@@ -64,19 +64,22 @@ function child() {
     else if (msg.do === 'probe') {
       // a request from the first cluster's pass to a mob of the last cluster: it must wait for the next meeting
       const out = { sentAt: null, appliedAt: null, appliedIn: undefined, delivered: null };
-      const gs = C.groups(), target = BF.mobs.list.find(m => !m.removed && m.cl !== undefined && BF.clusters.groupOf(m.cl) === gs[gs.length - 1].key);
-      BF.req.on('probe', () => { out.appliedAt = BF.rand.tick; out.appliedIn = C.cur ? C.cur.key : null; return { ok: true }; });
+      const gs = C.groups(), inGroup = k => m => !m.removed && !m.dead && m.cl !== undefined && BF.clusters.groupOf(m.cl) === k;
+      const target = BF.mobs.list.find(inGroup(gs[gs.length - 1].key)), sender = BF.mobs.list.find(inGroup(gs[0].key));
+      // a crossing request carries what it needs in its data and gets its result through its kind's onResult (no req.then)
+      BF.req.on('probe', () => { out.appliedAt = BF.rand.tick; out.appliedIn = C.cur ? C.cur.key : null; return { ok: true }; },
+        { onResult: (m, req, r) => { if (m === sender && r.ok) out.delivered = BF.rand.tick; } });
       let sent = false;
       BF.world.onThink(() => {
-        if (sent || !target || !C.cur || C.cur !== C.groups()[0]) return;
+        if (sent || !target || !sender || !C.cur || C.cur !== C.groups()[0]) return;
         sent = true; out.sentAt = BF.rand.tick;
-        const q = BF.req.send('probe', target.id, {}, null).then(r => { out.delivered = BF.rand.tick; });
+        const q = BF.req.send('probe', target.id, {}, sender);
         out.stamp = [q._at, q._due];
       }, 'probe');
       if (C.only) C.only = [...C.only, 'probe'];
       C.SYSTEMS.probe = false;
       for (let i = 0; i < 2; i++) { BF.boot.stream(); C.interval(BF.warp.TICK); }
-      out.groups = gs.length; out.target = target ? target.id : null;
+      out.groups = gs.length; out.target = target ? target.id : null; out.closures = C.stats().closures;
       process.send(out);
     }
     else if (msg.do === 'end') process.send({ traced: C.traced().slice(0, 40), only: C.only ? [...C.only] : names }, () => process.exit(0));
@@ -154,6 +157,7 @@ async function parent() {
     check(p.stamp && p.stamp[0] === p.sentAt && p.stamp[1] === p.appliedAt, `${NAMES[i]} order: it carried its sender's tick and its due tick (${p.stamp})`);
   }
   check(JSON.stringify(pr[0]) === JSON.stringify(pr[1]), 'the request went the same way in both orders');
+  check(pr.every(p => p.closures === 0), `no request to another cluster had req.then callbacks (${pr.map(p => p.closures).join(' / ')})`);
   const end = await Promise.all(kids.map((k, i) => ask(i, { do: 'end' })));
   if (end[1].traced.length) {
     console.log(`reads of another cluster's mobs that were hidden (cluster order), by system and line:`);

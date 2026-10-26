@@ -29,7 +29,7 @@
 // API: BF.ctick = { MEET, on (get / set), order (get / set: "tick" | "cluster"), cur (the running group), filter (the running group's
 //                   mob test, or null when every mob is seen), mine(m), hidden(o), sys(name, fn), local(name, init), step(h), interval(h),
 //                   meet(), groups(), SYSTEMS, converted() -> [names], only (a Set of system names, or null: all), system (the running one),
-//                   trace, traced() -> [["system file:line", count]], tickOf(base), clocks() -> Map base -> tick, stats(), text(), hourly(),
+//                   trace, traced() -> [["system file:line", count]], owned(name, {snap, apply}), tables(), table(name), tickOf(base), clocks() -> Map base -> tick, stats(), text(), hourly(),
 //                   reset() }
 (() => {
 "use strict";
@@ -145,12 +145,28 @@ function away(req, k) {
     // numbered in its group's sending order, so the order they apply in doesn't depend on the order groups ran in
     req._from = cur.key; req._n = cur.sent++; req._at = BF.rand.tick; req._due = Math.ceil(BF.rand.tick / MEET) * MEET;
     deferred.push(req); S.deferred++; H.deferred++;
+    // its callbacks (req.then) live only where it was sent: on several workers (C7) the meeting may run elsewhere. A crossing request
+    // must carry what it needs in its data and use its kind's onResult. Logged once per kind (thrown under BF.req.strict).
+    closures(req);
     return true;
   }
   if (!g || g === NOWHERE) return false;
   BF.req.fileIn(g.req, req);
   return true;
 }
+// A crossing request that has (or gets) req.then callbacks: noted, once per kind
+const closureKinds = new Set();
+function closures(req) {
+  const note = () => {
+    S.closures = (S.closures || 0) + 1;
+    if (BF.req.strict) throw new Error("request " + req.kind + " to another cluster has callbacks (req.then): use its kind's onResult (js/ctick.js)");
+    if (!closureKinds.has(req.kind)) { closureKinds.add(req.kind); if (BF.glog) BF.glog.log("ERROR", "clusters", "Request " + req.kind + " from " + (req.from || "nobody") + " to another cluster has callbacks (req.then), which several workers can't carry: give its kind an onResult"); }
+  };
+  if (req.cbs) { note(); return; }
+  const then = req.then;   // (then() is usually chained right after send(): catch it when it comes)
+  req.then = fn => { if (req._due !== undefined && !req.delivered) { req.then = then; note(); } return then(fn); };
+}
+
 // a request still queued at a meeting, into its new group (no place: its requester's group; neither: between ticks)
 function refile(req) {
   let g = targetOf(req, req.region != null ? req.region : -1);
@@ -304,6 +320,15 @@ function local(name, init) {
   return v;
 }
 
+// Module tables that last longer than an interval and aren't on a mob or village record (claims, records keyed by village, a cell's
+// stamps): each registers how to take the part a group owns and put it back, so the multi-worker runtime (C7) can send it at meetings.
+// owned(name, {snap(groupKey) -> plain JSON, apply(groupKey, plain)}); tables() -> the registered names. Unused on one worker.
+const tables = new Map();
+function owned(name, t) {
+  if (!t || typeof t.snap !== "function" || typeof t.apply !== "function") throw new Error("BF.ctick.owned(name, {snap, apply})");
+  tables.set(name, t);
+}
+
 // Tracing (tests): the reads of another group's objects that BF.ids.get and the region queries hid, by system and calling code.
 let trace = null;
 function traced(o) {
@@ -353,7 +378,7 @@ function stats() {
   const per = new Map();
   for (const m of BF.mobs.list) if (!m.removed && m.cl !== undefined) { const g = CL().groupOf(m.cl); per.set(g, (per.get(g) || 0) + 1); }
   return {
-    on, order, meetings: S.meetings, ticks: S.ticks, deferred: S.deferred, lastDeferred: S.lastDeferred, refiled: S.refiled, meetMs: S.meetMs || 0,
+    on, order, meetings: S.meetings, ticks: S.ticks, deferred: S.deferred, lastDeferred: S.lastDeferred, refiled: S.refiled, closures: S.closures || 0, meetMs: S.meetMs || 0,
     groups: groups.map(g => ({ key: g.key, bases: g.bases ? g.bases.length : 0, player: !!g.player, mobs: per.get(g.key) || 0, ms: g.ms / Math.max(1, S.since) })),
     converted: converted(), legacy: Object.keys(SYSTEMS).filter(k => !SYSTEMS[k]),
   };
@@ -384,7 +409,7 @@ function hourly() {
 function reset() {
   leave();
   groups = []; byKey = new Map(); deferred = []; needMeet = true; between = null; hourAt = null;
-  S.meetings = S.deferred = S.refiled = S.ticks = S.lastDeferred = S.err = 0; S.metAt = undefined; S.meetMs = 0;
+  S.meetings = S.deferred = S.refiled = S.ticks = S.lastDeferred = S.err = 0; S.metAt = undefined; S.meetMs = 0; S.closures = 0; closureKinds.clear();
   H.ticks = H.deferred = H.meetings = 0;
   if (CL()) CL().reset();
   clocks.clear();
@@ -400,6 +425,7 @@ BF.ctick = {
   get order() { return order; }, set order(o) { setOrder(o); },
   get cur() { return cur; },
   get filter() { return cur && !legacy ? mine : null; },
+  owned, tables: () => [...tables.keys()], table: name => tables.get(name),
   tickOf: b => clocks.get(b), clocks: () => new Map(clocks),   // each cluster's own tick (one clock for now)
   mine, hidden, sys, local, step, interval, meet: meetNow, groups: () => groups, converted, stats, text, hourly, reset,
   get only() { return only; }, set only(v) { only = v ? new Set(v) : null; },
