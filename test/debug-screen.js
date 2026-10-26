@@ -76,6 +76,10 @@ const start = async () => { const s = await lib.serve({ world: onServer, game: G
   const pc = await dbg.evaluate(() => ({ vss: document.getElementById('c-vss').textContent, ms: document.getElementById('c-perf-ms').textContent, parts: document.querySelectorAll('#c-split span').length, f3: document.getElementById('f3').textContent }));
   ok('Performance card shows the meter ' + JSON.stringify(pc.vss + ' / ' + pc.ms), /^[\d,]+ V·s\/s$/.test(pc.vss) && /ms\/step/.test(pc.ms) && pc.parts === 7 && /\nSim [\d]+ V·s\/s /.test(pc.f3));
   ok('meter on in the game while the screen is open', await lib.sim(game, () => BF.perf.on));
+  // the Simulation budget card (js/active.js): the villages simulated now, nearest and extra, from the start (bug: 0 until the first decision)
+  const bc = await dbg.evaluate(() => ({ big: document.getElementById('c-budget').textContent, sub: document.getElementById('c-budget-sub').textContent }));
+  const nSim = await lib.sim(game, () => BF.villageSim.count());
+  ok('Simulation budget card counts the villages simulated ' + JSON.stringify(bc), bc.big === nSim + (nSim === 1 ? ' village' : ' villages') + ' simulated (' + nSim + ' nearest + 0 extra)' && /^simulation took \d+% of real time/.test(bc.sub));
   // the state hash card (js/statehash.js, spec r15-24): the game's latest hash and every part
   // (the game hashes again every 10 s and the screen shows it with the next snapshot: wait, up to 15 s, until both show the same one)
   let hs, gh;

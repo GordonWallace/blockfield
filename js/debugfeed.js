@@ -202,7 +202,37 @@ function villages(pp) {
 }
 const sentLayouts = new Set(), logSigs = new Map(), econSigs = new Map(), sentIcons = new Set(), newIcons = new Set();
 let daySig = null;   // the picked villager's day timeline as last sent: "key|version"
-const resync = () => { sentLayouts.clear(); logSigs.clear(); econSigs.clear(); sentIcons.clear(); daySig = null; if (BF.glog) BF.glog.feedReset(); };
+// Village history (js/villagestats.js, spec r15-69) for the History panel: everything once (after a resync, a new world or a save
+// loaded), then each village's new samples and its loaded spans. Keyed by the saved world (unsaved: its seed), which the server keeps.
+let vhSent = new Map(), vhVer = null, vhWid = null;
+function vhist() {
+  const V = BF.vstats;
+  if (!V || !V.history) return undefined;
+  const wid = (BF.glog && BF.glog.world()) || (BF.state && BF.state.seed != null ? "seed-" + BF.state.seed : null);
+  if (!wid) return undefined;
+  const full = V.ver !== vhVer || wid !== vhWid, v = {};
+  if (full) { vhSent = new Map(); vhVer = V.ver; vhWid = wid; }
+  for (const k of V.keys()) {
+    const h = V.history(k), st = vhSent.get(k), lp = h.spans[h.spans.length - 1], end = lp ? lp[1] : null;
+    if (!st || st.gen !== h.gen) v[k] = { name: nameOf(k), s: h.s, spans: h.spans };
+    else if (h.s.length !== st.n || h.spans.length !== st.ns || end !== st.end) v[k] = { name: nameOf(k), add: h.s.slice(st.n), spans: h.spans };
+    else continue;
+    vhSent.set(k, { n: h.s.length, ns: h.spans.length, end, gen: h.gen });
+  }
+  if (!full && !Object.keys(v).length) return undefined;
+  return { wid, name: (BF.glog && BF.glog.world() && BF.glog.name()) || "", now: +(BF.sky.day + BF.sky.time).toFixed(4), full, v };
+}
+// Two of the simulation's village history parts in one, when a second arrives before the page sends the first on: they are changes.
+function vhMerge(a, b) {
+  if (!a || !b || b.full || a.wid !== b.wid) return b || a;
+  const v = Object.assign({}, a.v);
+  for (const k in b.v) {
+    const x = a.v[k], y = b.v[k];
+    v[k] = !x || y.s ? y : { name: y.name, spans: y.spans, ...(x.s ? { s: x.s.concat(y.add || []) } : { add: (x.add || []).concat(y.add || []) }) };
+  }
+  return Object.assign({}, b, { full: a.full, v });
+}
+const resync = () => { vhVer = null; sentLayouts.clear(); logSigs.clear(); econSigs.clear(); sentIcons.clear(); daySig = null; if (BF.glog) BF.glog.feedReset(); };
 // The day timeline of the villager picked on the debug screen (js/daytimeline.js), only when it changed; null once nothing is picked.
 // undefined (left out) when nothing changed, so the feed stays as light as before while nobody is picked.
 function dayline() {
@@ -331,6 +361,7 @@ function simPart(ack) {
   if (BF.boats) Object.assign(mobs, BF.boats.counts());   // boats by wood ("oak_boat": n) next to the mob types
   return { mobs, professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp), icons: icons(),
     gt: +(BF.sky.day + BF.sky.time).toFixed(5),   // game time now (days), for the day timeline's "now" edge
+    vhist: vhist(),   // village history, new samples (js/villagestats.js): the History panel
     mobmap: Date.now() - mobMapT >= MOBMAP_EVERY ? (mobMapT = Date.now(), mobMap(pp)) : undefined,
     pick: BF.dayTimeline ? { pv: BF.dayTimeline.pv, key: BF.dayTimeline.picked } : null, day: dayline(),
     loadLimits: BF.villageSim && BF.villageSim.LIMITS && BF.mobs.aiTime ? { aiMs: BF.mobs.aiTime(), aiWork: BF.mobs.aiWork ? BF.mobs.aiWork() : 0, maxAiWork: BF.villageSim.LIMITS.aiWork, villages: BF.villageSim.status().split(" ")[0] | 0, maxVillages: BF.villageSim.LIMITS.villages } : null,
@@ -371,7 +402,7 @@ function snapshot() {
   let part;
   if (onServer()) part = {};
   else if (inWorker()) {
-    BF.client.query("feed", { ack }, r => { if (r && r.ok) { delete r.ok; remote = r; } else if (r && r.error) remoteErr = r.error; });
+    BF.client.query("feed", { ack }, r => { if (r && r.ok) { delete r.ok; r.vhist = vhMerge(remote && remote.vhist, r.vhist); remote = r; } else if (r && r.error) remoteErr = r.error; });
     ack = null;
     if (remoteErr) { const e = remoteErr; remoteErr = null; throw new Error("in the simulation: " + e); }   // (the screen shows it, as one here)
     part = remote || {};

@@ -11,16 +11,17 @@ module.exports = async (pg) => {
     S.sample(rec);
     ok("no change with one day on record", S.popChange(rec.key) === null);
     // a population history: 3 days ago it was 4 more
-    const ser0 = S.serialize(); ser0[rec.key][Math.floor(BF.sky.day + BF.sky.time) - 3] = pop + 4; S.deserialize(ser0);
+    const ser0 = S.serialize(); ser0.pops[rec.key][Math.floor(BF.sky.day + BF.sky.time) - 3] = pop + 4; S.deserialize(ser0);
     let c = S.popChange(rec.key);
     ok("change over 3 days " + JSON.stringify(c), c && c.change === -4 && c.from === pop + 4 && c.days === 3);
     BF.sky.day += 8; S.sample(rec);
-    ok("8 days later the old counts are gone", S.popChange(rec.key) === null && Object.keys(S.serialize()[rec.key]).length === 1);
+    ok("8 days later the old counts are gone", S.popChange(rec.key) === null && Object.keys(S.serialize().pops[rec.key]).length === 1);
     BF.sky.day = d0;
     const ser = JSON.parse(JSON.stringify(S.serialize()));
-    S.reset(); ok("reset", !S.serialize()[rec.key]);
+    S.reset(); ok("reset", !S.serialize().pops[rec.key] && !S.serialize().hist[rec.key]);
     S.deserialize(ser); ok("save and load keep the counts", JSON.stringify(S.serialize()) === JSON.stringify(ser));
-    S.deserialize(undefined); ok("old saves start empty", Object.keys(S.serialize()).length === 0);
+    S.deserialize(ser.pops); ok("saves from before r15-69 (populations only) load", JSON.stringify(S.serialize().pops) === JSON.stringify(ser.pops));
+    S.deserialize(undefined); ok("old saves start empty", Object.keys(S.serialize().pops).length === 0 && Object.keys(S.serialize().hist).length === 0);
     // last week's events
     const w0 = H.week(rec.key, "birth"), t0 = H.week(rec.key, "trade");
     L.log(rec, "birth", "Test was born to A and B"); L.log(rec, "trade", "Player traded with Test (Farmer): gave 1 Emerald, got 1 Bread");
