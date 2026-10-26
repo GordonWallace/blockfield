@@ -2,7 +2,8 @@
 // Game options: which monsters spawn, world by world (js/gameopts.js). New worlds and worlds without options have zombies and skeletons on,
 // creepers and spiders off; the create form, the pause menu (Game options) and a world's Options on the start screen set them; a monster
 // turned off never spawns and the loaded ones leave; the others spawn about as often as with every monster on (the area caps shrink by the
-// switched-off share); the options are saved with the world and the start screen's changes apply when it opens.
+// switched-off share); the options are saved with the world and the start screen's changes apply when it opens. The same for the far
+// villages switch (spec r15-64): full detail by default, coarse from the pause menu (logged), saved, changed from the start screen.
 // Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/mo test/monster-options.js [--host page|worker|server]
 // The screens are the page's; the options in force, the mobs and the game log are read where the simulation is (spec r15-43).
 const lib = require('./lib');
@@ -19,6 +20,8 @@ module.exports = async (pg) => {
   await click('.bfp-start [data-act="show-create"]');
   const form = await pg.evaluate(() => [...document.querySelectorAll('.bfp-createopts [data-act="mon"]')].map(b => b.textContent));
   ok("the create form lists the four monsters with the defaults", form.join() === "Zombies: On,Skeletons: On,Creepers: Off,Spiders: Off", form);
+  const ff = await pg.evaluate(() => { const b = document.querySelector('.bfp-createopts [data-act="far"]'); return b && b.textContent; });
+  ok("the create form has the far villages switch, at full detail (spec r15-64)", ff === "Far villages: Full detail", ff);
   await click('.bfp-createopts [data-mon="spider"]');
   await pg.evaluate(() => { const f = document.querySelector(".bfp-view-create"); f.elements.name.value = "Monster options"; f.elements.seed.value = "123"; });
   await click('.bfp-view-create button[type="submit"]');
@@ -44,6 +47,12 @@ module.exports = async (pg) => {
   await click('.bfp-pauseopts [data-mon="spider"]');
   await pg.waitForTimeout(500);
   ok("and back on", await lib.sim(pg, () => BF.gameOpts.on("spider") && BF.mobs.typeDef("spider").spawns === true));
+  const f1 = await pg.evaluate(() => { const b = document.querySelector('.bfp-pauseopts [data-act="far"]'); return b && b.textContent; });
+  ok("the pause menu has the far villages switch, at full detail", f1 === "Far villages: Full detail", f1);
+  await click('.bfp-pauseopts [data-act="far"]');
+  await pg.waitForTimeout(500);
+  const f2 = await lib.sim(pg, () => ({ c: BF.gameOpts.coarse(), log: BF.glog.recent(200).filter(e => e.l === "INFO" && e.k === "options").map(e => e.x) }));
+  ok("far villages turned coarse in game, logged", f2.c === true && f2.log.some(t => /Far villages: coarse/.test(t)), f2);
 
   // ---- spawning: the others spawn about as often with creepers and spiders off
   const run = (opts) => lib.sim(pg, o => {
@@ -77,7 +86,7 @@ module.exports = async (pg) => {
   await lib.sim(pg, () => { BF.gameOpts.set("spider", true); BF.gameOpts.set("skeleton", false); });
   const id = await pg.evaluate(async () => { await BF.save.saveNow(); return BF.save.current.id; });
   const saved = await pg.evaluate(async id => (await BF.save.list()).find(w => w.id === id).monsters, id);
-  ok("the options are saved in the world's list entry", saved && saved.skeleton === false && saved.zombie === true && saved.creeper === false, saved);
+  ok("the options are saved in the world's list entry", saved && saved.skeleton === false && saved.zombie === true && saved.creeper === false && saved.coarse === true, saved);
   await pg.reload();
   // the boot world started (with the simulation off the page, once its host has), its rivers worked out
   await pg.waitForFunction(() => window.BF && BF.state && BF.state.seed && !BF.preparing, null, { timeout: 300000, polling: 250 });
@@ -90,17 +99,20 @@ module.exports = async (pg) => {
   await click(row + ' [data-act="options"]');
   const r1 = await pg.evaluate(r => [...document.querySelectorAll(r + ' [data-act="mon"]')].map(b => b.textContent), row);
   ok("a world's Options on the start screen show its saved options", r1.join() === "Zombies: On,Skeletons: Off,Creepers: Off,Spiders: On", r1);
+  const rf = await pg.evaluate(r => { const b = document.querySelector(r + ' [data-act="far"]'); return b && b.textContent; }, row);
+  ok("and its far villages setting", rf === "Far villages: Coarse (faster)", rf);
   await click(row + ' [data-mon="creeper"]');
+  await click(row + ' [data-act="far"]');
   await click(row + ' [data-act="options-ok"]');
   await pg.waitForTimeout(500);
   const s2 = await pg.evaluate(async id => (await BF.save.list()).find(w => w.id === id).monsters, id);
-  ok("Save writes them to the world", s2 && s2.creeper === true && s2.skeleton === false, s2);
+  ok("Save writes them to the world", s2 && s2.creeper === true && s2.skeleton === false && s2.coarse === false, s2);
   await pg.evaluate(id => BF.save.load(id), id);
   await pg.waitForTimeout(2000);
-  const l = await lib.sim(pg, () => BF.gameOpts.monsters());
-  ok("the world opens with them", l.creeper === true && l.skeleton === false && l.zombie === true && l.spider === true, l);
+  const l = await lib.sim(pg, () => Object.assign(BF.gameOpts.monsters(), { coarse: BF.gameOpts.coarse() }));
+  ok("the world opens with them", l.creeper === true && l.skeleton === false && l.zombie === true && l.spider === true && l.coarse === false, l);
   const old = await pg.evaluate(() => BF.gameOpts.normalize(undefined));
-  ok("a world saved before the options takes the defaults", old.zombie && old.skeleton && !old.creeper && !old.spider, old);
+  ok("a world saved before the options takes the defaults", old.zombie && old.skeleton && !old.creeper && !old.spider && old.coarse === false, old);
 
   if (fails.length) console.log("FAIL " + fails.length + " check(s)");
 };
