@@ -336,8 +336,10 @@ function blankMob(type, id) {
   list.push(mob);
   return mob;
 }
-function filledMob(mob, o) {
+// (had: the mob was here already, made between ticks on every worker alike: only its fields are taken)
+function filledMob(mob, o, had) {
   for (const k of Object.keys(o)) if (k !== "def" && k !== "type") mob[k] = k === "ai" && o.ai ? fill(o.ai, AiShape) : o[k];
+  if (had) return;
   if (!mob.prev) keepPrev(mob);   // (sent with it: where it started the tick)
   if (BF.regions) BF.regions.mobAdded(mob);
 }

@@ -39,6 +39,9 @@ const T = { meetings: 0, collect: 0, exchange: 0, adopt: 0, snap: 0, bytes: 0, r
 let peers = [], hourAt = null, hourT = null, tRun = 0, warned = 0;
 
 const C = () => BF.ctick;
+// (tests, CW.prof an object: ms a part of the collect took, summed)
+let lapT = 0;
+const lap = k => { if (!CW.prof) return; const t = now(); if (k) CW.prof[k] = (CW.prof[k] || 0) + t - lapT; lapT = t; };
 const groupOf = m => (m.cl !== undefined ? BF.clusters.groupOf(m.cl) : C().groups()[0] && C().groups()[0].key);
 const ownsKey = k => (CW.owners.has(k) ? CW.owners.get(k) : 0) === CW.me;
 function owns(g) { return ownsKey(g.key); }
@@ -58,7 +61,12 @@ let replaying = false;
 // touched in the owned passes, sent with their state as the channel gives it
 let touched = new Map();   // "name\u0000key" -> [name, key]
 function onTouch(name, key) { if (CW.active && C().cur && !replaying) touched.set(name + "\u0000" + JSON.stringify(key), [name, key]); }
-const onNewPlace = (o, k) => { if (CW.active && C().cur && typeof k === "string" && k.includes(":")) regNew.push([k, o]); };
+// New keys in the place registry while an owned pass runs: places (a ":" in the key) go to the others; mobs made here are sent in full
+let bornHere = new Set();
+const onNewPlace = (o, k) => {
+  if (!CW.active || !C().cur || typeof k !== "string") return;
+  if (k.includes(":")) regNew.push([k, o]); else if (k.charCodeAt(0) === 101) bornHere.add(o);
+};
 
 // ---------------------------------------------------------------- requests, as plain JSON
 function reqOut(r) {
@@ -77,24 +85,30 @@ function sync() {
   if (!CW.active) return;
   const t0 = now();
   T.run += t0 - tRun;
+  lap(null);
   const R = RW(), K = C(), I = K.inner;
   R.refs();
-  // mobs this worker made (not here at the last meeting): in full, every field (links by id), filled in under the same id
+  lap("refs");
+  // mobs not here at the last meeting that this worker made, or that every worker made between ticks (a chunk loading) and this one
+  // runs: in full, every field (links by id), filled in under the same id
   const born = [];
   for (const m of BF.mobs.list) {
-    if (m.removed || known.has(m)) continue;
+    if (m.removed || known.has(m) || !(bornHere.has(m) || ownsKey(groupOf(m)))) continue;
     const o = {};
     for (const k of Object.keys(m)) o[k] = m[k];   // (a plain copy, its own fields: the codec writes m itself as a reference)
     born.push([m.id, m.type, R.enc(o, m)]);
   }
+  lap("born");
   const mobs = [];
   for (const [m, s] of shadows) {
     if (m.removed) { mobs.push([m.id, null, 1]); continue; }
     const ops = R.diff(m, s);
     if (ops) mobs.push([m.id, ops]);
   }
+  lap("mobs");
   const recs = [];
   for (const [rec, s] of recShadows) { const ops = R.diff(rec, s); if (ops) recs.push([rec.key, ops]); }
+  lap("recs");
   const edits = [];
   for (const [k, e] of journal) edits.push([k, [...e]]);
   journal = new Map();
@@ -111,8 +125,10 @@ function sync() {
   const queued = gs.map(g => [g.key, I.pendingOf(g).map(reqOut)]).filter(q => q[1].length);
   const ms = gs.map(g => [g.key, +g.ms.toFixed(3)]);
   const counters = [I.R2.ids.j, I.R2.made.j, BF.ids.range.top, BF.rand.made];
+  lap("rest");
   const out = { born, mobs, recs, edits, tables, chans, reg, waited, queued, ms, counters };
   const msg = JSON.stringify(out);
+  lap("json");
   if (CW.sizes) {   // (tests: what the bytes are, by part and by the mobs' and records' fields)
     const add = (k, v) => { CW.sizes[k] = (CW.sizes[k] || 0) + JSON.stringify(v).length; };
     for (const k in out) add(k, out[k]);
@@ -136,17 +152,19 @@ function sync() {
     for (let i = 0; i < 4; i++) if (p.counters[i] > lift[i]) lift[i] = p.counters[i];
   }
   I.R2.ids.j = lift[0]; I.R2.made.j = lift[1]; BF.ids.range.lift(lift[2]); BF.rand.range.lift(lift[3]);
+  const fresh = new Set();
+  bornHere = new Set();
   // the others' changes: places and new mobs first (the changes may point at them), then records, mobs, blocks, tables, requests
   for (let w = 0; w < ps.length; w++) {
     const p = ps[w];
     if (!p) continue;
     for (const [k, e] of p.reg) if (BF.ids.live(k) === undefined) BF.ids.put(R.dec(e, null), k);
-    for (const [id, type] of p.born) if (BF.ids.live(id) === undefined) BF.mobs.blank(type, id);
+    for (const [id, type] of p.born) if (BF.ids.live(id) === undefined) { BF.mobs.blank(type, id); fresh.add(id); }
   }
   for (let w = 0; w < ps.length; w++) {
     const p = ps[w];
     if (!p) continue;
-    for (const [id, , e] of p.born) { const m = BF.ids.live(id); if (m) BF.mobs.filled(m, R.dec(e, m)); }
+    for (const [id, , e] of p.born) { const m = BF.ids.live(id); if (m) BF.mobs.filled(m, R.dec(e, m), !fresh.has(id)); }
   }
   const cells = new Map();
   for (const [k, list] of edits) for (const [i] of list) cells.set(k + "|" + i, CW.me);
