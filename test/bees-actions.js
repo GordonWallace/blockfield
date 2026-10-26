@@ -215,8 +215,10 @@ module.exports = async (pg) => {
     W.setBlock(spot.x, spot.y, spot.z, B.beehive);
     const nh = BE.homeAt(spot.x, spot.y, spot.z);
     ok("a placed hive starts empty", nh && nh.bees === 0 && nh.honey === 0, nh && nh.bees);
-    if (K.bkp && K.bkp.stage) BK.forceStop(K);
-    if (K.bkp) K.bkp.cd = 1e12;   // its own leading would fill the new hive too
+    // K was removed with its chunk above and the village spawned a new beekeeper on reload: pause the live ones. Their own leading would
+    // fill the new hive too, and wild bees they lead home past these hives move into them.
+    const keepers = BF.mobs.list.filter(m => m.profession === "beekeeper" && !m.dead && !m.removed);
+    for (const m of keepers) { if (m.bkp && m.bkp.stage) BK.forceStop(m); if (m.bkp) m.bkp.cd = 1e12; }
     BF.inventory.clear(); BF.inventory.setSlot(0, { id: B.poppy, count: 1 }); BF.inventory.select(0);
     BF.player.teleport(hb2.x + 1.5, hb2.y + 0.1, hb2.z + 1.5);
     let fol = 0;   // stand near a bee of that hive that is out (they may all be off at flowers): within 8 blocks it comes over
@@ -229,10 +231,18 @@ module.exports = async (pg) => {
     ok("bees follow a player holding a flower", fol > 0, { fol, sel: BF.inventory.selected(), out: BE.out(hb2).length, near: BE.list.filter(b => Math.hypot(b.x - BF.player.position.x, b.z - BF.player.position.z) < 8).length });
     const total = () => BE.loadedHomes().reduce((n, o) => n + o.bees, 0);
     const before = [hb2.bees, nh.bees, total()];
+    // Bees of any home near the path may follow (the other village hive is 4 blocks from hb2), so each move-in is booked against the home it
+    // left and the one it entered: every home's count must change by exactly its booked moves.
+    const homes0 = BE.loadedHomes().map(o => [o, o.bees]), led = new Map(), by = new Set(); let booking = true;
+    BE.onMoveIn((o, h, who) => { if (!booking) return; by.add(who === "player" ? "player" : who && who.profession || "?"); led.set(o, (led.get(o) || 0) + 1); if (h) led.set(h, (led.get(h) || 0) - 1); });
     const p0 = { x: BF.player.position.x, z: BF.player.position.z };
     for (let i = 0; i < 600; i++) { const t = Math.min(1, i / 300), x = p0.x + (spot.x + 1.5 - p0.x) * t, z = p0.z + (spot.z + 0.5 - p0.z) * t; BF.player.position.set(x, Math.max(W.heightAt(Math.floor(x), Math.floor(z)) + 1, spot.y) + 0.1, z); step(); }
-    ok("led to another hive they move in, one from one count to the other", nh.bees > 0 && before[1] === 0 && total() === before[2] && hb2.bees < before[0], { before, after: [hb2.bees, nh.bees, total()] });
-    BF.inventory.clear(); if (K.bkp) K.bkp.cd = 0;
+    booking = false;
+    const off = homes0.filter(([o, n]) => o.bees - n !== (led.get(o) || 0)).map(([o, n]) => [o.x, o.z, n, o.bees, led.get(o) || 0]);
+    ok("led to another hive they move in, one from one count to the other", nh.bees > 0 && before[1] === 0 && nh.bees === led.get(nh) && total() === before[2] && off.length === 0
+      && [...by].every(w => w === "player"),
+      { before, after: [hb2.bees, nh.bees, total()], into: led.get(nh), hb2: led.get(hb2) || 0, off, by: [...by] });
+    BF.inventory.clear(); for (const m of keepers) if (m.bkp) m.bkp.cd = 0;
     W.setBlock(spot.x, spot.y, spot.z, 0);
     ok("breaking a hive drops its record", !BE.homeAt(spot.x, spot.y, spot.z));
 
