@@ -903,25 +903,81 @@ function swimOutOfPit(m, dt, out) {
   return true;
 }
 function pickWander(m, r) {
-  if (m.pen && BF.shepherd && BF.shepherd.pickPenTarget(m)) return;   // penned sheep wander inside their pen (js/shepherd.js)
-  if (m.coop && BF.poultry && BF.poultry.pickCoopTarget(m)) return;   // coop chickens wander inside their run (js/poultry.js)
-  if (m.pasture && BF.cowherd && BF.cowherd.pickPastureTarget(m)) return;   // pasture cows graze inside the pasture (js/cowherd.js)
-  if (m.sty && BF.pigFarmer && BF.pigFarmer.pickStyTarget(m)) return;   // sty pigs root about inside the sty (js/pigfarmer.js)
-  if (m.horse && m.horse.pen && BF.stables && BF.stables.pickPenTarget(m)) return;   // paddock horses wander inside the paddock (js/stables.js)
-  for (let k = 0; k < (m.def.golem ? 16 : 1); k++) {   // a golem keeps to spots it fits (golemFits; by a wall half the spots round it can be inside)
-    const a = R(m).next() * Math.PI * 2, d = rnd(R(m), 3, r);
+  if (m.pen && BF.shepherd && BF.shepherd.pickPenTarget(m)) return true;   // penned sheep wander inside their pen (js/shepherd.js)
+  if (m.coop && BF.poultry && BF.poultry.pickCoopTarget(m)) return true;   // coop chickens wander inside their run (js/poultry.js)
+  if (m.pasture && BF.cowherd && BF.cowherd.pickPastureTarget(m)) return true;   // pasture cows graze inside the pasture (js/cowherd.js)
+  if (m.sty && BF.pigFarmer && BF.pigFarmer.pickStyTarget(m)) return true;   // sty pigs root about inside the sty (js/pigfarmer.js)
+  if (m.horse && m.horse.pen && BF.stables && BF.stables.pickPenTarget(m)) return true;   // paddock horses wander inside the paddock (js/stables.js)
+  // a golem keeps to spots it fits (golemFits; by a wall half the spots round it can be inside); a village mob to spots it can walk
+  // straight to (clearWalk), shorter walks after the first tries (a room). False when a village mob found none: it is hemmed in.
+  const V = m.def.village;
+  for (let k = 0, n = V ? 16 : 1; k < n; k++) {
+    const a = R(m).next() * Math.PI * 2, d = k < 8 ? rnd(R(m), 3, r) : rnd(R(m), 1.5, 3);
     m.ai.tx = m.position.x + Math.cos(a) * d;
     m.ai.tz = m.position.z + Math.sin(a) * d;
-    if (!m.def.golem || golemFits(m, m.ai.tx, m.ai.tz)) break;
+    if ((!m.def.golem || golemFits(m, m.ai.tx, m.ai.tz)) && (!V || clearWalk(m, m.ai.tx, m.ai.tz))) { if (m.ai.held) m.ai.held.hem = false; return true; }
   }
+  return !V;
+}
+// A village mob with nowhere to wander (pickWander false) stands still a moment; for the stuck log (blockedMove) that counts as pushing,
+// so one boxed in is still logged after STUCK_LOG s.
+function hemmedIn(m) {
+  const ai = m.ai, g = ai.held;
+  ai.mode = "idle"; ai.t = rnd(R(m), 1, 3);
+  if (g && !roomy(m)) g.hem = true;
+}
+// Whether a mob has somewhere to go from where it stands: ROOMY standing cells joined to its own (through doors and gates, a block up or
+// down at a time). A villager in a small room has the rest of the house and the village through the door; one boxed in has a few cells.
+const ROOMY = 24;
+function roomy(m) {
+  const [x0, y0, z0] = feetCell(m), tall = m.height > 2, seen = new Set([x0 + "," + y0 + "," + z0]), q = [[x0, y0, z0]];
+  const fits = (x, y, z) => (walkCell(x, y, z) || (!tall && ladderCell(x, y, z))) && (!tall || !blockAt(x, y + 2, z).solid);
+  const add = (x, y, z) => { const k = x + "," + y + "," + z; if (seen.has(k) || !fits(x, y, z)) return false; seen.add(k); q.push([x, y, z]); return true; };
+  for (let i = 0; i < q.length && q.length < ROOMY; i++) {
+    const [x, y, z] = q[i];
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (const dy of [0, 1, -1]) if (add(x + dx, y + dy, z + dz)) break;   // (one level per column)
+    if (ladderCell(x, y, z) || ladderCell(x, y - 1, z)) { add(x, y + 1, z); add(x, y - 1, z); }   // up and down a ladder (a miner's shaft)
+  }
+  return q.length >= ROOMY;
+}
+// Whether a village mob can walk straight from where it is to x, z without bumping into anything (r15-70): its body, as wide and as tall
+// as it is, fits all along the line, the floor goes up or down at most a block at a time (a step up with headroom for the jump), and it
+// keeps out of doors, gates, water and onto-roof steps. Idle walks pick their spots by it, so a villager pottering about a room or a yard
+// stops walking into the walls, beds and fences round it (which went in the game log as stuck after 30 s of it).
+function clearWalk(m, x1, z1) {
+  const p = m.position, hw = m.halfWidth - 0.05, top = Math.ceil(m.height) - 1, roofs = keepsOffRoofs(m);
+  const roofNow = roofs && roofLedge(p.x, p.y, p.z, m.halfWidth);
+  const dx = x1 - p.x, dz = z1 - p.z, n = Math.ceil(Math.hypot(dx, dz) / 0.3);
+  const open = (x, y, z) => { const b = blockAt(x, y, z); return !b.solid && !b.door && !b.gate && b.render !== "liquid"; };
+  const body = (x, y, z, h) => {   // the box's four corner columns clear from the feet up to h
+    for (const cx of [x - hw, x + hw]) for (const cz of [z - hw, z + hw]) for (let yy = y; yy <= y + h; yy++) if (!open(Math.floor(cx), yy, Math.floor(cz))) return false;
+    return true;
+  };
+  let y = Math.floor(p.y + 0.01);
+  for (let i = 1; i <= n; i++) {
+    const x = p.x + dx * i / n, z = p.z + dz * i / n, fx = Math.floor(x), fz = Math.floor(z);
+    if (!BF.world.isLoaded(fx, fz)) return false;
+    let ny = null;
+    for (const yy of [y, y + 1, y - 1]) {
+      const fl = blockAt(fx, yy - 1, fz);
+      if (!fl.solid || fl.door || fl.bed || fl.model === "fence" || !body(x, yy, z, top)) continue;
+      if (yy > y && !body(p.x + dx * (i - 1) / n, y, p.z + dz * (i - 1) / n, top + 1)) continue;   // a step up: room to jump it
+      ny = yy; break;
+    }
+    if (ny == null || (roofs && !roofNow && roofLedge(x, ny, z, m.halfWidth))) return false;
+    y = ny;
+  }
+  return true;
 }
 
 // Getting past what blocks a walk (village mobs: villagers and golems). Walks to a point (wanderAI: heading home from far off, a golem's
 // patrol) go straight at it, so a tree, a wall or a ledge too low to jump under would hold them there for good. Blocked for a moment,
 // it finds a route round it (A*, up to DETOUR_HOP blocks towards the point; three blocks high for a golem), and with none it steps
-// aside for a few seconds. Being held in one place for STUCK_LOG seconds of pushing goes in the game log; a pause of up to HELD_GAP s
-// between pushes (a villager stops to look about, then sets off the same way again) counts too, or a boxed-in one is never logged.
-const DETOUR_AFTER = 1.2, DETOUR_HOP = 16, STUCK_LOG = 30, HELD_GAP = 8;
+// aside for a few seconds. STUCK_LOG seconds of pushing against blocks without getting 3 blocks from one spot, or of being hemmed in
+// there (hemmedIn: nowhere to wander to), goes in the game log; between pushes it may stop for up to HELD_GAP s (to look about, to step
+// aside) and still count as held, and a longer pause starts the count again (r15-70: a builder at work, or a villager pottering about its
+// room, brushed something every few seconds all day, and the time in between used to count, so they were logged as stuck).
+const DETOUR_AFTER = 1.2, DETOUR_HOP = 16, DETOUR_GAIN = 4, STUCK_LOG = 30, HELD_GAP = 8;
 function moveLog(m, level, text) {
   if (!BF.glog) return;
   const who = BF.vlog && m.type === "villager" ? BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession || "villager") + ")" : "An " + m.type.replace(/_/g, " ");   // "Name (Job)" as in the village log
@@ -929,14 +985,18 @@ function moveLog(m, level, text) {
 }
 // Called every physics step: `blocked` = it wanted to move and a block stopped it.
 function blockedMove(m, dt, blocked) {
-  const ai = m.ai, p = m.position, g = ai.held || (ai.held = { x: p.x, z: p.z, t: 0, gap: 0, logged: false });
+  const ai = m.ai, p = m.position, g = ai.held || (ai.held = { x: p.x, z: p.z, t: 0, gap: 0, logged: false, hem: false, since: 0 });
   if (Math.hypot(p.x - g.x, p.z - g.z) > 3) {   // got somewhere
     if (g.logged) moveLog(m, "INFO", "got moving again at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z));
-    g.x = p.x; g.z = p.z; g.t = 0; g.logged = false;
-  } else if ((g.gap = blocked ? 0 : (g.gap || 0) + dt) <= HELD_GAP && (blocked || g.t > 0) && (g.t += dt) >= STUCK_LOG && !g.logged) {
-    g.logged = true;
-    moveLog(m, "ERROR", "stuck at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z) + " for " + STUCK_LOG + " s" + (ai.mode === "walk" ? " walking towards " + Math.floor(ai.tx) + ", " + Math.floor(ai.tz) : ""));
-  }
+    g.x = p.x; g.z = p.z; g.t = 0; g.gap = 0; g.logged = false; g.hem = false;
+  } else if (blocked || g.hem) {
+    if (!g.t) g.since = m.age;
+    g.gap = 0;
+    if ((g.t += dt) >= STUCK_LOG && !g.logged) {
+      g.logged = true;
+      moveLog(m, "ERROR", "stuck at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z) + " for " + Math.round(m.age - g.since) + " s" + (g.hem ? " with nowhere to go" : ai.mode === "walk" ? " walking towards " + Math.floor(ai.tx) + ", " + Math.floor(ai.tz) : ""));
+    }
+  } else if (g.t > 0 && (g.gap += dt) > HELD_GAP && !g.logged) g.t = 0;   // a long pause: not held after all
   ai.blockedT = blocked ? (ai.blockedT || 0) + dt : 0;
 }
 // False when this frame's A* searches are used up (busy villages): it tries again next frame instead of stepping aside at random.
@@ -945,7 +1005,9 @@ function startDetour(m) {
   if (!takePlan()) return false;
   ai.blockedT = 0;
   const k = Math.min(1, DETOUR_HOP / d), hx = Math.floor(px + dx * k), hz = Math.floor(pz + dz * k), [fx, fy, fz] = feetCell(m);
-  const route = findPath(fx, fy, fz, { x: hx, z: hz, at: (x, y, z) => Math.abs(x - hx) + Math.abs(z - hz) <= 2 }, 1500, m.height > 2);
+  // the hop's spot, or anywhere at least DETOUR_GAIN blocks nearer the point than it is now (a hop's spot can be inside a house)
+  const tx = ai.tx, tz = ai.tz, near = d - DETOUR_GAIN;
+  const route = findPath(fx, fy, fz, { x: hx, z: hz, at: (x, y, z) => Math.abs(x - hx) + Math.abs(z - hz) <= 2 || Math.hypot(x + 0.5 - tx, z + 0.5 - tz) <= near }, 1500, m.height > 2);
   if (route && route.length) ai.detour = { route, ri: 0, stuckT: 0 };
   else aside(m);
   return true;
@@ -975,7 +1037,7 @@ function wanderAI(m, dt, out) {
   ai.wanderAt = m.age;
   ai.t -= dt;
   if (ai.t <= 0) {
-    if (ai.mode === "idle" && R(m).next() < 0.6) { ai.mode = "walk"; pickWander(m, 8); ai.t = rnd(R(m), 3, 7); }
+    if (ai.mode === "idle" && R(m).next() < 0.6) { ai.mode = "walk"; ai.t = rnd(R(m), 3, 7); if (!pickWander(m, 8)) hemmedIn(m); }
     else { ai.mode = "idle"; ai.t = rnd(R(m), 2, 6); }
   }
   ai.lookT -= dt;
@@ -2169,9 +2231,11 @@ function updateMob(m, dt) {
       && !(offRoofs && roofLedge(m.position.x + Math.sign(_desired.x) * (res.hitX ? 0.6 : 0), m.position.y + 1, m.position.z + Math.sign(_desired.z) * (res.hitZ ? 0.6 : 0), m.halfWidth)) && (!T.village || stepAhead(m, _desired))) m.vel.y = 7.6;   // jump obstacles, only with headroom to clear one: under a ledge or leaves a jump just bounces off them
     else if (m.inWater && T.village && ai.pitOut) { m.vel.y = 6.5; ai.climbT = 0.3; }   // a well's rim, a block above the water: jump out like the player can
     else if (m.inWater) m.vel.y = 4;
-    if (!T.hostile && ai.mode === "walk" && !ai.detour && R(m).next() < 0.3) pickWander(m, 8);
+    if (!T.hostile && ai.mode === "walk" && !ai.detour && R(m).next() < 0.3 && !pickWander(m, 8)) hemmedIn(m);
   }
-  if (T.village) blockedMove(m, dt, (res.hitX || res.hitZ) && wants);
+  // blocked: it hit something and got almost nowhere. Sliding along a wall it brushes is getting somewhere (r15-70: a villager pottering
+  // about a room brushed its walls every few seconds, and that went in the game log as stuck)
+  if (T.village) blockedMove(m, dt, (res.hitX || res.hitZ) && wants && Math.hypot(m.position.x - px, m.position.z - pz) < 0.25 * Math.hypot(_desired.x, _desired.z) * dt);
   // fall damage
   const climbing = (T.climbs && (res.hitX || res.hitZ)) || m.onLadder;
   if (m.onGround || m.inWater || climbing) {
