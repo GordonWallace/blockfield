@@ -12,9 +12,11 @@ const lines = [];
 const snapped = new WeakSet();
 const bname = (x, y, z) => { const b = BF.blocks[BF.world.getBlock(x, y, z)]; return b ? b.name : '?'; };
 // what the stuck mob was doing: its AI state, its route, the blocks round its feet and the mobs pressing on it
-function snap() {
-  let m = null;   // the one that just logged: logged, with the least time held
-  for (const o of BF.mobs.list) { const g = o.ai && o.ai.held; if (g && g.logged && (!m || g.t < m.ai.held.t)) m = o; }
+function snap(e) {
+  let m = null;   // the one that just logged: logged, with the least time held (an ERROR that isn't a stuck one, the pit one: the mob nearest it)
+  const at = !/stuck at/.test(e.x) && /at (-?\d+), (-?\d+), (-?\d+)/.exec(e.x);
+  if (at) { let d = 4; for (const o of BF.mobs.list) { const q = o.position, k = Math.hypot(q.x - at[1], q.y - at[2], q.z - at[3]); if (!o.dead && k < d) { d = k; m = o; } } }
+  else for (const o of BF.mobs.list) { const g = o.ai && o.ai.held; if (g && g.logged && (!m || g.t < m.ai.held.t)) m = o; }
   if (m) {
     const ai = m.ai;
     const p = m.position, fx = Math.floor(p.x), fy = Math.floor(p.y), fz = Math.floor(p.z), ring = {};
@@ -25,11 +27,11 @@ function snap() {
     const r = ai.route;
     return { type: m.type, prof: m.profession, pos: [+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)], onGround: m.onGround, inWater: m.inWater, ladder: m.onLadder,
       route: r ? { kind: ai.routeKind, len: r.length, ri: ai.ri, next: r[ai.ri], last: r[r.length - 1] } : null, detour: ai.detour ? Object.keys(ai.detour).join(',') : null,
-      tgt: ai.tx != null ? +Math.hypot(ai.tx - p.x, ai.tz - p.z).toFixed(1) : null, task: m.task || (m.job && m.job.state) || null, ai: st, ring, near, bs: m.bs ? JSON.stringify(m.bs, (k, v) => (k === 'plan' || k === 'cells' || k === 'bp' || k === 'blocks') ? undefined : v).slice(0, 600) : undefined, hits: (hits.get(m.position) || []).map(e => Object.assign({}, e, { ago: TK - e.tick })) };
+      tgt: ai.tx != null ? +Math.hypot(ai.tx - p.x, ai.tz - p.z).toFixed(1) : null, task: m.task || (m.job && m.job.state) || null, bsMode: m.bs ? m.bs.mode : undefined, bsEntry: m.bs && m.bs.entry ? { type: m.bs.entry.type, ox: m.bs.entry.ox, oy: m.bs.entry.oy, oz: m.bs.entry.oz } : undefined, fill: m.bs && m.bs.fill ? Object.keys(m.bs.fill).join(',') : undefined, ai: st, ring, near, bs: m.bs ? JSON.stringify(m.bs, (k, v) => (k === 'plan' || k === 'cells' || k === 'bp' || k === 'blocks') ? undefined : v).slice(0, 600) : undefined, hits: (hits.get(m.position) || []).map(e => Object.assign({}, e, { ago: TK - e.tick })) };
   }
   return null;
 }
-BF.glog.setSink(e => { if (e.k === 'move') lines.push({ t: BF.sky ? +(BF.sky.day + BF.sky.time).toFixed(4) : 0, l: e.l, x: e.x, v: e.v, snap: e.l === 'ERROR' ? snap() : undefined }); });
+BF.glog.setSink(e => { if (e.k === 'move') lines.push({ t: BF.sky ? +(BF.sky.day + BF.sky.time).toFixed(4) : 0, l: e.l, x: e.x, v: e.v, snap: e.l === 'ERROR' ? snap(e) : undefined }); });
 // the last hits of each mob (BF.world.moveBox wrapped): where, which way it pushed, and the blocks it pushed into
 let TK = 0;
 const hits = new WeakMap(), mb = BF.world.moveBox;
