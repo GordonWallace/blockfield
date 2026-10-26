@@ -516,7 +516,7 @@ function farmTask(m, fs, R, D, H) {
   let spots = 0;
   const planted = cells.filter(c => c[4] === cane && besideWater(c[0], c[1], c[2])).length;   // cane already growing: no more than CANE_SPOTS plants (a builder's farm has grass all along its channel)
   const seeds = cnt(m, I("pumpkin_seeds")) + 4 * cnt(m, I("pumpkin"));
-  for (const [x, y, z, g, a] of cells) {
+  for (const [x, y, z, g, a, b] of cells) {
     const gn = bname(g), water = besideWater(x, y, z);
     if (a === pumpkin && T.canFit(m.inv, [{ id: I("pumpkin"), n: 1 }], [])) { pick({ kind: "pumpkin", x, y: y + 1, z, ty: y + 1, soil: y }); continue; }
     if (SOIL.has(gn) && water) {   // a cane spot
@@ -526,7 +526,8 @@ function farmTask(m, fs, R, D, H) {
       else if (h === 0 && a === 0 && cnt(m, cane) > 0 && planted < CANE_SPOTS) pick({ kind: "caneplant", x, y: y + 1, z, ty: y + 1, soil: y }, 1);
       continue;
     }
-    if (a === 0 && seeds > 0 && ((TILL.has(gn) && !water && H.hasHoe(m)) || (isFarmland(g) && P.has(H.key3(x, y, z))))) pick({ kind: "pumpkinplant", x, y: y + 1, z, ty: y + 1, soil: y }, 1);
+    // a builder's farm has no pumpkin patch: all its soil is tilled (js/villagelife.js chooseRepair, bug-057); stems there held its soil from the hoe
+    if (a === 0 && seeds > 0 && ((TILL.has(gn) && !water && H.hasHoe(m) && !b.built) || (isFarmland(g) && P.has(H.key3(x, y, z))))) pick({ kind: "pumpkinplant", x, y: y + 1, z, ty: y + 1, soil: y }, 1);
   }
   if (best) return best;
   // fewer cane spots than it wants: a farmland cell at a channel's end goes back to dirt for cane

@@ -643,6 +643,7 @@ function tryAutoPlans() {
     data.set(k, { t: "", auto: p.kind, ak: p.ak });
     runAuto(k, true);
     touched();
+    if (BF.glog) BF.glog.log("INFO", "signs", "A generated " + p.kind + " sign came into the world at " + k.split(",").join(", "), { at: k.split(",").map(Number) });
   }
 }
 
@@ -949,7 +950,6 @@ function tick(now) {
   const dt = Math.min(0.25, Math.max(0, (now - lastT) / 1000)); lastT = now;
   if (!BF.world || !BF.world.chunks) return;
   try {
-    if (pendingAuto) tryAutoPlans();
     if (renderDirty) refresh();
     tSlow -= dt;
     if (tSlow <= 0) {
@@ -960,11 +960,13 @@ function tick(now) {
   } catch (err) { console.error(err); }
 }
 if (BF.page) requestAnimationFrame(tick);   // (drawing: headless has none)
-// auto signs' text, every half game hour, in the simulation's think phase (spec r15-19; js/world.js tickSim); off the page also the generated signs coming into the world
+// auto signs' text, every half game hour, in the simulation's think phase (spec r15-19; js/world.js tickSim), and the generated signs
+// coming into the world: on every host in the think phase, never from the page's frames, so a sign's text (which counts beds, and so
+// sets when the village's beds were last scanned) comes at the same tick on the page, in a worker and on the world server (bug-082)
 function autoTick() {
   const S = BF.sky;
   if (!S) return;
-  if (!BF.page && pendingAuto) tryAutoPlans();   // (in the page the frame does it; a worker or the world server has no frames)
+  if (pendingAuto) tryAutoPlans();
   const hh = Math.floor(((S.day || 0) + (S.time || 0)) * 48);   // half an in-game hour = 1/48 day
   if (hh !== lastHH) { lastHH = hh; runAuto(); }
 }
