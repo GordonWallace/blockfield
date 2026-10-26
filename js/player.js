@@ -549,8 +549,10 @@ function playWorld(id, btn) {
   if (w && BF.save.playable && !BF.save.playable(w)) { startNote(BF.save.tooOld(w)); return; }
   requestLock();                       // inside the click so the browser allows it
   if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
-  Promise.resolve(BF.save.load(id)).then(() => beginPlay()).catch(e => {
-    console.error(e); exitLock();
+  const t0 = performance.now();
+  loading("Loading " + (w && w.name || "the world"));
+  Promise.resolve(BF.save.load(id)).then(() => { loaded("Loaded", t0); beginPlay(); }).catch(e => {
+    console.error(e); exitLock(); loading(null);
     if (btn) { btn.disabled = false; btn.textContent = "Play"; }
     startNote("Couldn't load that world: " + (e && e.message || e));
   });
@@ -578,6 +580,13 @@ function copyBrowser(btn) {
     return refreshWorlds().then(() => startNote("Browser saves: " + bits.join(", ") + ". They are still in this browser too."));
   }, e => startNote("Couldn't copy the browser saves: " + (e && e.message || e))).then(() => { btn.disabled = false; });
 }
+// The loading screen over the start screen from Create or Play until play starts (js/main.js BF.loading, bug-093): in a worker or on
+// the world server the world starts there after the page's river step, and the start screen showed again meanwhile.
+function loading(text) { if (BF.loading) { if (text) BF.loading.show(text); else BF.loading.hide(); } }
+function loaded(what, t0) {
+  loading(null);
+  if (BF.glog) BF.glog.log("INFO", "save", what + " world \"" + (BF.save && BF.save.current ? BF.save.current.name : "?") + "\": playing after " + ((performance.now() - t0) / 1000).toFixed(1) + " s of loading");
+}
 function createWorld() {
   const f = createForm.elements;
   const name = f.name.value.trim() || "New World", seedText = f.seed.value.trim(), mode = createMode || gameMode;
@@ -585,9 +594,12 @@ function createWorld() {
   requestLock();
   const btn = createForm.querySelector('button[type="submit"]');
   btn.disabled = true;
-  const done = () => { btn.disabled = false; beginPlay(); };
+  const t0 = performance.now();
+  loading("Creating " + name);
+  const done = () => { loaded("Created", t0); btn.disabled = false; beginPlay(); };
   if (hasSave() && BF.save.create) {
-    Promise.resolve(BF.save.create({ name, seed: seedText, gameMode: mode, biomeScale, monsters })).catch(e => { console.error(e); }).then(done);
+    Promise.resolve(BF.save.create({ name, seed: seedText, gameMode: mode, biomeScale, monsters }))
+      .catch(e => { console.error(e); if (BF.glog) BF.glog.log("ERROR", "save", "Creating world \"" + name + "\" failed: " + (e && e.message || e)); }).then(done);
   } else {
     const sd = parseSeed(seedText);
     BF.prepareWorld(sd).then(() => {   // (the planet works out its rivers first)
@@ -1204,6 +1216,16 @@ function act(kind, target, data) {
   if (!req.delivered && BF.client && BF.client.mode === "worker") return { ok: true, pending: true, then: fn => req.then(fn) };
   return req.result || { ok: false, why: "pending" };
 }
+// Off the page act's answer comes later, so a right click that only sometimes does something checks what the page knows first, and one
+// that always does (a cake, a hive, a blank map) takes its message when the answer comes.
+const offPage = () => !!(BF.client && BF.client.mode === "worker");
+function leadsHorse() {   // a horse on the player's lead, as the protocol's mob views show it (their lead field)
+  const M = BF.client && BF.client.world;
+  if (!M || !M.entities) return false;
+  for (const e of M.entities.values()) if (e.kind === "mob" && e.lead === "player") return true;
+  return false;
+}
+const later = (a, fn) => { if (a.pending) a.then(res => fn(res && res.r)); else fn(a.r); };
 // A right click on a mob (player.mob): the module's answer, or true while it is on its way (the simulation in a worker answers later)
 function mobAct(data) {
   const a = act("player.mob", null, data);
@@ -1797,17 +1819,23 @@ function secondaryDown() {
   if (target && target.id === BF.B.crafting_table && useBlk) { openInventory("crafting"); mouseR = false; return true; }
   const tb = target && BF.blocks[target.id];
   if (tb && tb.door && useBlk) { act("player.door", cellKey(target.x, target.y, target.z), {}); swing(); mouseR = false; return true; }
-  if (tb && /_fence$/.test(tb.name) && BF.horses && act("player.tie", cellKey(target.x, target.y, target.z), {}).ok) { swing(); mouseR = false; return true; }   // tie led horses to a fence post
+  if (tb && /_fence$/.test(tb.name) && BF.horses && (!offPage() || leadsHorse()) && act("player.tie", cellKey(target.x, target.y, target.z), {}).ok) { swing(); mouseR = false; return true; }   // tie led horses to a fence post
   if (tb && tb.gate && useBlk) { act("player.door", cellKey(target.x, target.y, target.z), { gate: true }); swing(); mouseR = false; return true; }
   if (tb && (tb.bed || tb.tent) && useBlk) { trySleep(target); mouseR = false; return true; }
   if (tb && BF.baker && BF.baker.isCake(target.id) && useBlk) {   // a placed cake: eat a slice (js/baker.js)
-    const r = act("player.cake", cellKey(target.x, target.y, target.z), { creative: creative() }).r;
-    if (r === true) swing(); else if (typeof r === "string") actionBar(r);
+    later(act("player.cake", cellKey(target.x, target.y, target.z), { creative: creative() }), r => {
+      if (r === true) swing(); else if (typeof r === "string") actionBar(r);
+    });
     mouseR = false; return true;
   }
   if (tb && BF.baker && BF.baker.isOven(target.id) && useBlk) { actionBar(BF.baker.ovenText(target.x, target.y, target.z)); mouseR = false; return true; }   // what a baker's oven holds
   if (tb && BF.bees && BF.bees.isHome(target.id) && useBlk) {   // a bee nest or beehive: shears or a glass bottle harvest a full one, otherwise how it is (js/bees.js)
-    const r = act("player.hive", null, { cell: Object.assign({}, target), creative: creative() }).r;
+    const a = act("player.hive", null, { cell: Object.assign({}, target), creative: creative() });
+    if (a.pending) {   // the sim keeps a record for every loaded hive, so the click is the hive's: its answer comes later
+      a.then(res => { const r = res && res.r; if (r && r.give) swing(); if (r && r.msg) actionBar(r.msg); });
+      mouseR = false; return true;
+    }
+    const r = a.r;
     if (r) {
       mouseR = false;
       if (r.give) swing();
@@ -1860,8 +1888,9 @@ function secondaryDown() {
     if (BF.mapview.use(sel, it)) { swing(); mouseR = false; placeCd = PLACE_REPEAT; return true; }
   }
   if (it.mapSize && BF.maps) { // blank map: bind it to the 8x8-chunk zone the player stands in (js/maps.js)
-    const msg = act("player.map", null, {}).r;
-    if (msg) { swing(); actionBar(msg); mouseR = false; placeCd = PLACE_REPEAT; return true; }
+    const a = act("player.map", null, {});
+    if (a.pending) { a.then(res => { if (res && res.r) actionBar(res.r); }); swing(); mouseR = false; placeCd = PLACE_REPEAT; return true; }
+    if (a.r) { swing(); actionBar(a.r); mouseR = false; placeCd = PLACE_REPEAT; return true; }
   }
   if (it.boat && BF.boats) {   // boat: on the water (or the ground) in front, facing the way the player looks
     if (!act("player.boat", null, { boat: it.boat, eye: arr(eyeVec()), dir: arr(dirVec()), yaw }).ok) return false;

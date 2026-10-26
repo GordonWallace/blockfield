@@ -28,6 +28,8 @@ module.exports = async (pg) => {
         const mobs = new Set(BF.mobs.list), recs = new Set(BF.mobs.villages.values()), boats = new Set(BF.boats ? BF.boats.list || [] : []);
         const kind = o => mobs.has(o) || (o.def && o.position && o.type) ? "mob" : recs.has(o) ? "village" : boats.has(o) ? "boat" : null;
         const skip = o => o.isObject3D || o.isMaterial || o.isVector3 || o.isBufferGeometry || o.isColor || o.isTexture || o.isQuaternion || o.isEuler || o.isMatrix4;
+        // (a mob's link caches, js/ids.js r15-61: the last answer of a lookup by id, never saved, sent to a worker or hashed)
+        const caches = new Set(BF.ids.CACHE_FIELDS || []);
         const found = new Map();
         const walk = (root, label) => {
           const seen = new Set();
@@ -39,7 +41,7 @@ module.exports = async (pg) => {
             if (v instanceof Map) { for (const [k, x] of v) { visit(k, path + "{key}", d + 1); visit(x, path + "{}", d + 1); } return; }
             if (v instanceof Set) { for (const x of v) visit(x, path + "<>", d + 1); return; }
             if (Array.isArray(v)) { v.forEach((x, i) => visit(x, path + "[" + i + "]", d + 1)); return; }
-            for (const k of Object.keys(v)) visit(v[k], path + "." + k, d + 1);
+            for (const k of Object.keys(v)) if (!caches.has(k)) visit(v[k], path + "." + k, d + 1);
           };
           visit(root, "", 0);
         };
