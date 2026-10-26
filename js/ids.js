@@ -14,7 +14,9 @@
 //   which callers take as they took null. A dead mob stays registered until it is removed.
 // API: BF.ids = { alloc(), get(id), put(obj, id?), remove(idOrObj), idOf(v), placeKey(kind, x, y, z), link(proto, name, field),
 //                 place(proto, name, field, keyOf), Refs, refs(o), MobRef, mobRef(o), isRefs(o), REF, reuse(obj, id), seen(id), next, size, list(prefix),
-//                 serialize(), deserialize(o), reset(), stats }
+//                 serialize(), deserialize(o), reset(), stats,
+//                 range: { get(), set(r), top } (clusters, js/ctick.js: ids handed out from ranges), hidden (a filter: (obj) -> true when get() must
+//                 not see it: an object of a cluster that isn't running), away(id) (a live object hidden now) }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -30,10 +32,26 @@ const hooks = { onNew: null };
 const ghosts = new Map(), GHOST = 600;
 const now = () => (BF.simNow ? BF.simNow() : 0);
 let next = 1;            // the next "e<n>" id
+let top = 1;             // one past the highest id handed out or seen
+// Clusters (spec r15-39b, js/ctick.js): while a cluster runs, its new ids come from ranges the meeting handed it (lim: the end of the
+// current one; more() -> [start, end] of its next), so the ids a cluster makes don't depend on the order clusters run in.
+let lim = 0, more = null;
+let hide = null;         // (obj) -> true: get() doesn't see it (an object of a cluster that isn't running, js/ctick.js)
 const stats = { collisions: 0, last: null };   // a different object put under a key that was in use (tests read this)
 
-function alloc() { return "e" + next++; }
-function get(id) { if (id == null) return undefined; const o = reg.get(id); if (o !== undefined || !ghosts.size) return o; const g = ghosts.get(id); return g && g.o; }
+function alloc() {
+  if (lim && next >= lim) { const r = more(); next = r[0]; lim = r[1]; }
+  const n = next++;
+  if (next > top) top = next;
+  return "e" + n;
+}
+const bump = n => { if (n >= top) top = n + 1; if (!lim && n >= next) next = n + 1; };
+function get(id) {
+  if (id == null) return undefined;
+  let o = reg.get(id);
+  if (o === undefined && ghosts.size) { const g = ghosts.get(id); o = g && g.o; }
+  return hide !== null && o !== undefined && hide(o) ? undefined : o;
+}
 function put(obj, id) {
   if (!obj) return obj;
   if (id == null) id = obj.id;
@@ -206,14 +224,22 @@ BF.ids = {
     if (typeof id !== "string" || !/^e\d+$/.test(id) || (reg.has(id) && reg.get(id) !== obj)) return false;
     if (obj.id != null && obj.id !== id && reg.get(obj.id) === obj) reg.delete(obj.id);
     obj.id = id; reg.set(id, obj); ghosts.delete(id); gen++;
-    const n = +id.slice(1);
-    if (n >= next) next = n + 1;
+    bump(+id.slice(1));
     return true;
   },
   // raises the counter past a saved id (js/mobs.js importVillagers), so new ids never take one a saved villager will come back with
-  seen(id) { const n = typeof id === "string" && /^e\d+$/.test(id) ? +id.slice(1) : 0; if (n >= next) next = n + 1; },
-  serialize() { return { next }; },
-  deserialize(o) { const n = o && Math.floor(+o.next); if (n > next) next = n; },
-  reset() { reg.clear(); ghosts.clear(); gen++; next = 1; stats.collisions = 0; stats.last = null; },
+  seen(id) { const n = typeof id === "string" && /^e\d+$/.test(id) ? +id.slice(1) : 0; bump(n); },
+  serialize() { return { next: Math.max(next, top) }; },
+  deserialize(o) { const n = o && Math.floor(+o.next); if (n > next) next = n; if (n > top) top = n; },
+  reset() { reg.clear(); ghosts.clear(); gen++; next = top = 1; lim = 0; more = null; stats.collisions = 0; stats.last = null; },
+  get hidden() { return hide; }, set hidden(f) { hide = f || null; gen++; },   // (gen: a cached lookAt read under another cluster's view is not reused)
+  // a live object get() doesn't see now (another cluster's, js/ctick.js): not gone, so nothing should be undone because of it
+  away(id) { const o = reg.get(id); return !!(o !== undefined && hide !== null && hide(o)); },
+  // the counter's state while a cluster runs ({next, lim, more}; set(null): back to the one counter, past every id handed out)
+  range: {
+    get: () => ({ next, lim, more }),
+    set(r) { if (r) { next = r.next; lim = r.lim; more = r.more; } else { next = top; lim = 0; more = null; } },
+    get top() { return top; },
+  },
 };
 })();

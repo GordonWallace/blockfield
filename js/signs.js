@@ -970,7 +970,7 @@ function autoTick() {
   const hh = Math.floor(((S.day || 0) + (S.time || 0)) * 48);   // half an in-game hour = 1/48 day
   if (hh !== lastHH) { lastHH = hh; runAuto(); }
 }
-if (BF.world && BF.world.onThink) BF.world.onThink(autoTick);
+if (BF.world && BF.world.onThink) BF.world.onThink(autoTick, "signs");
 BF.onLoad(() => {
   if (BF.on) BF.on("newWorld", reset);
   if (BF.page && BF.proto && BF.proto.listen) BF.proto.listen(list => { for (const e of list) if (e.kind === "signs" && BF.world.replica) adopt(e.store); });

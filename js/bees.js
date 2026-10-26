@@ -626,7 +626,8 @@ BF.bees = {
 // The bee simulation runs with the mobs, once per simulation step (fast-forward included); js/entityview.js draws the bees (spec r15-12).
 if (BF.mobs && BF.mobs.update) {
   const prev = BF.mobs.update;
-  BF.mobs.update = function (dt) { const r = prev.apply(this, arguments); try { update(dt); } catch (e) { console.error(e); } return r; };
+  const run = dt => { try { update(dt); } catch (e) { console.error(e); } };
+  BF.mobs.update = function (dt) { const r = prev.apply(this, arguments), C = BF.ctick; if (C && C.on) C.sys("bees", () => run(dt)); else run(dt); return r; };   // (clusters: js/ctick.js)
 }
 if (W() && W().reset) { const prev = W().reset; W().reset = function () { const r = prev.apply(this, arguments); reset(); return r; }; }
 
