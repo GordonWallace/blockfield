@@ -72,6 +72,13 @@ async function run(b, label, srv, query) {
     `${label}: the card lists the page, the simulation, both workers and the server (${got.rows.join(' | ')})`);
   if (label === 'server') check(got.rows.some(r => /world server thread/.test(r)) && got.rows.some(r => /Worker 1 \(server thread\)/.test(r)), `server: the simulation's threads are named as the server's`);
   check(/Worker 1/.test(got.legend) && /Worker 2/.test(got.legend), `${label}: the Regions legend names the workers (${got.legend})`);
+  // a village's mobs all think on its worker: the map outlines it in that worker's colour, and a region where they mix with wild mobs
+  // of another worker is striped (its mobs per worker), not given to the majority alone
+  const mixed = await dbg.evaluate(() => { const d = BFMobMap.data(); return { striped: d.regions.filter(r => r[6]).map(r => r[6]), villages: d.villages.map(v => [v[4], v[5]]) }; });
+  const vw = await sim(pg, () => { const RW = BF.rworkers, out = {}; for (const m of BF.mobs.list) if (m.type === 'villager' && m.villageId != null && !m.dead && !m.removed) (out[m.villageId] = out[m.villageId] || new Set()).add(RW.ownerOf(RW.unitOf(m, -1))); const o = {}; for (const k in out) o[k] = [...out[k]]; return o; });
+  check(Object.values(vw).every(ws => ws.length === 1), `${label}: every village's villagers think on one worker (${JSON.stringify(vw)})`);
+  check(mixed.villages.length > 0 && mixed.villages.every(v => typeof v[1] === 'number'), `${label}: each village on the map carries its worker (${JSON.stringify(mixed.villages)})`);
+  check(mixed.striped.every(by => by.filter(Boolean).length > 1), `${label}: ${mixed.striped.length} regions mix workers and carry their mobs per worker (${JSON.stringify(mixed.striped.slice(0, 4))})`);
   check(new RegExp(': ' + os.cpus().length + ' cores').test(got.cores), `${label}: one bar per core of this computer (${got.cores}; os.cpus ${os.cpus().length})`);
   // the snapshot itself: busy shares in range, a history building up
   const snap = await dbg.evaluate(() => BFThreads.snap());

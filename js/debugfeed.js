@@ -264,16 +264,19 @@ function mobMap(pp) {
   if (BF.villageSim && BF.villageSim.areas) for (const a of BF.villageSim.areas()) {
     if (a.kind !== "village" || !a.v || a.v.minX == null) continue;
     const p = inF(a.v.minX, a.v.minZ), x0 = p && p.x, z0 = p && p.z, q = p && inF(a.v.maxX + 1, a.v.maxZ + 1);   // block corners, so a turned box stays whole
-    if (q) villages.push([Math.min(x0, q.x), Math.min(z0, q.z), Math.max(x0, q.x) - 1, Math.max(z0, q.z) - 1, nameOf(a.key)]);
+    if (q) villages.push([Math.min(x0, q.x), Math.min(z0, q.z), Math.max(x0, q.x) - 1, Math.max(z0, q.z) - 1, nameOf(a.key), villageWorker(a.key)]);
   }
-  // regions holding mobs (js/regions.js, spec r15-30) for the map's Regions overlay: [x0, z0, x1, z1 (exclusive), mobs, worker]. Corner
-  // cells' centres are mapped, so a region on a neighbouring face comes out as the right (turned) box. worker: the worker most of its
-  // mobs think on (workerOfMob), for the overlay's colours by worker.
+  // regions holding mobs (js/regions.js, spec r15-30) for the map's Regions overlay: [x0, z0, x1, z1 (exclusive), mobs, worker, by?].
+  // Corner cells' centres are mapped, so a region on a neighbouring face comes out as the right (turned) box. worker: the worker most of
+  // its mobs think on (workerOfMob); by: its mobs per worker, when they think on more than one (the overlay draws the region in stripes).
   const regions = [];
   if (BF.regions) for (const s of BF.regions.stats()) {
     if (!s.mobs) continue;
     const b = BF.regions.bounds(s.key), p = inF(b.x0 + 0.5, b.z0 + 0.5), x0 = p && p.x, z0 = p && p.z, q = p && inF(b.x1 - 0.5, b.z1 - 0.5);
-    if (q) regions.push([Math.min(x0, q.x) - 0.5, Math.min(z0, q.z) - 0.5, Math.max(x0, q.x) + 0.5, Math.max(z0, q.z) + 0.5, s.mobs, regionWorker(s.key)]);
+    if (!q) continue;
+    const by = regionWorkers(s.key), r = [Math.min(x0, q.x) - 0.5, Math.min(z0, q.z) - 0.5, Math.max(x0, q.x) + 0.5, Math.max(z0, q.z) + 0.5, s.mobs, 0];
+    if (by) { for (let w = 1; w < by.length; w++) if (by[w] > by[r[5]]) r[5] = w; if (by.filter(Boolean).length > 1) r.push(by); }
+    regions.push(r);
   }
   const out = { kinds, acts, mobs, chunks, villages, regions, workers: workerCount(), region: BF.regions ? BF.regions.REGION : 0, player: [r1(pp.x), r1(pp.z), +(BF.player.yaw || 0).toFixed(2)], cs: CS };
   if (F >= 0) {
@@ -291,15 +294,21 @@ function workerOfMob(m, k) {
   if (RW && RW.active && RW.ownerOf && RW.unitOf) return RW.ownerOf(RW.unitOf(m, k)) | 0;
   return 0;
 }
-// A region's worker: the one most of its mobs think on (a village's mobs go with their village, wherever they stand)
-function regionWorker(k) {
+// A region's mobs per worker (null with one worker). A village's mobs go with their village wherever they stand, and the wild ones with
+// their region (or, with clusters, their cluster), so one region can hold mobs of several workers.
+function regionWorkers(k) {
   const n = workerCount();
-  if (n <= 1) return 0;
+  if (n <= 1) return null;
   const by = new Array(n).fill(0);
   for (const m of BF.regions.mobsIn(k)) if (!m.dead && !m.removed) by[Math.min(n - 1, workerOfMob(m, k))]++;
-  let best = 0;
-  for (let w = 1; w < n; w++) if (by[w] > by[best]) best = w;
-  return best;
+  return by;
+}
+// A village's worker: its cluster group's, else its unit's ("v:" + key, js/rworkers.js), else 0
+function villageWorker(key) {
+  const CW = BF.cworkers, RW = BF.rworkers, CL = BF.clusters;
+  if (CW && CW.active && CW.workerOf && CL) return CW.workerOf(CL.groupOf("v:" + key)) | 0;
+  if (RW && RW.active && RW.ownerOf) return RW.ownerOf("v:" + key) | 0;
+  return 0;
 }
 // how many workers the simulation thinks on now (1: the simulation thread alone)
 function workerCount() {

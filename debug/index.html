@@ -408,7 +408,7 @@
         <div class="ph"><h2>Mobs map</h2><span class="sub" id="m-count"></span><div class="grow"></div>
           <div class="seg"><button id="m-zout" title="Zoom out (or the mouse wheel)">−</button><button id="m-zin" title="Zoom in (or the mouse wheel)">+</button><button id="m-center" title="Centre the map on you again">Centre</button></div><div class="seg"><button id="m-regions" title="Shade the simulation regions (64 x 64 blocks) by how many mobs each holds, coloured by the worker that thinks them">Regions</button></div></div>
         <div class="mapwrap"><canvas id="mmap"></canvas><div class="tip" id="mtip"></div></div>
-        <div class="mleg" id="m-rlegend" hidden title="With Regions on: each region coloured by the worker most of its mobs think on (a village's mobs go with their village); the busy share is the worker's thread, as on the Threads card"></div>
+        <div class="mleg" id="m-rlegend" hidden title="With Regions on: each region coloured by the worker its mobs think on, striped when they think on several (a village's mobs go with their village wherever they stand, the wild ones with their region); each village is outlined in its worker's colour. The busy share is the worker's thread, as on the Threads card"></div>
         <div class="mleg"><div class="seg"><button id="m-all" title="Show every type">All</button><button id="m-none" title="Hide every type">None</button></div><span id="m-legend"></span></div>
       </div>
       <div class="panel" id="rpanel">
@@ -1161,7 +1161,9 @@ function renderMobMap() {
   }
   g.stroke();
   // the Regions overlay (js/regions.js): each region holding mobs shaded by its count, the busiest darkest, with the count when there is
-  // room, in the colour of the worker its mobs think on (js/debugfeed.js regionWorker; one worker: all one colour)
+  // room, in the colour of the worker its mobs think on; a region whose mobs think on several (a village's mobs go with their village,
+  // the wild ones with their region) is striped, each worker's band as tall as its share of the mobs (js/debugfeed.js regionWorkers).
+  // One worker: all one colour.
   const rl = $("m-rlegend");
   rl.hidden = !mRegions;
   if (mRegions) {
@@ -1173,19 +1175,30 @@ function renderMobMap() {
     const top = Math.max(...mm.regions.map(r => r[4]));
     const rgb = wk => { const c = wColor(wk | 0); return [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16)).join(","); };
     g.font = "11px IBM Plex Mono, monospace"; g.textAlign = "center"; g.textBaseline = "middle";
-    for (const [x0, z0, x1, z1, n, wk] of mm.regions) {
+    for (const [x0, z0, x1, z1, n, wk, by] of mm.regions) {
       const px = X(x0), pz = Z(z0), pw = (x1 - x0) * sc, ph = (z1 - z0) * sc;
       if (px > w || pz > h || px + pw < 0 || pz + ph < 0) continue;
-      const c = rgb(wk);
-      g.fillStyle = `rgba(${c},${(0.08 + 0.42 * n / top).toFixed(3)})`; g.fillRect(px, pz, pw, ph);
+      const c = rgb(wk), a = (0.08 + 0.42 * n / top).toFixed(3);
+      if (by) {
+        const tot = by.reduce((p, v) => p + v, 0) || 1;
+        let y = pz;
+        by.forEach((v, i) => { if (!v) return; const bh = ph * v / tot; g.fillStyle = `rgba(${rgb(i)},${a})`; g.fillRect(px, y, pw, bh); y += bh; });
+      } else { g.fillStyle = `rgba(${c},${a})`; g.fillRect(px, pz, pw, ph); }
       g.strokeStyle = `rgba(${c},0.55)`; g.lineWidth = 1; g.strokeRect(Math.round(px) + 0.5, Math.round(pz) + 0.5, Math.round(pw), Math.round(ph));
       if (pw >= 28) { g.fillStyle = "rgba(238,243,234,0.8)"; g.fillText(String(n), px + pw / 2, pz + ph / 2); }
     }
     g.textAlign = "start"; g.textBaseline = "alphabetic";
   }
-  // running villages: a subtle outline and their name
-  g.setLineDash([4, 4]); g.strokeStyle = "rgba(242,198,109,0.35)"; g.font = "11px IBM Plex Mono, monospace"; g.fillStyle = "rgba(242,198,109,0.6)";
-  for (const v of mm.villages) { g.strokeRect(X(v[0]) + 0.5, Z(v[1]) + 0.5, (v[2] - v[0] + 1) * sc, (v[3] - v[1] + 1) * sc); g.fillText(v[4] || "", X(v[0]) + 3, Z(v[1]) - 4); }
+  // running villages: a subtle outline and their name; with Regions on and several workers, in the colour of the worker the village
+  // thinks on (all its villagers, pen animals and golems, wherever they stand)
+  const vByW = mRegions && (mm.workers || 1) > 1;
+  g.setLineDash([4, 4]); g.font = "11px IBM Plex Mono, monospace";
+  for (const v of mm.villages) {
+    const col = vByW ? wColor(v[5] | 0) : null;
+    g.strokeStyle = col || "rgba(242,198,109,0.35)"; g.fillStyle = col || "rgba(242,198,109,0.6)"; g.lineWidth = col ? 2 : 1;
+    g.strokeRect(X(v[0]) + 0.5, Z(v[1]) + 0.5, (v[2] - v[0] + 1) * sc, (v[3] - v[1] + 1) * sc); g.fillText((v[4] || "") + (col ? " (" + ((v[5] | 0) ? "worker " + v[5] : "simulation") + ")" : ""), X(v[0]) + 3, Z(v[1]) - 4);
+  }
+  g.lineWidth = 1;
   g.setLineDash([]);
   // on the planet: the edges of the player's face (mm.sq, in its frame); past them the neighbouring faces are unfolded, and the corner
   // wedges between two neighbours hold nothing, so they stay hatched
