@@ -6,7 +6,7 @@ Each **bee nest** (found on about one in thirty oak and birch trees in forests a
 
 ### Daily life
 
-Bees come out in the morning and head for flowers (poppies, dandelions and cornflowers) within 22 blocks of home. They land on a flower for a few seconds and fly back; they sometimes rest on the ground, leaves or walls along the way. Bees fly straight, a little above the tallest thing around them. A bee under leaves or a roof (a wild nest hangs just under its tree's leaves) first flies out from under them before it climbs, and a bee that meets an obstacle goes over it, along it or under it, whichever way is open. They return home half an hour before sunset and stay in all night, and also whenever it rains. No flowers, no honey.
+Bees come out in the morning and head for flowers (poppies, dandelions and cornflowers) within 22 blocks of home. They land on a flower for a few seconds and fly back; they sometimes rest on the ground, leaves or walls along the way. Bees fly straight, a little above the tallest thing around them. A bee under leaves or a roof (a wild nest hangs just under its tree's leaves) first flies out from under them before it climbs, and a bee that meets an obstacle goes over it, along it or under it, whichever way is open. They return home half an hour before sunset and stay in all night, and also whenever it rains. A bee that takes more than half a minute to find its way in gets in anyway. No flowers, no honey.
 
 ### Honey and growth
 
