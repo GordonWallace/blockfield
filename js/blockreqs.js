@@ -14,7 +14,7 @@
 //   doorBreak  target "x,y,z" (the lower half), data {expect: door id}: a zombie breaks a closed door; both halves go, one door drops. The
 //              break progress stays on the zombie (ai.doorT, js/mobs.js); a door opened, closed by someone else or gone is refused.
 // Game log: a WARN "requests" line when a villager loses a contended door to a lower id (at most one a game hour, as it can be frequent).
-// API: BF.blockReq = { cells(m, cells, opts) -> req, door(m, x, y, z, open) -> req, free(id), tick() }
+// API: BF.blockReq = { cells(m, cells, opts) -> req, door(m, x, y, z, open) -> req, free(id), tick(), reset() }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -105,5 +105,5 @@ function cells(m, list, o) {
 }
 const door = (m, x, y, z, open) => R.send("door", pk(x, y, z), { open: !!open }, m);
 
-BF.blockReq = { cells, door, free, tick: () => ticks };
+BF.blockReq = { cells, door, free, tick: () => ticks, reset() { ticks = 0; warnAt = -1e9; doorSet.clear(); } };   // reset: a new world (BF.mobs.clear)
 })();

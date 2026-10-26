@@ -29,6 +29,7 @@ const GROUP = [4, 8];          // animals per first-generation group
 const ZONE = 4;                // chunks per side of a region whose groups are all of one kind
 const ROLLS_PER_STEP = 6;      // chunks rolled per update at most
 const BREED_R = 8, BREED_CHANCE = 0.1, CROWD_R = 24, CROWD_MAX = 8;
+const WQ = {};
 const PAIR_P = 1 - Math.sqrt(1 - BREED_CHANCE);   // each adult rolls once a day: about BREED_CHANCE for a pair
 const tune = { pairP: PAIR_P };                    // tests may raise it
 const CAP = 10, CAP_CHUNKS = 28, BUFFER = 12;
@@ -197,9 +198,11 @@ function wildBreeding() {
       if (!breedable(m, t)) continue;
       let mate = null, md = BREED_R * BREED_R, crowd = 0;
       // (spec r15-31) a's animals within CROWD_R of m, from the region index; in tests checked against a itself
-      const close = L => L.filter(o => o.type === type && live(o) && wildAnimal(o) && (o.position.x - m.position.x) ** 2 + (o.position.z - m.position.z) ** 2 <= CROWD_R * CROWD_R);
-      for (const o of BF.mobs.checkScan("wildlife.breed", close(BF.mobs.near(m.position, CROWD_R)), () => close(a))) {
-        const dx = o.position.x - m.position.x, dz = o.position.z - m.position.z, d2 = dx * dx + dz * dz;
+      // (through a face edge, bug-091: o seen from m's frame)
+      const d2Of = o => { const q = BF.planet.local(m.position, o.position, WQ); return (q.x - m.position.x) ** 2 + (q.z - m.position.z) ** 2; };
+      const close = L => L.filter(o => o.type === type && live(o) && wildAnimal(o) && d2Of(o) <= CROWD_R * CROWD_R);
+      for (const o of BF.mobs.checkScan("wildlife.breed", close(BF.mobs.near(m.position, CROWD_R, true)), () => close(a))) {
+        const d2 = d2Of(o);
         if (d2 <= CROWD_R * CROWD_R) crowd++;
         if (o !== m && d2 < md && Math.abs(o.position.y - m.position.y) < 3 && breedable(o, t)) { md = d2; mate = o; }
       }
@@ -351,7 +354,7 @@ function deserialize(o) {
 }
 function reset() {
   rolled = new Set(); toRoll.clear(); stored = new Map(); toRestore.clear(); nights = new Map();
-  areaList = []; areaOf = new Map(); targets = new Map(); targetsDirty = true; LOG.length = 0;
+  areaList = []; areaOf = new Map(); targets = new Map(); targetsDirty = true; LOG.length = 0; areasT = breedT = watchT = 0;
 }
 function counts() {
   let n = 0;

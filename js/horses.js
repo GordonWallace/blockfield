@@ -93,7 +93,7 @@ function newRec(o) {
   const st = o.stats || rollStats(rs);
   const r = BF.ids.mobRef({ hid: nextId++, x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, coat: o.coat || COATS[irnd(rs, 0, 6)], mark: o.mark || MARKS[irnd(rs, 0, 4)],
     maxHp: st.hp, hp: st.hp, speed: st.speed, jump: st.jump, tamed: !!o.tamed, owner: o.owner || null, saddle: !!o.saddle, temper: 0,
-    growAt: o.growAt != null ? o.growAt : null, cd: o.cd || 0, fed: null, herd: o.herd || null, lead: null, post: null, pen: o.pen || null, rider: false, mob: null });
+    growAt: o.growAt != null ? o.growAt : null, cd: o.cd || 0, fed: null, herd: o.herd || null, lead: null, post: null, pen: o.pen || null, rider: false, mob: null, avoid: null, mate: null });
   recs.set(r.hid, r);
   return r;
 }
@@ -149,6 +149,7 @@ function tame(m, owner) {
 // Food eaten by a horse (from the player or a villager): heals, calms an untamed one, speeds a foal up, makes a tamed adult willing to breed
 // (wheat or hay). Returns false when it has no use for it.
 function feed(m, itemName, by) {
+  if (BF.rworkers) BF.rworkers.writes(m);   // (a villager of another unit may be the one feeding it: js/rworkers.js)
   const r = m && m.horse, f = FEED[itemName];
   if (!r || !f || !live(m)) return false;
   const t = now();
@@ -164,13 +165,15 @@ const willing = (r, t) => (r.tamed || !r.owner) && !isFoal(r) && r.fed != null &
 // In the think phase the birth is a "spawn" request from a (r15-23); both must still be willing when it applies. Returns the foal when born at once.
 function breed(a, b) {
   const t = now();
-  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b), () => live(a) && live(b) && a.horse && b.horse && willing(a.horse, t) && willing(b.horse, t));
+  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b), () => live(a) && live(b) && a.horse && b.horse && willing(a.horse, t) && willing(b.horse, t), ["horses", a.id, b.id, t]);
 }
+if (BF.mobs.maker) BF.mobs.maker("horses", (ai, bi, t) => { const a = BF.ids.get(ai), b = BF.ids.get(bi); return a && b ? [() => breedNow(a, b), () => live(a) && live(b) && a.horse && b.horse && willing(a.horse, t) && willing(b.horse, t)] : null; });   // (another worker's foal, spec r15-39)
 function breedNow(a, b) {
   const ra = a.horse, rb = b.horse, t = now();
   const r = R(a), st = foalStats(ra, rb, r);
   const pick = (x, y) => (r.next() < 0.45 ? x : r.next() < 0.82 ? y : null);
-  const foal = spawn((a.position.x + b.position.x) / 2, Math.max(a.position.y, b.position.y), (a.position.z + b.position.z) / 2, {
+  const at = BF.herd.birthSpot(a, b);   // (through a face edge, bug-089)
+  const foal = spawn(at.x, at.y, at.z, {
     stats: st, coat: pick(ra.coat, rb.coat) || COATS[irnd(r, 0, 6)], mark: pick(ra.mark, rb.mark) || MARKS[irnd(r, 0, 4)],
     tamed: !!ra.tamed, owner: ra.owner, growAt: t + FOAL_DAYS, cd: t + FOAL_DAYS + BREED_CD, pen: ra.pen || rb.pen,
   });
@@ -592,10 +595,10 @@ function serialize() {
   for (const r of recs.values()) {
     store(r);
     const q = v => Math.round(v * 100) / 100;
-    out.push({ hid: r.hid, x: q(r.x), y: q(r.y), z: q(r.z), yaw: q(r.yaw), coat: r.coat, mark: r.mark, maxHp: r.maxHp, hp: q(r.hp), speed: q(r.speed), jump: q(r.jump),
+    out.push({ hid: r.hid, x: q(r.x), y: q(r.y), z: q(r.z), yaw: q(r.yaw), coat: r.coat, mark: r.mark, maxHp: r.maxHp, hp: q(r.hp), speed: r.speed, jump: r.jump,
       tamed: r.tamed ? 1 : 0, owner: r.owner, saddle: r.saddle ? 1 : 0, temper: r.temper, growAt: r.growAt, cd: r.cd, fed: r.fed, herd: r.herd, t: r.mob ? null : r.t,
       post: r.lead && r.lead.kind === "post" ? [r.lead.x, r.lead.y, r.lead.z] : null, led: r.lead && r.lead.kind === "player" ? 1 : 0, pen: r.pen,
-      rider: r.mob && r.mob.rider ? 1 : 0 });
+      rider: r.mob && r.mob.rider ? 1 : 0, avoid: r.avoid || null });
   }
   return { recs: out, herds: [...herds.values()].map(h => [h.id, Math.round(h.cx), Math.round(h.cz), Math.round(h.dir * 100) / 100]), next: nextId, nextHerd };
 }
@@ -610,14 +613,15 @@ function deserialize(o) {
       maxHp: clamp(+e.maxHp || 20, 1, 60), hp: +e.hp || 20, speed: +e.speed || 9, jump: +e.jump || 2, tamed: !!e.tamed, owner: e.owner || null, saddle: !!e.saddle,
       temper: +e.temper || 0, growAt: e.growAt != null ? +e.growAt : null, cd: +e.cd || 0, fed: e.fed != null ? +e.fed : null, herd: e.herd || null, t: e.t != null ? +e.t : null,
       lead: Array.isArray(e.post) ? { kind: "post", x: e.post[0], y: e.post[1], z: e.post[2] } : e.led ? { kind: "player" } : null, post: Array.isArray(e.post) ? e.post : null,
-      pen: e.pen && typeof e.pen === "object" ? e.pen : null, rider: !!e.rider, mob: null });
+      pen: e.pen && typeof e.pen === "object" ? e.pen : null, rider: !!e.rider, mob: null,
+      avoid: e.avoid && typeof e.avoid === "object" ? e.avoid : null, mate: null });   // (every field a live record has, so a reload doesn't change the record, bug-084)
     recs.set(r.hid, r);
     nextId = Math.max(nextId, r.hid + 1);
   }
   backT = 0;
 }
 function reset() {
-  recs.clear(); herds.clear(); nextId = 1; nextHerd = 1;
+  recs.clear(); herds.clear(); nextId = 1; nextHerd = 1; backT = 0;
 }
 
 BF.horses = {

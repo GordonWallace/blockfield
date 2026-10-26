@@ -21,7 +21,7 @@
 const BF = (globalThis.BF = globalThis.BF || {});
 
 const BUDGETS = [0, 0.2, 0.4, 0.6, 0.8];   // the pause menu's choices (0: the minimum rule only)
-const opt = { on: true, budget: 0.4, memMB: 500, win: 10, hold: 60, cool: 300, reach: 1000, minFps: 30 };
+const opt = { on: true, budget: 0.4, memMB: 500, win: 10, hold: 60, cool: 300, reach: 1000, minFps: 30, fixed: 0 };   // fixed: see decide
 const store = {
   get() { try { return localStorage.getItem("blockfield.simBudget"); } catch (_) { return null; } },
   set(v) { try { localStorage.setItem("blockfield.simBudget", String(v)); } catch (_) {} },
@@ -34,7 +34,7 @@ const store = {
   if (q) { opt.on = true; opt.budget = Math.min(10, +q[1] / 100); }
 }
 
-const now = () => performance.now();
+const now = () => BF.rworkers.realNow();   // (the wall clock; with region workers the leader's reading, so every worker decides alike: js/rworkers.js)
 // ---- the measure: 1-second slices of real time that ran (not 0x, not paused), the last 10 kept for the figures shown
 let slice = { sim: 0, real: 0, frames: 0 }, slices = [], underMs = 0, overMs = 0, fps = 60;
 function frame(simMs, raw) {
@@ -103,6 +103,7 @@ function decide(px, pz, base) {
     x.d = ed(x.v, px, pz);
     if (x.d > opt.reach) drop(k, `over ${opt.reach} blocks away`);
   }
+  if (opt.fixed > 0) return fixedSet(px, pz, base, t, ed);
   const f = used(), slow = BF.warp && BF.warp.speed === 1 && fps < opt.minFps;
   if (overMs >= opt.win * 1000 && t - lastLoad >= opt.hold * 1000 && extras.size) {
     let far = null;
@@ -140,6 +141,33 @@ function decide(px, pz, base) {
   return [...extras].map(([key, x]) => ({ key, v: x.v }));
 }
 
+// set({fixed: n}) (measuring, tools/headless.js --extra n): the n nearest villages within reach on top of the minimum, whatever the time
+// they take, so runs and workers compare alike (the budget reads real time); the memory limit still holds.
+let fixedAt = null;   // [x, z, n] the fixed set was picked for (the search is wide: done again only when the player moved a chunk)
+function fixedSet(px, pz, base, t, ed) {
+  if (fixedAt && Math.abs(fixedAt[0] - px) < 16 && Math.abs(fixedAt[1] - pz) < 16 && fixedAt[2] === opt.fixed) { lastN = base.size + extras.size; return [...extras].map(([key, x]) => ({ key, v: x.v })); }
+  fixedAt = [px, pz, opt.fixed];
+  let near = [];
+  try { near = BF.worldgen.villagesNear(px, pz, opt.reach + 200) || []; } catch (e) { near = []; }
+  const cand = [];
+  for (const v of near) {
+    if (!v || v.minX == null) continue;
+    const k = vKey(v), d = ed(v, px, pz);
+    if (!base.has(k) && d <= opt.reach) cand.push({ v, k, d });
+  }
+  cand.sort((a, b) => a.d - b.d || (a.k < b.k ? -1 : 1));
+  const want = new Set(cand.slice(0, opt.fixed).map(c => c.k));
+  for (const k of [...extras.keys()]) if (!want.has(k)) { extras.delete(k); fp.delete(k); }
+  for (const c of cand.slice(0, opt.fixed)) {
+    if (extras.has(c.k)) continue;
+    const keys = VS().footprint(c.v);
+    if (extraChunks(base, keys) * chunkBytes() / (1024 * 1024) > opt.memMB) break;
+    extras.set(c.k, { v: c.v, t, d: c.d }); fp.set(c.k, keys);
+    note(`${vname(c.k)} joins the simulated set, ${Math.round(c.d)} blocks away (a fixed set of ${opt.fixed})`, c.k);
+  }
+  lastN = base.size + extras.size;
+  return [...extras].map(([key, x]) => ({ key, v: x.v }));
+}
 const text = () => `Simulated villages: ${lastN || (VS() ? VS().count() : 0)} (budget ${opt.on && opt.budget > 0 ? pct(opt.budget) : "off"})`;
 BF.active = {
   BUDGETS, frame, decide,
@@ -166,6 +194,6 @@ BF.active = {
   feed: () => ({ on: opt.on, budget: opt.budget, used: used(), fps: Math.round(fps), villages: lastN, extras: [...extras].map(([k, x]) => ({ key: k, name: vname(k), d: Math.round(x.d) })),
     under: Math.round(underMs / 1000), over: Math.round(overMs / 1000), memMB: opt.memMB, log: decisions.slice(-12) }),
   log: () => decisions.slice(),
-  reset() { extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, frames: 0 }; decide.memTold = false; },
+  reset() { fixedAt = null; extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, frames: 0 }; fps = 60; decide.memTold = false; },
 };
 })();

@@ -433,6 +433,7 @@ function planetTp(a) {
   const m1 = LATLON.exec(a[0] || ""), m2 = LATLON.exec(a[1] || "");
   if (m1 || m2) {   // latitude / longitude need their hemisphere letters (plain numbers are u / v)
     if (!m1 || !m2 || a.length > 3) fail("Usage: /tp <lat><N|S> <lon><E|W> [y], e.g. /tp 35.26N 45E");
+    for (const [m, t] of [[m1, a[0]], [m2, a[1]]]) if (/^[+-]/.test(m[1])) fail(`The letter gives the hemisphere, so no + or - with it: ${t.replace(/^[+-]/, "")}, not ${t}`);   // -10S would quietly be 10N (bug-090)
     const lat = +m1[1] * (/s/i.test(m1[2]) ? -1 : 1), lon = +m2[1] * (/w/i.test(m2[2]) ? -1 : 1);
     if (!/[ns]/i.test(m1[2]) || !/[ew]/i.test(m2[2])) fail("Latitude comes first (N or S), then longitude (E or W)");
     if (Math.abs(lat) > 90) fail(`Latitude must be between 90S and 90N, found ${a[0]}`);

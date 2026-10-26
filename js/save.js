@@ -51,6 +51,7 @@ const reqP = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result);
 
 // ---------- snapshot / restore ----------
 function snapshot() {
+  if (BF.rworkers) BF.rworkers.rec(["s"]);   // (region workers: the followers take one too, in case serializing changes anything: js/rworkers.js)
   const edits = {};
   for (const [k, m] of BF.world.edits) {
     if (!m.size) continue;
@@ -136,6 +137,7 @@ function restore(data, meta) {
   if (BF.bees) BF.bees.deserialize(data.bees); // bee homes (old saves: none)
   if (BF.glog) BF.glog.loadChunkTimes(data.chunkTime); // chunk times (old saves: every chunk starts at 0)
   if (BF.gameOpts) BF.gameOpts.purgeStored();   // monsters switched off since the save don't come back with their chunks
+  BF.emit("worldRestored", data, meta);   // (js/simworker.js: region workers restore the same data, js/rplay.js)
 }
 
 // The page's copy of a saved world, when the simulation is in a worker (r15-38): what the page draws and plays with. The worker restores
@@ -206,6 +208,7 @@ function importRecord(rec, keepId) {
     if (had && keepId) return { meta: had, skipped: true };
     if (had || !meta.id) meta.id = newId();
     meta.lastPlayed = Date.now();
+    meta.name = clampName(meta.name, "Imported world");   // (as Create and Rename keep names: bug-072)
     const log = rec.log;
     return tx(["worlds", "data"], "readwrite", t => {
       t.objectStore("worlds").put(meta);
@@ -219,6 +222,9 @@ function importRecord(rec, keepId) {
     }).then(() => ({ meta, skipped: false }));
   });
 }
+// a world's name as kept: at most 40 characters, never half an emoji (bug-072; as js/savefile.js clampName, which the simulation
+// doesn't load; the world server clamps its own renames)
+const clampName = (name, dflt) => Array.from(String(name == null ? "" : name)).slice(0, 40).join("").trim() || dflt || "World";
 const newId = () => "w" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
 const download = (url, name) => { const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); };
 // the world server's import (debug/server.js -> server/world.js): the file's bytes; keep: as importRecord's keepId
@@ -263,7 +269,7 @@ const save = {
     else if (!/^-?\d+$/.test(String(seed).trim())) { let h = 0; for (const ch of String(seed)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0; seed = h >>> 0; }
     else seed = numberSeed(String(seed).trim());
     const now = Date.now();
-    const meta = { id: newId(), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: 4, version: VERSION, game: BF.VERSION, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 10, monsters: BF.gameOpts ? BF.gameOpts.normalize(opts.monsters) : undefined, created: now, lastPlayed: now };
+    const meta = { id: newId(), name: clampName(opts.name, "New World"), seed, gameMode: opts.gameMode || "survival", gen: 4, version: VERSION, game: BF.VERSION, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 10, monsters: BF.gameOpts ? BF.gameOpts.normalize(opts.monsters) : undefined, created: now, lastPlayed: now };
     const start = () => {
       const o = { gameMode: meta.gameMode, biomeScale: meta.biomeScale, villages: meta.villages, monsters: meta.monsters };
       BF.newWorld(seed, o);
@@ -310,13 +316,13 @@ const save = {
   },
 
   rename(id, name) {
-    if (server()) return asked({ op: "rename", id, name: String(name).slice(0, 40) }, "rename it").then(r => {
+    if (server()) return asked({ op: "rename", id, name: String(name) }, "rename it").then(r => {
       if (save.current && save.current.id === id) { save.current.name = r.meta.name; BF.client.meta({ id, name: r.meta.name }); }
     });
     return tx(["worlds"], "readwrite", t => {
       const s = t.objectStore("worlds");
       const r = s.get(id);
-      r.onsuccess = () => { if (r.result) { r.result.name = String(name).slice(0, 40); s.put(r.result); if (save.current && save.current.id === id) { save.current.name = r.result.name; if (host()) BF.client.meta({ id, name: r.result.name }); } } };
+      r.onsuccess = () => { if (r.result) { r.result.name = clampName(name, r.result.name); s.put(r.result); if (save.current && save.current.id === id) { save.current.name = r.result.name; if (host()) BF.client.meta({ id, name: r.result.name }); } } };
     });
   },
 
@@ -374,21 +380,31 @@ const save = {
   },
 
   // A saved world as a .bfworld file, downloaded (spec r15-42): the world server's copy (debug/server.js serves it), or this browser's.
+  // One that can't be exported rejects with why (the title screen shows it) and is an ERROR "save" in the game log.
   exportFile(id) {
     const w = save.current && save.current.id === id ? save.current : null;
+    const failed = e => { slog("ERROR", "Exporting world " + (w ? "\"" + w.name + "\"" : id) + " failed: " + (e && e.message || e)); throw e; };
+    const give = (blob, name) => { const url = URL.createObjectURL(blob); download(url, name); setTimeout(() => URL.revokeObjectURL(url), 60000); };
     if (server()) {
-      download("/saves/" + encodeURIComponent(id) + "/export", "");
-      slog("INFO", "Exported world " + (w ? "\"" + w.name + "\"" : id) + " from the world server");
-      return Promise.resolve(true);
+      // fetched first, so a server that can't export it (a 404, a failed save) gives its reason instead of a junk download (bug-073)
+      return fetch("/saves/" + encodeURIComponent(id) + "/export").then(r => {
+        if (!r.ok) return r.json().catch(() => ({})).then(j => { throw new Error(j.why || "the world server answered " + r.status); });
+        const cd = r.headers.get("Content-Disposition") || "", m = /filename\*=UTF-8''([^;]+)/.exec(cd);
+        let name = BF.saveFile.fileName(w && w.name);
+        if (m) try { name = decodeURIComponent(m[1]); } catch (e) { /* the default */ }
+        return r.blob().then(blob => {
+          give(blob, name);
+          slog("INFO", "Exported world " + (w ? "\"" + w.name + "\"" : id) + " from the world server (" + Math.round(blob.size / 1024) + " KB)");
+          return true;
+        });
+      }).catch(failed);
     }
     const first = w && save.saveNow ? save.saveNow() : Promise.resolve();
     return first.then(() => exportRecord(id)).then(rec => BF.saveFile.pack(rec).then(blob => {
-      const url = URL.createObjectURL(blob);
-      download(url, BF.saveFile.fileName(rec.meta.name));
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      give(blob, BF.saveFile.fileName(rec.meta.name));
       slog("INFO", "Exported world \"" + rec.meta.name + "\" (" + Math.round(blob.size / 1024) + " KB)");
       return true;
-    }));
+    })).catch(failed);
   },
   // A .bfworld file (a File or Blob) -> the world it holds, added to the world server's saves or this browser's. -> its meta
   importFile(file) {
