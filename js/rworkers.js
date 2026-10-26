@@ -123,19 +123,22 @@ let pathCtx = null, shared = null;
 // The objects of every village record and every villager's offers, by where they are: built once an exchange, when first needed
 // (refsOn starts it over). A mob's diff and a request's data point at these instead of copying them.
 // An index entry is [entity ref, parent entry or null, key]; pathOf turns it into [entity ref, keys] when one is found.
+// RW.indexScope ({mobs, recs}: clusters on several workers, js/cworkers.js): only those, the ones this worker ran (no others are reachable
+// from them between meetings).
 function sharedIndex() {
   if (shared) return shared;
   shared = new Map();
+  const sc = RW.indexScope, itMobs = sc ? sc.mobs : mobSet, itRecs = sc ? sc.recs : recSet;
   // the villagers' offers first: an offer is the villager's own object, and a village record that keeps one too (a cache of the market)
   // has it by reference on this worker only; on the others that place holds a copy, so a request pointing there would miss the offer
-  for (const m of mobSet) if (m.trades && Array.isArray(m.trades)) {
+  for (const m of itMobs) if (m.trades && Array.isArray(m.trades)) {
     let top = null;
     for (let i = 0; i < m.trades.length; i++) { const o = m.trades[i]; if (o && typeof o === "object" && !shared.has(o)) shared.set(o, [{ "@": m.id }, top || (top = [{ "@": m.id }, [{ "@": m.id }, null, null], "trades"]), i]); }   // (m, then .trades, then [i])
   }
-  for (const rec of recSet) indexTree(rec, [{ V: rec.key }, null, null], shared, 0);
+  for (const rec of itRecs) indexTree(rec, [{ V: rec.key }, null, null], shared, 0);
   // then every mob's own plain objects, one level down: a task that holds another mob's record (a stable keeper's catch holds the horse's
   // m.horse, js/stables.js) must point at it there, or the other workers keep a copy that the horse's own changes never reach
-  for (const m of mobSet) {
+  for (const m of itMobs) {
     let top = null;
     for (const k in m) {
       const o = m[k];
@@ -303,8 +306,9 @@ function diffV(v, s) {
   const ks = Object.keys(v), oks = s.ks, vs = s.vs;
   let same = ks.length === oks.length;
   for (let i = 0; same && i < ks.length; i++) if (ks[i] !== oks[i]) same = false;
-  if (same) {   // the usual case: the same keys in the same order
-    (s.fn || (s.fn = cmpFor(ks)))(v, vs, ops, v === self);
+  const fn = same && (s.fn || (s.fn = cmpFor(ks)));
+  if (fn) {   // the usual case: the same keys in the same order
+    fn(v, vs, ops, v === self);
     return ops.length ? ops : null;
   }
   // keys added, deleted or reordered: by name
@@ -328,10 +332,14 @@ function diffV(v, s) {
 // and only a child that differs from its shadow, an object or a zero (+0 / -0) goes on to keyChild. Skipped keys are left out. Same ops,
 // same order as reading the keys one by one.
 const cmps = new Map();
+const seenKs = new Map();   // key list -> uses before it is compiled (an object with keys of its own, a cell table, is compared by name)
 function cmpFor(ks) {
   const id = ks.join("\u0001");
   let fn = cmps.get(id);
   if (fn) return fn;
+  const u = (seenKs.get(id) || 0) + 1;
+  if (u < 3) { if (seenKs.size > 20000) seenKs.clear(); seenKs.set(id, u); return null; }
+  seenKs.delete(id);
   const body = ["let x, o;"];
   for (let i = 0; i < ks.length; i++) {
     const k = ks[i];

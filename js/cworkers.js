@@ -108,6 +108,10 @@ function sync() {
   lap(null);
   const R = RW(), K = C(), I = K.inner;
   R.refs();
+  // the shared index (objects that live inside an entity, sent as where they are) of the mobs and records this worker ran: nothing it
+  // changed can reach into another group's between meetings
+  R.indexScope = { mobs: new Set(shadows.keys()), recs: new Set(recShadows.keys()) };
+  for (const m of BF.mobs.list) if (!known.has(m)) R.indexScope.mobs.add(m);
   lap("refs");
   // mobs not here at the last meeting that this worker made, or that every worker made between ticks (a chunk loading) and this one
   // runs: in full, every field (links by id), filled in under the same id
@@ -155,6 +159,7 @@ function sync() {
     for (const [, ops] of mobs) if (ops) for (const op of ops) add("mob." + op[0], op);
     for (const [, ops] of recs) for (const op of ops) add("rec." + op[0], op);
   }
+  R.indexScope = null;
   const t1 = now();
   T.collect += t1 - t0;
   const all = CW.link.exchange(msg);
