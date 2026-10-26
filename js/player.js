@@ -311,7 +311,11 @@ function buildDOM() {
     else if (a === "view") {
       const i = VIEW_OPTS.indexOf(BF.world.viewDist);
       setViewDist(i < 0 ? VIEW_OPTS.find(v => v > BF.world.viewDist) || VIEW_OPTS[0] : VIEW_OPTS[(i + 1) % VIEW_OPTS.length]);
-    } else if (a === "budget") { if (BF.active) BF.active.cycle(); updateBudgetBtn(); }   // 20, 40, 60, 80% or off (js/active.js)
+    } else if (a === "budget") {   // 20, 40, 60, 80% or off (js/active.js); where the simulation is elsewhere, there too (bug-081)
+      const away = !!(BF.simHost && BF.simHost.worker);
+      if (BF.active) { BF.active.cycle(away); if (away) BF.simHost.budget(); }
+      updateBudgetBtn();
+    }
     else if (a === "host") cycleHost();
     else if (a === "mode") setGameMode(act.dataset.mode);
     else if (a === "help") helpEl.hidden = !helpEl.hidden;
@@ -333,8 +337,13 @@ function buildDOM() {
   knobEl = touchEl.querySelector(".bfp-knob");
 }
 
-// "Simulated villages: 6 (budget 40%)" (spec r15-34, js/active.js)
-function updateBudgetBtn() { if (budgetBtn && BF.active) budgetBtn.textContent = BF.active.text(); }
+// "Simulated villages: 6 (budget 40%)" (spec r15-34, js/active.js); in a worker or on the world server the simulation's own line (the
+// budget query, answered after the setting it was just sent: bug-081)
+function updateBudgetBtn() {
+  if (!budgetBtn || !BF.active) return;
+  if (!(BF.simHost && BF.simHost.worker && BF.client)) { budgetBtn.textContent = BF.active.text(); return; }
+  BF.client.query("budget", {}, r => { if (r && r.ok) budgetBtn.textContent = r.text; });
+}
 // "Simulation: World server (1 thread)", and the setting when it forces a host (spec r15-43, js/simhost.js); a click cycles the setting
 // (Automatic, World server, Browser (worker), Browser (this page)), which applies from the next start
 function updateHostBtn() {
