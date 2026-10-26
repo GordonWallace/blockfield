@@ -638,7 +638,7 @@ function importAll(o) {
   for (const k in c.noroad || {}) if (Number.isFinite(+c.noroad[k])) noRoad.set(k, +c.noroad[k]);
   for (const s of Array.isArray(c.wear) ? c.wear : []) { const p = String(s).split(",").map(Number); if (p.length === 4 && p.every(Number.isFinite)) wear.set(p.slice(0, 3).join(","), p[3]); }
 }
-function reset() { routes.clear(); wear.clear(); market.clear(); noRoad.clear(); lastSeen.clear(); LOG.length = 0; }
+function reset() { routes.clear(); wear.clear(); market.clear(); noRoad.clear(); lastSeen.clear(); LOG.length = 0; tickT = summT = 0; }
 
 let hooked = false;
 function hook() { if (!hooked && BF.on) { hooked = true; BF.on("mobKilled", onKilled); } }

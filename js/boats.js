@@ -220,11 +220,14 @@ function exitSpot(b, hw, h) {
   }
   return { x: p.x, y: p.y + H, z: p.z };
 }
+// Pen, coop, pasture and sty stock (bug-085): their building keeps their records and brings them back, so a boat never keeps its own copy.
+const penned = m => !!(m.pen || m.coop || m.pasture || m.sty || m.penVillage);
 function stow(b) {   // the mob passenger's chunk unloaded: remember it and seat it again when the boat is back
   const m = b.mob;
   b.mob = null;
   if (!m || m.dead) return;
   m.riding = null;
+  if (penned(m)) return;   // its pen brings it back
   b.stowed = { type: m.type, variant: m.variant || null, style: m.style || null, key: m.village && m.slot ? m.village.key + "#" + m.slot.idx : null };
   b.stowT = 0;
 }
@@ -242,16 +245,19 @@ function restoreStowed(b, dt) {
   b.stowed = null;
   if (m) takeMob(b, m);
 }
-// Mobs that walk into an empty seat get in (not iron golems, sleeping or trading villagers, or one just let out).
+// Mobs that walk into an empty seat get in (not iron golems, sleeping or trading villagers, pen stock, or one just let out).
 function pickUpMobs(b) {
   if (b.mob || b.stowed || !BF.mobs) return;
   const L = BF.mobs.near ? BF.mobs.near(b.pos, HW + 2, true) : BF.mobs.list;   // (spec r15-31: the mobs beside the boat)
   for (const m of L) {
-    if (m.dead || m.removed || m.riding || m.rider || m.sleeping || m.tradingWith || (m.def && (m.def.golem || m.def.herd)) || (m.boatCd || 0) > 0) continue;
+    if (m.dead || m.removed || m.riding || m.rider || m.sleeping || m.tradingWith || (m.def && (m.def.golem || m.def.herd)) || penned(m) || (m.boatCd || 0) > 0) continue;
     const r = HW + m.halfWidth - 0.1, q = seenXZ(b.pos, m.position);
     if (Math.abs(q.x - b.pos.x) > r || Math.abs(q.z - b.pos.z) > r) continue;
     if (m.position.y > b.pos.y + H || m.position.y + m.height < b.pos.y) continue;
-    if (takeMob(b, m)) return;
+    if (takeMob(b, m)) {
+      if (BF.glog) BF.glog.log("INFO", "boats", "A " + m.type + " got into " + (/^[aeiou]/.test(b.wood) ? "an " : "a ") + b.wood + " boat", { at: m });   // js/gamelog.js
+      return;
+    }
   }
 }
 
@@ -416,7 +422,8 @@ const boats = {
     const r = v => Math.round(v * 1000) / 1000;
     return list.map(b => {
       let pass = b.stowed;
-      if (b.mob && !b.mob.dead) { const m = b.mob; pass = { type: m.type, variant: m.variant || null, style: m.style || null, key: m.village && m.slot ? m.village.key + "#" + m.slot.idx : null }; }
+      if (b.mob && !b.mob.dead && penned(b.mob)) pass = null;   // a passenger a pen took in while it sat in the boat: the pen saves it
+      else if (b.mob && !b.mob.dead) { const m = b.mob; pass = { type: m.type, variant: m.variant || null, style: m.style || null, key: m.village && m.slot ? m.village.key + "#" + m.slot.idx : null }; }
       return [b.wood, r(b.pos.x), r(b.pos.y), r(b.pos.z), r(b.yaw), b.rider ? 1 : 0, pass || null];
     });
   },

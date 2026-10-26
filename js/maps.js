@@ -23,6 +23,7 @@ const nameOf = (s, zx, zz) => "filled_map_" + keyOf(s, zx, zz);
 const centre = z => z * ZONE + ZONE / 2;
 const originX = (s, zx) => centre(zx) - side(s) / 2;
 
+const RW = () => BF.rworkers && BF.rworkers.active;
 const data = new Map();     // key -> {size, zx, zz, px: Uint16Array(PX*PX) (RGB565, 0 = unexplored), ver, cur, merged: {size: ver of that smaller map when last merged in}}
 function getData(s, zx, zz, create = true) {
   const k = keyOf(s, zx, zz);
@@ -127,11 +128,18 @@ function explore(d, x, z, budget) {
     if (dx * dx + dz * dz > R * R) continue;
     done++;
     const v = sample(Math.floor(ox + (i + 0.5) * s), Math.floor(oz + (j + 0.5) * s), s);
-    if (v && d.px[j * PX + i] !== v) { d.px[j * PX + i] = v; changed = true; }
+    if (v && d.px[j * PX + i] !== v) { d.px[j * PX + i] = v; changed = true; if (RW()) (d.chg || (d.chg = [])).push(j * PX + i, v); }
   }
   if (changed) d.ver++;
+  if (RW()) BF.rworkers.touch("map", d);   // (an explorer draws while it thinks: the other region workers get the pixels and where it got to, js/rworkers.js)
   return changed;
 }
+
+if (BF.rworkers) BF.rworkers.channel("map", {
+  key: d => [d.size, d.zx, d.zz], get: k => getData(k[0], k[1], k[2]),
+  state: d => { const ch = d.chg || []; d.chg = null; return { ver: d.ver, cur: d.cur, ch }; },
+  set: (d, o) => { if (!d || !o) return; for (let i = 0; i < o.ch.length; i += 2) d.px[o.ch[i]] = o.ch[i + 1]; d.ver = o.ver; d.cur = o.cur; },
+});
 
 // ---------------------------------------------------------------- bigger maps
 // Copies what a smaller map has seen into the next size up (same centre), keeping anything the bigger map already knows.

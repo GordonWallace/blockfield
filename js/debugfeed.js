@@ -311,6 +311,7 @@ function simPart(ack) {
     budget: BF.active ? BF.active.feed() : undefined,   // the simulation budget and its decisions (js/active.js, spec r15-34)
     requests: BF.req ? BF.req.stats() : undefined,   // the request queue and transition-mode direct writes by module (js/requests.js)
     regionTick: BF.rtick ? BF.rtick.stats() : undefined,   // regions ticked, ms per phase, the busiest regions (js/regiontick.js, spec r15-33)
+    workers: BF.rplay ? Object.assign(BF.rplay.status(), { text: BF.rplay.text() }) : undefined,   // region workers (js/rplay.js, spec r15-39)
     hash: stateHash(),   // the world state hash and its parts (js/statehash.js)
     glog: BF.glog ? BF.glog.feed() : undefined, build: BF.glog ? BF.glog.build.commit : undefined };   // the game log's new entries; the commit running
 }

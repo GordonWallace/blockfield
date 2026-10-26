@@ -143,6 +143,20 @@ module.exports = async (pg, out) => {
     const cow = BF.mobs.spawn("cow", x0 + 0.5, y0 + 1.8, z0 - 20.5);
     runBoats(0.3);
     ok("a second mob doesn't fit", bm.mob === pig && !cow.riding);
+    // pen, coop, pasture and sty stock never ride: their building brings them back, and a boat of its own copy made a duplicate (bug-085)
+    const bq = boats.spawn("birch", x0 + 0.5, y0 + 1.739, z0 - 12.5, 0);
+    const pc = BF.mobs.spawn("cow", x0 + 0.5, y0 + 1.8, z0 - 12.5);
+    pc.pasture = { key: "test" };
+    runBoats(0.5);
+    ok("a pasture cow doesn't get into a boat (bug-085)", !bq.mob && !pc.riding, { mob: bq.mob && bq.mob.type });
+    pc.pasture = null;
+    runBoats(0.5);
+    ok("the same cow, wild, gets in", bq.mob === pc);
+    pc.pasture = { key: "test" };   // a pasture took it in while it sat in the boat
+    const rq = boats.serialize().find(e => e[0] === "birch");
+    ok("a passenger a pasture took in is not saved with the boat (its pasture saves it)", rq && rq[6] === null, rq);
+    pc.pasture = null;
+    boats.hit(bq, false); boats.remove(bq, false); BF.mobs.discard(pc);
 
     // ---- saving: the player and the pig aboard ----
     const saved = JSON.parse(JSON.stringify(boats.serialize()));
