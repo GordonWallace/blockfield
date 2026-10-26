@@ -56,7 +56,7 @@ const LEISURE = new Set([
   "Strolling around the village", "Relaxing", "Wandering about", "Loafing", "Winding down for the evening", "Looking for work",
   "Heading out for the day", "Heading to bed", "Has no bed to sleep in", "In love", "Running from a zombie",
   "Has saplings to plant", "Looking for saplings",   // a forester between tasks (js/forester.js)
-  "Planning",                                        // a builder between structures (js/builder.js)
+  "Planning", "Admiring the work",                   // a builder between structures, and resting after one (js/builder.js bs.cool: its task is done)
 ]);
 // ...and a builder waiting for materials nobody sells yet ("Looking for: 22 Oak Log", js/builder.js shopMode): it wanders the village
 const leisure = m => { const t = BF.villagerStatus.text(m); return LEISURE.has(t) || t.startsWith("Looking for: "); };

@@ -26,6 +26,15 @@ module.exports = async (pg) => {
     listed: BF.villageSim.estimates(a.key).list.filter(e => e.who === a.who) }), info);
   ok("a villager strolling beyond the edge is at leisure", est.leisure, est);
   ok("leisure doesn't count towards the unload countdown", est.listed.length === 0, est);
+  // a builder admiring the structure it just finished is at leisure too (js/builder.js bs.cool: the build task is done, villageSim.done)
+  const admire = await pg.evaluate(a => {
+    const m = BF.mobs.villages.get(a.key).members.find(x => BF.vlog.nameOf(x) === a.who), text = BF.villagerStatus.text;
+    BF.villagerStatus.text = v => (v === m ? "Admiring the work" : text(v));
+    const r = { leisure: BF.villagerStatus.leisure(m), listed: BF.villageSim.estimates(a.key).list.filter(e => e.who === a.who).length };
+    BF.villagerStatus.text = v => (v === m ? "Strolling around the village" : text(v));
+    return r;
+  }, info);
+  ok("a builder admiring its finished work is at leisure, and doesn't hold the village up", admire.leisure && admire.listed === 0, admire);
   await pg.evaluate(([x, z]) => { BF.player.spawn(x, BF.worldgen.heightAt(x, z) + 3, z); }, [info.x + 900, info.z]);
   await wait(k => BF.villageSim.countdown(k) !== null || !BF.villageSim.isActive(k), info.key, 30000);
   await pg.evaluate(() => { BF.sky.day += 3; });   // past any countdown the other villagers' tasks started
