@@ -116,7 +116,8 @@ function run(w, via) {
     const timer = setTimeout(() => fail("it did not start in 60 s"), 60000);
     const client = BF.proto.worker.connect(w, via);   // first, so the worker's hello finds it
     hook(client);
-    w.onmessage = ev => {
+    const tl = BF.tload || { wrap: f => f };   // (timed: the page thread's busy share, js/threadload.js)
+    w.onmessage = tl.wrap(ev => {
       const d = ev.data;
       if (d && d.h != null) { BF.proto.worker.receive(d); return; }
       if (!d) return;
@@ -142,7 +143,7 @@ function run(w, via) {
       else if (d.saves) { const f = asked.get(d.saves.rid); if (f) { asked.delete(d.saves.rid); f(d.saves); } }
       else if (d.feedAck) { if (BF.debugFeed && BF.debugFeed.serverAck) BF.debugFeed.serverAck(d.feedAck); }
       else if (d.gone) gone(d.gone);
-    };
+    });
     w.onerror = ev => { if (ev && ev.preventDefault) ev.preventDefault(); if (!settled) fail(ev && ev.message || "it could not load"); else crashed(ev && ev.message || "the " + what + " failed"); };
     const three = document.querySelector('script[src*="three"]');
     w.postMessage({ boot: Object.assign({ three: three ? three.src : null, build: window.BF_BUILD || null }, urlWorkers()) });   // (build: the checkout's commit, for the game log's header)
