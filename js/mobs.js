@@ -2044,7 +2044,7 @@ function golemAI(m, dt, out) {
     if (!rv) ai.revenge = null;
     ai.foe = ai.rescue || rv || nearestMob(m, 16, o => o.hostile && o !== gu, "h");
   }
-  if (ai.foe && golemChase(m, dt, out)) return;
+  if (ai.foe && golemChase(m, dt, out)) { if (ai.routeKind === "patrol") ai.route = null; return; }
   ai.foe = null; ai.rescue = null; ai.chase = null;
   if (creative()) ai.provoked = 0;
   if (ai.provoked > 0 && playerAlive()) {
@@ -2070,9 +2070,25 @@ function golemAI(m, dt, out) {
     if (!m.patrol || R(m).next() < dt / 90) { const h = V.houses[irnd(R(m), 0, V.houses.length - 1)]; m.patrol = R(m).next() < 0.3 || !h ? [V.x, V.z] : [h.x + (h.w || 1) / 2, h.z + (h.d || 1) / 2]; }
     px = m.patrol[0]; pz = m.patrol[1];
   }
+  // A patrol spot more than 14 blocks off is walked to along a planned route three blocks high (r15-70: walking straight at it, and taking
+  // short detours round what was in the way, a golem spent minutes pushing under eaves, at fences and at roof edges between houses, and
+  // went in the game log as stuck). With no route there it picks another spot; ai.stuckT below zero, with no route, waits to plan again.
+  if (ai.route && ai.routeKind === "patrol") {
+    const st = followRoute(m, dt, out, T.speed * 0.6);
+    if (st === "going") return;
+    ai.route = null; ai.mode = "idle"; ai.t = rnd(R(m), 2, 4);
+    if (st === "stuck") { m.patrol = null; ai.stuckT = -4; }
+  }
   if (V && Math.hypot(px - m.position.x, pz - m.position.z) > 14 && !(ai.mode === "walk" && Math.hypot(px - ai.tx, pz - ai.tz) < 8)) {
-    ai.mode = "walk"; ai.t = rnd(R(m), 5, 8);
-    for (let k = 0; k < 16; k++) { ai.tx = px + rnd(R(m), -6, 6); ai.tz = pz + rnd(R(m), -6, 6); if (golemFits(m, ai.tx, ai.tz)) break; }
+    if (ai.stuckT < 0) ai.stuckT += dt;
+    else if (takePlan()) {
+      let gx = null, gz = null;
+      for (let k = 0; k < 16 && gx == null; k++) { const x = px + rnd(R(m), -6, 6), z = pz + rnd(R(m), -6, 6); if (golemFits(m, x, z)) { gx = Math.floor(x); gz = Math.floor(z); } }
+      const [fx, fy, fz] = feetCell(m);
+      const route = gx != null && findPath(fx, fy, fz, { x: gx, z: gz, at: (x, y, z) => Math.abs(x - gx) + Math.abs(z - gz) <= 3 }, 3000, true);
+      if (route && route.length) { ai.route = route; ai.ri = 0; ai.stuckT = 0; ai.routeKind = "patrol"; ai.detour = null; return; }
+      m.patrol = null; ai.stuckT = -4;
+    }
   }
   wanderAI(m, dt, out);
   out.x *= 0.6; out.z *= 0.6;
