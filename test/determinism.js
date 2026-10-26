@@ -8,7 +8,7 @@
 // (it is not simulated here).
 // ENFORCED since Stage 1 (r15-10, r15-14 to r15-23) merged: any difference fails, with the parts that differ and where each first differs.
 // (ENFORCE = false makes it report-only again, printing DIFF lines and passing.) The unit checks (a single block, item or mob position
-// changes the hash; hashing twice gives the same hash) always count.
+// changes the hash, and so do the random streams' and id counters; hashing twice gives the same hash) always count.
 // Usage: NODE_PATH=$(npm root -g) node test/determinism.js [seed=3] [days=1]
 const ENFORCE = true;
 const path = require('path');
@@ -77,12 +77,17 @@ const advance = (pg, steps) => pg.evaluate(k => {
     r.item = change(() => BF.inventory.add(BF.I.stick, 1));
     const m = BF.mobs.list.find(m => !m.removed);
     if (m) { r.mob = change(() => { m.position.x += 0.01; }); m.position.x -= 0.01; }
+    // the counters that decide what comes next (bug-083): a world one random draw or 100 ids ahead plays differently later
+    const rs = BF.rand.save(); r.rand = change(() => BF.rand.load({ tick: rs.tick, made: rs.made + 1 })); BF.rand.load(rs);
+    const is = BF.ids.serialize(); r.ids = change(() => BF.ids.deserialize({ next: is.next + 100 })); BF.ids.deserialize(is);
     return { same, r, mobs: BF.mobs.list.length, ms: a.ms };
   });
   check(u.same, 'hashing twice gives the same hash');
   check(u.r.block.join() === 'edits', `one block changed changes only the edits part (${u.r.block})`);
   check(u.r.item.join() === 'player', `one item added changes only the player part (${u.r.item})`);
   check(u.mobs > 0 && u.r.mob && u.r.mob.length === 1 && u.r.mob[0] === 'mobs', `one mob moved 0.01 changes only the mobs part (${u.r.mob})`);
+  check(u.r.rand.join() === 'rand', `the random streams one draw ahead change only the rand part (${u.r.rand})`);
+  check(u.r.ids.join() === 'ids', `the id counter 100 ahead changes only the ids part (${u.r.ids})`);
   console.log(`${u.mobs} mobs, a hash takes ${u.ms} ms`);
   // the unit checks moved page 1 on and changed it (the block was put back, the item and the edit record stay): boot it again
   await pages[0].context().close();
