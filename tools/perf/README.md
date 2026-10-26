@@ -29,6 +29,14 @@ In a page, `BF.perf.ask(true)` turns it on, `BF.perf.stats()` reads the last 5 s
   after a warm-up; reads the meter every 5 s.
 - `analyze.js run1.json run2.json ...`: averages each perfmobs run over game hours `FROM`..`TO` (default 24..48, day 2). `JSON=1` for JSON.
 - `profsum.js file.cpuprofile [top=40]`: self time by file and by function.
+- `activity.js [--seed 3] [--seconds 600] [--extra n] [--warm 30] [--out file.json]` (spec r15-60): headless, no browser
+  (`tools/headless.js`). Prints three tables as JSON: `byState` (mob updates and µs per update by class, villager / village animal / wild /
+  hostile / golem, and by the state before the update: idle, route, wander, work, sleep), `activity` (per villager-second: requests by kind,
+  path searches, trades, items gained and spent; `events` = requests + path searches) and `villages` (each village's ms per tick, its mobs
+  plus its share of the village systems, and the top speed that allows, 50 / ms, busiest first). `--extra 8` is the 9-village load.
+  A spec that makes villagers cheaper shows `byState` and `villages` going down while `activity` stays the same. `test/perf-activity.js`
+  runs it in CI (seed 3, `--extra 8`, 600 s) and writes ci-out/activity.json. In a page: `BF.perf.byState()`, `.activity()`,
+  `.villageSpeed()`, all since `BF.perf.reset()`.
 - `lib.js`: the shared harness (boot, go to the village, run steps with the meter on, averages). `test/perf-soak.js` uses it too.
 
 Example, comparing two checkouts on one machine (seed 3 is the big village):
