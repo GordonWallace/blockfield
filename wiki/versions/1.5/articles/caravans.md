@@ -26,7 +26,7 @@ A merchant sets out at most once every 2 game days, and only one trip at a time 
 
 Every deal is an ordinary trade on the other villager's trade screen, so nothing appears from nothing: the merchant's purse and pack are its own. Whatever it fails to sell stays in its pack and becomes spare goods you can buy from it.
 
-A merchant caught away from home at dusk pitches its tent and sleeps in it, then goes on in the morning, as an explorer does. One that sets out without a tent only goes if it can get home the same day.
+A merchant caught away from home at dusk pitches its tent and sleeps in it, then packs the tent up in the morning and goes on, as an explorer does. One that sets out without a tent only goes if it can get home the same day.
 
 ## Keeping a trip going
 While a caravan is on the road, both villages and the chunks along its route stay loaded, wherever you are, so the trip never stalls and the merchant is never lost in unloaded country. They are released when the merchant gets home. A trip that gets lost on the way or runs past 3 game days is abandoned: the merchant goes home, and that pair of villages is marked "no road" for a week. When the game gets heavy, the safety valve described in [[page:village-loading]] can end a trip early, and the merchant then goes home with its cargo.
