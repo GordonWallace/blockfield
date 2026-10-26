@@ -268,7 +268,7 @@ const MOB_FIELDS = [
   "_agePass", "_ageT", "vname", "priceDay", "store", "fshop", "eggc", "job", "idleT", "tsm", "farm", "flt", "cshop", "bs", "kitFor", "vtask", "ex",
   "fo", "shp", "pkp", "pgk", "pgc", "stb", "furn", "mi", "mc", "bkr", "beeKit", "bkp", "patrol", "_farT", "mateId", "cow", "calf", "_k", "wildB",
   "pig", "piglet", "hen", "chick", "sheep", "penKey", "penVillageId", "_shorn", "lamb", "coopKey", "styKey", "horse", "kind", "ctl", "escrow",
-  "asks", "cart", "mateT", "furnWork", "mateSeek", "eatenTotal", "lastMealFx", "loveId", "breedDay", "bred", "bredKey", "child", "parents", "_swT",
+  "asks", "cart", "mateT", "furnWork", "mateSeek", "eatenTotal", "lastMealFx", "loveId", "breedDay", "bred", "bredKey", "child", "growing", "parents", "_swT",
   "wob", "lastHurt", "homeBedKey", "sleeping", "restored", "attackerId", "attackedAt", "boatCd", "jobPrefer", "cowKit", "cwk", "cwc", "gls", "crumb",
   "penIn", "atOut", "fall", "jobMem", "seek", "exploded", "vdenied", "vanon", "local", "otherId", "sellerId", "goalSellerId", "ledById", "ridingId",
   "pastureKey", "exitKey"];
