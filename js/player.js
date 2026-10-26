@@ -311,7 +311,11 @@ function buildDOM() {
     else if (a === "view") {
       const i = VIEW_OPTS.indexOf(BF.world.viewDist);
       setViewDist(i < 0 ? VIEW_OPTS.find(v => v > BF.world.viewDist) || VIEW_OPTS[0] : VIEW_OPTS[(i + 1) % VIEW_OPTS.length]);
-    } else if (a === "budget") { if (BF.active) BF.active.cycle(); updateBudgetBtn(); }   // 20, 40, 60, 80% or off (js/active.js)
+    } else if (a === "budget") {   // 20, 40, 60, 80% or off (js/active.js); where the simulation is elsewhere, there too (bug-081)
+      const away = !!(BF.simHost && BF.simHost.worker);
+      if (BF.active) { BF.active.cycle(away); if (away) BF.simHost.budget(); }
+      updateBudgetBtn();
+    }
     else if (a === "host") cycleHost();
     else if (a === "mode") setGameMode(act.dataset.mode);
     else if (a === "help") helpEl.hidden = !helpEl.hidden;
@@ -333,8 +337,13 @@ function buildDOM() {
   knobEl = touchEl.querySelector(".bfp-knob");
 }
 
-// "Simulated villages: 6 (budget 40%)" (spec r15-34, js/active.js)
-function updateBudgetBtn() { if (budgetBtn && BF.active) budgetBtn.textContent = BF.active.text(); }
+// "Simulated villages: 6 (budget 40%)" (spec r15-34, js/active.js); in a worker or on the world server the simulation's own line (the
+// budget query, answered after the setting it was just sent: bug-081)
+function updateBudgetBtn() {
+  if (!budgetBtn || !BF.active) return;
+  if (!(BF.simHost && BF.simHost.worker && BF.client)) { budgetBtn.textContent = BF.active.text(); return; }
+  BF.client.query("budget", {}, r => { if (r && r.ok) budgetBtn.textContent = r.text; });
+}
 // "Simulation: World server (1 thread)", and the setting when it forces a host (spec r15-43, js/simhost.js); a click cycles the setting
 // (Automatic, World server, Browser (worker), Browser (this page)), which applies from the next start
 function updateHostBtn() {
@@ -1437,7 +1446,13 @@ function rayBox(o, d, mn, mx) {   // distance along the ray to the box, or null
   return t0;
 }
 // The mobs whose boxes block a placement or a rest: the simulation's, or the mirror's stand-ins with the simulation in a worker
-const nearMobList = r => remoteSim() ? mirrorEntities("mob", pos, r) : BF.regions ? BF.regions.mobsAround(pos.x, pos.z, r, null, { label: "player near" }) : (BF.mobs && BF.mobs.list) || [];   // (r15-32)
+// (r15-32). Through a face edge (bug-091): a mob kept in another frame is given as a copy at its spot seen from the player's frame.
+const nearMobList = r => remoteSim() ? mirrorEntities("mob", pos, r) : BF.regions ? BF.regions.mobsAround(pos.x, pos.z, r, null, { local: true, label: "player near" }).map(seenMob) : (BF.mobs && BF.mobs.list) || [];
+function seenMob(m) {
+  BF.planet.local(pos, m.position, MLQ);
+  if (MLQ.x === m.position.x && MLQ.z === m.position.z) return m;
+  return { type: m.type, position: new THREE.Vector3(MLQ.x, m.position.y, MLQ.z), halfWidth: m.halfWidth, height: m.height, dead: m.dead, hostile: m.hostile };
+}
 // Attacks the mob under the crosshair if it is closer than the targeted block. Returns true if a mob was targeted.
 function tryAttack() {
   const bh = boatHit(), m0 = mobHit();
