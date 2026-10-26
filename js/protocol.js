@@ -34,6 +34,7 @@ const VERSION = 1;
 const TYPES = { out: ["hello", "chunk", "unload", "blockChanges", "edits", "entities", "events", "village", "clock", "log", "self", "result"],
   in: ["request", "view", "query", "speed", "save", "player", "world", "meta", "clientLog"] };
 const SECN = 4096;
+const MAX_VIEW = 32;   // the farthest view distance the page offers (chunks, js/player.js VIEW_OPTS): a view message asking for more gets this
 const glog = (lvl, text) => { if (BF.glog) BF.glog.log(lvl, "protocol", text); };
 const errOnce = new Set();
 const errorOnce = (key, text) => { if (!errOnce.has(key)) { errOnce.add(key); glog("ERROR", text); } };
@@ -520,7 +521,13 @@ function serve(send, opts) {
     count("in", m.t, bytes(p));
     const fn = IN[m.t];
     if (!fn) { errorOnce("type " + m.t, "The simulation got a message of unknown type \"" + m.t + "\""); return; }
-    fn(m);
+    // a message the handler can't take (a bug, or a malformed message from a page) is logged and dropped, never the end of the simulation
+    // (bug-078); a request or query still gets an answer, so the page doesn't wait for it forever
+    try { fn(m); } catch (e) {
+      errorOnce("threw " + m.t, "The simulation could not take a \"" + m.t + "\" message: " + (e && e.message));
+      if (m.rid != null) out({ t: "result", rid: m.rid, tick: tickNow(), result: { ok: false, why: "error" } });
+      else if (m.qid != null) out({ t: "result", qid: m.qid, result: { ok: false, why: "error", error: String(e && e.message || e) } });
+    }
   }
   const IN = {
     // a player request (r15-20): applied at once at this tick boundary; its block changes go first, then its result
@@ -534,7 +541,8 @@ function serve(send, opts) {
     },
     view(m) {
       const first = !S.view;
-      S.view = { x: m.x, y: m.y, z: m.z, dist: m.dist | 0, budget: m.budget };
+      const num = (v, old) => (Number.isFinite(v) ? v : old != null ? old : 0), V0 = S.view || {};
+      S.view = { x: num(m.x, V0.x), y: num(m.y, V0.y), z: num(m.z, V0.z), dist: Math.max(0, Math.min(MAX_VIEW, m.dist | 0)), budget: m.budget };
       if (opts.onView) opts.onView(S.view);   // (the worker loads chunks to the page's view distance, as the page did)
       if (first) flush(true);
     },
@@ -581,7 +589,7 @@ function serve(send, opts) {
       if (m.monsters) { if (cur) cur.monsters = m.monsters; if (BF.gameOpts) for (const t in m.monsters) BF.gameOpts.set(t, m.monsters[t]); }
     },
     // the client's own log entries (its errors): into this game log, which is the one saved
-    clientLog(m) { if (BF.glog) for (const e of m.list || []) BF.glog.log(e.l, e.k, e.x, { at: e.p }); },
+    clientLog(m) { if (BF.glog && Array.isArray(m.list)) for (const e of m.list) if (e) BF.glog.log(e.l, e.k, e.x, { at: e.p }); },
   };
 
   // ---- taps: block edits (js/world.js), effects (js/fx.js), the game log (js/gamelog.js)
