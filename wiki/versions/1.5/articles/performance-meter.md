@@ -38,3 +38,5 @@ From 1.5 the world simulation (mobs, villagers, crops, water, the clock and weat
 This is how the game runs when it isn't served by `./run.sh` with its world server, and the browser can start a worker: the online version, or the game served by another web server. A game opened as a file runs the simulation in the page. The F3 overlay's last line and the pause menu's *Simulation* button say which it is, and the button can force one; see [[page:world-server]] for the three ways the game runs.
 
 With the simulation on its own thread, fast-forward's ticks no longer share the page's time with drawing, so the picture stays smooth at fast-forward: in the tests' big-village day at 100x the page's work per frame dropped from about 50 ms to about 6 ms. While the game's tab is hidden the simulation pauses, as it did when it ran in the page. If the simulation ever stops with an error, the game says so and offers to reload from your last save; the error goes to the [[page:game-log]].
+
+On top of that thread, the simulation can share each tick's thinking out over more cores when it is busy: see [[page:several-cores]].

@@ -402,6 +402,14 @@ function scanStep(R, D, budget) {
 }
 // ---------------------------------------------------------------- task search
 const claims = new Map();   // cell key -> mob
+// Several region workers (spec r15-39, js/rworkers.js): a claim is made while its farmer thinks, so the other workers get it through a
+// channel; else a village whose thinking moves to another worker would find its farmers' cells unclaimed there and pick them twice.
+const claimSet = (k, m) => { claims.set(k, m); if (BF.rworkers) BF.rworkers.touch("farmclaim", k); };
+const claimDrop = k => { claims.delete(k); if (BF.rworkers) BF.rworkers.touch("farmclaim", k); };
+if (BF.rworkers) BF.rworkers.channel("farmclaim", {
+  key: k => k, get: k => k, state: k => { const o = claims.get(k); return o ? o.id : null; },
+  set: (k, id) => { const o = id == null ? null : BF.ids.get(id); if (o) claims.set(k, o); else claims.delete(k); },
+});
 function claimed(k, m) { const o = claims.get(k); return o && o !== m && !o.dead && !o.removed && o.farm && o.farm.task && o.farm.task.k === k; }
 function plantFor(m, x, y, z) {
   const c = ids(), votes = new Map();
@@ -1133,7 +1141,7 @@ function newFarm() { return { task: null, stage: null, t: 0, actT: 0, breakT: 0,
 function endTask(m, fs, success) {
   const t = fs.task;
   if (t) {
-    if (claims.get(t.k) === m) claims.delete(t.k);
+    if (claims.get(t.k) === m) claimDrop(t.k);
     if (!success) fs.avoid[t.k] = BF.simNow() + 30;
     fs.last = t.kind;
     if (success) fs.counts[t.kind] = (fs.counts[t.kind] || 0) + 1;
@@ -1264,7 +1272,7 @@ function farmAI(m, dt, out) {
   ensureKit(m); ensureCover(D, m);
   if (fs.breakT > 0) { fs.breakT -= dt; return false; }
   if (!fs.task) {
-    if (fs.next) { fs.task = fs.next; fs.next = null; fs.stage = "act"; fs.actT = actOf(fs.task.kind); fs.t = 0; claims.set(fs.task.k, m); }
+    if (fs.next) { fs.task = fs.next; fs.next = null; fs.stage = "act"; fs.actT = actOf(fs.task.kind); fs.t = 0; claimSet(fs.task.k, m); }
     else {
       fs.thinkT = (fs.thinkT || 0) - dt;
       if (fs.thinkT > 0) return fs.idleWork;      // brief pause between tasks still counts as work
@@ -1276,7 +1284,7 @@ function farmAI(m, dt, out) {
       if (VS && VS.begin && !VS.begin(m, (t.kind === "craft" ? 0 : VS.walkSecs(m, [t.seller ? t.seller.position : [(t.sx != null ? t.sx : t.x) + 0.5, (t.sz != null ? t.sz : t.z) + 0.5]])) + (t.kind === "tend" ? 4 : actOf(t.kind) + (t.kind === "harvest" ? ACT.plant : 0)), t.kind === "craft" && t.hay ? "Making hay bales" : t.kind === "gather" ? "Gathering dirt" : NAMES[t.kind] || (BF.baker && BF.baker.FARM_NAMES[t.kind]) || "Farm work")) { fs.thinkT = 1; fs.idleWork = false; return false; }
       fs.task = t; fs.stage = t.kind === "craft" ? "act" : "walk"; fs.t = 0; fs.actT = actOf(t.kind); fs.navFail = 0; fs.idleWork = true;
       t.max = TASK_MAX + (t.x != null ? 2.5 * Math.hypot(t.x + 0.5 - m.position.x, t.z + 0.5 - m.position.z) : 0);   // long walks to a far field get more time
-      if (t.k) claims.set(t.k, m);
+      if (t.k) claimSet(t.k, m);
     }
   }
   const t = fs.task;
@@ -1761,7 +1769,7 @@ function stats(m) {
   return { today: s && s.total ? s.farm / s.total : 0, yesterday: p && p.total ? p.farm / p.total : null, farm: s.farm, total: s.total, counts: fs.counts,
     harvested: fs.harvested || 0, tilled: fs.tilled || 0, bordered: fs.bordered || 0, watered: fs.watered || 0, task: fs.task && fs.task.kind };
 }
-function reset() { wantVillages.clear(); claims.clear(); liveProjects.clear(); savedProjects.clear(); LOG.length = 0; acc = 0; }
+function reset() { wantVillages.clear(); claims.clear(); liveProjects.clear(); savedProjects.clear(); LOG.length = 0; acc = 0; pass = 0; }
 
 // ---------------------------------------------------------------- the player's buckets (hooked from player.js right-click)
 // Empty bucket: scoops the water source the player looks at (an infinite source refills). Water bucket: pours a source against

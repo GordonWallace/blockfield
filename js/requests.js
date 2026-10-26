@@ -16,7 +16,8 @@
 // API: BF.req = { send(kind, target, data, from) -> req (req.then(fn)), on(kind, applyFn(req, world) -> {ok, ...}, {onResult}?),
 //   beginTick(), apply(), blocks(fn), deliver(), endTick(), times() -> {ticks, think, apply, blocks, deliver} (ms), resetTimes(), phase, direct, strict, stats(), resetStats(), text(), queued(), reset(), order(a, b),
 //   player(kind, target, data) -> req (applied now, req.result; through the protocol when R.via is set), applyPlayer(kind, target, data), via, record() -> list / record(false) -> list, replay(list), replayFlush(),
-//   recording, replaying, inPlayer, route, regionOrder, single, applying (region inboxes, spec r15-33) }
+//   recording, replaying, inPlayer, route, regionOrder, single, applying (region inboxes, spec r15-33),
+//   adopt(o), tap, onCbs, dIdx, dPart, seq (several workers, spec r15-39: js/rworkers.js) }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -60,8 +61,22 @@ function make(kind, target, data, from) {
 function send(kind, target, data, from) {
   const req = make(kind, target, data, from);
   const k = R.route && kinds.has(kind) && !kinds.get(kind).global ? R.route(req) : -1;
+  file(req, k);
+  if (R.tap) R.tap(req);   // (several workers, js/rworkers.js: the requests a worker's own mobs and callbacks send go to the others)
+  return req;
+}
+function file(req, k) {
   if (k >= 0) { req.region = k; let a = inbox.get(k); if (!a) inbox.set(k, (a = [])); a.push(req); }
   else queue.push(req);
+}
+// A request another worker's mob sent this tick (spec r15-39): filed in the inbox it went to there. o: {kind, target, data, from, seq,
+// tick, region}. It has no callbacks here (they ran there).
+function adopt(o) {
+  const req = { kind: o.kind, target: o.target, data: o.data || {}, from: o.from == null ? null : o.from, seq: o.seq, tick: o.tick,
+    cbs: null, result: undefined, delivered: false };
+  req.then = fn => { if (req.delivered) { try { fn(req.result, req); } catch (e) { console.error(e); } } else (req.cbs || (req.cbs = [])).push(fn); return req; };
+  S.sent++; H.sent++; bump(S, req.kind, "sent"); bump(H, req.kind, "sent");
+  file(req, o.region != null && o.region >= 0 ? o.region : -1);
   return req;
 }
 // opts: onResult(m, req, result) for a requester that is a live mob; global: true for a kind that is always applied from the global
@@ -136,14 +151,17 @@ function deliver() {
   const prev = phase;
   phase = "deliver";
   try {
-    for (const req of list) {
+    for (let i = 0; i < list.length; i++) {
+      const req = list[i];
       req.delivered = true;
       if (gone(req.from)) continue;   // the requester went: the result is dropped (the apply function kept any items in the world)
       const k = kinds.get(req.kind);
+      R.dIdx = i; R.dPart = 0;   // (where in the delivery a request sent now comes: several workers number them alike, js/rworkers.js)
       if (k && k.onResult && req.from) { const m = BF.ids && BF.ids.get(req.from); if (m) { try { k.onResult(m, req, req.result); } catch (e) { console.error(e); } } }
-      if (req.cbs) for (const fn of req.cbs) { try { fn(req.result, req); } catch (e) { console.error(e); } }
+      R.dPart = 1;
+      if (req.cbs) { if (R.onCbs) R.onCbs(req); for (const fn of req.cbs) { try { fn(req.result, req); } catch (e) { console.error(e); } } }
     }
-  } finally { phase = prev; }
+  } finally { phase = prev; R.dIdx = -1; }
 }
 
 // Time per phase (spec r15-33): ms summed over the ticks since resetTimes(), for the debug screen and the hourly region-tick log line.
@@ -154,7 +172,7 @@ let t0 = 0;
 function lapT(part) { const t = clock(); if (t0) T[part] += t - t0; t0 = t; }
 function beginTick() { if (rec || rep) boundary(); phase = "think"; t0 = clock(); T.ticks++; }
 function blocks(fn) { if (t0) lapT("apply"); const prev = phase; phase = "blocks"; try { fn(); } finally { phase = prev; if (t0) lapT("blocks"); } }
-function endTick() { phase = "idle"; if (t0) lapT("deliver"); t0 = 0; hourly(); if (BF.rtick) BF.rtick.hourly(); }
+function endTick() { phase = "idle"; if (t0) lapT("deliver"); t0 = 0; hourly(); if (BF.rtick) BF.rtick.hourly(); if (BF.rworkers) BF.rworkers.hourly(); }
 const times = () => Object.assign({}, T);
 function resetTimes() { T.ticks = T.think = T.apply = T.blocks = T.deliver = 0; }
 
@@ -324,7 +342,10 @@ function text(s) {
 }
 
 const R = {
-  send, on, apply, deliver, beginTick, blocks, endTick, stats, resetStats, text, order, times, resetTimes,
+  send, adopt, on, apply, deliver,
+  tap: null, onCbs: null, dIdx: -1, dPart: 0,   // (several workers, spec r15-39: js/rworkers.js)
+  get seq() { return seq; }, set seq(n) { seq = n; },
+  beginTick, blocks, endTick, stats, resetStats, text, order, times, resetTimes,
   player, applyPlayer, record, replay, replayFlush, via: null,
   get recording() { return !!rec; },
   get replaying() { return rep ? rep.length - repAt : 0; },   // entries still to replay

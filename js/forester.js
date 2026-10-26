@@ -108,7 +108,7 @@ function hook() {
     const creative = !!(BF.inventory && BF.inventory.isCreative && BF.inventory.isCreative());
     fallAbove(x, y, z, !creative);
   });
-  BF.on("newWorld", () => saps.clear());
+  BF.on("newWorld", () => { saps.clear(); notTree.clear(); growLast = sawT = sapLast = 0; });
 }
 
 // Tree shapes: [logs, leaves] as [dx, dy, dz] lists around the sapling cell (dy 0 = the sapling's own cell).
@@ -489,7 +489,7 @@ function findDrop(m, F) {
   const sw = F.sweep, R = sw ? SWEEP_R : GATHER_R;
   let best = null, bd = Infinity;
   for (const d of D) {
-    if (!WANT(d.id) || (F.skip && F.skip.has(d))) continue;
+    if (!WANT(d.id) || (F.skip && F.skip[d.key])) continue;
     const ox = sw ? sw.x + 0.5 : m.position.x, oz = sw ? sw.z + 0.5 : m.position.z;
     if (Math.hypot(d.pos.x - ox, d.pos.z - oz) > R) continue;
     if (d.age < 0.8) { F.young++; continue; }
@@ -543,7 +543,7 @@ function endTask(m, F, ok) {
     if (t.kind === "plant") F.plantCd = PLANT_CD;
     else if (t.kind === "cut") { F.cutCd = CUT_CD; F.saved = !ok && t.done ? { key: t.claim, done: t.done, chop: F.chop } : null; }   // an interrupted tree keeps its progress
     else if (t.kind === "buy") { if (!ok) F.avoid.set(t.deal.otherId, nowS() + 120); }
-    else if (t.kind === "gather") { if (!ok && F.sweep) { const n = F.tries || (F.tries = new WeakMap()), c = (n.get(t.drop) || 0) + 1; n.set(t.drop, c); if (c >= 2) (F.skip || (F.skip = new WeakSet())).add(t.drop); } else F.gatherCd = ok ? 0 : 6; }   // an item it cannot reach twice is left
+    else if (t.kind === "gather") { if (!ok && F.sweep) { const n = F.tries || (F.tries = {}), c = (n[t.dropKey] || 0) + 1; n[t.dropKey] = c; if (c >= 2) (F.skip || (F.skip = {}))[t.dropKey] = true; } else F.gatherCd = ok ? 0 : 6; }   // an item it cannot reach twice is left
   }
   F.task = null; F.t = 0; F.chop = 0; m.ai.route = null;
 }
@@ -616,7 +616,7 @@ function ai(m, dt, out) {
     let task = null;
     if (F.sweep && (nowS() > F.sweep.until || freeSlots(m) === 0)) { log("swept", m, { why: freeSlots(m) ? "time" : "full" }); F.sweep = null; F.skip = null; F.tries = null; }
     const drop = F.gatherCd <= 0 || F.sweep ? findDrop(m, F) : null;
-    if (drop) { task = { kind: "gather", drop, x: Math.floor(drop.pos.x), y: Math.floor(drop.pos.y), z: Math.floor(drop.pos.z), max: GATHER_R * 3 }; if (!begins(m, task)) task = null; }
+    if (drop) { task = { kind: "gather", dropKey: drop.key, x: Math.floor(drop.pos.x), y: Math.floor(drop.pos.y), z: Math.floor(drop.pos.z), max: GATHER_R * 3 }; if (!begins(m, task)) task = null; }
     else if (F.sweep && F.young) { F.thinkT = 0.3; a.mode = "idle"; a.t = 1; return true; }       // items still falling: wait for them
     else if (F.sweep) { log("swept", m, { why: "clear" }); F.sweep = null; F.skip = null; F.tries = null; }
     F.shopT -= 1;
@@ -654,10 +654,11 @@ function ai(m, dt, out) {
   a.mode = "idle"; a.t = 2;
   const reach = k.kind === "plant" ? PLANT_REACH : k.kind === "cut" ? CUT_REACH : k.kind === "buy" ? SHOP_REACH : 1.6;
   if (k.kind === "gather" && k.picks) {   // "pickup" requests sent (js/drops.js): done once they have applied
-    if (k.picks.some(q => q.result === undefined) && BF.rand.tick - k.picks[0].tick < 4) return true;
+    if (k.picks.some(q => q.result == null) && BF.rand.tick - k.picks[0].tick < 4) return true;
     endTask(m, F, !!(k.picks[0].result && k.picks[0].result.ok)); return true;
   }
-  if (k.kind === "gather" && (!BF.drops.list.includes(k.drop))) { endTask(m, F, true); return true; }
+  const drop = k.kind === "gather" ? BF.drops.get(k.dropKey) : null;   // (the drop by its key: the task is state other region workers copy, spec r15-39)
+  if (k.kind === "gather" && !drop) { endTask(m, F, true); return true; }
   if (k.kind === "buy") {   // the seller walks about: follow it
     const o = k.deal.other;
     if (!canSell(o) && !(o && o.tradingWith)) { endTask(m, F, false); return true; }
@@ -665,7 +666,7 @@ function ai(m, dt, out) {
     if (Math.abs(nx - k.x) + Math.abs(nz - k.z) > 2) { m.ai.route = null; }
     k.x = nx; k.y = Math.floor(o.position.y); k.z = nz;
   }
-  if (k.kind === "gather") { k.x = Math.floor(k.drop.pos.x); k.y = Math.floor(k.drop.pos.y); k.z = Math.floor(k.drop.pos.z); }
+  if (k.kind === "gather") { k.x = Math.floor(drop.pos.x); k.y = Math.floor(drop.pos.y); k.z = Math.floor(drop.pos.z); }
   const dist = Math.hypot(k.x + 0.5 - m.position.x, k.z + 0.5 - m.position.z);
   if (dist > reach || (k.kind !== "gather" && Math.abs(k.y - m.position.y) > 3.2)) {
     const r = travel(m, F.nav, dt, out, k.x, k.y, k.z, m.def.speed * 1.1, reach, k.kind === "gather" ? 4.5 : 2.6);   // it reaches up for items caught in leaves
@@ -687,11 +688,14 @@ function ai(m, dt, out) {
     rq.then(r => { if (F.task !== k) return; if (!r.ok) log("giveup", m, { task: "plant", why: "spot taken" }); endTask(m, F, r.ok); });
   }
   else if (k.kind === "gather") {   // asks for the item, and whatever else lies at its feet (the player, or a forester with a lower id, may get it first)
-    const d = k.drop;
-    k.picks = [BF.drops.ask(d, m).then(r => { if (r.ok) log("pickup", m, { got: r.got + " " + BF.items[r.id].name }); })];
+    const d = drop;
+    // each ask's result, kept in the task as plain data (not the request itself: the task is the villager's state, which other region
+    // workers hold a copy of, spec r15-39)
+    const pick = req => { const p = { tick: req.tick, result: null }; req.then(r => { p.result = r; }); return p; };
+    k.picks = [pick(BF.drops.ask(d, m).then(r => { if (r.ok) log("pickup", m, { got: r.got + " " + BF.items[r.id].name }); }))];
     for (const o of BF.drops.list) {
       if (o === d || !WANT(o.id) || o.age < 0.8 || Math.hypot(o.pos.x - m.position.x, o.pos.z - m.position.z) > 1.6) continue;
-      k.picks.push(BF.drops.ask(o, m));
+      k.picks.push(pick(BF.drops.ask(o, m)));
     }
   } else {   // cut
     const tr = k.tree, bx = tr.base;

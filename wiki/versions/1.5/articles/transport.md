@@ -13,7 +13,7 @@ Every kind of wood has its own boat, made from five planks of that wood. Boats b
 - **Speed:** about 8 blocks a second on water, up to about 40 on ice, and a slide of under half a block a second on land.
 - **Rivers:** boats drift with flowing water and drop down river steps, but cannot climb them going upstream; get out and carry it.
 - **Obstacles:** a boat never climbs a ledge or crosses a block. It never enters a chunk that is not loaded yet.
-- **Passengers:** one mob can ride along with you. A mob that walks into the boat gets in; hitting the boat, or you getting out, lets it out. Iron golems do not ride.
+- **Passengers:** one mob can ride along with you. A mob that walks into the boat gets in; hitting the boat, or you getting out, lets it out. Iron golems do not ride, and neither do the animals of a village's pens, coops, pastures and sties.
 - **Breaking:** three hits break an empty boat into its item. In creative mode one hit does, without a drop.
 
 Boats are saved with the world. If you quit while sitting in one, you are in it when you return. Empty boats stay where you left them, even in unloaded areas.
