@@ -45,8 +45,9 @@ module.exports = async (pg) => {
     }
     if (!seller) { for (const [o, f] of hooks) o.ai = f; return { error: "no villager could walk off freely to test with" }; }
     const res = {};
+    let heldFrames = 0;   // steps the seller spent stopped for this buyer
     const moved = (n, call, dist) => {   // how far the seller walks in n steps while the buyer at `dist` calls it (or not)
-      reset();
+      reset(); heldFrames = 0;
       for (let i = 0; i < 20; i++) { walkOff(); step(); }   // under way
       const x0 = seller.position.x, z0 = seller.position.z;
       for (let i = 0; i < n; i++) {
@@ -54,6 +55,7 @@ module.exports = async (pg) => {
         place(dist);
         if (call) M.waitFor(seller, buyer, dist);
         step();
+        if (seller.holdFor === buyer && seller.holdT > 0) heldFrames++;
       }
       return +Math.hypot(seller.position.x - x0, seller.position.z - z0).toFixed(2);
     };
@@ -61,7 +63,7 @@ module.exports = async (pg) => {
     res.held = moved(60, true, 6);          // 3 s of calls
     res.after = moved(80, false, 6);        // calls stop: walks on
     res.long = moved(200, true, 6);         // 10 s of calls: stops for 8, then walks on
-    res.far = moved(40, true, 15);
+    res.far = moved(40, true, 15); res.farHeld = heldFrames;
     // each buying from the other: only one of them stops
     for (let i = 0; i < 20; i++) { M.waitFor(seller, buyer, 5); M.waitFor(buyer, seller, 5); step(); }
     res.mutual = [seller.holdT > 0 && seller.holdFor === buyer, buyer.holdT > 0 && buyer.holdFor === seller];   // (either may also be held by another villager really buying from it)
@@ -80,7 +82,7 @@ module.exports = async (pg) => {
     if (r.long < 0.5) fail("the seller waited more than 8 s (" + r.long + ")");
     if (!r.log.some(t => /^INFO .*waited 8 s/.test(t))) fail("no INFO line for the seller that waited 8 s");
     if (r.mutual[0] || r.mutual[1]) fail("two villagers buying from each other: one stopped for the other");
-    if (r.far < 1) fail("a buyer 15 blocks off stopped the seller (" + r.far + ")");
+    if (r.farHeld) fail("a buyer 15 blocks off stopped the seller (" + r.farHeld + " steps, walked " + r.far + ")");   // (not the distance: another mob in the way can slow it)
   }
   console.log(fails ? "seller-waits: " + fails + " failures" : "seller-waits: ok");
 };
