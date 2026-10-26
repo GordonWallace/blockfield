@@ -161,6 +161,42 @@ module.exports = async (pg) => {
     }, [y]);
     check(arrow.onB && arrow.k > 2 && arrow.dir > 0.95, `${tag}: an arrow flies across the edge, turned with it ${JSON.stringify(arrow)}`);
 
+    // a creeper blowing up beside the edge hurts the player and a cow across it (bug-088: the blast measured raw atlas x / z)
+    for (const [kc, kp, kw] of [[-2, 1, 0], [1, -2, -1]]) {
+      const r = await lib.sim(pg, async ([y, kc, kp, kw]) => {
+        const cc = globalThis.__cc, PL = BF.player;
+        const p = cc(kp, 0); PL.teleport(p.x, y, p.z); PL.setFlying(false); PL.health = 20;
+        const w = cc(kw, 2), cow = BF.mobs.spawn("cow", w.x, y, w.z), hp0 = cow.hp;
+        const c = cc(kc, 0), cr = BF.mobs.spawn("creeper", c.x, y, c.z);
+        for (let i = 0; i < 400 && !cr.exploded && !cr.removed; i++) {
+          (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); PL.teleport(p.x, y, p.z);
+          if (i % 20 === 0) await new Promise(r => setTimeout(r, 5));
+        }
+        const out = { exploded: !!cr.exploded, player: PL.health, cow: cow.dead ? 0 : cow.hp, cow0: hp0 };
+        if (!cow.dead) BF.mobs.kill(cow); if (!cr.removed) BF.mobs.kill(cr);
+        for (let i = 0; i < 30; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+        for (let k = -6; k <= 6; k++) for (let j = -6; j <= 6; j++) for (let yy = y - 2; yy < y; yy++) {   // mend the floor (the channel's water too)
+          const a = globalThis.__at(k, j), want = yy === y - 1 && j <= -5 && j >= -8 ? BF.B.water : BF.B.stone;
+          if (BF.world.getBlock(a.x, yy, a.z) !== want) BF.world.setBlock(a.x, yy, a.z, want);
+        }
+        return out;
+      }, [y, kc, kp, kw]);
+      await pg.waitForTimeout(2000);   // the hit reaches the page's player (worker, server hosts); its half second of invulnerability runs out
+      r.player = Math.min(r.player, await pg.evaluate(() => BF.player.health));
+      await pg.evaluate(() => { BF.player.health = 20; }); await lib.sim(pg, () => { BF.player.health = 20; });
+      check(r.exploded && r.player < 20 && r.cow < r.cow0, `${tag}: a creeper at k=${kc} hurts the player at k=${kp} and a cow at k=${kw} (bug-088) ${JSON.stringify(r)}`);
+    }
+
+    // a pair bred astride the edge has its young between them (bug-089: the raw atlas midpoint was far round the planet)
+    const born = await lib.sim(pg, async ([y]) => {
+      const P = BF.planet, cc = globalThis.__cc, a = cc(-2, 4), b = cc(1, 4);
+      const ma = BF.mobs.spawn("cow", a.x, y, a.z), mb = BF.mobs.spawn("cow", b.x, y, b.z), s = BF.herd.birthSpot(ma, mb);
+      const out = { a: +P.distance(s, ma.position).toFixed(2), b: +P.distance(s, mb.position).toFixed(2), k: +globalThis.__kOf(s).toFixed(2) };
+      BF.mobs.kill(ma); BF.mobs.kill(mb); for (let i = 0; i < 30; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+      return out;
+    }, [y]);
+    check(born.a < 2 && born.b < 2, `${tag}: young of a pair astride the edge is born between them (bug-089) ${JSON.stringify(born)}`);
+
     // a route planned across the edge is straight; a villager walks to a target across the edge
     const walk = await lib.sim(pg, async ([y]) => {
       const P = BF.planet, at = globalThis.__at, cc = globalThis.__cc, kOf = globalThis.__kOf, onB = globalThis.__onB, h = globalThis.__h;

@@ -1437,7 +1437,13 @@ function rayBox(o, d, mn, mx) {   // distance along the ray to the box, or null
   return t0;
 }
 // The mobs whose boxes block a placement or a rest: the simulation's, or the mirror's stand-ins with the simulation in a worker
-const nearMobList = r => remoteSim() ? mirrorEntities("mob", pos, r) : BF.regions ? BF.regions.mobsAround(pos.x, pos.z, r, null, { label: "player near" }) : (BF.mobs && BF.mobs.list) || [];   // (r15-32)
+// (r15-32). Through a face edge (bug-091): a mob kept in another frame is given as a copy at its spot seen from the player's frame.
+const nearMobList = r => remoteSim() ? mirrorEntities("mob", pos, r) : BF.regions ? BF.regions.mobsAround(pos.x, pos.z, r, null, { local: true, label: "player near" }).map(seenMob) : (BF.mobs && BF.mobs.list) || [];
+function seenMob(m) {
+  BF.planet.local(pos, m.position, MLQ);
+  if (MLQ.x === m.position.x && MLQ.z === m.position.z) return m;
+  return { type: m.type, position: new THREE.Vector3(MLQ.x, m.position.y, MLQ.z), halfWidth: m.halfWidth, height: m.height, dead: m.dead, hostile: m.hostile };
+}
 // Attacks the mob under the crosshair if it is closer than the targeted block. Returns true if a mob was targeted.
 function tryAttack() {
   const bh = boatHit(), m0 = mobHit();
