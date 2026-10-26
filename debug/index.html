@@ -398,6 +398,7 @@
           <div><div class="big" id="a-dist">-</div><div class="sub" id="a-name"></div></div>
         </div>
       </div>
+      <div class="panel" id="hpanel"></div>
       <div class="panel" id="mpanel">
         <div class="ph"><h2>Mobs map</h2><span class="sub" id="m-count"></span><div class="grow"></div>
           <div class="seg"><button id="m-zout" title="Zoom out (or the mouse wheel)">−</button><button id="m-zin" title="Zoom in (or the mouse wheel)">+</button><button id="m-center" title="Centre the map on you again">Centre</button></div><div class="seg"><button id="m-regions" title="Shade the simulation regions (64 x 64 blocks) by how many mobs each holds">Regions</button></div></div>
@@ -456,6 +457,7 @@
 </main>
 
 <script src="logmatch.js"></script>
+<script src="vhist-view.js"></script>
 <script>
 (() => {
 "use strict";
@@ -491,6 +493,7 @@ function connect() {
   es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); if (c.glog !== undefined) glogSet(c.glog); } catch (err) { console.error(err); } });
   es.addEventListener("snap", e => { try { onSnap(JSON.parse(e.data)); } catch (err) { console.error(err); } });
   es.addEventListener("alerts", e => { try { const o = JSON.parse(e.data); alerts = o.alerts || []; alertErr = null; renderAlerts(); } catch (err) { console.error(err); } });
+  if (window.BFHist) BFHist.attach(es, { pick: k => { pinned = k; if (snap) onSnap(snap); } });   // the History panel (debug/vhist-view.js)
   es.onerror = () => { serverUp = false; status(); };
   es.onopen = () => { serverUp = true; status(); };
 }
@@ -529,6 +532,7 @@ function onSnap(s) {
   push(hist.fps, s.info.fps); push(hist.queue, s.info.chunksQueued);
   const was = viewKey;
   pickView(s);
+  if (window.BFHist) BFHist.snap(s, viewKey);
   renderTop(s); renderVillages(s); renderCompare(s); renderVillage(s); renderRoutes(s); renderDay(); status(); alertsFromSnap(s);
   if (s.mobmap) { mm = s.mobmap; renderMobMap(); }
   if (logChanged || logDirty || was !== viewKey) { if (logDirty || was !== viewKey) econChanged = true; logDirty = false; renderLog(); }
@@ -827,8 +831,9 @@ function renderBudget(b) {
   if (!b) return;
   const pc = f => Math.round(f * 100) + "%", on = b.on && b.budget > 0;
   $("c-budget-st").textContent = on ? "budget " + pc(b.budget) : "off";
-  $("c-budget").innerHTML = `${b.villages} <small>villages simulated</small>`;
-  $("c-budget-sub").textContent = `${pc(b.used)} of each second used · ${b.fps} fps` + (on ? ` · ${b.over ? "over for " + b.over + " s" : "under for " + b.under + " s"}` : "");
+  const ex = b.extra != null ? b.extra : b.extras.length;
+  $("c-budget").innerHTML = `${b.villages} <small>${b.villages === 1 ? "village" : "villages"} simulated (${b.villages - ex} nearest + ${ex} extra)</small>`;
+  $("c-budget-sub").textContent = `simulation took ${pc(b.used)} of real time` + (on ? ` (limit ${pc(b.budget)})` : "") + ` · ${b.fps} fps` + (on ? ` · ${b.over ? "over for " + b.over + " s" : "under for " + b.under + " s"}` : "");
   $("b-budget").style.width = Math.min(100, Math.round(on ? b.used / b.budget * 100 : 0)) + "%";
   $("c-budget-ex").textContent = b.extras.length ? "Extra: " + b.extras.map(e => `${e.name} (${e.d} blocks)`).join(", ") : "No extra villages";
   $("c-budget-log").innerHTML = b.log.slice().reverse().map(e => `<div>day ${e.day.toFixed(2)} · ${esc(e.text)}</div>`).join("");

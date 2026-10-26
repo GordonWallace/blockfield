@@ -171,7 +171,10 @@ function fixedSet(px, pz, base, t, ed) {
   lastN = base.size + extras.size;
   return [...extras].map(([key, x]) => ({ key, v: x.v }));
 }
-const text = () => `Simulated villages: ${lastN || (VS() ? VS().count() : 0)} (budget ${opt.on && opt.budget > 0 ? pct(opt.budget) : "off"})`;
+// the villages simulated now (villageSim's set, extras counting down included): from the start and with the budget off too, which the last
+// decision's figure (lastN, 0 before the first) was not
+const simulated = () => (VS() ? VS().count() : lastN);
+const text = () => `Simulated villages: ${simulated()} (budget ${opt.on && opt.budget > 0 ? pct(opt.budget) : "off"})`;
 BF.active = {
   BUDGETS, frame, decide,
   isExtra: key => extras.has(key),
@@ -196,7 +199,7 @@ BF.active = {
   },
   text,
   // the debug screen's Simulation budget card
-  feed: () => ({ on: opt.on, budget: opt.budget, used: used(), fps: Math.round(fps), villages: lastN, extras: [...extras].map(([k, x]) => ({ key: k, name: vname(k), d: Math.round(x.d) })),
+  feed: () => ({ on: opt.on, budget: opt.budget, used: used(), fps: Math.round(fps), villages: simulated(), extra: VS() && VS().extraCount ? VS().extraCount() : extras.size, extras: [...extras].map(([k, x]) => ({ key: k, name: vname(k), d: Math.round(x.d) })),
     under: Math.round(underMs / 1000), over: Math.round(overMs / 1000), memMB: opt.memMB, log: decisions.slice(-12) }),
   log: () => decisions.slice(),
   reset() { fixedAt = null; extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, frames: 0 }; fps = 60; decide.memTold = false; },

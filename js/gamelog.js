@@ -234,7 +234,7 @@ if (BF.page) addEventListener("pagehide", () => close("the page was closed"));
 
 BF.glog = {
   LEVELS: ["ERROR", "WARN", "INFO", "DEBUG"], CAP, log, job, village, build: BUILD,
-  entries: () => (fwd ? rlog : entries), recent: (n = 50) => (fwd ? rlog : world ? entries : pre).slice(-n), base: () => base, world: () => world, head: () => head, headLine, text,
+  entries: () => (fwd ? rlog : entries), recent: (n = 50) => (fwd ? rlog : world ? entries : pre).slice(-n), base: () => base, world: () => world, name: () => wname, head: () => head, headLine, text,
   chunkDays, chunkTimes, loadChunkTimes, flush, forget, feed, feedAt, feedReset, diskBuild, ready: () => !!world && !loading, tap: fn => taps.push(fn),
   setSink: fn => { sink = typeof fn === "function" ? fn : null; },   // fn(entry) for every entry from now on (headless: the log file)
   remote: fn => { fwd = typeof fn === "function" ? fn : null; },   // fn(entries) takes this page's entries (r15-38); null: kept here again
