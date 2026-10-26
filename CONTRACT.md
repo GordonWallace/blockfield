@@ -1042,7 +1042,7 @@ worldgen.js (`sty` plot, `PIG_POP`), trading.js (table, `PRODUCE`, values, stock
 (right click), storage.js (inputs), logmatch.js (`pigs`), debugfeed.js / debug/index.html, builder.js / blueprints.js (`sty`).
 - **Pigs.** Every pig carries `m.pig = {fed, cd, growAt, x, z, mob}` (absolute game days). A `carrot`, `potato` or `beetroot` (`FEED_NAMES`) from the player (right click; creative keeps it) or the pig farmer sets
   `fed`: willing for 1 day. Two willing adults of the same sty (or both wild) within 10 blocks walk together and a piglet appears; both rest 1 day (`BREED_CD`). Piglets (`m.piglet`, `growAt`) are scaled 0.5
-  (`BF.mobs.setYoungSize`), drop nothing and grow up after 3 days (`PIGLET_DAYS`); feed ages one by 10%. No breeding while 24 pigs are within 16 blocks. Wild pigs within 10 blocks of a player holding feed follow
+  (`BF.mobs.setYoungSize`), drop nothing and grow up after 3 days (`PIGLET_DAYS`); feed ages one by 10%. No breeding while 24 pigs are within 16 blocks, or while the sty of a sty pig holds more pigs than its limit (a wild pig that walked in after the pig farmer fed a pair; the pair waits for the cull). Wild pigs within 10 blocks of a player holding feed follow
   them (not sty pigs). Events: `pigFed(m, by)`, `pigBorn(piglet, a, b)`, `pigPenned(m, sty)`, `pigCulled(m, by, pork)`. Wild pigs also breed on their own: js/wildlife.js (idea-037)
   makes a wild pair willing once a game day and the walk and piglet above follow; all pig breeding lives here.
 - **Sties.** Village generator 9 (default for new worlds; worlds saved with 8 or less keep theirs): a village of `PIG_POP` (10)+ villagers on grass (`v.ground === 0`) gets a pig farmer 60% of the time (`PIG_CHANCE`, its own seeded
