@@ -153,8 +153,11 @@ function doorOf(h) {
   return h.door;
 }
 function spawnBee(h, at, mode) {
+  // (every field a bee ever gets, from the start: one object layout for all bees, so the flight code's property reads stay fast, r15-61)
   const b = { id: ++seq, home: h, x: at.x, y: at.y, z: at.z, vx: 0, vy: 0, vz: 0, mode: mode || "start", t: 0, nectar: false, land: null, tgt: null,
-    phase: 0, yaw: 0, follow: null, angry: 0, stung: false, stuck: 0, lastD: Infinity, trips: 0 };
+    phase: 0, yaw: 0, follow: null, angry: 0, stung: false, stuck: 0, lastD: Infinity, trips: 0, rng: undefined, px: undefined, py: undefined,
+    pz: undefined, pyaw: undefined, followT: undefined, front: undefined, restedOut: undefined, restedBack: undefined, hurry: undefined,
+    landYaw: undefined, gone: undefined };
   b.phase = rs(b).next() * 6.28; b.yaw = rs(b).next() * 6.28;
   bees.push(b); h.out++;
   return b;
