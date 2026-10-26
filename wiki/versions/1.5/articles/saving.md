@@ -29,6 +29,8 @@ The title screen has three ways to move a world, in every mode:
 
 To move a world from the server back into a browser, Export it while playing on the server, then open the game without the server (as a file, say) and Import it there.
 
+A world file can be at most 256 MB once unpacked (a world's file is a few MB to tens of MB). A bigger one, or a small file that would unpack to more, is refused with *That world file is too big*, and the server goes on running the game while it checks.
+
 ## Older worlds
 
 Blockfield 1.5 can't open worlds made with earlier releases: 1.4's planets and 1.3's flat worlds. They stay in the browser's list, greyed out and marked *Made with Blockfield 1.4, can't be opened in 1.5* (or 1.3), with only a Delete button. Import refuses their files with the same message, and Copy browser saves to the server leaves them behind.

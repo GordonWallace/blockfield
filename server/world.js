@@ -32,7 +32,7 @@ const { Worker } = require("worker_threads");
 const path = require("path"), fs = require("fs"), v8 = require("v8");
 const WS = require("./ws.js"), IDB = require("./idb.js"), SaveFile = require("../js/savefile.js");
 
-const SIMTHREAD = path.join(__dirname, "simthread.js"), FEED_MS = 250, IMPORT_MAX = 1 << 30;
+const SIMTHREAD = path.join(__dirname, "simthread.js"), FEED_MS = 250, IMPORT_MAX = SaveFile.MAX;   // (bytes sent; unpacked it is held to SaveFile.MAX too: bug-071)
 const SAVE_VERSION = 3;   // (js/save.js VERSION: the worlds this release opens)
 const say = s => console.log("[world] " + s);
 
@@ -284,8 +284,8 @@ function start(o) {
     const log = head ? { head, lists: (head.batches || []).map(([seq]) => worlds.get(id, "log:" + String(seq).padStart(9, "0")) || []) } : null;
     return { meta, buf: SaveFile.packSync({ game: o.version || null, meta, data, log }) };
   }
-  function importWorld(buf, keep) {
-    const rec = SaveFile.unpackSync(buf), meta = Object.assign({}, rec.meta);
+  function importWorld(rec, keep) {
+    const meta = Object.assign({}, rec.meta);
     const old = m => !m || !(m.version >= SAVE_VERSION);
     if (old(meta) || old(rec.data)) throw new Error("Made with Blockfield " + (meta.version === 2 ? "1.4" : "1.3") + ", can't be opened in " + (o.version || "1.5"));
     const had = meta.id && worlds.meta(meta.id);
@@ -324,10 +324,11 @@ function start(o) {
       req.on("data", d => { n += d.length; if (n > IMPORT_MAX) { over = true; req.destroy(); } else parts.push(d); });
       req.on("end", () => {
         if (over) return;
-        try { reply(200, importWorld(Buffer.concat(parts), /[?&]keep=1\b/.test(req.url))); }
-        catch (e) { say("an import failed: " + e.message); reply(400, { ok: false, why: e.message }); }
+        // (unpacked off the main thread, so the server keeps answering while a big file unpacks)
+        SaveFile.unpack(Buffer.concat(parts)).then(rec => reply(200, importWorld(rec, /[?&]keep=1\b/.test(req.url))))
+          .catch(e => { say("an import failed: " + e.message); reply(400, { ok: false, why: e.message }); });
       });
-      req.on("close", () => { if (over) reply(413, { ok: false, why: "that file is over 1 GB" }); });
+      req.on("close", () => { if (over) reply(413, { ok: false, why: "that file is over " + (IMPORT_MAX >> 20) + " MB" }); });
       return true;
     }
     reply(404, { ok: false, why: "no such saves request" });
