@@ -29,13 +29,15 @@ module.exports = async (pg, out) => {
   await pg.evaluate(() => { BF.player.yaw = Math.atan2(-4 + 5, 6) ; });
   await pg.waitForTimeout(800);
   await pg.screenshot({ path: out + "-view.png" });
+  // the open grass east of the village (14 past its box) loaded before the camping checks: under load it can lag the village
+  await pg.waitForFunction(() => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.wg && m.village.wg.maxX != null).every(m => { const ox = Math.floor(m.village.wg.maxX + 14), oz = Math.floor(m.village.z); return [[-5, -5], [5, 5], [-5, 5], [5, -5]].every(([dx, dz]) => BF.world.isLoaded(ox + dx, oz + dz)); }), null, { timeout: 90000, polling: 500 }).catch(() => {});
   const r2 = await pg.evaluate(async () => {
     const vs = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.inv && !m.child);
     const open = m => { const c = BF.world.chunkAt(m.position.x, m.position.z); return c && c.top[(Math.floor(m.position.z) - c.cz * 16) * 16 + Math.floor(m.position.x) - c.cx * 16] < m.position.y; };
     const T = BF.trades, I = BF.I, A = vs.find(open) || vs[0], res = {};   // a villager outdoors (one inside a house would pitch on its roof)
     const tx = Math.floor(A.position.x) + 2, ty = Math.floor(A.position.y), tz = Math.floor(A.position.z);
     BF.world.setBlock(tx, ty, tz, BF.B.survey_table); BF.emit("blockPlaced", tx, ty, tz, BF.B.survey_table);
-    BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.inv = T.stockFor("explorer", A); A.trades = [];
+    BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.inv = T.stockFor("explorer", A); A.trades = []; A.jobStocked = true;   // its kit is set here: claiming the table below must not hand it a second one (a villager that never had a job gets its starting wares on its first claim)
     res.hasTent = T.inv.count(A.inv, I.tent);
     BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: BF.B.survey_table, prof: "explorer" } });
     T.inv.remove(A.inv, I.tent, 1); BF.sky.setTime(0.2);   // lost its tent: collects a spare at home by day

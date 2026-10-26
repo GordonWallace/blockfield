@@ -25,9 +25,10 @@ module.exports = async (pg, out) => {
     // make it an explorer (its own survey table)
     const tx = Math.floor(A.position.x) + 2, ty = Math.floor(A.position.y), tz = Math.floor(A.position.z);
     W.setBlock(tx, ty, tz, BF.B.survey_table); BF.emit("blockPlaced", tx, ty, tz, BF.B.survey_table);
-    BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.inv = T.stockFor("explorer", A); A.trades = [];
+    BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.inv = T.stockFor("explorer", A); A.trades = []; A.jobStocked = true;   // its kit is set here: claiming the table below must not hand it a second one (a villager that never had a job gets its starting wares on its first claim)
     BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: BF.B.survey_table, prof: "explorer" } });
     if (T.inv.count(A.inv, I.tent) < 1) T.inv.add(A.inv, I.tent, 1);
+    res.tents0 = T.inv.count(A.inv, I.tent);
     // inside its own village, 150 blocks from its (pretend) bed at dusk: no camp
     const home = A.bed;
     { const cx = Math.floor(V.x) + 3, cz = Math.floor(V.z) + 3, cy = W.heightAt(cx, cz) + 1;
@@ -63,6 +64,7 @@ module.exports = async (pg, out) => {
   if (r1.error) { fail(r1.error); return; }
   if (r1.inVillageCamp) fail("explorer camped inside its own village");
   if (!r1.outside) fail("test spot not outside the village");
+  if (r1.tents0 !== 1) fail("explorer starts with " + r1.tents0 + " tents, not one");
   if (r1.farmCamp) fail("explorer pitched its tent on farmland");
   if (!r1.camp) { fail("explorer out of its village at dusk did not camp"); return; }
   // asleep in its tent, then the village unloads and comes back before morning
