@@ -152,10 +152,17 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
       out.routes = BF.merchant.routes().map(r => ({ a: r.a, b: r.b, trips: r.trips, items: r.items, ems: r.emeralds, road: r.road.length }));
       R.days.push(out);
     };
-    // dirt paths made: count setBlock calls to dirt_path from merchant.js
+    // dirt paths made: count setBlock calls to dirt_path from merchant.js, and the merchants' path requests that land
     const sb = BF.world.setBlock.bind(BF.world);
     R.paths = 0;
     BF.world.setBlock = function (x, y, z, id) { if (id === BF.B.dirt_path && new Error().stack.includes('merchant.js')) R.paths++; return sb(x, y, z, id); };
+    // since block requests (spec r15-19) a merchant asks for its path blocks (js/merchant.js step), and the request lays them: count those that land
+    const cells = BF.blockReq.cells.bind(BF.blockReq);
+    BF.blockReq.cells = function (m, cs, opts) {
+      const req = cells(m, cs, opts), n = m && m.profession === 'merchant' && Array.isArray(cs) ? cs.filter(c => c.id === BF.B.dirt_path).length : 0;
+      if (n && req && typeof req.then === 'function') req.then(r => { if (r && r.ok) R.paths += n; });
+      return req;
+    };
     const profs = {};
     for (const m of BF.mobs.list) if (m.type === 'villager' && m.village && keys.includes(m.village.key) && !m.dead) profs[m.village.key + ' ' + m.profession] = 1;
     return { gap: globalThis.__gapIds, keys, d: Math.round(d), merchants: Object.keys(profs).filter(k => /merchant$/.test(k)), sim: BF.villageSim.status() };
