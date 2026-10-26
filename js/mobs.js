@@ -881,8 +881,9 @@ function pickWander(m, r) {
 // Getting past what blocks a walk (village mobs: villagers and golems). Walks to a point (wanderAI: heading home from far off, a golem's
 // patrol) go straight at it, so a tree, a wall or a ledge too low to jump under would hold them there for good. Blocked for a moment,
 // it finds a route round it (A*, up to DETOUR_HOP blocks towards the point; three blocks high for a golem), and with none it steps
-// aside for a few seconds. Being held in one place for STUCK_LOG seconds of pushing goes in the game log.
-const DETOUR_AFTER = 1.2, DETOUR_HOP = 16, STUCK_LOG = 30;
+// aside for a few seconds. Being held in one place for STUCK_LOG seconds of pushing goes in the game log; a pause of up to HELD_GAP s
+// between pushes (a villager stops to look about, then sets off the same way again) counts too, or a boxed-in one is never logged.
+const DETOUR_AFTER = 1.2, DETOUR_HOP = 16, STUCK_LOG = 30, HELD_GAP = 8;
 function moveLog(m, level, text) {
   if (!BF.glog) return;
   const who = BF.vlog && m.type === "villager" ? BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession || "villager") + ")" : "An " + m.type.replace(/_/g, " ");   // "Name (Job)" as in the village log
@@ -890,11 +891,11 @@ function moveLog(m, level, text) {
 }
 // Called every physics step: `blocked` = it wanted to move and a block stopped it.
 function blockedMove(m, dt, blocked) {
-  const ai = m.ai, p = m.position, g = ai.held || (ai.held = { x: p.x, z: p.z, t: 0, logged: false });
+  const ai = m.ai, p = m.position, g = ai.held || (ai.held = { x: p.x, z: p.z, t: 0, gap: 0, logged: false });
   if (Math.hypot(p.x - g.x, p.z - g.z) > 3) {   // got somewhere
     if (g.logged) moveLog(m, "INFO", "got moving again at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z));
     g.x = p.x; g.z = p.z; g.t = 0; g.logged = false;
-  } else if (blocked && (g.t += dt) >= STUCK_LOG && !g.logged) {
+  } else if ((g.gap = blocked ? 0 : (g.gap || 0) + dt) <= HELD_GAP && (blocked || g.t > 0) && (g.t += dt) >= STUCK_LOG && !g.logged) {
     g.logged = true;
     moveLog(m, "ERROR", "stuck at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z) + " for " + STUCK_LOG + " s" + (ai.mode === "walk" ? " walking towards " + Math.floor(ai.tx) + ", " + Math.floor(ai.tz) : ""));
   }
