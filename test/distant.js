@@ -142,8 +142,13 @@ module.exports = async (pg, out) => {
       const L = BF.lod.levels[0], b0 = L.builds;
       const p = BF.player.position, P = BF.planet, g = P.grid(p.x, p.z);
       goTo(g.f, g.u + 300, g.v + 120, 300);
+      // a 300-block hop reads as flight to the rings, and a ring whose last build was slow (a slow runner) waits for the player to
+      // slow down before it moves (js/lod.js update()): wait for ring 0 to start, so ringsDone doesn't find the old ring built
+      const t0 = performance.now();
+      while (L.builds === b0 && !L.building && performance.now() - t0 < 60000) await new Promise((r) => setTimeout(r, 100));
+      const waitS = (performance.now() - t0) / 1000, buildMs = L.buildMs;
       await ringsDone(300);
-      if (L.builds === b0) return "not rebuilt";
+      if (L.builds === b0) return { notRebuilt: true, waitS, buildMs };
       const n1 = 2 * BF.lod.EXT + 1;
       let bad = 0, n = 0;
       for (let k = 0; k < 400; k++) {
@@ -153,7 +158,7 @@ module.exports = async (pg, out) => {
         n++;
         if (r.ok[0] !== L.raw.ok[o] || (r.ok[0] && (r.y[0] !== L.raw.y[o] || r.col[2] !== L.raw.col[3 * o + 2]))) bad++;
       }
-      return { bad, n };
+      return { bad, n, waitS };
     });
     check(moved.n === 400 && moved.bad === 0, `ring 0 moved with the player matches a fresh build (${JSON.stringify(moved)})`);
 
