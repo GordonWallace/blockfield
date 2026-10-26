@@ -10,7 +10,8 @@
 // canonical text are compared with the reference's, and the first objects that differ are printed with where their text first differs.
 // Owners: by default (and CI) by a hash of each group, never moving. --shuffle k: the groups change workers at every meeting (by a hash
 // of k), so every hand-over is tried: module state left behind on the old worker shows up here (the C2-C6 bar once C3 has made the mob
-// loop's tables owned). --plan: planned from the measured times (js/cworkers.js plan), as in play.
+// loop's tables owned). --plan: planned from the measured times (js/cworkers.js plan). --order cluster (without --shuffle): nobody owns
+// a group, each worker takes the next one when it is free (js/cworkers.js claim), so groups move between workers as with --shuffle.
 // Usage: node test/cluster-workers.js [--workers 2] [--seed 3] [--extra 3] [--seconds 30] [--shuffle k | --plan] [--order tick|cluster]
 //                                    [--profile converted|a,b,c]
 const path = require('path'), crypto = require('crypto');
@@ -38,7 +39,7 @@ function child() {
     BF.cworkers.shuffle = shuffle;
     BF.cworkers.fixed = fixed;
     BF.cworkers.sizes = {};
-    BF.cworkers.setup({ n, me, link: BF.rworkers.attach(shared, me, n) });
+    BF.cworkers.setup({ n, me, link: BF.rworkers.attach(shared, me, n), claims: shared.claims });
   }
   const md5 = t => crypto.createHash('md5').update(t).digest('hex').slice(0, 16);
   const objs = () => {
@@ -74,10 +75,11 @@ function child() {
 // ---------------------------------------------------------------- the parent
 async function main() {
   const n = +arg('workers', 2), seed = +arg('seed', 3), extra = +arg('extra', 3), seconds = +arg('seconds', 30);
-  const profile = arg('profile', 'converted'), plan = process.argv.includes('--plan'), fixed = !plan && arg('shuffle') == null;
-  const shuffle = plan ? 0 : +arg('shuffle', 1), order = arg('order', 'tick');
+  const order = arg('order', 'tick'), pull = order === 'cluster' && arg('shuffle') == null;
+  const profile = arg('profile', 'converted'), plan = process.argv.includes('--plan'), fixed = !plan && !pull && arg('shuffle') == null;
+  const shuffle = plan || pull ? 0 : +arg('shuffle', 1);
   const { load } = require('../tools/headless.js');
-  const shared = load().BF.rworkers.makeShared(n, 128 << 20);
+  const shared = load().BF.cworkers.makeShared(n);
   const spawn = data => {
     const w = new Worker(__filename, { workerData: Object.assign({ seed, extra, order, shuffle, fixed, profile }, data) });
     const waiting = [];
@@ -90,7 +92,7 @@ async function main() {
   const ws = [];
   for (let me = 0; me < n; me++) ws.push(spawn({ me, n, shared }));
   await Promise.all([ref, ...ws].map(x => x.next()));
-  console.log(`booted the reference and ${n} cluster workers in ${((Date.now() - t0) / 1000).toFixed(1)} s (seed ${seed}, extra ${extra}, ${order} order${shuffle ? (fixed ? ', fixed owners ' : ', shuffle ') + shuffle : ''}, profile ${profile})`);
+  console.log(`booted the reference and ${n} cluster workers in ${((Date.now() - t0) / 1000).toFixed(1)} s (seed ${seed}, extra ${extra}, ${order} order${pull ? ', groups pulled' : shuffle ? (fixed ? ', fixed owners ' : ', shuffle ') + shuffle : ''}, profile ${profile})`);
   let fails = 0, errs = 0;
   const all = [ref, ...ws];
   for (let s = 1; s <= seconds; s++) {

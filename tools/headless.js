@@ -14,8 +14,9 @@
 //   split starts after s game seconds that every copy plays on its own (as in play, js/rplay.js).
 //   --ctick p: the cluster tick on (spec r15-39b, js/ctick.js) with the systems of profile p (BF.ctick.only: converted, the systems marked
 //   converted; full, every system; or a list). --cworkers n: and the clusters split over n workers (C7, js/cworkers.js: n - 1
-//   worker_threads, server/regionthread.js); the world must come out the same as with one. --shuffle k: the groups change workers at
-//   every meeting.
+//   worker_threads, server/regionthread.js); the world must come out the same as with one. --order cluster (the default with
+//   --cworkers: each worker takes the next group when it is free) or tick (groups planned onto workers at each meeting); --shuffle k
+//   (with --order tick): the groups change workers at every meeting.
 //   --json: one JSON line at the end ({seed, seconds, ticks, vss, mobss, msPerTick, real, villagers, mobs, chunks, hash, parts, workers,
 //   census: every item in the world by name, and the emeralds}).
 // As a module: const { load } = require('./tools/headless.js'); const { BF, ctx } = load(); BF.boot.headless({seed: 3}).tick(20);
@@ -109,6 +110,7 @@ async function main(argv) {
   let pool = null;
   if (a.ctick != null || ncw > 1) {
     BF.ctick.only = only; BF.ctick.on = true;
+    if (a.order) BF.ctick.order = a.order;
     say(`cluster tick on (${only ? only.join(', ') : 'every system'})`);
   }
   if (ncw > 1) {   // C7: n - 1 followers with the same world and the cluster tick on, every worker running its own groups
@@ -118,10 +120,11 @@ async function main(argv) {
     const boots = await Promise.all(pool.list.map(f => f.ask({ boot: { seed, rivers,
       settings: { at: a.at || 'village', villages: a.villages != null ? +a.villages : undefined, viewDist: a.view != null ? +a.view : undefined, extra: a.extra != null ? +a.extra : undefined } } })));
     for (const [i, b] of boots.entries()) if (b.booted !== H0.hash) throw new Error(`cluster worker ${i + 1} booted a different world (${b.booted}, not ${H0.hash})`);
-    const shared = BF.rworkers.makeShared(ncw, 128 << 20);
-    await Promise.all(pool.list.map(f => f.ask({ cstart: { shared, me: f.me, n: ncw, only, shuffle: +a.shuffle || 0 } })));
+    const shared = BF.cworkers.makeShared(ncw), order = a.order || 'cluster';
+    await Promise.all(pool.list.map(f => f.ask({ cstart: { shared, me: f.me, n: ncw, only, order, shuffle: +a.shuffle || 0 } })));
+    BF.ctick.order = order;
     BF.cworkers.shuffle = +a.shuffle || 0;
-    BF.cworkers.setup({ n: ncw, me: 0, link: BF.rworkers.attach(shared, 0, ncw) });
+    BF.cworkers.setup({ n: ncw, me: 0, link: BF.rworkers.attach(shared, 0, ncw), claims: shared.claims });
     BF.cworkers.prof = {};
     say(`${ncw} cluster workers: ${ncw - 1} followers booted the same world in ${((performance.now() - t1) / 1000).toFixed(1)} s`);
   } else if (nw > 1) {

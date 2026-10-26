@@ -252,7 +252,7 @@ function scoped(h) {
   if (BF.regions) BF.regions.tick();
 }
 function pass(g, h) {
-  if (W() && !W().owns(g)) { g.tick = BF.rand.tick; if (g.bases) for (const b of g.bases) clocks.set(b, g.tick); return; }   // (another worker runs it)
+  if (W() && !W().pull && !W().owns(g)) { g.tick = BF.rand.tick; if (g.bases) for (const b of g.bases) clocks.set(b, g.tick); return; }   // (another worker runs it)
   const t0 = performance.now();
   enter(g);
   try { scoped(h); }
@@ -266,7 +266,12 @@ function pass(g, h) {
 const due = () => needMeet || BF.rand.tick % MEET === 0 && S.metAt !== BF.rand.tick;
 function meetNow() { meet(); S.metAt = BF.rand.tick; }
 // One tick, every group in turn (the "tick" order; BF.simStep with the cluster tick on).
+let ahead = 0;
 function step(h) {
+  if (W() && W().pull) {   // (the cluster order on several workers: the interval runs at its first step, the next MEET - 1 steps are done)
+    if (ahead > 0) { ahead--; return; }
+    if (BF.rand.tick % MEET === 0) { interval(h); ahead = MEET - 1; return; }
+  }
   if (due()) meetNow();
   global(h);
   for (const g of groups) pass(g, h);
@@ -284,15 +289,11 @@ function interval(h) {
   if (due()) meetNow();
   const views = [];
   for (let t = 0; t < MEET; t++) { global(h); views.push(view()); }
-  for (let i = 0; i < groups.length; i++) {
-    const g = groups[i], last = i === groups.length - 1;
-    for (let t = 0; t < MEET; t++) {
-      setView(views[t]);
-      pass(g, h);
-      if (last) { BF.req.endTick(); S.ticks++; H.ticks++; S.since++; hourly(); }
-    }
-  }
-  setView(views[MEET - 1]);
+  // every group in turn; on several workers each takes the next group from the shared queue when it is free (js/cworkers.js claim)
+  const pull = W() && W().pull;
+  for (let i = 0, g; (g = pull ? W().claim() : groups[i]); i++) for (let t = 0; t < MEET; t++) { setView(views[t]); pass(g, h); }
+  if (pull) for (const g of groups) if (g.tick !== views[MEET - 1][1]) { g.tick = views[MEET - 1][1]; if (g.bases) for (const b of g.bases) clocks.set(b, g.tick); }   // (another worker ran it)
+  for (let t = 0; t < MEET; t++) { setView(views[t]); BF.req.endTick(); S.ticks++; H.ticks++; S.since++; hourly(); }
   if (W()) W().sync();
   return n + MEET;
 }

@@ -43,8 +43,28 @@ const C = () => BF.ctick;
 let lapT = 0;
 const lap = k => { if (!CW.prof) return; const t = now(); if (k) CW.prof[k] = (CW.prof[k] || 0) + t - lapT; lapT = t; };
 const groupOf = m => (m.cl !== undefined ? BF.clusters.groupOf(m.cl) : C().groups()[0] && C().groups()[0].key);
-const ownsKey = k => (CW.owners.has(k) ? CW.owners.get(k) : 0) === CW.me;
+const ownsKey = k => (CW.pull ? ran.has(k) : (CW.owners.has(k) ? CW.owners.get(k) : 0) === CW.me);
 function owns(g) { return ownsKey(g.key); }
+
+// ---------------------------------------------------------------- pulling groups (the cluster order)
+// In the cluster order (each group's whole interval in turn) nobody owns a group: after the meeting every worker holds the whole world as
+// it is, so any of them can run any group. The groups are queued longest first (by their last time, the same list on every worker) and
+// each worker takes the next one from a shared counter (Atomics) whenever it is free, so a slow interval on one group doesn't hold up
+// the rest. A worker snaps the shadows of a group's mobs and record when it takes it.
+let ranBy = new Map();   // group key -> the worker that ran it in the last interval
+let ran = new Set(), queue = [], byGroup = new Map(), claims = null;
+const slot = () => meetings & 1;   // (two counters in turn: the one for the next interval is cleared while this one is in use)
+function claim() {
+  if (!CW.pull) return null;
+  const i = Atomics.add(claims, slot(), 1);
+  if (i >= queue.length) return null;
+  const g = queue[i], t0 = now(), R = RW();
+  ran.add(g.key);
+  for (const m of byGroup.get(g.key) || []) if (!m.removed) shadows.set(m, R.snap(m));
+  for (const rec of BF.mobs.villages.values()) if (BF.clusters.groupOf("v:" + rec.key) === g.key) recShadows.set(rec, R.snap(rec));
+  T.snap += now() - t0;
+  return g;
+}
 
 function err(what) { if (warned++ < 20 && BF.glog) BF.glog.log("ERROR", "workers", "Cluster workers: " + what); }
 function note(text) { if (BF.glog && CW.me === 0) BF.glog.log("INFO", "workers", "Cluster workers: " + text); }
@@ -144,11 +164,11 @@ function sync() {
   const ps = all.map((x, w) => (w === CW.me ? null : JSON.parse(x)));
   peers = all.map((x, w) => ({ bytes: x.length }));
   // everything every worker measured (its own groups'), for the plan
-  groupMs = new Map();
+  groupMs = new Map(); ranBy = new Map();
   const lift = [I.R2.ids.j, I.R2.made.j, BF.ids.range.top, BF.rand.made];
   for (let w = 0; w < all.length; w++) {
     const p = w === CW.me ? { ms, counters } : ps[w];
-    for (const [k, v] of p.ms) groupMs.set(k, v);
+    for (const [k, v] of p.ms) { groupMs.set(k, v); ranBy.set(k, w); }
     for (let i = 0; i < 4; i++) if (p.counters[i] > lift[i]) lift[i] = p.counters[i];
   }
   I.R2.ids.j = lift[0]; I.R2.made.j = lift[1]; BF.ids.range.lift(lift[2]); BF.rand.range.lift(lift[3]);
@@ -210,9 +230,17 @@ function met(groups) {
   const R = RW();
   R.refs();
   shadows = new Map(); recShadows = new Map(); known = new Set(BF.mobs.list);
-  for (const m of BF.mobs.list) if (!m.removed && ownsKey(groupOf(m))) shadows.set(m, R.snap(m));
-  for (const rec of BF.mobs.villages.values()) if (ownsKey(BF.clusters.groupOf("v:" + rec.key))) recShadows.set(rec, R.snap(rec));
   meetings++;
+  if (CW.pull) {
+    ran = new Set();
+    queue = groups.slice().sort((a, b) => (est.get(b.key) || 0) - (est.get(a.key) || 0) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    byGroup = new Map();
+    for (const m of BF.mobs.list) { if (m.removed) continue; const k = groupOf(m); let a = byGroup.get(k); if (!a) byGroup.set(k, (a = [])); a.push(m); }
+    if (CW.me === 0) Atomics.store(claims, slot() ^ 1, 0);
+  } else {
+    for (const m of BF.mobs.list) if (!m.removed && ownsKey(groupOf(m))) shadows.set(m, R.snap(m));
+    for (const rec of BF.mobs.villages.values()) if (ownsKey(BF.clusters.groupOf("v:" + rec.key))) recShadows.set(rec, R.snap(rec));
+  }
   T.snap += now() - t0;
   tRun = now();
   hourly();
@@ -220,8 +248,10 @@ function met(groups) {
 // Owners for the new groups, worked out alike on every worker from the run times swapped at the last sync: the player's group on the
 // first worker; then the rest longest first, each staying on its last worker while that has room, else to the least loaded (the
 // first worker counts LEAD of its load as room). A group not met before is guessed from its bases' share of their old groups' time.
+let est = new Map();
 function plan(groups) {
-  const prev = CW.owners, est = new Map();
+  const prev = CW.owners;
+  est = new Map();
   const perBase = new Map();
   for (const [k, ms] of groupMs) { const g = lastGroups.get(k); if (g) for (const b of g) perBase.set(b, ms / g.length); }
   for (const g of groups) {
@@ -230,6 +260,7 @@ function plan(groups) {
     est.set(g.key, ms);
   }
   lastGroups = new Map(groups.map(g => [g.key, g.bases || []]));
+  if (CW.pull) return;
   const next = new Map();
   if (CW.shuffle && CW.fixed) {   // (tests: spread in key order, so every worker runs some, and never moved while the groups stay the same)
     groups.map(g => g.key).sort().forEach((k, i) => next.set(k, (i + CW.shuffle) % CW.n));
@@ -272,6 +303,10 @@ function setup(o) {
   if (o.n > 1 && off.length) throw new Error("cluster workers need every running system converted (js/ctick.js SYSTEMS); not yet: " + off.join(", "));
   if (o.n > 1 && !K.on) throw new Error("cluster workers need the cluster tick on (BF.ctick.on)");
   CW.n = o.n; CW.me = o.me; CW.link = o.link; CW.active = o.n > 1;
+  // o.claims (a SharedArrayBuffer of two Int32, the same for every worker: makeShared): the workers pull groups (the cluster order)
+  CW.pull = !!(CW.active && o.claims && K.order === "cluster" && !CW.shuffle);
+  claims = o.claims ? new Int32Array(o.claims) : null;
+  ran = new Set(); queue = []; byGroup = new Map();
   CW.owners = new Map(); CW.solo = false;
   shadows = new Map(); recShadows = new Map(); known = new Set(BF.mobs.list); journal = new Map(); regNew = []; groupMs = new Map(); lastGroups = new Map(); meetings = 0; warned = 0;
   for (const k in T) T[k] = 0;
@@ -298,8 +333,8 @@ function stop(why) {
 const f2 = v => (Math.round(v * 100) / 100).toFixed(2);
 function stats() {
   const n = Math.max(1, T.meetings), per = new Array(CW.n).fill(0), groups = new Array(CW.n).fill(0);
-  for (const g of C().groups()) { const w = CW.owners.has(g.key) ? CW.owners.get(g.key) : 0; groups[w]++; per[w] += groupMs.get(g.key) || 0; }
-  return { active: CW.active, n: CW.n, me: CW.me, solo: !!CW.solo, meetings: T.meetings, groups, ms: per.map(v => v / C().MEET),
+  for (const g of C().groups()) { const w = CW.pull ? ranBy.get(g.key) || 0 : CW.owners.has(g.key) ? CW.owners.get(g.key) : 0; groups[w]++; per[w] += groupMs.get(g.key) || 0; }
+  return { active: CW.active, n: CW.n, me: CW.me, solo: !!CW.solo, pull: CW.pull, meetings: T.meetings, groups, ms: per.map(v => v / C().MEET),
     perMeeting: { run: T.run / n, collect: T.collect / n, exchange: T.exchange / n, adopt: T.adopt / n, snap: T.snap / n }, kbPerMeeting: T.bytes / n / 1024 };
 }
 // The F3 line: "Cluster workers 4: groups 2/3/2/2, ms a tick 1.20/1.10/0.90/1.30, swap 3.10 ms a meeting"
@@ -307,7 +342,7 @@ function text(s) {
   s = s || stats();
   if (!s.active) return "Cluster workers 1";
   const pm = s.perMeeting;
-  return "Cluster workers " + s.n + (s.solo ? " (one runs all)" : "") + ": groups " + s.groups.join("/") + ", ms a tick " + s.ms.map(f2).join("/") +
+  return "Cluster workers " + s.n + (s.pull ? " (pulling)" : s.solo ? " (one runs all)" : "") + ": groups " + s.groups.join("/") + ", ms a tick " + s.ms.map(f2).join("/") +
     ", swap " + f2(pm.collect + pm.exchange + pm.adopt + pm.snap) + " ms a meeting";
 }
 function hourly() {
@@ -325,6 +360,8 @@ function hourly() {
   hourT = Object.assign({}, T);
 }
 
-Object.assign(CW, { setup, stop, owns, sync, met, stats, text });
+// The shared memory every worker attaches to: js/rworkers.js's mailboxes and barrier, and the claim counters
+function makeShared(n, bytes) { return Object.assign(RW().makeShared(n, bytes || 128 << 20), { claims: new SharedArrayBuffer(8) }); }
+Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, makeShared, pull: false });
 BF.cworkers = CW;
 })();
