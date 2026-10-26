@@ -55,7 +55,7 @@ Clouds drift slowly east, about a block a second near the equator and hardly at 
 
 ## Fast-forward
 
-The right arrow key makes the whole world run faster; the left arrow slows it again. The speeds are 1x, 3x, 5x, 10x, 100x and 1000x, and one step further down from 1x is **0x**, which freezes everything: mobs, sky, weather, crops, water and furnaces. You yourself always move at normal speed, so you can look around while time races or stops. An indicator shows the current speed, and the real speed when your computer cannot keep up.
+The right arrow key makes the whole world run faster; the left arrow slows it again. The speeds are 1x, 3x, 5x, 10x, 100x and 1000x, and one step further down from 1x is **0x**, which freezes everything: mobs, sky, weather, crops, water and furnaces. `/time set` and `/weather` still work while frozen: the sky and weather change at once and then stay put. You yourself always move at normal speed, so you can look around while time races or stops. An indicator shows the current speed, and the real speed when your computer cannot keep up.
 
 At 10x and faster, blocks changing more than a chunk away from you (villagers opening doors, planting, felling trees) are redrawn at most a few times a second rather than every frame, which leaves more of each frame to the simulation. Blocks you break or place yourself still show at once, and everything catches up as soon as you slow below 10x.
 
