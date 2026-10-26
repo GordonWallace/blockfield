@@ -136,8 +136,9 @@ async function run(b, url, mode) {
     }
     h = await query('entity', { id: horseId });
     check(followed && (thrown || h.horse.tamed), tag('the horse carries the player (the simulation drives it) and throws them or is tamed'), { thrown, tamed: h.horse.tamed, rodeFor });
-    // ridden until it is tamed
-    for (let i = 0; i < 60 && !h.horse.tamed; i++) {
+    // ridden until it is tamed: each throw adds 5 to its temper and a buck tames it with temper% odds, so 20 throws make it certain; at a
+    // remount and a buck (1.5 to 3.5 s) a throw, that is up to ~100 s (60 s left a run at temper 70 with no luck, js/horses.js drive)
+    for (let i = 0; i < 150 && !h.horse.tamed; i++) {
       if (!(await riding())) await req('player.mount', null, { id: horseId });
       await pg.waitForTimeout(1000);
       h = await query('entity', { id: horseId });
