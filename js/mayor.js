@@ -16,12 +16,16 @@
 // unreachable builders, the spend cap; ERROR failed reviews. Village log kind "mayor": orders delivered and each review's summary.
 // The reference for all of this (wakes, prompt, briefing, tools, records): docs/MAYOR.md.
 // API: BF.mayor = { state(key?) -> records, mob(key?), busy(), wake(reason), brief(key?) -> briefing text, runTool(name, input, key?) -> text,
-//                   measure(metric, structure?, key?), serialize(), deserialize(o), WAKES }
+//                   measure(metric, structure?, key?), serialize(), deserialize(o), WAKES,
+//                   metrics(key), appoint(key), tick(), ready() (for tools/mayorbench) }
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
 
 const off = /[?&](mayor|claude)=0\b/.test(location.search);
+// For tools/mayorbench: ?mayorauto=0 appoints no mayor by itself (the bench calls appoint), ?mayortick=0 stops the 1 s timer (the bench calls tick
+// between its own sim steps, so the mayor keeps up with a world run faster than real time).
+const auto = !/[?&]mayorauto=0\b/.test(location.search), timer = !/[?&]mayortick=0\b/.test(location.search);
 const NAMES = ["Odessa Thorn", "Bram Whitlow", "Marigold Ashby", "Tobias Fenn", "Ione Callow", "Silas Brook", "Wren Hallet", "Agatha Pell"];
 const TEMPERS = ["careful: you prefer to secure food and shelter before anything grand", "ambitious: you like to see the village grow and try new things",
   "thrifty: you dislike waste and prefer what the village can supply easily", "warm-hearted: you put the villagers' comfort and happiness first"];
@@ -68,7 +72,7 @@ if (!off && typeof fetch === "function") {
 
 // ---------------------------------------------------------------- the village and its people
 const loaded = R => (R.members || []).some(m => m.type === "villager" && !m.dead && !m.removed && m.position);
-const villagers = R => (R.members || []).filter(m => m.type === "villager" && !m.dead && !m.removed && m.position);
+const villagers = R => (R.members || []).filter(m => m.type === "villager" && !m.mayor && !m.dead && !m.removed && m.position);
 const builders = R => villagers(R).filter(m => m.profession === "builder" && !m.child);
 const bySlot = (R, idx) => builders(R).find(m => m.slot && String(m.slot.idx) === String(idx)) || null;
 const villageName = R => (BF.signs && BF.signs.villageName && BF.signs.villageName(R.key)) || "the village";
@@ -442,7 +446,7 @@ function due(S) {
 function tick() {
   if (!status || !status.configured || !BF.mobs || !BF.world || !B() || !B().assess) return;
   hookBuilders();
-  if (!picked) { const R = pickVillage(); if (!R) return; picked = R.key; if (!mayors.has(R.key)) create(R); }
+  if (!picked) { const R = auto ? pickVillage() : null; if (!R) return; picked = R.key; if (!mayors.has(R.key)) create(R); }
   const S = mayors.get(picked), R = BF.mobs.villages.get(picked);
   if (!S || !R || !loaded(R)) return;
   const m = spawn(S, R);
@@ -452,7 +456,7 @@ function tick() {
   deliver(S, R, m);
   if (due(S)) review(S, R, m);
 }
-setInterval(() => { try { tick(); } catch (e) { console.error(e); } }, 1000);
+if (timer) setInterval(() => { try { tick(); } catch (e) { console.error(e); } }, 1000);
 
 // ---------------------------------------------------------------- save
 function serialize() {
@@ -476,6 +480,20 @@ BF.mayor = {
   brief(key) { const S = pick(key), R = S && BF.mobs.villages.get(S.key); return S && R ? brief(S, R) : ""; },
   runTool(name, input, key) { const S = pick(key), R = S && BF.mobs.villages.get(S.key); return S && R && TOOLS[name] ? TOOLS[name](S, R, input || {}, mobs.get(S.key)) : "no mayor"; },
   measure(metric, structure, key) { const S = pick(key), R = S && BF.mobs.villages.get(S.key); return R ? measure(metric, structure, R) : null; },
+  // tools/mayorbench: the same numbers for any loaded village, mayor or not; appoint a mayor for a village; run one tick by hand
+  metrics(key) {
+    const R = BF.mobs && BF.mobs.villages.get(key);
+    if (!R) return null;
+    const o = {};
+    for (const k of ["population", "free_beds", "homeless", "starving", "food_days", "happiness", "unemployed", "births_week", "deaths_week"]) o[k] = measure(k, null, R);
+    o.built = B().builtOf(R).filter(e => e.state === "done").length;
+    o.byType = {}; for (const e of B().builtOf(R)) if (e.state === "done") o.byType[e.type] = (o.byType[e.type] || 0) + 1;
+    o.deaths = (R.deadInfo || []).length;
+    return o;
+  },
+  appoint(key) { const R = BF.mobs && BF.mobs.villages.get(key); if (!R) return false; picked = key; if (!mayors.has(key)) create(R); return true; },
+  tick() { try { tick(); } catch (e) { console.error(e); } },
+  ready: () => !!(status && status.configured),
   serialize, deserialize,
 };
 })();

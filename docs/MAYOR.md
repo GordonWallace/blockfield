@@ -282,6 +282,22 @@ All saved with the world (`js/save.js` key `mayors`), one record per village.
   review, are read back at a tenth of the input price. The debug screen shows how many tokens came from the cache.
 - **Cost per review:** expected to be under half a cent on Haiku. The real figure for every review is in the game log and on the debug screen.
 
+## Benchmark: a village with a mayor against the same village without
+
+`tools/mayorbench.js` runs the same village twice for the same number of game days, once with a mayor and once without, and compares the numbers day by day. Run it from the repo on a machine with the API key:
+
+```
+NODE_PATH=$(npm root -g) node tools/mayorbench.js --seeds 3,7,11 --days 10
+```
+
+- Options: `--seeds` (worlds, default 3,7,11), `--days` (game days per run, default 10), `--dt` (step, default 0.1 game s), `--out` (report path), `--mock` (stand-in API, no key or cost), `--headed`.
+- The village is the nearest to the spawn with 6+ buildings and a builder. Math.random is seeded from the seed, and drawing is off. The world is stepped by hand, and it waits while a review is out, so the model's thinking time costs the village nothing.
+- Measured at the start and every game day (`BF.mayor.metrics`): population, free beds, homeless, starving, food days, happiness, unemployed, structures built (and by type), deaths. The mayor's reviews, spend, final strategy, lessons, goals and the village log of builds and mayor lines go in the report too.
+- The report is Markdown (default `tools/mayorbench-<date>.md`) with the raw numbers beside it (`.json`).
+- Cost: only the mayor runs spend, about $0.05-0.15 per 10-day run on Haiku. The hourly cap applies; a refused review is retried later.
+- Caveats: the two runs of a seed start close but not identical, because chunks and villagers load asynchronously, so the report shows both starts. One seed is one anecdote; use several. 10 game days is short for farms and children to pay off.
+- The page hooks: `?mayorauto=0` (no automatic appointment), `?mayortick=0` (no timer; the bench calls `BF.mayor.tick()`), `BF.mayor.appoint(key)`, `BF.mayor.metrics(key)`.
+
 ## Where to watch it
 
 - **Debug screen, API calls panel:** each review appears as "Mayor review", with the briefing, every tool call and result, the reply, tokens,
