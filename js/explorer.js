@@ -505,8 +505,11 @@ function ai(m, dt, out) {
   if (act && X.fin[act.it.name] !== undefined) { delete X.fin[act.it.name]; log("resume", m, { map: act.it.name, coverage: +coverage(act.d).toFixed(3) }); vlog(m, "went back to " + mapText(act) + " (" + Math.floor(coverage(act.d) * 100) + "% filled)"); }
   if (!act && blankSlots(m).length) {
     X.cd -= dt;
-    if (X.cd <= 0 && useBlank(m)) act = carried(m).find(c => !c.done && !c.shelved);
-    else if (X.cd <= 0) X.cd = 30;
+    // (X.cd is shopAI's countdown too, which takes it down again in the same update and restarts it at 0: in full detail this one
+    // reaches 0 by rounding; in coarse mode, spec r15-64, a whole update short of 0 counts as due)
+    const due = X.cd <= 0 || (BF.mobs.coarseNow() && X.cd <= dt);
+    if (due && useBlank(m)) act = carried(m).find(c => !c.done && !c.shelved);
+    else if (due) X.cd = 30;
   }
   if (act) return exploreAI(m, act, dt, out);
   return shopAI(m, dt, out);

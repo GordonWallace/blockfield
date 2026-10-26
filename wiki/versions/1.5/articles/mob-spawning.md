@@ -47,7 +47,7 @@ Monsters spawn in any loaded chunk, not only near you or near villages. Each loa
 
 ### Game options
 
-Each world has its own **game options**, which say which of the four monsters spawn. A new world has zombies and skeletons on, and creepers and spiders off; worlds saved before the options existed take the same settings. You can change them in three places:
+Each world has its own **game options**, which say which of the four monsters spawn, and how far villages are simulated (*Far villages: Full detail* or *Coarse (faster)*, see [[page:village-loading]]). A new world has zombies and skeletons on, creepers and spiders off, and far villages at full detail; worlds saved before the options existed take the same settings. You can change them in three places:
 
 - **Create New World**: the *Game options* buttons on the form.
 - **The world list** on the title screen: *Options* on a world's row, then *Save*. The world uses them the next time it opens.
