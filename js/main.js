@@ -23,22 +23,58 @@ function resize() {
 addEventListener("resize", resize);
 resize();
 
+// The browser can take the 3D view's WebGL context away (a graphics driver reset, too little graphics memory: a real GPU under load) and
+// give it back; three.js then uploads every mesh again. The distant terrain (js/lod.js rings, js/globe.js tiles) and the far chunk meshes
+// (js/world.js purge) free their arrays once uploaded, so they are built again instead: uploading them would throw "Cannot read properties
+// of null (reading 'BYTES_PER_ELEMENT')" on every frame and leave the screen black. (three.js's own listeners ran first: it was created first.)
+const glog = (level, text) => { if (BF.glog) BF.glog.log(level, "graphics", text); };
+const held = () => { const r = renderer.info; return r.memory.geometries + " geometries, " + r.memory.textures + " textures"; };
+canvas.addEventListener("webglcontextlost", () => glog("ERROR", "The browser took away the 3D view's graphics context (WebGL context lost), so the screen is black until it comes back; it held " + held()));
+canvas.addEventListener("webglcontextrestored", () => {
+  const far = BF.world.contextRestored ? BF.world.contextRestored() : 0;
+  if (BF.lod && BF.lod.active) BF.lod.reset(scene);
+  if (BF.globe && BF.globe.active) BF.globe.reset(scene);
+  glog("INFO", "The graphics context came back (WebGL context restored): distant terrain and " + far + " far chunk meshes are being built again");
+});
+
 // The planet's rivers and lakes are worked out for the whole planet before its world starts (js/planetrivers.js, spec r14-10): several
 // seconds, once per seed per session. prepareWorld(seed) runs that in slices behind a loading screen with progress and resolves
 // when it's done; newWorld then finds the network ready. newWorld on its own still works (it solves the network in one go, as tests do).
+// BF.loading (bug-093): one loading screen, held by the start screen from Create or Play until the world is playing (show(text) ...
+// hide()), so the start screen never shows between the river step and play (in a worker or on the world server the world starts there
+// after the page's river step). prepareWorld's progress shows on the same screen.
+const LOAD_CSS = "position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;" +
+  "background:#0e1310;color:var(--ink);font:13px var(--mono)";
+let loadEl = null, loadHeld = null;
+function loadScreen(text, bar) {
+  if (!loadEl) {
+    loadEl = document.createElement("div");
+    loadEl.id = "bf-loading";
+    loadEl.style.cssText = LOAD_CSS;
+    loadEl.innerHTML = '<div style="font:18px var(--display);color:var(--accent)">Blockfield</div><div class="t"></div>' +
+      '<div class="bw" style="width:260px;height:8px;border:1px solid var(--panel-edge);border-radius:2px"><div class="b" style="height:100%;width:0;background:var(--accent)"></div></div>';
+    document.body.appendChild(loadEl);
+  }
+  loadEl.querySelector(".t").textContent = text;
+  loadEl.querySelector(".bw").style.visibility = bar ? "" : "hidden";
+  return loadEl;
+}
+function loadDone() {
+  if (loadHeld) { loadScreen(loadHeld, false); return; }
+  if (loadEl) { loadEl.remove(); loadEl = null; }
+}
+BF.loading = {
+  show(text) { loadHeld = text || "Loading the world"; if (!BF.preparing) loadScreen(loadHeld, false); },
+  hide() { loadHeld = null; if (!BF.preparing) loadDone(); },
+};
 BF.prepareWorld = function (seed) {
   BF.state.gen = 4;
   BF.worldgen.init(BF.makeNoise(seed >>> 0), { villages: BF.state.villages || 10 });
   if (BF.worldgen.riversReady()) return Promise.resolve();
-  const el = document.createElement("div");
-  el.id = "bf-loading";
-  el.style.cssText = "position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;" +
-    "background:#0e1310;color:var(--ink);font:13px var(--mono)";
-  el.innerHTML = '<div style="font:18px var(--display);color:var(--accent)">Blockfield</div><div class="t">Working out the rivers and lakes</div>' +
-    '<div style="width:260px;height:8px;border:1px solid var(--panel-edge);border-radius:2px"><div class="b" style="height:100%;width:0;background:var(--accent)"></div></div>';
-  document.body.appendChild(el);
+  const el = loadScreen("Working out the rivers and lakes", true);
   BF.preparing = true;   // the frame loop waits (the old world is gone: worldgen is the planet's now)
   const bar = el.querySelector(".b"), t = el.querySelector(".t");
+  bar.style.width = "0";
   const show = f => { bar.style.width = Math.round(f * 100) + "%"; t.textContent = "Working out the rivers and lakes · " + Math.round(f * 100) + "%"; };
   // the terrain at the network's nodes (the slow first part) in a few workers at once where the page may start them (served over
   // http, as run.sh does; a page opened as a file can't), else here in slices with the rest
@@ -50,7 +86,7 @@ BF.prepareWorld = function (seed) {
       do { f = BF.worldgen.solveRivers(first); first = null; } while (f < 1 && performance.now() - t0 < 60);
       show(pre ? 0.4 + 0.6 * f : f);
       if (f < 1) setTimeout(step, 0);
-      else { el.remove(); BF.preparing = false; resolve(); }
+      else { BF.preparing = false; loadDone(); resolve(); }   // (a held screen stays, without its bar, until the world plays)
     };
     setTimeout(step, 30);
   }));

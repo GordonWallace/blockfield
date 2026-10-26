@@ -8,6 +8,9 @@
 //   player    the player's saved state and inventory
 //   chests, furnaces, signs   block-entity contents
 //   drops, clock, weather, wildlife (wild mobs stored with unloaded chunks), boats, horses, bees, farmland
+//   rand, ids  the random streams' counters and the entity id counter
+//   villagers  the save's village state beyond the mobs (structures, farm beds, village ages, ovens, pens...)
+// The logs and statistics (village logs, economy tallies, happiness, day timelines) are left out: nothing in the simulation reads them.
 // Numbers that aren't whole are rounded to 1/1024 before hashing; render-only fields (meshes, animation phases, prevPos) are skipped.
 // Mobs have no stable ids yet (r15-13): a reference to a mob is its id when it has one, else its type and name (villagers have names).
 // Hashing only reads: it never draws random numbers or changes the world.
@@ -38,6 +41,7 @@ const num = v => Number.isInteger(v) ? String(v) : Number.isFinite(v) ? "f" + Ma
 // worked out by whoever asks first in a tick, so its time stamp depends on the order mobs think in, spec r15-33).
 const SKIP = new Set(["def", "root", "model", "meshes", "material", "mesh", "geo", "geometry", "walkPhase", "walkAmt", "headYaw", "headPitch",
   "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg", "_ri", "_rs", "_res",
+  "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN",   // caches on mobs (r15-61: js/ids.js links, js/regiontick.js ids)
   "swingT"]);   // ai.swingT: the arm swing, drawn and heard only, set by the professions' unseeded "visual" rolls (r15-20 report)
 // Fields named _snd...: mobs' sound timers (js/audio.js), heard only.
 const skipKey = k => SKIP.has(k) || k.startsWith("_snd");
@@ -146,6 +150,13 @@ const PARTS = {
   horses: horsesText,
   bees: () => text(call(BF.bees, "serialize")),
   farmland: () => text(call(BF.farmland, "serialize")),
+  // counters that decide what comes next (bug-083): the random streams' tick and creation counter (js/rand.js) and the entity id counter
+  // (js/ids.js). Two worlds that differ only here look the same now and play differently later.
+  rand: () => text(call(BF.rand, "save")),
+  ids: () => text(call(BF.ids, "serialize")),
+  // what the save keeps for villages beyond their mobs (js/mobs.js exportVillagers): builders' structures and progress, farm beds, village
+  // ages, ovens, pens and coops, newborns, the dead, caravans... (also bug-083: none of it was in another part)
+  villagers: () => text(call(BF.mobs, "exportVillagers")),
 };
 
 // A part's canonical text (what its hash is taken of), to find where two worlds differ.

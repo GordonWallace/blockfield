@@ -136,8 +136,9 @@ async function run(b, url, mode) {
     }
     h = await query('entity', { id: horseId });
     check(followed && (thrown || h.horse.tamed), tag('the horse carries the player (the simulation drives it) and throws them or is tamed'), { thrown, tamed: h.horse.tamed, rodeFor });
-    // ridden until it is tamed
-    for (let i = 0; i < 60 && !h.horse.tamed; i++) {
+    // ridden until it is tamed: each throw adds 5 to its temper and a buck tames it with temper% odds, so 20 throws make it certain; at a
+    // remount and a buck (1.5 to 3.5 s) a throw, that is up to ~100 s (60 s left a run at temper 70 with no luck, js/horses.js drive)
+    for (let i = 0; i < 150 && !h.horse.tamed; i++) {
       if (!(await riding())) await req('player.mount', null, { id: horseId });
       await pg.waitForTimeout(1000);
       h = await query('entity', { id: horseId });
@@ -152,10 +153,12 @@ async function run(b, url, mode) {
     h = await query('entity', { id: horseId });
     check(h.horse.saddle, tag('saddled by a request with the saddle held'), { r: sr, horse: h.horse });
     // ride it: the page steers its copy, the simulation's horse follows
-    await req('player.mount', null, { id: horseId });
+    // (a CI flake had riding() null here: on a failure, the mount's answer and both sides' state say why)
+    const asked = await req('player.mount', null, { id: horseId });
     await until(() => !!BF.player.vehicle, null, 5000);
     const r2 = await riding();
-    check(r2 && r2.kind === 'horse' && (mode === 'page' || r2.local), tag('on the saddled horse (off the page: the page rides its copy)'), r2);
+    check(r2 && r2.kind === 'horse' && (mode === 'page' || r2.local), tag('on the saddled horse (off the page: the page rides its copy)'),
+      r2 ? r2 : { r2, asked, horse: await query('entity', { id: horseId }), me: await me(), vehicle: await pg.evaluate(() => !!BF.player.vehicle) });
     const hud = await pg.evaluate(() => { const v = BF.player.vehicle; return v && v.ctl.hud ? v.ctl.hud(v) : null; });
     check(hud && hud.hp > 0 && hud.max >= hud.hp, tag('the HUD has the horse\'s health'), hud);
     const b0 = await query('entity', { id: horseId });
@@ -188,7 +191,7 @@ async function run(b, url, mode) {
     await pg.evaluate(c => { const P = BF.player, p = P.position; const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz) || 1; P.teleport(p.x + dx / d * 6, p.y + 1, p.z + dz / d * 6); }, c0);
     await pg.waitForTimeout(5000); await settle();
     const c1 = await query('entity', { id: horseId }), p4 = await me();
-    check(dist(c1, p4) < dist(c0, p4) - 1.5, tag('the led horse follows the player'), { before: +dist(c0, p4).toFixed(2), after: +dist(c1, p4).toFixed(2) });
+    check(dist(c1, p4) < dist(c0, p4) - 1.5, tag('the led horse follows the player'), { before: +dist(c0, p4).toFixed(2), after: +dist(c1, p4).toFixed(2), c0, c1, p4 });
   }
   const errs = await pg.evaluate(() => (BF.client.world.log || []).filter(e => e.l === "ERROR").map(e => e.x).slice(0, 5));
   check(!errs.length, tag('no ERROR in the game log'), errs);

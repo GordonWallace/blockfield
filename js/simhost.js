@@ -218,7 +218,7 @@ H.eval = function (src, arg) {
 H.budget = function () {
   if (!H.worker || !BF.active || !BF.proto.worker.w) return;
   const o = BF.active.opts();
-  BF.proto.worker.w.postMessage({ budget: { on: o.on, budget: o.budget } });
+  BF.proto.worker.w.postMessage({ budget: { on: o.on, budget: o.budget }, coarse: BF.gameOpts ? BF.gameOpts.overridden() : null });   // (and ?coarse=, spec r15-64)
 };
 // to the world server, outside the protocol (the debug feed's page part, js/debugfeed.js)
 H.post = m => { if (H.server && BF.proto.worker.w) BF.proto.worker.w.postMessage(m); };
@@ -281,12 +281,40 @@ H.demo = (seed, opts) => H.world("demo", { seed, opts: opts || {} });
 // ---- each frame (js/main.js)
 let sentPlayer = "", sentSpeed = null, sentPause = null, lastClock = null, moveSeen = 0;
 // The page's clock for drawing: the ticks a frame would run, counted but not run (they run in the worker). Returns how many.
+// It runs at the worker's pace, not the speed asked for: at 1000x the worker may reach only 15x, and the sky, clouds, water and
+// entities drawn by this clock would otherwise race at 1000x between the clock messages and snap back at each one.
 H.ticks = function (raw) {
-  const W = BF.warp, plan = W.plan(raw);
+  const W = BF.warp, plan = W.plan(raw * paceFactor());
   W.advance(plan.n * plan.h);
   return plan.n;
 };
-H.achieved = () => { const c = BF.client && BF.client.world.clock; return c ? c.achieved : undefined; };
+H.achieved = () => { if (pace != null) return pace; const c = BF.client && BF.client.world.clock; return c ? c.achieved : undefined; };
+// The worker's pace: game seconds it ran per real second, measured from its clock messages (each carries its tick count) at least
+// PACE_MS apart and smoothed; until the first measure after a speed change, the achieved speed the latest clock message reports.
+const PACE_MS = 500;
+let pace = null, paceRef = null, paceSpeed = null, paceSeen = null, paceTold = false;
+function paceFactor() {
+  const W = BF.warp, sp = W.speed, c = BF.client && BF.client.world.clock;
+  if (sp !== paceSpeed) { paceSpeed = sp; pace = null; paceRef = null; paceTold = false; }
+  if (!c || !(sp > 0) || BF.state.paused) { paceRef = null; return 1; }
+  if (c !== paceSeen) {
+    paceSeen = c;
+    const t = performance.now();
+    if (c.speed !== sp || c.frozen) paceRef = null;
+    else if (!paceRef || c.tick < paceRef.tick) paceRef = { tick: c.tick, t };
+    else if (t - paceRef.t >= PACE_MS) {
+      const r = (c.tick - paceRef.tick) * W.TICK / ((t - paceRef.t) / 1000);
+      pace = pace == null ? r : pace + (r - pace) * 0.3;
+      paceRef = { tick: c.tick, t };
+      if (!paceTold && sp > 1) {
+        paceTold = true;
+        if (pace < sp * 0.9) glog("INFO", "Fast-forward " + sp + "x: the simulation keeps up about " + pace.toFixed(1) + "x here; the sky, water and mobs are drawn at that pace");
+      }
+    }
+  }
+  const r = pace != null ? pace : c.speed === sp && c.achieved > 0 ? c.achieved : sp;
+  return r >= sp * 0.95 ? 1 : r / sp;   // (within 5%: the speed asked for, so 1x doesn't wobble with the measure)
+}
 // The player's body and the speed to the worker, when they changed
 H.frame = function () {
   if (!H.worker || H.crashed) return;

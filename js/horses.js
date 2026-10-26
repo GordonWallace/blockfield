@@ -561,6 +561,7 @@ function playerUse(m, sel, sneaking) {
 function tieToPost(x, y, z) {
   let n = 0;
   for (const r of recs.values()) if (r.mob && live(r.mob) && r.lead && r.lead.kind === "player") { leash(r.mob, { x, y, z }); n++; }
+  if (n && BF.glog) BF.glog.log("INFO", "horses", "The player tied " + n + " horse" + (n === 1 ? "" : "s") + " to the fence post at " + x + ", " + y + ", " + z, { at: [x, y, z] });
   return n > 0;
 }
 

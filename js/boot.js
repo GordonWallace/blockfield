@@ -142,6 +142,7 @@ function headless(o) {
   if (!BF.page) initSim();   // in a page (its frame loop held, as test/headless.js does) js/main.js has set the modules up already
   const t0 = performance.now();
   BF.world.setViewDist(s.viewDist > 0 ? s.viewDist | 0 : 8);
+  if (BF.gameOpts && s.coarse != null) BF.gameOpts.override(s.coarse === "on" || s.coarse === true ? true : s.coarse === "off" || s.coarse === false ? false : null);   // --coarse (js/gameopts.js)
   if (o.save) BF.save.restore(o.save, o.save.meta || null);
   else BF.newWorld(o.seed != null ? +o.seed : 1337, { villages: s.villages, biomeScale: s.biomeScale, monsters: s.monsters, gameMode: s.gameMode });
   if (s.extra > 0) BF.active.set({ on: true, fixed: s.extra | 0, reach: 4000 });   // the nearest n villages simulated besides the minimum, up to 4000 blocks away (js/active.js)
