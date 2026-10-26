@@ -26,7 +26,7 @@ resize();
 // The planet's rivers and lakes are worked out for the whole planet before its world starts (js/planetrivers.js, spec r14-10): several
 // seconds, once per seed per session. prepareWorld(seed) runs that in slices behind a loading screen with progress and resolves
 // when it's done; newWorld then finds the network ready. newWorld on its own still works (it solves the network in one go, as tests do).
-// BF.loading (bug-092): one loading screen, held by the start screen from Create or Play until the world is playing (show(text) ...
+// BF.loading (bug-093): one loading screen, held by the start screen from Create or Play until the world is playing (show(text) ...
 // hide()), so the start screen never shows between the river step and play (in a worker or on the world server the world starts there
 // after the page's river step). prepareWorld's progress shows on the same screen.
 const LOAD_CSS = "position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;" +

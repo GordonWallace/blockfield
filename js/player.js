@@ -576,7 +576,7 @@ function copyBrowser(btn) {
     return refreshWorlds().then(() => startNote("Browser saves: " + bits.join(", ") + ". They are still in this browser too."));
   }, e => startNote("Couldn't copy the browser saves: " + (e && e.message || e))).then(() => { btn.disabled = false; });
 }
-// The loading screen over the start screen from Create or Play until play starts (js/main.js BF.loading, bug-092): in a worker or on
+// The loading screen over the start screen from Create or Play until play starts (js/main.js BF.loading, bug-093): in a worker or on
 // the world server the world starts there after the page's river step, and the start screen showed again meanwhile.
 function loading(text) { if (BF.loading) { if (text) BF.loading.show(text); else BF.loading.hide(); } }
 function loaded(what, t0) {

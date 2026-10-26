@@ -1,5 +1,5 @@
 // @ci integration suite=ui timeout=600 hosts=worker,server
-// Creating or loading a world never shows the start screen again (bug-092): from the Create (or Play) button until play starts, a
+// Creating or loading a world never shows the start screen again (bug-093): from the Create (or Play) button until play starts, a
 // loading screen covers the start screen, also while the worker or the world server starts the world after the page's river step.
 // Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/cnf test/create-no-flash.js [--host page|worker|server]
 const lib = require('./lib');
