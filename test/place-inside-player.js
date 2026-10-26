@@ -74,7 +74,11 @@ module.exports = async (pg, out) => {
   });
   await click();
   const flush = await block(p4.X - 1, p4.gy, p4.Z);
-  check(flush === BF_COBBLE, "a block can still be placed right next to the player");
+  // for a failure: where the page and the simulation each have the player, what the page aimed at, and the requests refused so far
+  const why4 = flush === BF_COBBLE ? "" : " " + JSON.stringify({ flush, p4,
+    page: await pg.evaluate(() => { const p = BF.player.position, t = BF.player.target; return { at: [p.x, p.y, p.z].map(v => +v.toFixed(3)), target: t && [t.x, t.y, t.z, t.id, t.normal] }; }),
+    sim: await lib.sim(pg, () => { const p = BF.player.position, s = BF.req.stats(); return { at: [p.x, p.y, p.z].map(v => +v.toFixed(3)), refused: s.refused, byKind: s.byKind }; }) });
+  check(flush === BF_COBBLE, "a block can still be placed right next to the player" + why4);
   // 5. grazing: a player slightly inside a block's side (0.005 in z) but well along it in x keeps walking along it
   const graze = await pg.evaluate(() => { const p = BF.player.position; return { X: Math.floor(p.x), Z: Math.floor(p.z), gy: Math.floor(p.y) }; });
   await lib.sim(pg, ({ X, Z, gy }) => {

@@ -37,6 +37,12 @@ While the thinking is split, a worker that crashes stops the simulation: the gam
 
 Saving is unchanged: the thread that leads holds the whole world between ticks, so it saves as it always did.
 
+## Clusters (in progress)
+
+Region workers never pay off much, because every worker has to keep its whole copy of the world in step every tick. Version 1.5 is moving to **clusters** instead: each village and the land round it (about half the way to the next village) runs on its own, and clusters only pass things to each other once a game second, at a *meeting*. Something that crosses from one cluster to another, like a request aimed at a mob over the border, waits for the next meeting, at most one game second. That happens on one worker too, so the world plays exactly the same with any number of workers.
+
+The groundwork is in the game but off: with it off, the world plays exactly as before. The game's systems (mobs, village life, animals, caravans, blocks) are being moved over one by one. When the clusters are turned on, the [[page:game-log]] notes it, and an ERROR names any cluster whose tick fails.
+
 ## What it costs
 
 Each worker holds a full copy of the world, so each one takes about as much memory as the simulation does on its own. On a machine with little memory, `--workers 1` or a small number is the better choice.

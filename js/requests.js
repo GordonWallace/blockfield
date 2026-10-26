@@ -17,7 +17,11 @@
 //   beginTick(), apply(), blocks(fn), deliver(), endTick(), times() -> {ticks, think, apply, blocks, deliver} (ms), resetTimes(), phase, direct, strict, stats(), resetStats(), text(), queued(), reset(), order(a, b),
 //   player(kind, target, data) -> req (applied now, req.result; through the protocol when R.via is set), applyPlayer(kind, target, data), via, record() -> list / record(false) -> list, replay(list), replayFlush(),
 //   recording, replaying, inPlayer, route, regionOrder, single, applying (region inboxes, spec r15-33),
-//   adopt(o), tap, onCbs, dIdx, dPart, seq (several workers, spec r15-39: js/rworkers.js) }
+//   adopt(o), tap, onCbs, dIdx, dPart, seq (several workers, spec r15-39: js/rworkers.js),
+//   ctx(), useCtx(c), newCtx(list?), fileIn(c, req), away, think() (clusters, spec r15-39b: js/ctick.js) }
+// Clusters (js/ctick.js): each cluster has its own queue, inboxes, results waiting and sequence counter (a context; useCtx switches),
+// so a cluster's apply and deliver handle only its own requests. R.away(req, region) -> true takes a request out of the filing:
+// one aimed at another cluster waits for the next meeting.
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -61,6 +65,7 @@ function make(kind, target, data, from) {
 function send(kind, target, data, from) {
   const req = make(kind, target, data, from);
   const k = R.route && kinds.has(kind) && !kinds.get(kind).global ? R.route(req) : -1;
+  if (R.away) { if (k >= 0) req.region = k; if (R.away(req, k)) return req; }   // (clusters, js/ctick.js: for another cluster, at the next meeting)
   file(req, k);
   if (R.tap) R.tap(req);   // (several workers, js/rworkers.js: the requests a worker's own mobs and callbacks send go to the others)
   return req;
@@ -68,6 +73,15 @@ function send(kind, target, data, from) {
 function file(req, k) {
   if (k >= 0) { req.region = k; let a = inbox.get(k); if (!a) inbox.set(k, (a = [])); a.push(req); }
   else queue.push(req);
+}
+// Contexts (clusters, js/ctick.js): {queue, inbox, done, seq}. ctx() is the one in use (its arrays, and the counter as it stands).
+const ctx = () => ({ queue, inbox, done, seq });
+function useCtx(c) { queue = c.queue; inbox = c.inbox; done = c.done; seq = c.seq; }
+const newCtx = list => ({ queue: list || [], inbox: new Map(), done: [], seq: 0 });
+// a request filed in context c's inboxes as send() would have (its region from route, kept on req.region)
+function fileIn(c, req) {
+  const k = req.region != null && req.region >= 0 ? req.region : -1;
+  if (k >= 0) { let a = c.inbox.get(k); if (!a) c.inbox.set(k, (a = [])); a.push(req); } else c.queue.push(req);
 }
 // A request another worker's mob sent this tick (spec r15-39): filed in the inbox it went to there. o: {kind, target, data, from, seq,
 // tick, region}. It has no callbacks here (they ran there).
@@ -345,6 +359,8 @@ const R = {
   send, adopt, on, apply, deliver,
   tap: null, onCbs: null, dIdx: -1, dPart: 0,   // (several workers, spec r15-39: js/rworkers.js)
   get seq() { return seq; }, set seq(n) { seq = n; },
+  ctx, useCtx, newCtx, fileIn, away: null, think() { phase = "think"; },   // (clusters, spec r15-39b: js/ctick.js)
+  pending() { const out = queue.slice(); for (const L of inbox.values()) for (const r of L) out.push(r); return out; },   // queued in this context
   beginTick, blocks, endTick, stats, resetStats, text, order, times, resetTimes,
   player, applyPlayer, record, replay, replayFlush, via: null,
   get recording() { return !!rec; },
