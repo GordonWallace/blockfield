@@ -35,6 +35,7 @@ const CAP = 600;                // bees out in the world at once
 const EMERGE = 60;              // seconds for a home's bees to come out
 const REST_IN = [15, 35];       // seconds a bee stays in after a trip before it goes out again
 const DAWN = 0.01, DUSK = 0.5 - 1 / 48;   // out between these times of day (sunset is 0.5; a game hour is 1/24 day)
+const HOME_MAX = 30;   // s on its way home before it gets in anyway
 const SPEED = 2.4, HOME_SPEED = 3.4, STING_SPEED = 5.2, FOLLOW_SPEED = 3.6;
 const ANGRY = 20;               // seconds bees stay angry
 const FOLLOW_R = 8, FOLLOW_MAX = 10, MOVE_IN_R = 2.5, LURE_NEAR_HOME = 5;
@@ -153,7 +154,7 @@ function doorOf(h) {
 }
 function spawnBee(h, at, mode) {
   const b = { id: ++seq, home: h, x: at.x, y: at.y, z: at.z, vx: 0, vy: 0, vz: 0, mode: mode || "start", t: 0, nectar: false, land: null, tgt: null,
-    phase: 0, yaw: 0, follow: null, angry: 0, stung: false, stuck: 0, lastD: Infinity, trips: 0 };
+    phase: 0, yaw: 0, follow: null, angry: 0, stung: false, stuck: 0, lastD: Infinity, trips: 0, homeT: 0 };
   b.phase = rs(b).next() * 6.28; b.yaw = rs(b).next() * 6.28;
   bees.push(b); h.out++;
   return b;
@@ -222,7 +223,7 @@ function nextErrand(b) {
   if (!b.restedOut && q.next() < 0.45) { const s = landingSpot(b.x, b.y, b.z, 6, q); if (s) { b.restedOut = true; b.mode = "fly"; b.tgt = s; return; } }
   if (fl.length) { b.mode = "fly"; b.tgt = flowerSpot(q.pick(fl), q); return; }
   // no flowers within reach: a few rests near home, then home with nothing
-  if ((b.trips = (b.trips || 0) + 1) > 3) { b.mode = "home"; b.tgt = null; return; }
+  if ((b.trips = (b.trips || 0) + 1) > 3) { b.mode = "home"; b.tgt = null; b.homeT = 0; return; }
   const s = landingSpot(h.x, h.y, h.z, 10, q);
   b.mode = "fly"; b.tgt = s;
   if (!s) { b.mode = "home"; b.tgt = null; }
@@ -321,6 +322,7 @@ function stepBee(b, dt, lp, now) {
     const d0 = doorOf(h), d = flyTo(b, d0.x, d0.y, d0.z, b.hurry ? HOME_SPEED : SPEED, dt, Math.hypot(d0.x - b.x, d0.z - b.z) < 3);
     if (d < 0.3) { enter(b); return; }
     if (d > b.lastD - 0.01 * dt) { if ((b.stuck += dt) > 8) { enter(b); return; } } else { b.stuck = 0; b.lastD = d; }   // stuck behind something: it gets in anyway
+    if ((b.homeT = (b.homeT || 0) + dt) > HOME_MAX) enter(b);   // or working its way round something for too long (still gaining a little now and then)
     return;
   }
   if (b.mode === "land") {
@@ -392,7 +394,7 @@ function housekeeping() {
     if (!h) { if (dusk && b.angry <= now) removeBee(b); continue; }   // a bee whose home was broken vanishes at dusk
     if (!loaded.has(pk(h.x, h.y, h.z))) continue;
     const n = over.get(h) || 0;
-    if (n > 0 && b.mode !== "home" && !(b.angry > now)) { b.mode = "home"; b.follow = null; b.hurry = h.hurry; b.stuck = 0; b.lastD = Infinity; over.set(h, n - 1); }
+    if (n > 0 && b.mode !== "home" && !(b.angry > now)) { b.mode = "home"; b.follow = null; b.hurry = h.hurry; b.stuck = 0; b.lastD = Infinity; b.homeT = 0; over.set(h, n - 1); }
     else if (b.mode === "home") b.hurry = h.hurry;
   }
   cropGrid = new Map();
@@ -520,7 +522,7 @@ function toFrameOf(b, o) {
   if (q == null) return;
   b.vx = v.x; b.vz = v.z;
   if (Math.abs(b.vx) + Math.abs(b.vz) > 0.05) b.yaw = Math.atan2(b.vx, b.vz);
-  b.follow = null; b.mode = "home"; b.tgt = null; b.land = null; b.stuck = 0; b.lastD = Infinity;
+  b.follow = null; b.mode = "home"; b.tgt = null; b.land = null; b.stuck = 0; b.lastD = Infinity; b.homeT = 0;
 }
 // Bees out of home h (or the bees of a home just broken) go for the player for ANGRY seconds.
 function anger(list, h) {
