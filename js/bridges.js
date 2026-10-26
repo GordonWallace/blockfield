@@ -58,6 +58,7 @@ function record(x, z, rec) {
   if (arr.length && now - arr[arr.length - 1] < 0.0015) return;   // one trip is one crossing, not one per frame
   arr.push(+now.toFixed(4));
   if (arr.length > 80) arr.splice(0, arr.length - 80);
+  if (BF.rworkers) BF.rworkers.touch("cross", [rec.key, k]);   // (a villager crossing while it thinks: the other region workers count it too, js/rworkers.js)
 }
 // A villager in the water: a crossing at most every few seconds.
 function noteSwim(m) {
@@ -271,6 +272,11 @@ function importAll(o) {
   }
 }
 const reset = () => counts.clear();
+// Several workers (spec r15-39): a villager's crossings are counted on the worker that thinks for it; this sends each changed cell's count on
+// (bug-083: the state hash's villagers part showed the copies' counts drifting apart, and they decide where builders put bridges).
+if (BF.rworkers) BF.rworkers.channel("cross", { key: o => o, get: k => k,
+  state: k => { const cells = counts.get(k[0]), arr = cells && cells.get(k[1]); return arr ? arr.slice() : []; },
+  set: (k, arr) => { if (!k || !Array.isArray(arr)) return; let cells = counts.get(k[0]); if (!cells) counts.set(k[0], cells = new Map()); cells.set(k[1], arr.slice()); } });
 
 BF.bridges = { CELL, NEED, BUSY, MAXBUILT, WINDOW, noteSwim, record, count, heat, plan, weight, route, deck, exportAll, importAll, reset, _find: findSpan };
 })();
