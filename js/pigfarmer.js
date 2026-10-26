@@ -65,7 +65,10 @@ function stOf(m) {
 }
 const isPiglet = m => !!(m.pig && m.pig.growAt != null);
 const hungry = (m, t) => { const s = m.pig; return !s || s.fed == null || t - s.fed >= FEED_DAYS; };
-const willing = (m, t) => { const s = m.pig; return !!(s && live(m) && s.growAt == null && s.fed != null && t - s.fed < FEED_DAYS && t >= s.cd); };
+// A sty pig does not breed while its herd is over the limit (a wild pig that walked in after the pig farmer fed a pair): the piglet would take
+// the herd two over it. The pair stays fed and breeds once the pig farmer has culled back to the limit (within FEED_DAYS of the meal).
+const overLimit = m => { const p = m.sty; return !!(p && p.pigs && p.limit && p.pigs.length > p.limit); };
+const willing = (m, t) => { const s = m.pig; return !!(s && live(m) && s.growAt == null && s.fed != null && t - s.fed < FEED_DAYS && t >= s.cd) && !overLimit(m); };
 
 function syncLook(m) {
   const s = stOf(m), k = H().growK(s.growAt, now(), PIGLET_DAYS);

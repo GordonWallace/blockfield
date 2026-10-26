@@ -227,9 +227,17 @@ module.exports = async (pg, out) => {
     run(3);
     const crowded = P.pigs.length, culls0 = P.culls | 0, pork0 = c("raw_porkchop");
     ok("the sty is over its limit", crowded > P.limit, [crowded, P.limit]);
+    const pair = P.pigs.filter(s => s.mob && !s.mob.dead && s.growAt == null).slice(0, 2);
+    for (const s of pair) { s.cd = 0; s.fed = day(); }
+    ok("fed pigs do not breed while the sty is over its limit (the piglet would take it two over)", pair.length === 2 && pair.every(s => !BF.pigFarmer.willing(s.mob, day())), pair.map(s => BF.pigFarmer.willing(s.mob, day())));
+    for (const s of pair) s.cd = day() + 5;
     for (let i = 0; i < 9000 && P.pigs.length > P.limit; i++) { step(); if (BF.sky.time > 0.45) BF.sky.setTime(0.08); }
     const n = crowded - P.limit;
     ok("the pig farmer culled the herd back to the limit", P.pigs.length === P.limit && P.culls - culls0 === n, [P.pigs.length, P.limit, P.culls]);
+    const fedAt = P.pigs.find(s => s.mob && !s.mob.dead && s.growAt == null);
+    if (fedAt) { fedAt.cd = 0; fedAt.fed = day(); }
+    ok("back at the limit, a fed pig is willing to breed again", !!fedAt && BF.pigFarmer.willing(fedAt.mob, day()), fedAt && [fedAt.fed, fedAt.cd, day()]);
+    if (fedAt) fedAt.cd = day() + 5;
     ok("it kept the pork: 1-3 raw porkchops a pig", c("raw_porkchop") - pork0 >= n && c("raw_porkchop") - pork0 <= 3 * n, [pork0, c("raw_porkchop")]);
     run(20);
     ok("no more culling at the limit", P.pigs.length === P.limit, P.pigs.length);
