@@ -22,6 +22,7 @@ module.exports = async (pg, out) => {
     v.position.set(b.x + 0.5 - fx * 0.5, b.y + 0.5625 + 0.22, b.z + 0.5 - fz * 0.5);
     if (v.vel) v.vel.set(0, 0, 0);
     BF.state.paused = true;
+    if (BF.regions && BF.regions.tick) BF.regions.tick();   // file it in the region it now lies in, as the end of a step would (paused: no step runs)
     // clear the room above the bed so the player can look straight down at it
     for (let dy = 1; dy <= 4; dy++) for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) BF.world.setBlock(b.x + dx, b.y + dy, b.z + dz, 0);
     if (BF.proto) BF.proto.flush();

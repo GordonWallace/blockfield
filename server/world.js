@@ -158,12 +158,16 @@ function start(o) {
       return;
     }
     srv.client = ws;
-    srv.page = null; srv.feedAck = null; srv.iconsAsked = false; srv.tests = [];
+    srv.page = null; srv.feedAck = null; srv.iconsAsked = false; srv.tests = []; srv.budget = null;
     say("a page connected");
     const h = srv.held;
     ws.send(JSON.stringify({ hello: { server: "blockfield", version: o.version || null, threads: srv.workers, held: h ? { id: h.id, name: h.name } : null } }));   // threads: a world's simulation threads (region workers, r15-39)
     ws.on("message", (data, binary) => { try { binary ? fromPagePacket(packetIn(data)) : fromPageText(JSON.parse(data.toString("utf8"))); } catch (e) { say("a bad message from the page: " + e.message); } });
-    ws.on("close", () => { if (srv.client === ws) closed(); });
+    ws.on("close", (code, reason) => {
+      if (srv.client !== ws) return;
+      if (code === 1006) { say("the page's connection was lost: " + (reason || "dropped")); logIn(srv.active, "The page's connection was lost without closing (" + (reason || "dropped") + ")", "WARN"); }
+      closed();
+    });
     ws.on("error", () => {});
   }
   function fromPageText(m) {
@@ -185,8 +189,9 @@ function start(o) {
       srv.iconsAsked = false;
       return;
     }
-    if (m.test === "eval" && !o.test) { say("a page asked for test eval; refused (start with --test)"); return; }
+    if ((m.test === "eval" || m.test === "crash") && !o.test) { say("a page asked for test " + JSON.stringify(String(m.test)).slice(0, 40) + "; refused (start with --test)"); return; }
     if (m.test === "lockstep" || m.test === "eval" || m.auto) srv.tests.push(m);   // (kept for the threads this page plays on next)
+    if (m.budget) srv.budget = m;   // the page's simulation budget (bug-081): the latest, for the threads this page plays on next
     if (srv.active) srv.active.post(m);   // {test: "crash"} and the like
   }
   // a protocol packet for the simulation; a world message decides which thread plays
@@ -199,6 +204,7 @@ function start(o) {
       if (m.op === "load" && h && h.id === a.id) {   // the held world, picked again: its thread plays, the title screen's goes
         if (srv.active && srv.active !== h) srv.active.kill();
         srv.active = h; srv.held = null;
+        if (srv.budget) h.post(srv.budget);   // (the setting may have changed since its page closed)
       } else {
         if (h && m.op !== "demo") { srv.held = null; letGo(h); }   // another world: the held one was saved when its page closed
         // a world to play starts in a fresh thread, so nothing of the title screen's world (its clock, counters, timers) carries over
@@ -206,6 +212,7 @@ function start(o) {
           srv.active.kill();
           srv.active = fresh(); srv.active.played = true;
           for (const t of srv.tests) srv.active.post(t);
+          if (srv.budget) srv.active.post(srv.budget);
           warm();
         }
       }
@@ -287,10 +294,13 @@ function start(o) {
     const meta = worlds.meta(id), data = worlds.get(id, "data");
     if (!meta || !data) throw Object.assign(new Error("World not found"), { status: 404 });
     const head = worlds.get(id, "loghead");
-    const log = head ? { head, lists: (head.batches || []).map(([seq]) => worlds.get(id, "log:" + String(seq).padStart(9, "0")) || []) } : null;
+    // (only batches with proper numbers: a world imported before bug-070 was fixed may name others, which are left out)
+    const batches = head && Array.isArray(head.batches) ? head.batches.filter(b => Array.isArray(b) && SaveFile.isSeq(b[0])) : [];
+    if (head && batches.length !== (head.batches || []).length) say("export of " + JSON.stringify(meta.name) + " left out " + ((head.batches || []).length - batches.length) + " damaged game log batches");
+    const log = head ? { head: Object.assign({}, head, { batches }), lists: batches.map(([seq]) => worlds.get(id, "log:" + String(seq).padStart(9, "0")) || []) } : null;
     return { meta, buf: SaveFile.packSync({ game: o.version || null, meta, data, log }) };
   }
-  function importWorld(rec, keep) {
+  function importWorld(rec, keep) {   // (rec: SaveFile.unpack checked the game log's batch numbers: bug-070)
     const meta = Object.assign({}, rec.meta);
     const old = m => !m || !(m.version >= SAVE_VERSION);
     if (old(meta) || old(rec.data)) throw new Error("Made with Blockfield " + (meta.version === 2 ? "1.4" : "1.3") + ", can't be opened in " + (o.version || "1.5"));
