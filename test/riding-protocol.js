@@ -152,10 +152,12 @@ async function run(b, url, mode) {
     h = await query('entity', { id: horseId });
     check(h.horse.saddle, tag('saddled by a request with the saddle held'), { r: sr, horse: h.horse });
     // ride it: the page steers its copy, the simulation's horse follows
-    await req('player.mount', null, { id: horseId });
+    // (a CI flake had riding() null here: on a failure, the mount's answer and both sides' state say why)
+    const asked = await req('player.mount', null, { id: horseId });
     await until(() => !!BF.player.vehicle, null, 5000);
     const r2 = await riding();
-    check(r2 && r2.kind === 'horse' && (mode === 'page' || r2.local), tag('on the saddled horse (off the page: the page rides its copy)'), r2);
+    check(r2 && r2.kind === 'horse' && (mode === 'page' || r2.local), tag('on the saddled horse (off the page: the page rides its copy)'),
+      r2 ? r2 : { r2, asked, horse: await query('entity', { id: horseId }), me: await me(), vehicle: await pg.evaluate(() => !!BF.player.vehicle) });
     const hud = await pg.evaluate(() => { const v = BF.player.vehicle; return v && v.ctl.hud ? v.ctl.hud(v) : null; });
     check(hud && hud.hp > 0 && hud.max >= hud.hp, tag('the HUD has the horse\'s health'), hud);
     const b0 = await query('entity', { id: horseId });
