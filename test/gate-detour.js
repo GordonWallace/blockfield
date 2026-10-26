@@ -24,6 +24,7 @@ module.exports = async (pg) => {
       while (T < 30 && shutAt == null) {
         BF.sky.setTime(0.3); P.set(C.fx0 - 8, C.y + 20, C.fz0 - 8);
         if (outAt == null) { v.ai.leaving = false; v.ai.mode = "walk"; v.ai.t = 5; v.ai.tx = fx; v.ai.tz = fz; }
+        v.holdT = 99;   // walks on past a villager coming to buy from it: otherwise it can stand in the gateway 8 s for one (seller-waits tests that)
         BF.mobs.update(0.05); BF.world.tickSim(); T += 0.05;
         if (outAt == null && !inside()) outAt = +T.toFixed(1);
         if (outAt != null && !gate()) shutAt = +T.toFixed(1);
