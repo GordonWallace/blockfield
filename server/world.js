@@ -216,6 +216,12 @@ function start(o) {
       const st = meta ? rivers.get(riverKey(meta.seed, meta.biomeScale)) : rivers.get(riverKey(a.seed, (a.opts || {}).biomeScale));
       if (st) srv.active.post({ server: "rivers", st });
     }
+    // Save and Quit to Title (js/save.js quit): the thread plays on as the title background, holding no saved world any more, so an
+    // export or rename of that world goes to its folder, and a page closing doesn't hold it (bug-074)
+    if (srv.active && p.h.startsWith('{"t":"meta"')) {
+      const q = JSON.parse(p.h);
+      if (q.quit && q.id && srv.active.id === q.id) { say("world " + JSON.stringify(srv.active.name) + " quit to the title screen"); srv.active.id = null; srv.active.name = null; }
+    }
     if (srv.active) srv.active.post(p, p.b ? [p.b] : []);
   }
   // a held world's thread goes once its save (from the page closing) is done
