@@ -873,8 +873,9 @@ function renderBudget(b) {
   if (!b) return;
   const pc = f => Math.round(f * 100) + "%", on = b.on && b.budget > 0;
   $("c-budget-st").textContent = on ? "budget " + pc(b.budget) : "off";
-  $("c-budget").innerHTML = `${b.villages} <small>villages simulated</small>`;
-  $("c-budget-sub").textContent = `${pc(b.used)} of each second used · ${b.fps} fps` + (on ? ` · ${b.over ? "over for " + b.over + " s" : "under for " + b.under + " s"}` : "");
+  const ex = b.extra != null ? b.extra : b.extras.length;
+  $("c-budget").innerHTML = `${b.villages} <small>${b.villages === 1 ? "village" : "villages"} simulated (${b.villages - ex} nearest + ${ex} extra)</small>`;
+  $("c-budget-sub").textContent = `simulation took ${pc(b.used)} of real time` + (on ? ` (limit ${pc(b.budget)})` : "") + ` · ${b.fps} fps` + (on ? ` · ${b.over ? "over for " + b.over + " s" : "under for " + b.under + " s"}` : "");
   $("b-budget").style.width = Math.min(100, Math.round(on ? b.used / b.budget * 100 : 0)) + "%";
   $("c-budget-ex").textContent = b.extras.length ? "Extra: " + b.extras.map(e => `${e.name} (${e.d} blocks)`).join(", ") : "No extra villages";
   $("c-budget-log").innerHTML = b.log.slice().reverse().map(e => `<div>day ${e.day.toFixed(2)} · ${esc(e.text)}</div>`).join("");
