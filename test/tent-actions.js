@@ -32,6 +32,8 @@ module.exports = async (pg, out) => {
   await pg.evaluate(a => { BF.player.position.set(a[0], a[1], a[2]); BF.player.yaw = Math.atan2(-4 + 5, 6) ; }, r1.at);
   await pg.waitForTimeout(800);
   await pg.screenshot({ path: out + "-view.png" });
+  // the open grass east of the village (14 past its box) loaded before the camping checks: under load it can lag the village
+  for (let t = 0; t < 180 && !(await lib.sim(pg, () => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.wg && m.village.wg.maxX != null).every(m => { const ox = Math.floor(m.village.wg.maxX + 14), oz = Math.floor(m.village.z); return [[-5, -5], [5, 5], [-5, 5], [5, -5]].every(([dx, dz]) => BF.world.isLoaded(ox + dx, oz + dz)); }))); t++) await pg.waitForTimeout(500);
   const r2 = await lib.sim(pg, async () => {
     const vs = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.inv && !m.child);
     const open = m => { const c = BF.world.chunkAt(m.position.x, m.position.z); return c && c.top[(Math.floor(m.position.z) - c.cz * 16) * 16 + Math.floor(m.position.x) - c.cx * 16] < m.position.y; };
