@@ -87,6 +87,7 @@ function snd(name, m, vol) { const V = BF.villageLife; if (V && V.sound && m.pos
 
 // Wheat eaten by `m` (from the player or a cowherd). Returns false for cows that are not hungry; calves grow 10% faster.
 function feed(m, by) {
+  if (BF.rworkers) BF.rworkers.writes(m);   // (a villager of another unit may be the one feeding it: js/rworkers.js)
   if (!live(m) || m.type !== "cow") return false;
   const s = stOf(m), t = now();
   if (s.growAt != null) { s.growAt -= CALF_DAYS * 0.1; syncLook(m); fx(m, "#ffd84a", 4); snd("cow", m, 0.4); return true; }
@@ -98,6 +99,7 @@ function feed(m, by) {
 }
 // Milks `m` (the caller swaps the bucket). Returns false for calves and cows already milked today.
 function milk(m, by) {
+  if (BF.rworkers) BF.rworkers.writes(m);   // (a villager of another unit may be the one feeding it: js/rworkers.js)
   if (!milkable(m)) return false;
   stOf(m).milkDay = today();
   fx(m, "#f4f2ea", 4); snd("cow", m, 0.4);
@@ -137,10 +139,11 @@ const findMate = (m, t) => H().findMate(m, t, willing, o => o.pasture || null, M
 // In the think phase the birth is a "spawn" request from a (r15-23): births come in parent-id order, and the pair must still be willing
 // when it applies (one parent can't breed twice in a tick). Returns the young when born at once.
 function breed(a, b, t) {
-  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b, t), () => willing(a, t) && willing(b, t));
+  return BF.mobs.spawnLater(a, "born:" + a.id, () => breedNow(a, b, t), () => willing(a, t) && willing(b, t), ["cowherd", a.id, b.id, t]);
 }
+if (BF.mobs.maker) BF.mobs.maker("cowherd", (ai, bi, t) => { const a = BF.ids.get(ai), b = BF.ids.get(bi); return a && b ? [() => breedNow(a, b, t), () => willing(a, t) && willing(b, t)] : null; });   // (another worker's birth, spec r15-39)
 function breedNow(a, b, t) {
-  const x = (a.position.x + b.position.x) / 2, z = (a.position.z + b.position.z) / 2, y = Math.max(a.position.y, b.position.y);
+  const { x, y, z } = BF.herd.birthSpot(a, b);   // (through a face edge, bug-089)
   const calf = BF.mobs.spawn("cow", x, y, z);
   if (!calf) return null;
   const s = stOf(calf);

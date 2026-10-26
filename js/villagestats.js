@@ -36,7 +36,7 @@ function update() {
   for (const rec of BF.mobs.villages.values())
     if ((rec.members || []).some(m => m.type === "villager" && !m.dead && !m.removed && m.position)) sample(rec);   // loaded villages only
 }
-function reset() { pops.clear(); }
+function reset() { pops.clear(); tickT = 0; }
 
 BF.vstats = {
   DAYS, sample, popChange, reset, update,

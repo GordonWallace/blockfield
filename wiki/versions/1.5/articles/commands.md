@@ -23,7 +23,7 @@ Commands let you change the world and yourself. They are meant for building, tes
 - `/tp <u> <v>`: Teleports you to the surface at that spot: on top of whatever is highest there, so on the water over a sea or lake, on sea ice, on a tree's leaves or on a roof. Ground that is not loaded yet is generated first, so the height it reports is where you land.
 - There are more ways to say where:
   - `/tp face <0-5> <u> <v> [y]`: to a point on any face, on the surface unless you give a layer.
-  - `/tp <lat> <lon> [y]`: to a latitude and longitude, written with their letters, as in `/tp 35.26N 45E` or `/tp 10.5S 120W 2000`.
+  - `/tp <lat> <lon> [y]`: to a latitude and longitude, written with their letters, as in `/tp 35.26N 45E` or `/tp 10.5S 120W 2000`. The letter gives the sign, so `-10S` or `+10S` is refused rather than read as 10N.
   - `/tp corner <1-8>`: to one of the planet's eight corners, 40 blocks in from it, 30 above the ground, flying and facing it.
   - `/tp up <blocks>`: straight up, that many blocks above the ground (or sea) where you are, flying. `/tp up 25000` takes you off the planet.
   - `/tp ground`: back down to the surface where you are.

@@ -25,8 +25,10 @@ From 1.5 the simulation can run in one of three places, and the game picks one e
 2. **Browser (worker)**: otherwise, if the browser can, the simulation runs in a background thread of the page (a Web Worker; see [[page:performance-meter]]). This is what the online version uses, and a game served by any other web server.
 3. **Browser (this page)**: a game opened straight from its file can't start a worker, so the simulation runs in the page itself, as it did before 1.5.
 
-**How to tell which:** the pause menu's *Simulation* button and the last line of the F3 overlay say `World server (1 thread)`, `Browser (worker)` or `Browser (this page)`. When the page runs it because something else couldn't, F3 adds why (for example that the page was opened as a file). The [[page:game-log]] says it too, as the game starts.
+**How to tell which:** the pause menu's *Simulation* button and the last line of the F3 overlay say `World server (N threads)` (the threads its simulation may use, see [[page:several-cores]]), `Browser (worker)` or `Browser (this page)`. When the page runs it because something else couldn't, F3 adds why (for example that the page was opened as a file). The [[page:game-log]] says it too, as the game starts.
 
 **Choosing one yourself:** click the pause menu's *Simulation* button to cycle the setting through *Automatic* (the order above), *World server*, *Browser (worker)* and *Browser (this page)*. The browser remembers it, and it applies the next time the game starts: save and quit, then reload the page. A forced choice that can't run falls back the same way (no server: a worker; no worker: the page). Adding `?sim=server`, `?sim=worker`, `?sim=page` or `?sim=auto` to the game's address does the same for that visit only.
+
+`./run.sh --workers <n>` sets how many cores the server's simulation may use (by default all but two, at most 8; the *Simulation* button's thread count): see [[page:several-cores]].
 
 `./run.sh --lan` makes the game, the debug screen and the world server reachable from other machines on your network; without it they only answer on this machine. `./run.sh --saves <folder>` keeps the server's worlds somewhere else, and `./run.sh --no-world` starts no world server (the game then runs in a worker).

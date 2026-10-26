@@ -36,6 +36,20 @@ Object.assign(globalThis, {
     }
   },
 });
+// region workers (spec r15-39, js/rplay.js): followers in worker_threads of their own (server/regionthread.js), as many as the server says
+Object.assign(globalThis, {
+  BF_WORKERS: workerData.workers || undefined, BF_SPLIT: workerData.split || undefined,
+  BF_CORES: require("os").availableParallelism ? require("os").availableParallelism() : require("os").cpus().length,
+  BF_REGION_SPAWN: (me, n) => {
+    const { Worker } = require("worker_threads");
+    const w = new Worker(path.join(__dirname, "regionthread.js"), { workerData: { me, n, play: true } });
+    let fn = null, done = false;
+    w.on("message", m => { if (fn) fn(m); });
+    w.on("error", e => { if (fn && !done) fn({ error: String(e && e.stack || e) }); });
+    w.on("exit", code => { if (code && fn && !done) fn({ error: "it exited (code " + code + ")" }); });
+    return { post: m => w.postMessage(m), on: f => { fn = f; }, terminate: () => { done = true; w.terminate(); } };
+  },
+});
 process.on("uncaughtException", e => { for (const fn of listeners.error) fn({ error: e, message: e && e.message }); if (!listeners.error.length) throw e; });
 process.on("unhandledRejection", reason => { for (const fn of listeners.unhandledrejection) fn({ reason }); });
 
@@ -107,7 +121,10 @@ parentPort.on("message", d => {
       if (d.server === "rivers") riversIn = d.st;   // (the next world's network, from the server's cache: simworker.js worldOp)
       else if (d.server === "detach") detach();
       else if (d.server === "state") post(Object.assign({ server: "state", id: d.id }, BF.save.current && BF.save.current.id === d.id ? state() : { meta: null }));
-      else if (d.server === "feed") post({ server: "feed", part: BF.debugFeed && BF.debugFeed.simPart ? BF.debugFeed.simPart(d.ack) : null });
+      else if (d.server === "feed") {
+        if (BF.rworkers && BF.rworkers.journal) BF.rworkers.rec(["feed", d.ack == null ? null : d.ack]);   // (region workers: the followers read it too, js/rplay.js)
+        post({ server: "feed", part: BF.debugFeed && BF.debugFeed.simPart ? BF.debugFeed.simPart(d.ack) : null });
+      }
       else if (d.server === "save") {   // (an export of the world being played or held: saved first)
         if (!BF.save || !BF.save.current) { post({ server: "save", ok: false, why: "no world here" }); return; }
         BF.save.saveNow().then(ok => post({ server: "save", ok: !!ok, why: BF.save.lastError }), e => post({ server: "save", ok: false, why: String(e && e.message || e) }));
