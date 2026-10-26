@@ -1,6 +1,7 @@
-// Move errors (bug: stuck villagers and golems): runs a seed headless (tools/headless.js) for N game days and counts the game log's
-// `move` ERROR lines ("stuck at ... for 30 s") per 100 villager/golem game-days. Prints JSON: {seed, extra, days, mobDays, errors,
-// per100, byType, lines}. Usage: node tools/perf/moves.js [--seed 3] [--extra 8] [--days 2] [--warm 60] [--out file.json]
+// Move errors (r15-70): runs a seed headless (tools/headless.js) for N game days and counts the game log's `move` ERROR lines (stuck,
+// fallen into a well) per 100 villager/golem game-days. Prints JSON: {seed, extra, days, mobDays, errors, per100, byType}; --out also
+// writes every move line, each stuck one with a snapshot of the mob (snap). --progress 1: a line on stderr every 0.1 day.
+// Usage: node tools/perf/moves.js [--seed 3] [--extra 8] [--days 2] [--warm 60] [--progress 1] [--out file.json]
 const fs = require('fs');
 const a = {};
 for (let i = 2; i < process.argv.length; i += 2) a[process.argv[i].replace(/^--/, '')] = process.argv[i + 1];

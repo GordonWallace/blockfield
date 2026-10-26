@@ -2014,7 +2014,7 @@ function villagerAI(m, dt, out) {
   if (V && !away && !(ai.outT > 0 && ai.mode === "walk")) {   // (not while walking away from the door it came out of this morning: morningAI)
     const dx = ax - m.position.x, dz = az - m.position.z, d = Math.hypot(dx, dz);
     if (d > 40) { // wandered too far: head back toward the centre (or home)
-      if (ai.stuckT < 0 && !ai.route) ai.stuckT += dt;
+      if (ai.stuckT < 0) ai.stuckT += dt;
       else if (takePlan()) {
         const [fx, fy, fz] = feetCell(m), gx = Math.floor(ax), gz = Math.floor(az);
         const route = findPath(fx, fy, fz, { x: gx, z: gz, at: (x, y, z) => Math.hypot(x + 0.5 - ax, z + 0.5 - az) <= 30 }, 3000);
@@ -2022,8 +2022,15 @@ function villagerAI(m, dt, out) {
         ai.stuckT = -10;
       }
       ai.mode = "walk"; ai.tx = ax + rnd(R(m), -6, 6); ai.tz = az + rnd(R(m), -6, 6); ai.t = rnd(R(m), 5, 8);
-    } else if (ai.mode === "walk" && Math.hypot(ai.tx - ax, ai.tz - az) > 36) {
-      ai.tx = ax + rnd(R(m), -20, 20); ai.tz = az + rnd(R(m), -20, 20);
+    } else if (ai.mode === "walk" && !ai.detour && Math.hypot(ai.tx - ax, ai.tz - az) > 36) {
+      // a wander heading out past 36 turns for a spot nearer the centre, one it can walk straight to (r15-70: any spot, and from inside a
+      // house it walked into the walls with detours for the rest of the walk); with none it stops
+      let ok = false;
+      for (let k = 0; k < 6 && !ok; k++) {
+        const a = R(m).next() * Math.PI * 2, d = rnd(R(m), 2, 8), tx = m.position.x + Math.cos(a) * d, tz = m.position.z + Math.sin(a) * d;
+        if (Math.hypot(tx - ax, tz - az) <= 36 && clearWalk(m, tx, tz)) { ai.tx = tx; ai.tz = tz; ok = true; }
+      }
+      if (!ok) { ai.mode = "idle"; ai.t = rnd(R(m), 1, 3); }
     }
   }
   // coarse (spec r15-64): no idle wandering, unless it is heading back from too far out

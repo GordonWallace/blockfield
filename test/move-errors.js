@@ -35,14 +35,17 @@ module.exports = async (pg, out) => {
       if (wall && !(x === 5 && z === 2 && y < Y0 + 2)) W.setBlock(X0 + x, y, Z0 + z, B.planks);
     }
     W.setBlock(X0 + 1, Y0, Z0 + 1, B.lectern != null ? B.lectern : B.crafting_table);
-    const m = M.list.find(v => v.type === "villager" && !v.child && v.village && !v.dead);
+    // a villager whose day has no errands of its own to steer it (a toolsmith's or a builder's walks are their own: not what this measures),
+    // living near the centre (one whose house is far out keeps to it, and from this floor it would try to walk back to it)
+    const ok = v => v.type === "villager" && !v.child && v.village && !v.dead && !(v.home && v.home.x != null && Math.hypot(v.home.x - v.village.x, v.home.z - v.village.z) > 25);
+    const m = ["nitwit", "librarian", "cleric", "mason", "fisherman", "armorer", "weaponsmith"].map(p => M.list.find(v => ok(v) && v.profession === p)).find(v => v) || M.list.find(ok);
     if (!m) return { error: "no villager" };
     m.position.set(X0 + 2.5, Y0, Z0 + 2.5); m.vel.set(0, 0, 0); m.ai.route = null; m.ai.mode = "idle"; m.ai.t = 0; m.ai.held = null; m.ai.detour = null;
-    const mb = W.moveBox; let push = 0;
+    const mb = W.moveBox, by = {}; let push = 0;
     // walking into a block (a hit while it means to move, sliding along a wall too)
     W.moveBox = function (pos, vel, hw, h, dt) {
       const x0 = pos.x, z0 = pos.z, v = Math.hypot(vel.x, vel.z), o = mb.apply(this, arguments);
-      if (pos === m.position && (o.hitX || o.hitZ) && v > 0.1) push += dt;
+      if (pos === m.position && (o.hitX || o.hitZ) && v > 0.1) { push += dt; const k = m.ai.mode + (m.ai.route ? "/" + m.ai.routeKind : "") + (m.ai.detour ? "/detour" : ""); by[k] = +((by[k] || 0) + dt).toFixed(2); }
       return o;
     };
     const old = new Set(BF.glog ? BF.glog.recent(400) : []);
@@ -51,7 +54,7 @@ module.exports = async (pg, out) => {
     try {
       while (T < 60) { BF.sky.setTime(0.1); M.update(0.05); BF.world.tickSim(); P.set(X0 + 12, Y0 + 1, Z0 + 20); T += 0.05; }
     } finally { W.moveBox = mb; }
-    res.room = { push: +push.toFixed(2), log: mine(), at: [m.position.x - X0, m.position.z - Z0].map(v => +v.toFixed(1)) };
+    res.room = { push: +push.toFixed(2), by, who: m.profession, log: mine(), at: [m.position.x - X0, m.position.z - Z0].map(v => +v.toFixed(1)) };
     m.position.set(X0 + 12.5, Y0, Z0 + 20.5); m.vel.set(0, 0, 0);
     // 2. a pen, fences round x 8..12, z 1..5, its gate (west side, z 3) open
     for (let x = 8; x <= 12; x++) for (let z = 1; z <= 5; z++) if (x === 8 || x === 12 || z === 1 || z === 5) W.setBlock(X0 + x, Y0, Z0 + z, B.oak_fence);
