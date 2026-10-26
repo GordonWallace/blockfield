@@ -953,7 +953,7 @@ function clearWalk(m, x1, z1) {
     for (const cx of [x - hw, x + hw]) for (const cz of [z - hw, z + hw]) for (let yy = y; yy <= y + h; yy++) if (!open(Math.floor(cx), yy, Math.floor(cz))) return false;
     return true;
   };
-  let y = Math.floor(p.y + 0.01);
+  let y = feetCell(m)[1];
   for (let i = 1; i <= n; i++) {
     const x = p.x + dx * i / n, z = p.z + dz * i / n, fx = Math.floor(x), fz = Math.floor(z);
     if (!BF.world.isLoaded(fx, fz)) return false;
@@ -961,7 +961,8 @@ function clearWalk(m, x1, z1) {
     for (const yy of [y, y + 1, y - 1]) {
       const fl = blockAt(fx, yy - 1, fz);
       if (!fl.solid || fl.door || fl.bed || fl.model === "fence" || !body(x, yy, z, top)) continue;
-      if (yy > y && !body(p.x + dx * (i - 1) / n, y, p.z + dz * (i - 1) / n, top + 1)) continue;   // a step up: room to jump it
+      const ox = p.x + dx * (i - 1) / n, oz = p.z + dz * (i - 1) / n;
+      if (yy > y && (!body(ox, y, oz, top + 1) || !riseOK(Math.floor(ox), y, Math.floor(oz), fx, yy, fz))) continue;   // a step up: room to jump it, and not too high
       ny = yy; break;
     }
     if (ny == null || (roofs && !roofNow && roofLedge(x, ny, z, m.halfWidth))) return false;
@@ -977,7 +978,7 @@ function clearWalk(m, x1, z1) {
 // there (hemmedIn: nowhere to wander to), goes in the game log; between pushes it may stop for up to HELD_GAP s (to look about, to step
 // aside) and still count as held, and a longer pause starts the count again (r15-70: a builder at work, or a villager pottering about its
 // room, brushed something every few seconds all day, and the time in between used to count, so they were logged as stuck).
-const DETOUR_AFTER = 1.2, DETOUR_HOP = 16, DETOUR_GAIN = 4, STUCK_LOG = 30, HELD_GAP = 8;
+const DETOUR_AFTER = 1.2, DETOUR_HOP = 16, DETOUR_GAIN = 4, STUCK_LOG = 30, HELD_GAP = 8, FREED = 8;
 function moveLog(m, level, text) {
   if (!BF.glog) return;
   const who = BF.vlog && m.type === "villager" ? BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession || "villager") + ")" : "An " + m.type.replace(/_/g, " ");   // "Name (Job)" as in the village log
@@ -985,15 +986,19 @@ function moveLog(m, level, text) {
 }
 // Called every physics step: `blocked` = it wanted to move and a block stopped it.
 function blockedMove(m, dt, blocked) {
-  const ai = m.ai, p = m.position, g = ai.held || (ai.held = { x: p.x, z: p.z, t: 0, gap: 0, logged: false, hem: false, since: 0 });
+  const ai = m.ai, p = m.position, g = ai.held || (ai.held = { x: p.x, z: p.z, t: 0, gap: 0, logged: false, hem: false, since: 0, lx: 0, lz: 0 });
   if (Math.hypot(p.x - g.x, p.z - g.z) > 3) {   // got somewhere
-    if (g.logged) moveLog(m, "INFO", "got moving again at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z));
-    g.x = p.x; g.z = p.z; g.t = 0; g.gap = 0; g.logged = false; g.hem = false;
+    // once logged, it has got moving again only FREED blocks from where it was stuck: one shut in a pen or a yard goes in the log once,
+    // not each time it crosses it (r15-70)
+    const freed = !g.logged || Math.hypot(p.x - g.lx, p.z - g.lz) > FREED;
+    if (g.logged && freed) moveLog(m, "INFO", "got moving again at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z));
+    g.x = p.x; g.z = p.z; g.t = 0; g.gap = 0; g.hem = false;
+    if (freed) g.logged = false;
   } else if (blocked || g.hem) {
     if (!g.t) g.since = m.age;
     g.gap = 0;
     if ((g.t += dt) >= STUCK_LOG && !g.logged) {
-      g.logged = true;
+      g.logged = true; g.lx = p.x; g.lz = p.z;
       moveLog(m, "ERROR", "stuck at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z) + " for " + Math.round(m.age - g.since) + " s" + (g.hem ? " with nowhere to go" : ai.mode === "walk" ? " walking towards " + Math.floor(ai.tx) + ", " + Math.floor(ai.tz) : ""));
     }
   } else if (g.t > 0 && (g.gap += dt) > HELD_GAP && !g.logged) g.t = 0;   // a long pause: not held after all
@@ -1328,6 +1333,17 @@ function zombieBreakDoor(m, dt, out) {
 // ---------- villager nights: walk home along a grid path, open doors on the way, sleep in their bed ----------
 const bedtime = () => { const t = BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.3; return t > 0.5 && t < 0.985; };   // villagers head in at sunset, well before monsters can spawn (js/mobs.js)
 const blockAt = (x, y, z) => BF.blocks[BF.world.getBlock(x, y, z)] || BF.blocks[0];
+// The height of the top of the floor block at (x, y, z) above y: 1 for a full block, less for a low one (a slab, a stonecutter, a bed,
+// a path). A step up from one floor to the next block's floor one higher rises 1 + its top - this top, and a mob can climb at most
+// STEP_RISE (a jump: 7.6 m/s against GRAVITY lifts it about 1.1). r15-70: routes went up from a stonecutter in a trench onto a path
+// 1.4 higher, and the villager pushed at the bank for minutes.
+const STEP_RISE = 1.1;
+function floorTop(x, y, z) {
+  const id = BF.world.getBlock(x, y, z), bs = BF.CBOXES[id], b = BF.CBOX[id];
+  if (bs) { let t = 0; for (const c of bs) t = Math.max(t, c[4]); return t; }
+  return b ? Math.min(1, b[4]) : 1;
+}
+const riseOK = (x, y, z, nx, ny, nz) => ny - y + floorTop(nx, ny - 1, nz) - floorTop(x, y - 1, z) <= STEP_RISE;
 function bedOK(bed) {
   if (!bed) return false;   // no bed (a sleeper's bed taken away): not usable, rather than a throw that removes the villager
   const k = blockAt(bed.x, bed.y, bed.z);
@@ -1352,7 +1368,8 @@ function ladderCell(x, y, z) {
 const navCell = (x, y, z) => walkCell(x, y, z) || ladderCell(x, y, z);
 // A* over walkable cells (4-way, step up 1, drop up to 3, straight up/down ladders). goal(x, y, z) -> bool. Returns cells after start, or null.
 // tall: for a mob three blocks high (iron golems' detours), every cell also needs the block above its head clear, and, as it is wider than
-// its cell and overhangs all eight around it, those clear above knee height too (or it would walk its head into a ledge beside the route).
+// its cell and overhangs all eight around it, those clear above knee height too (or it would walk its head into a ledge beside the route),
+// and no fence gates: it can't open one, and through one left open it walked into a pen that was then shut on it (r15-70).
 let planBudget = 0;
 // A* searches (spec r15-33). In the mob loop a mob may search only with a grant: PLANS grants are handed out at the start of each tick
 // to the mobs that have been waiting longest (then by id), so who gets a search never depends on the order mobs think in (regions,
@@ -1397,7 +1414,7 @@ const AROUND = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1
 // The A* as it was before spec r15-05 (string keys, a linear scan of the open list): kept for BF.debug.pathCompare.
 function findPathOld(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
   const air = (x, y, z) => !tall || !blockAt(x, y, z).solid;
-  const nav = tall ? (x, y, z) => navCell(x, y, z) && air(x, y + 2, z) && AROUND.every(([ex, ez]) => air(x + ex, y + 1, z + ez) && air(x + ex, y + 2, z + ez)) : navCell;
+  const nav = tall ? (x, y, z) => navCell(x, y, z) && !blockAt(x, y, z).gate && air(x, y + 2, z) && AROUND.every(([ex, ez]) => air(x + ex, y + 1, z + ez) && air(x + ex, y + 2, z + ez)) : navCell;
   const key = (x, y, z) => x + "," + y + "," + z;
   const gx = goal.x, gz = goal.z, hh = (x, z) => Math.abs(x - gx) + Math.abs(z - gz);
   const open = [[sx, sy, sz, 0, hh(sx, sz)]], from = new Map([[key(sx, sy, sz), null]]), cost = new Map([[key(sx, sy, sz), 0]]);
@@ -1424,6 +1441,7 @@ function findPathOld(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
       const nx = x + dx, ny = y + dy, nz = z + dz;
       if (!nav(nx, ny, nz)) continue;
       if (dy > 0 && (blockAt(x, y + 2, z).solid || !air(x, y + 3, z) || (tall && BF.DIRS.some(([ex, ez]) => !air(x + ex, y + 3, z + ez))))) break;   // no room to jump (a golem is wider than its cell)
+      if (dy > 0 && !riseOK(x, y, z, nx, ny, nz)) break;   // too high a step from a low floor (floorTop)
       if (dy < 0 && (blockAt(nx, y + 1, nz).solid || !air(nx, y + 2, nz))) break;        // wall: cannot step off
       const k = key(nx, ny, nz), ng = g + 1 + (dy ? 0.5 : 0) + (blockAt(nx, ny, nz).door || blockAt(nx, ny, nz).gate ? 1 : 0);
       if (cost.has(k) && cost.get(k) <= ng) break;
@@ -1474,7 +1492,7 @@ function fpSlot(k) {   // the table slot of key k in this search, made if new
 }
 function findPathFast(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
   const air = (x, y, z) => !tall || !blockAt(x, y, z).solid;
-  const navRead = tall ? (x, y, z) => navCell(x, y, z) && air(x, y + 2, z) && AROUND.every(([ex, ez]) => air(x + ex, y + 1, z + ez) && air(x + ex, y + 2, z + ez)) : navCell;
+  const navRead = tall ? (x, y, z) => navCell(x, y, z) && !blockAt(x, y, z).gate && air(x, y + 2, z) && AROUND.every(([ex, ez]) => air(x + ex, y + 1, z + ez) && air(x + ex, y + 2, z + ez)) : navCell;
   const Y0 = BF.MIN_Y, key = (x, y, z) => ((x - sx + 32768) * 65536 + (z - sz + 32768)) * 4096 + (y - Y0);
   const gx = goal.x, gz = goal.z, hh = (x, z) => Math.abs(x - gx) + Math.abs(z - gz);
   const S = FP;
@@ -1559,6 +1577,7 @@ function findPathFast(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
       const nx = x + dx, ny = y + dy, nz = z + dz;
       if (!nav(nx, ny, nz)) continue;
       if (dy > 0 && (blockAt(x, y + 2, z).solid || !air(x, y + 3, z) || (tall && BF.DIRS.some(([ex, ez]) => !air(x + ex, y + 3, z + ez))))) break;   // no room to jump (a golem is wider than its cell)
+      if (dy > 0 && !riseOK(x, y, z, nx, ny, nz)) break;   // too high a step from a low floor (floorTop)
       if (dy < 0 && (blockAt(nx, y + 1, nz).solid || !air(nx, y + 2, nz))) break;        // wall: cannot step off
       const b = blockAt(nx, ny, nz);
       reach(nx, ny, nz, g + 1 + (dy ? 0.5 : 0) + (b.door || b.gate ? 1 : 0), cur);
@@ -1617,7 +1636,11 @@ function findPath(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
   }
   return a;
 }
-const feetCell = m => [Math.floor(m.position.x), Math.floor(m.position.y + 0.01), Math.floor(m.position.z)];
+// (standing on a low block, a slab or a stonecutter, its feet are in that block's cell: the cell it stands in is the one above, r15-70)
+const feetCell = m => {
+  const x = Math.floor(m.position.x), y = Math.floor(m.position.y + 0.01), z = Math.floor(m.position.z), b = blockAt(x, y, z);
+  return [x, b.solid && !b.door && !b.gate && !b.ladder ? y + 1 : y, z];
+};
 // Route to a cell beside the bed (same floor).
 function pathToBed(m) {
   const b = m.bed, [fx, fz] = BF.DIRS[b.f], hx = b.x + fx, hz = b.z + fz;
