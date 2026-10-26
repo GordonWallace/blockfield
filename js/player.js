@@ -545,8 +545,10 @@ function playWorld(id, btn) {
   if (w && BF.save.playable && !BF.save.playable(w)) { startNote(BF.save.tooOld(w)); return; }
   requestLock();                       // inside the click so the browser allows it
   if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
-  Promise.resolve(BF.save.load(id)).then(() => beginPlay()).catch(e => {
-    console.error(e); exitLock();
+  const t0 = performance.now();
+  loading("Loading " + (w && w.name || "the world"));
+  Promise.resolve(BF.save.load(id)).then(() => { loaded("Loaded", t0); beginPlay(); }).catch(e => {
+    console.error(e); exitLock(); loading(null);
     if (btn) { btn.disabled = false; btn.textContent = "Play"; }
     startNote("Couldn't load that world: " + (e && e.message || e));
   });
@@ -574,6 +576,13 @@ function copyBrowser(btn) {
     return refreshWorlds().then(() => startNote("Browser saves: " + bits.join(", ") + ". They are still in this browser too."));
   }, e => startNote("Couldn't copy the browser saves: " + (e && e.message || e))).then(() => { btn.disabled = false; });
 }
+// The loading screen over the start screen from Create or Play until play starts (js/main.js BF.loading, bug-092): in a worker or on
+// the world server the world starts there after the page's river step, and the start screen showed again meanwhile.
+function loading(text) { if (BF.loading) { if (text) BF.loading.show(text); else BF.loading.hide(); } }
+function loaded(what, t0) {
+  loading(null);
+  if (BF.glog) BF.glog.log("INFO", "save", what + " world \"" + (BF.save && BF.save.current ? BF.save.current.name : "?") + "\": playing after " + ((performance.now() - t0) / 1000).toFixed(1) + " s of loading");
+}
 function createWorld() {
   const f = createForm.elements;
   const name = f.name.value.trim() || "New World", seedText = f.seed.value.trim(), mode = createMode || gameMode;
@@ -581,9 +590,12 @@ function createWorld() {
   requestLock();
   const btn = createForm.querySelector('button[type="submit"]');
   btn.disabled = true;
-  const done = () => { btn.disabled = false; beginPlay(); };
+  const t0 = performance.now();
+  loading("Creating " + name);
+  const done = () => { loaded("Created", t0); btn.disabled = false; beginPlay(); };
   if (hasSave() && BF.save.create) {
-    Promise.resolve(BF.save.create({ name, seed: seedText, gameMode: mode, biomeScale, monsters })).catch(e => { console.error(e); }).then(done);
+    Promise.resolve(BF.save.create({ name, seed: seedText, gameMode: mode, biomeScale, monsters }))
+      .catch(e => { console.error(e); if (BF.glog) BF.glog.log("ERROR", "save", "Creating world \"" + name + "\" failed: " + (e && e.message || e)); }).then(done);
   } else {
     const sd = parseSeed(seedText);
     BF.prepareWorld(sd).then(() => {   // (the planet works out its rivers first)

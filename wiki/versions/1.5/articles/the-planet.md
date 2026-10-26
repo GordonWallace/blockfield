@@ -74,7 +74,7 @@ Climate follows latitude. Five bands run from the equator to the poles: tropical
 
 ## Rivers and lakes
 
-The planet's rivers are worked out for the whole world at once when it starts (the loading screen shows **Working out the rivers and lakes** for several seconds). Every river runs down to the sea or into a lake, never crosses another and never splits, and lakes sit in inland hollows and highland basins, each with one river flowing out. See [[page:rivers]].
+The planet's rivers are worked out for the whole world at once when it starts (the loading screen shows **Working out the rivers and lakes** for several seconds, then **Creating** or **Loading** with the world's name until it is ready to play). Every river runs down to the sea or into a lake, never crosses another and never splits, and lakes sit in inland hollows and highland basins, each with one river flowing out. See [[page:rivers]].
 
 ## Seeing far
 
