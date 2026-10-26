@@ -131,7 +131,7 @@ self.onmessage = ev => {
   if (d && d.test === "crash") { crashNext = true; return; }   // (test/sim-worker.js: the crash path)
   if (d && d.test === "eval") { if (BF) BF.testEval = true; return; }
   if (d && d.rivers) { pageRivers = d.rivers; return; }   // the page's river network for the next world message (js/simhost.js world)
-  if (d && d.auto) { if (BF && BF.active) BF.active.set({ on: false }); return; }   // (an automated browser's page: the budget off, js/active.js)   // (a test page: the protocol's eval query, BFT.sim)
+  if (d && d.budget) { if (BF && BF.active) BF.active.set(d.budget); return; }   // the page's Simulated villages setting (js/simhost.js budget, js/active.js)
   if (!d || d.h == null) return;
   if (!sim) { early.push(d); return; }
   if (crashed) return;

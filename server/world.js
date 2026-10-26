@@ -154,7 +154,7 @@ function start(o) {
       return;
     }
     srv.client = ws;
-    srv.page = null; srv.feedAck = null; srv.iconsAsked = false; srv.tests = [];
+    srv.page = null; srv.feedAck = null; srv.iconsAsked = false; srv.tests = []; srv.budget = null;
     say("a page connected");
     const h = srv.held;
     ws.send(JSON.stringify({ hello: { server: "blockfield", version: o.version || null, threads: 1, held: h ? { id: h.id, name: h.name } : null } }));   // threads: a world's simulation threads (1 until r15-39)
@@ -182,7 +182,8 @@ function start(o) {
       return;
     }
     if (m.test === "eval" && !o.test) { say("a page asked for test eval; refused (start with --test)"); return; }
-    if (m.test === "lockstep" || m.test === "eval" || m.auto) srv.tests.push(m);   // (kept for the threads this page plays on next)
+    if (m.test === "lockstep" || m.test === "eval") srv.tests.push(m);   // (kept for the threads this page plays on next)
+    if (m.budget) srv.budget = m;   // the page's simulation budget (bug-081): the latest, for the threads this page plays on next
     if (srv.active) srv.active.post(m);   // {test: "crash"} and the like
   }
   // a protocol packet for the simulation; a world message decides which thread plays
@@ -195,6 +196,7 @@ function start(o) {
       if (m.op === "load" && h && h.id === a.id) {   // the held world, picked again: its thread plays, the title screen's goes
         if (srv.active && srv.active !== h) srv.active.kill();
         srv.active = h; srv.held = null;
+        if (srv.budget) h.post(srv.budget);   // (the setting may have changed since its page closed)
       } else {
         if (h && m.op !== "demo") { srv.held = null; letGo(h); }   // another world: the held one was saved when its page closed
         // a world to play starts in a fresh thread, so nothing of the title screen's world (its clock, counters, timers) carries over
@@ -202,6 +204,7 @@ function start(o) {
           srv.active.kill();
           srv.active = fresh(); srv.active.played = true;
           for (const t of srv.tests) srv.active.post(t);
+          if (srv.budget) srv.active.post(srv.budget);
           warm();
         }
       }
