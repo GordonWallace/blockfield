@@ -17,6 +17,7 @@
 //                     mobIdsIn(key) -> [mob ids], villageIdsIn(key) -> [village keys],
 //                     tick(), stats() -> [{key, name, f, ru, rv, mobs, drops, villages, blockEntities}], counts(), check() -> {ok, diffs},
 //                     reset(), Index (the bare per-object index, for tests and benchmarks), regionOf(mob), dropRegionOf(drop), mobsByRegion() -> Map key -> Set (r15-33),
+//                     mobIndex() (the mobs' Index: keys() sorted, ordered(key, num) a region's mobs by num, kept between ticks, r15-61),
 //                     mobsAround(x, z, r, filter, {local, label}) -> [mobs], mobsInBox(x0, z0, x1, z1, filter, opts), hostilesAround(x, z, r, out) -> [hostile mobs], ofType(type) -> [mobs], villageMobs(rec, filter) -> [mobs], checkQuery(label, got, want), verifyQueries, queryStats(), resetQueryStats() }
 (() => {
 "use strict";
@@ -103,6 +104,8 @@ class Index {
   constructor(pos, flag) {
     this.pos = pos; this.by = new Map(); this.n = 0; this.moves = 0; this.flag = flag || null; this.fs = new Map();
     this.objs = []; this.ps = []; this.ks = new Int32Array(64); this.bx = new Float64Array(64); this.bz = new Float64Array(64);
+    // ordered(): each region's objects in a sort order, kept until that region's set changes (dirty), and the regions' keys in order
+    this.plans = new Map(); this.dirty = new Set(); this.keyList = null;
   }
   // put o in region k (-1: nowhere, kept out of the sets until it is somewhere) and its slot's box with it
   _set(i, o, k) {
@@ -110,13 +113,17 @@ class Index {
     const f = this.flag && this.flag(o);
     if (old >= 0) {
       const s = this.by.get(old);
-      if (s && s.delete(o)) { this.n--; if (!s.size) this.by.delete(old); if (f) { const q = this.fs.get(old); if (q && q.delete(o) && !q.size) this.fs.delete(old); } }
+      if (s && s.delete(o)) {
+        this.n--; this.dirty.add(old);
+        if (!s.size) { this.by.delete(old); this.keyList = null; }
+        if (f) { const q = this.fs.get(old); if (q && q.delete(o) && !q.size) this.fs.delete(old); }
+      }
     }
     this.ks[i] = k;
     if (k < 0) { this.bx[i] = this.bz[i] = NaN; return; }
     let s = this.by.get(k);
-    if (!s) this.by.set(k, (s = new Set()));
-    s.add(o); this.n++;
+    if (!s) { this.by.set(k, (s = new Set())); this.keyList = null; }
+    s.add(o); this.n++; this.dirty.add(k);
     if (f) { let q = this.fs.get(k); if (!q) this.fs.set(k, (q = new Set())); q.add(o); }
     const rv = k % K, r = (k - rv) / K, ru = r % K;
     this.bx[i] = FW * ((r - ru) / K) + FN + ru * REGION; this.bz[i] = FN + rv * REGION;
@@ -154,7 +161,29 @@ class Index {
     }
   }
   in(k) { return this.by.get(k); }
-  clear() { for (const o of this.objs) o._ri = undefined; this.objs = []; this.ps = []; this.by.clear(); this.fs.clear(); this.n = 0; }
+  // The keys of the regions holding objects, ascending (kept until a region is added or emptied).
+  keys() {
+    if (!this.keyList) { this.keyList = [...this.by.keys()].sort((a, b) => a - b); for (const k of this.dirty) if (!this.by.has(k)) { this.dirty.delete(k); this.plans.delete(k); } }
+    return this.keyList;
+  }
+  // Region k's objects sorted by num(o), ties in set order (the set's own order when that is already sorted): the same array as sorting
+  // the set every time (spec r15-33's plan), kept from tick to tick while the set is unchanged and the numbers still strictly ascend.
+  ordered(k, num) {
+    let a = this.plans.get(k);
+    if (a !== undefined && !this.dirty.has(k)) {
+      let last = -Infinity, ok = true;
+      for (let i = 0; i < a.length; i++) { const n = num(a[i]); if (!(n > last)) { ok = false; break; } last = n; }
+      if (ok) return a;
+    }
+    const s = this.by.get(k);
+    a = s ? [...s] : [];
+    let sorted = true, last = -Infinity;
+    for (let i = 0; i < a.length; i++) { const n = num(a[i]); if (n < last) { sorted = false; break; } last = n; }
+    if (!sorted) a.sort((p, q) => num(p) - num(q));
+    this.plans.set(k, a); this.dirty.delete(k);
+    return a;
+  }
+  clear() { for (const o of this.objs) o._ri = undefined; this.objs = []; this.ps = []; this.by.clear(); this.fs.clear(); this.n = 0; this.plans.clear(); this.dirty.clear(); this.keyList = null; }
 }
 
 const mobPos = m => m.position, dropPos = d => d.pos, vilPos = v => v;
@@ -399,6 +428,7 @@ const resetQueryStats = () => { qs.queries = qs.checked = qs.diffs = 0; qs.last 
 // the regions holding mobs.
 const regionOf = m => mobs.keyOf(m), dropRegionOf = d => drops.keyOf(d);
 const mobsByRegion = () => mobs.by;
+const mobIndex = () => mobs;   // (js/regiontick.js plan: the regions' keys and their mobs in id order, Index keys / ordered)
 const idsOf = (s, f) => { const out = []; if (s) for (const o of s) out.push(f(o)); return out; };
 
 const regions = {
@@ -407,7 +437,7 @@ const regions = {
   mobsIn: k => mobs.in(k), dropsIn: k => drops.in(k), villagesIn: k => villages.in(k), blockEntitiesIn: k => beBy.get(k),
   mobIdsIn: k => idsOf(mobs.in(k), m => m.id), villageIdsIn: k => idsOf(villages.in(k), v => v.key),
   onSet, mobAdded, mobRemoved, dropAdded, dropRemoved, tick, stats, counts, check, reset, Index,
-  regionOf, dropRegionOf, mobsByRegion,
+  regionOf, dropRegionOf, mobsByRegion, mobIndex,
   mobsAround, mobsInBox, hostilesAround, ofType, villageMobs, checkQuery, queryStats, resetQueryStats, verifyQueries: false,
 };
 BF.regions = regions;

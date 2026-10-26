@@ -34,7 +34,8 @@ const now = () => performance.now();
 // Fields never sent: drawing and animation (as js/statehash.js), the region index's own slots (_ri, _rs: each replica's index), caches
 // (_res: a villager's reserve, js/market.js), the tick's previous position (keepPrev: every replica sets it), a request's callbacks.
 const SKIP = new Set(["def", "root", "model", "meshes", "material", "mesh", "geo", "geometry", "walkPhase", "walkAmt", "headYaw", "headPitch",
-  "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg", "_ri", "_rs", "_res", "prev", "cbs", "_r", "_tm"]);
+  "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg", "_ri", "_rs", "_res", "prev", "cbs", "_r", "_tm",
+  "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN"]);   // (and each replica's own caches on mobs: js/ids.js links, js/regiontick.js ids, r15-61)
 const skipKey = k => SKIP.has(k) || (k.charCodeAt(0) === 95 && k.startsWith("_snd"));
 let mobSet = null, recSet = null, dropSet = null, hiveSet = null, self = null;
 function refsOn() {
