@@ -99,6 +99,7 @@ async function play(pg, label, minutes) {
   check(/^Workers 3/.test(wt || ''), `browser: F3 says ${JSON.stringify(wt)}`);
   const lines = await pg.evaluate(() => BF.glog.entries().filter(e => e.k === 'workers').map(e => e.l + ' ' + e.x));   // (the worker's entries come to the page's log)
   check(lines.some(l => /split/i.test(l)) && !lines.some(l => /^ERROR/.test(l)), `browser: the game log has the workers' lines, no errors (${lines.slice(-3).join(' | ').slice(0, 300)})`);
+  for (const l of lines) if (/^ERROR/.test(l)) console.log('  ' + l.slice(0, 1200));   // in full: the first says which mob and field the copies differ in
   // paused: a follower's copy is the leader's (the hash checks compare whole states; one more on demand)
   const same = await sim(pg, () => { const RW = BF.rworkers; return { checks: RW.checks, mismatch: RW.mismatch }; });
   check(!same.mismatch, `browser: paused, the leader and the followers agree`);
