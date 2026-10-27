@@ -24,7 +24,7 @@
 //   belongs to the cluster of the ground it stands on (roaming, js/clusters.js baseOf), so it is handed over to the other village's cluster
 //   at the meeting after it gets there and trades there locally; it waits at the edge of a village until it belongs to that village's
 //   cluster, and goes back to its home's at the meeting after it comes home. Its plans read the other village from the shared table
-//   (js/shared.js: prices as of the last meeting), never the other village's live villagers. What it changes outside its cluster waits for
+//   (js/sharedtable.js: prices as of the last meeting), never the other village's live villagers. What it changes outside its cluster waits for
 //   the meeting and goes on the merchant itself until then (meet, a "start" hook via js/villagesim.js): the pin of a new trip is asked for
 //   (stage "pin": granted in merchant id order, at most MAX_PINS on the road), pins whose trip is over are dropped, the routes' trips, roads
 //   given up and path wear are written down, and the path blocks are requested; its home village's log lines written while away wait on
@@ -91,7 +91,7 @@ function inCluster(m, key) {
 }
 // Home's prices as the other village's cluster may read them: the shared table's row (the last meeting's), else the last-known prices.
 function homeSummary(home) {
-  const row = BF.shared && BF.shared.row(home.key), sum = row && row.sum ? row.sum : market.get(home.key);
+  const row = BF.sharedTable && BF.sharedTable.row(home.key), sum = row && row.sum ? row.sum : market.get(home.key);
   return { key: home.key, x: home.x, z: home.z, sum: sum || { sells: {}, buys: {} } };
 }
 
@@ -214,7 +214,7 @@ function candidates(m) {
   }
   return out.sort((a, b) => a.d - b.d);
 }
-// With the cluster tick on: every village within RANGE read from the shared table (as of the last meeting, js/shared.js), or its
+// With the cluster tick on: every village within RANGE read from the shared table (as of the last meeting, js/sharedtable.js), or its
 // last-known prices when it isn't simulated; never another village's live records.
 function candidatesShared(m, home) {
   const out = [];
@@ -222,7 +222,7 @@ function candidatesShared(m, home) {
   try { near = BF.worldgen.villagesNear(home.x, home.z, RANGE) || []; } catch (e) { near = []; }
   for (const v of near) {
     if (!v || v.x == null) continue;
-    const key = vKey(v), row = BF.shared && BF.shared.row(key), sum = row && row.trade ? row.sum : market.get(key);
+    const key = vKey(v), row = BF.sharedTable && BF.sharedTable.row(key), sum = row && row.trade ? row.sum : market.get(key);
     if (key === home.key || !sum || blocked(home.key, key)) continue;
     const d = pdist(home, v);
     if (d <= RANGE && tripDays(m, d) <= MAX_PLAN_DAYS) out.push({ rec: { key, x: v.x, z: v.z, wg: v, sum, tick: row ? row.tick : null }, d });
@@ -767,12 +767,12 @@ function exportAll(out) {
   const nr = {};
   for (const [k, d] of noRoad) if (d > dayNow()) nr[k] = +d.toFixed(3);
   out["caravans"] = { routes: r, wear: w, market: Object.fromEntries(market), noroad: nr };
-  if (clustered() && BF.shared) out["caravans"].shared = BF.shared.serialize();   // the shared table (spec r15-39b): only with the cluster tick on
+  if (clustered() && BF.sharedTable) out["caravans"].shared = BF.sharedTable.serialize();   // the shared table (spec r15-39b): only with the cluster tick on
 }
 function importAll(o) {
   routes.clear(); wear.clear(); market.clear(); noRoad.clear();
   const c = o && o.caravans;
-  if (BF.shared) BF.shared.restore(c && c.shared);
+  if (BF.sharedTable) BF.sharedTable.restore(c && c.shared);
   if (!c || typeof c !== "object") return;
   for (const k in c.routes || {}) {
     const v = c.routes[k], [a, b] = k.split("|");
@@ -782,7 +782,7 @@ function importAll(o) {
   for (const k in c.noroad || {}) if (Number.isFinite(+c.noroad[k])) noRoad.set(k, +c.noroad[k]);
   for (const s of Array.isArray(c.wear) ? c.wear : []) { const p = String(s).split(",").map(Number); if (p.length === 4 && p.every(Number.isFinite)) wear.set(p.slice(0, 3).join(","), p[3]); }
 }
-function reset() { routes.clear(); wear.clear(); market.clear(); noRoad.clear(); lastSeen.clear(); LOG.length = 0; tickT = summT = 0; if (BF.shared) BF.shared.reset(); }
+function reset() { routes.clear(); wear.clear(); market.clear(); noRoad.clear(); lastSeen.clear(); LOG.length = 0; tickT = summT = 0; if (BF.sharedTable) BF.sharedTable.reset(); }
 
 let hooked = false;
 function hook() { if (!hooked && BF.on) { hooked = true; BF.on("mobKilled", onKilled); } }

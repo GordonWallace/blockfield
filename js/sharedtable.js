@@ -8,7 +8,7 @@
 //   columns   column(name, rec -> plain JSON): another system's public field, worked out for every row at each publish
 // Saved with the game and in the state hash (js/merchant.js exportAll "caravans".shared), only while the cluster tick is on: a game saved
 // between meetings plays on from the table it had. Game log: INFO "clusters" once a game hour while the debug overlay or screen is on.
-// API: BF.shared = { row(key) -> row | undefined, rows() -> [rows] by key, column(name, fn), tick (the last publish's), publish(),
+// API: BF.sharedTable = { row(key) -> row | undefined, rows() -> [rows] by key, column(name, fn), tick (the last publish's), publish(),
 //                    serialize() -> {tick, rows}, restore(o), text(), reset() }
 (() => {
 "use strict";
@@ -52,7 +52,7 @@ function hourly() {
   published = 0;
 }
 function column(name, fn) {
-  if (typeof name !== "string" || typeof fn !== "function") throw new Error("BF.shared.column(name, rec => plain JSON)");
+  if (typeof name !== "string" || typeof fn !== "function") throw new Error("BF.sharedTable.column(name, rec => plain JSON)");
   const i = cols.findIndex(c => c[0] === name);
   if (i >= 0) cols[i] = [name, fn]; else cols.push([name, fn]);
 }
@@ -66,7 +66,7 @@ function restore(o) {
 const text = () => "Shared table" + (tick == null ? ": none yet" : " at tick " + tick + ": " + rows.size + " villages, " + [...rows.values()].filter(r => r.trade).length + " trading");
 function reset() { rows = new Map(); tick = null; hourAt = null; published = 0; }
 
-BF.shared = {
+BF.sharedTable = {
   row: key => rows.get(key), rows: () => [...rows.values()], column, publish, serialize, restore, text, reset,
   get tick() { return tick; },
 };

@@ -222,7 +222,7 @@ function meet() {
 }
 
 // The meeting's own work (onMeet(fn, name, when)): "start" hooks run before the clusters are worked out again (records, pins and the
-// simulated set come and go there), "end" hooks after the waited requests are applied and delivered (the shared table, js/shared.js).
+// simulated set come and go there), "end" hooks after the waited requests are applied and delivered (the shared table, js/sharedtable.js).
 // Both in registration order, between ticks with every group seen, alike on every worker. Requests sent from either are filed into
 // the new groups (a "start" hook's with the queued ones, an "end" hook's to their target's group).
 const meetHooks = { start: [], end: [] };

@@ -1,5 +1,5 @@
 // @ci integration suite=village timeout=900
-// A caravan between two clusters (spec r15-39b, item C5: js/merchant.js, js/shared.js). With the cluster tick on, a merchant walking or
+// A caravan between two clusters (spec r15-39b, item C5: js/merchant.js, js/sharedtable.js). With the cluster tick on, a merchant walking or
 // dealing away belongs to the cluster of the ground it stands on (js/clusters.js baseOf), so it is handed over to the other village's
 // cluster at the meeting after it gets there, deals there, and goes back to its home's cluster at the meeting after it comes home.
 // Two child processes boot the same world headless (tools/headless.js: seed 3 at the village nearest the spawn, the 3 nearest other
@@ -98,9 +98,9 @@ function child() {
       if (st.trip && st.stage === 'back' && !homed && C.groups().length && BF.clusters.groupOf(m.cl) === BF.clusters.groupOf('v:' + B.key) && P.distance(m.position, B) > 20) { homed = true; put(stand(A, B, 6)); }
       C.interval(BF.warp.TICK);
       const g = BF.clusters.groupOf(m.cl);
-      const rows = BF.shared.rows();
+      const rows = BF.sharedTable.rows();
       process.send({ parts: BF.stateHash.parts(), tick: BF.rand.tick, stage: st.trip ? st.stage : null, cl: m.cl, inA: g === BF.clusters.groupOf('v:' + A.key), inB: g === BF.clusters.groupOf('v:' + B.key),
-        dead: !!m.dead, pinned: BF.villageSim.pins().has(tripId), rows: rows.length, stamps: rows.every(r => r.tick === BF.shared.tick), tableAt: BF.shared.tick,
+        dead: !!m.dead, pinned: BF.villageSim.pins().has(tripId), rows: rows.length, stamps: rows.every(r => r.tick === BF.sharedTable.tick), tableAt: BF.sharedTable.tick,
         sold: st.trip ? st.trip.soldN : null, errors: errors.splice(0) });
     } else if (msg.do === 'asks') {
       // three merchants of different villages plan a trip in the same interval (as js/merchant.js start does with the cluster tick on):

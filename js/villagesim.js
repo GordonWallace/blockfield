@@ -509,7 +509,7 @@ BF.villageSim = {
     if (BF.ctick && !hooked) {   // the set at meetings, and the shared table published at their end (spec r15-39b)
       hooked = true;
       BF.ctick.onMeet(meet, "villageSim", "start");
-      if (BF.shared) BF.ctick.onMeet(BF.shared.publish, "shared", "end");
+      if (BF.sharedTable) BF.ctick.onMeet(BF.sharedTable.publish, "shared", "end");
     }
   },
 };
