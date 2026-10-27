@@ -74,7 +74,9 @@ function fx(m, color, n) { const V = BF.villageLife; if (V && V.particles && m.p
 function snd(name, m, vol) { const V = BF.villageLife; if (V && V.sound && m.position) V.sound(name, m.position.x, m.position.y + 0.8, m.position.z, vol); }
 
 // Wheat eaten by `m` (from the player or a shepherd). Returns false for lambs or sheep that are not hungry.
-function feed(m, by) {
+// (spec r15-71: when a keeper does it while thinking, the change waits for the end of the mob loop, js/mobs.js later)
+function feed(m, by) { return BF.mobs.later ? BF.mobs.later(m, () => live(m) && m.type === "sheep" && (stOf(m).growAt != null || hungry(m, now())), () => feed0(m, by)) : feed0(m, by); }
+function feed0(m, by) {
   if (BF.rworkers) BF.rworkers.writes(m);   // (a villager of another unit may be the one feeding it: js/rworkers.js)
   if (!live(m) || m.type !== "sheep") return false;
   const s = stOf(m), t = now();
@@ -86,16 +88,23 @@ function feed(m, by) {
   return true;
 }
 // Takes the wool: returns how many items, or 0 when there is nothing to shear. The caller puts them somewhere.
+// (spec r15-71: when a keeper does it while thinking, the change waits for the end of the mob loop, js/mobs.js later)
 function shear(m, by) {
   if (BF.rworkers) BF.rworkers.writes(m);   // (a villager of another unit may be the one feeding it: js/rworkers.js)
   if (!live(m) || m.type !== "sheep") return 0;
   const s = stOf(m);
   if (s.growAt != null || s.shorn) return 0;
+  const n = rndInt(RS(by && by.position ? by : m), 1, 3);   // the shearer's stream when a villager shears (spec r15-33: a mob draws only from its own)
+  if (BF.mobs.later) BF.mobs.later(m, () => true, () => shear0(m, by)); else shear0(m, by);
+  return n;
+}
+function shear0(m, by) {
+  const s = stOf(m);
+  if (s.growAt != null || s.shorn) return;
   s.shorn = true; s.woolAt = now() + regrowDays();
   syncLook(m);
   fx(m, "#e9e9e6", 8); snd("sheep", m, 0.5);
   if (BF.emit) BF.emit("sheepShorn", m, by);
-  return rndInt(RS(by && by.position ? by : m), 1, 3);   // the shearer's stream when a villager shears (spec r15-33: a mob draws only from its own)
 }
 function dropItem(id, n, m) {
   if (id == null || n <= 0) return;
