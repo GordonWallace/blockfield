@@ -24,11 +24,12 @@ module.exports = async (pg) => {
       if (await wait(k => !BF.villageSim.isActive(k) && !BF.mobs.list.some(m => m.village && m.village.key === k), info.key, 8000)) return true;
       // past the countdown, which lasts as long as the longest task. Never into bedtime: a village that unloads at bedtime comes back with
       // everyone in bed, not where they stood (js/mobsave.js fresh), and a merchant's trip can hold the countdown for minutes (CI: the jump
-      // from 0.3 landed after 0.5 and 2 of 44 were in place). Where it would, the clock goes to the same time the next day instead.
+      // from 0.3 landed after 0.5 and 2 of 44 were in place). Where it would, the clock goes to the same time the next day instead. Nor near
+      // it: the countdown still runs while this waits, so a jump to 0.49 crossed into bedtime before the unload (locally under load: 8 of 59).
       await lib.sim(pg, k => {
         const t = BF.villageSim.timeLeft(k), t0 = BF.sky.time;
         BF.sky.time += Math.min(0.25, (isFinite(t) ? t + 2 : 36) / 1200);
-        if (BF.mobs.nav.bedtime()) { BF.sky.time = t0; BF.sky.day += 1; }
+        if (BF.mobs.nav.bedtime() || BF.sky.time > 0.42) { BF.sky.time = t0; BF.sky.day += 1; }   // (bedtime starts at 0.5: js/mobs.js)
       }, info.key);
     }
     return false;
