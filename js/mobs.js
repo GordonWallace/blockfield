@@ -186,6 +186,16 @@ function ownTables() {
   const part = (map, g) => { const o = []; for (const [k, v] of map) if (groupFor(k) === g) o.push([k, v]); return o; };
   const put = (map, g, a) => { for (const k of [...map.keys()]) if (groupFor(k) === g) map.delete(k); for (const [k, v] of a || []) map.set(k, v); };
   C.owned("mobs.spawnAcc", { snap: g => part(spawnAcc, g), apply: (g, a) => put(spawnAcc, g, a) });
+  // the darkening stamps, by the group of their cell's centre (a stamp on another group's cell came at a meeting, on every copy alike)
+  const CC = BF.world && BF.world.clusterCells;
+  if (CC) {
+    CC.onMeeting("darkStamp", d => { stampCell(Math.floor(d.x / CELL) + "," + Math.floor(d.z / CELL), d.t); });
+    const darkOf = k => { const i = k.indexOf(","); return CC.cellGroup(+k.slice(0, i) * CELL + CELL / 2, +k.slice(i + 1) * CELL + CELL / 2); };
+    C.owned("mobs.darkStamps", {
+      snap: g => { const o = []; for (const [k, v] of darkStamps) if (darkOf(k) === g) o.push([k, v]); return o; },
+      apply: (g, a) => { for (const k of [...darkStamps.keys()]) if (darkOf(k) === g) darkStamps.delete(k); for (const [k, v] of a || []) darkStamps.set(k, v); },
+    });
+  }
   C.owned("mobs.aiBy", { snap: g => aiBy.get(g) || null, apply: (g, v) => { if (v) aiBy.set(g, v); else aiBy.delete(g); } });
   const enc = a => ({ pos: v3(a.pos), prev: v3(a.prev), vel: v3(a.vel), look: v3(a.look), dir: v3(a.dir), life: a.life, stuck: a.stuck, owner: a.owner ? a.owner.id : null,
     victim: a.victim ? a.victim.id : null, byPlayer: !!a.byPlayer, damage: a.damage, crit: a.crit, pickup: a.pickup, cell: a.cell, rng: a.rng, cl: clOf(a) });
@@ -241,10 +251,20 @@ function darkLongEnough(x, z, factor) {
   const st = darkStamps.get(cx + "," + cz);
   return st == null || gameNow() - st >= wait || st > gameNow();   // a stamp in the future: time was set back
 }
+// With the cluster tick on (spec r15-39b) a stamp on another group's cell waits for the next meeting (js/world.js clusterCells.toMeeting),
+// so a group sees the same stamps in every order and on every worker. Old stamps go only once no cell's wait can reach them (twice
+// DARK_WAIT), so which ones a copy has dropped never matters.
 function stampDark(x, z, r) {
-  const now = gameNow(), cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
-  for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) darkStamps.set((cx + dx) + "," + (cz + dz), now);
-  if (darkStamps.size > 4096) for (const [k, v] of darkStamps) if (now - v >= DARK_WAIT || v > now) darkStamps.delete(k);
+  const now = gameNow(), cx = Math.floor(x / CELL), cz = Math.floor(z / CELL), CC = BF.world && BF.world.clusterCells;
+  for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+    const bx = (cx + dx) * CELL + CELL / 2, bz = (cz + dz) * CELL + CELL / 2;
+    if (CC && CC.cur() && !CC.mineCell(bx, bz)) CC.toMeeting("darkStamp", bx, bz, { x: bx, y: 0, z: bz, t: now });
+    else stampCell((cx + dx) + "," + (cz + dz), now);
+  }
+}
+function stampCell(k, t) {
+  darkStamps.set(k, t);
+  if (darkStamps.size > 4096) for (const [j, w] of darkStamps) if (t - w >= 2 * DARK_WAIT || w > t) darkStamps.delete(j);
 }
 
 // (The mob models, their geometry and everything else about how a mob looks are in js/mobview.js, spec r15-11.)

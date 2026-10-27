@@ -48,7 +48,7 @@ function world(roundTrip) {
 }
 
 const a = world(true);
-for (const n of ['mobs.spawnAcc', 'mobs.aiBy', 'mobs.arrows', 'drops', 'boats', 'wildlife.rolled', 'wildlife.stored', 'wildlife.nights', 'mobSave.villagers', 'mobSave.golems', 'mobSave.wild'])
+for (const n of ['mobs.spawnAcc', 'mobs.aiBy', 'mobs.arrows', 'drops', 'boats', 'wildlife.rolled', 'wildlife.stored', 'wildlife.nights', 'mobSave.villagers', 'mobSave.golems', 'mobSave.wild', 'mobs.darkStamps'])
   check(a.names.includes(n), `table ${n} is registered`);
 check(a.made.drop > 0 && a.made.boat && a.made.skeleton, `a drop, a boat and a skeleton put in the far cluster ${a.far}`);
 const nonEmpty = a.parts.filter(p => p[2] !== '[]' && p[2] !== 'null').map(p => p[0]);
