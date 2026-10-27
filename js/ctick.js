@@ -381,15 +381,36 @@ const ofCell = (x, z) => CL().groupOf(CL().ofRegion(BF.regions.keyOf(x, 0, z)));
 const ofMob = m => (m && m.cl !== undefined ? CL().groupOf(m.cl) : null);
 const mineVillage = k => !cur || legacy || ofVillage(k) === cur.key;
 const mineCell = (x, z) => !cur || legacy || ofCell(x, z) === cur.key;
+// A table's keys by group, in the table's order, for the owned tables' snap and apply (keysOf(coll, g, groupOf(k, v)): a Map's or a
+// Set's): made once per swap step (tablesStep: js/cworkers.js, around its snaps and around its applies) instead of every group's snap
+// and apply testing every key. Within a step a key doesn't change group and an apply changes only its own group's keys (applied(coll, g)
+// after it); made again when the table's size changed some other way. Outside a step (one worker, tests) made at each call.
+let tstep = 0, inStep = false;
+const parts = new WeakMap();   // coll -> {at, size, m: group -> [keys]}
+const NO_KEYS = [];
+function keysOf(coll, g, groupOf) {
+  let c = inStep ? parts.get(coll) : undefined;
+  if (!c || c.at !== tstep || c.size !== coll.size || c.m.get(g) === null) {
+    c = { at: tstep, size: coll.size, m: new Map() };
+    const isMap = coll instanceof Map;
+    for (const e of coll) { const k = isMap ? e[0] : e, gk = isMap ? groupOf(k, e[1]) : groupOf(k), a = c.m.get(gk); if (a) a.push(k); else c.m.set(gk, [k]); }
+    if (inStep) parts.set(coll, c);
+  }
+  return c.m.get(g) || NO_KEYS;
+}
+function applied(coll, g) { const c = parts.get(coll); if (c && c.at === tstep) { c.size = coll.size; c.m.set(g, null); } }
+function tablesStep(on) { inStep = !!on; tstep++; }
+
 function ownedMap(name, map, groupOfKey, enc, dec, ver) {
   if (ver) return ownedLog(name, map, groupOfKey, enc, dec, ver);
   owned(name, {
-    snap(g) { const o = []; for (const [k, v] of map) if (groupOfKey(k, v) === g) o.push([k, enc ? enc(v, k) : v]); return o; },
+    snap(g) { const o = []; for (const k of keysOf(map, g, groupOfKey)) o.push([k, enc ? enc(map.get(k), k) : map.get(k)]); return o; },
     apply(g, list) {
       const got = new Set();
       for (const [k] of list) got.add(k);
-      for (const [k, v] of [...map]) if (!got.has(k) && groupOfKey(k, v) === g) map.delete(k);
+      for (const k of keysOf(map, g, groupOfKey)) if (!got.has(k)) map.delete(k);
       for (const [k, v] of list) map.set(k, dec ? dec(v, k) : v);
+      applied(map, g);
     },
   });
 }
@@ -400,8 +421,8 @@ function ownedLog(name, map, groupOfKey, enc, dec, ver) {
   owned(name, {
     snap(g, all) {
       const keys = [], put = [];
-      for (const [k, v] of map) {
-        if (groupOfKey(k, v) !== g) continue;
+      for (const k of keysOf(map, g, groupOfKey)) {
+        const v = map.get(k);
         keys.push(k);
         const n = ver(k, v);
         if (all || had.get(k) !== n) { had.set(k, n); put.push([k, enc ? enc(v, k) : v]); }
@@ -410,15 +431,16 @@ function ownedLog(name, map, groupOfKey, enc, dec, ver) {
     },
     apply(g, o) {
       const got = new Set(o.keys);
-      for (const [k, v] of [...map]) if (!got.has(k) && groupOfKey(k, v) === g) { map.delete(k); had.delete(k); }
+      for (const k of keysOf(map, g, groupOfKey)) if (!got.has(k)) { map.delete(k); had.delete(k); }
       for (const [k, j] of o.put) { const v = dec ? dec(j, k) : j; map.set(k, v); had.set(k, ver(k, v)); }
+      applied(map, g);
     },
   });
 }
 function ownedSet(name, set, groupOfKey) {
   owned(name, {
-    snap(g) { const o = []; for (const k of set) if (groupOfKey(k) === g) o.push(k); return o; },
-    apply(g, list) { const got = new Set(list); for (const k of [...set]) if (!got.has(k) && groupOfKey(k) === g) set.delete(k); for (const k of list) set.add(k); },
+    snap(g) { return keysOf(set, g, groupOfKey).slice(); },
+    apply(g, list) { const got = new Set(list); for (const k of keysOf(set, g, groupOfKey)) if (!got.has(k)) set.delete(k); for (const k of list) set.add(k); applied(set, g); },
   });
 }
 
@@ -551,7 +573,9 @@ BF.ctick = {
     get deferred() { return deferred; }, set deferred(v) { deferred = v; },
     pendingOf(g) { keepSlot(between); useSlot(g); try { return BF.req.pending(); } finally { useSlot(between); } },
     setPending(g, list) { g.req = BF.req.newCtx(); for (const r of list) BF.req.fileIn(g.req, r); },
+    tablesStep,
   },
+  keysOf, applied,   // an owned table's keys of one group, in its order (see keysOf); after applying a group's part
   // trace: true starts counting hidden reads ("system file:line" -> count), traced() reads them, trace = false stops
   get trace() { return !!trace; }, set trace(v) { trace = v ? new Map() : null; },
   traced: () => (trace ? [...trace].sort((a, b) => b[1] - a[1]) : []),
