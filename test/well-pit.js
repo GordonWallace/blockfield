@@ -4,6 +4,7 @@
 // 1. A villager put in the well's water swims to a bank it can jump from (not under the bell) and climbs out, with an ERROR and an INFO
 //    line in the game log.
 // 2. Four villagers on the rim run from the player standing on the far side: none goes over the edge into the water.
+// 3. A builder at work on its own site (here one round the well) is in its dig on purpose: no ERROR, and it isn't pulled out of it.
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
   await require('./lib').toVillage(pg);
@@ -31,7 +32,26 @@ module.exports = async (pg, out) => {
       step();
       ms.forEach((v, i) => { if (inWell(v)) fell.add(i); });
     }
-    return { outAt, log: log.filter(t => /well|climbed/.test(t)), fell: [...fell] };
+    // 3: a builder whose site takes in the well, its own job put off so it keeps that site for the test
+    const b = BF.mobs.list.find(v => v.type === "villager" && v.profession === "builder" && !v.dead && !vs.includes(v));
+    let site = null;
+    if (b) {
+      const hooks = [];
+      for (const k of Object.keys(BF)) {
+        const o = BF[k];
+        if (o && typeof o === "object" && typeof o.ai === "function" && o !== BF.mobs) { const f = o.ai; hooks.push([o, f]); o.ai = function (x) { return x === b ? false : f.apply(this, arguments); }; }
+      }
+      const bs0 = b.bs, seen = new Set(BF.glog ? BF.glog.recent(400) : []), t1 = T;
+      const fake = { mode: "build", entry: { type: "well", ox: V.x - 1, oy: V.y, oz: V.z - 1, w: 3, d: 3 } };
+      b.position.set(V.x + 0.5, V.y + 0.5, V.z + 0.5); b.vel.set(0, 0, 0); b.ai.mode = "idle"; b.ai.t = 0; b.ai.route = null; b.ai.pitOut = null; b.ai.pitLogged = false;
+      let pulled = false;
+      try {
+        while (T < t1 + 4) { b.bs = fake; P.set(V.x + 12, V.y + 30, V.z + 12); step(); if (b.ai.pitOut) pulled = true; }
+      } finally { b.bs = bs0; for (const [o, f] of hooks) o.ai = f; }
+      const name = BF.vlog ? BF.vlog.nameOf(b) : "";
+      site = { pulled, errors: (BF.glog ? BF.glog.recent(400) : []).filter(e => e.k === "move" && !seen.has(e) && e.l === "ERROR" && (!name || (e.x || "").includes(name))).map(e => e.x) };
+    }
+    return { outAt, log: log.filter(t => /well|climbed/.test(t)), fell: [...fell], site };
   });
   console.log(JSON.stringify(r));
   let fails = 0;
@@ -42,6 +62,11 @@ module.exports = async (pg, out) => {
     if (!r.log.some(t => /^ERROR .*fell into a well/.test(t))) fail("no ERROR line for the fall");
     if (!r.log.some(t => /^INFO .*climbed out/.test(t))) fail("no INFO line for the climb out");
     if (r.fell.length) fail(r.fell.length + " fleeing villagers went over the rim into the well");
+    if (!r.site) fail("no builder in the village for the site check");
+    else {
+      if (r.site.errors.length) fail("a builder in its own dig was logged: " + r.site.errors.join(" | "));
+      if (r.site.pulled) fail("a builder in its own dig was steered out of it");
+    }
   }
   console.log(fails ? "well-pit: " + fails + " failures" : "well-pit: ok");
 };

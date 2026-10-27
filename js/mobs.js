@@ -1107,8 +1107,14 @@ function pitAt(x, y, z) {
   return false;
 }
 // Stops a village mob's walk (and any push) that would take it over the edge into a pit: each horizontal velocity axis that heads for one.
+// A builder at work at its own site (a well it is digging, a foundation): its building route takes it in and out of the dig, and the
+// water a well's builder puts in first can run into it, so that is not a pit to keep it out of or get it out of.
+function atOwnSite(m) {
+  const e = m.bs && m.bs.mode === "build" && m.bs.entry, p = m.position;
+  return !!e && p.x >= e.ox - 2 && p.x < e.ox + e.w + 2 && p.z >= e.oz - 2 && p.z < e.oz + e.d + 2;
+}
 function keepOutOfPits(m) {
-  if (m.inWater || m.onLadder || m.knockT > 0) return;
+  if (m.inWater || m.onLadder || m.knockT > 0 || atOwnSite(m)) return;
   const v = m.vel, p = m.position, y = Math.floor(p.y + 0.01), reach = m.halfWidth + 0.1;
   if (Math.abs(v.x) > 0.01 && pitAt(Math.floor(p.x + Math.sign(v.x) * reach), y, Math.floor(p.z))) v.x = 0;
   if (Math.abs(v.z) > 0.01 && pitAt(Math.floor(p.x), y, Math.floor(p.z + Math.sign(v.z) * reach))) v.z = 0;
@@ -1985,7 +1991,7 @@ function updateMob(m, dt) {
   if (m.coop && BF.poultry) BF.poultry.contain(m, _desired);   // nor does a coop chicken
   if (m.pasture && BF.cowherd) BF.cowherd.contain(m, _desired);   // nor a pasture cow
   if (m.sty && BF.pigFarmer) BF.pigFarmer.contain(m, _desired);   // nor a sty pig
-  if (T.village && !m.rider) {   // in a well or other pit (bug-061): swim for the lowest bank
+  if (T.village && !m.rider && !atOwnSite(m)) {   // in a well or other pit (bug-061): swim for the lowest bank
     if (m.inWater || (ai.pitOut && !m.onGround)) swimOutOfPit(m, dt, _desired);   // (still heading for the bank in the air, jumping out)
     else if (ai.pitOut || ai.pitLogged) { if (ai.pitLogged) moveLog(m, "INFO", "climbed out at " + Math.floor(m.position.x) + ", " + Math.floor(m.position.y) + ", " + Math.floor(m.position.z)); ai.pitOut = null; ai.pitLogged = false; ai.pitT = 0; }
   }
