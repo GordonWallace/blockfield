@@ -51,17 +51,20 @@ function bedHouse(m) {
   for (const h of rec.houses || []) if (h && h.w && b.x >= h.x && b.x < h.x + h.w && b.z >= h.z && b.z < h.z + h.d) return h;
   return null;
 }
-const houseCache = new Map();   // house -> {t, list: [{x,y,z}]}
+const houseCache = new Map();   // "x,y,z,w,d" of a house -> {t, list: [{x,y,z}]}
+const houseKey = H => H.x + "," + H.y + "," + H.z + "," + H.w + "," + H.d;
+// several workers (clusters, js/cworkers.js): a house's cached chests are its cluster's (by the house's corner)
+BF.onLoad(() => { const C = BF.ctick; if (C && C.ownedMap) C.ownedMap("storage.houses", houseCache, k => { const a = k.split(","); return C.ofCell(+a[0], +a[2]); }); });
 function chestsIn(H, b) {
   const now = BF.simNow ? BF.simNow() : 0;
-  const hit = houseCache.get(H);
+  const hk = houseKey(H), hit = houseCache.get(hk);
   if (hit && now - hit.t < 10) return hit.list;
   const W = BF.world, y0 = (H.y != null ? H.y : b.y - 1), list = [];
   for (let x = H.x; x < H.x + H.w; x++) for (let z = H.z; z < H.z + H.d; z++) {
     if (!W.isLoaded(x, z)) continue;
     for (let y = y0; y <= y0 + 9; y++) if (BF.isChest(W.getBlock(x, y, z))) list.push({ x, y, z });
   }
-  houseCache.set(H, { t: now, list });
+  houseCache.set(hk, { t: now, list });
   return list;
 }
 // May villager key k use the chest at p? Unowned (and not delivered to somebody else just now) or its own.
@@ -266,7 +269,9 @@ BF.req.on("chestPut", (req, W) => {
   const c = INV().chestRecord(x, y, z);
   c.reserved = { key: keyOf(m), until: dayNow() + ORDER_DAYS, name: nameOf(m) };
   m.store.order = null; m.store.checkT = 0.5;
-  houseCache.clear();
+  // (with clusters, only the running cluster's houses: the others' caches are theirs, js/ctick.js)
+  if (BF.ctick && BF.ctick.filter) { for (const k of [...houseCache.keys()]) { const a = k.split(","); if (BF.ctick.mineCell(+a[0], +a[2])) houseCache.delete(k); } }
+  else houseCache.clear();
   if (BF.vlog) BF.vlog.trade(m, f, o, 1);
   log(m.village, who(f) + " placed a chest at " + at(spot) + " in the house of " + who(m));
   return { ok: true };
@@ -389,11 +394,14 @@ function statusText(m) {
 let tickT = 0, hooked = false;
 function tick(dt) {
   hook();
-  if ((tickT -= dt) > 0 || !INV() || !INV().chests) return;
-  tickT = 2;
+  // clusters (spec r15-39b, js/ctick.js): each cluster the chests in its regions, every 2 game seconds on the tick counter
+  const C = BF.ctick && BF.ctick.filter ? BF.ctick : null;
+  if (C) { if (BF.rand.tick % 40 !== 7) return; }
+  else { if ((tickT -= dt) > 0) return; tickT = 2; }
+  if (!INV() || !INV().chests) return;
   const now = dayNow();
   for (const c of INV().chests.values()) {
-    if (!c.owner) continue;
+    if (!c.owner || (C && !C.mineCell(c.pos.x, c.pos.z))) continue;
     if (!chestEmpty(c)) { c.emptySince = null; continue; }
     if (c.emptySince == null || c.emptySince > now) c.emptySince = now;
     else if (now - c.emptySince >= RELEASE_DAYS) INV().chestRelease(c, "empty for a day");
