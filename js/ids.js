@@ -25,6 +25,9 @@ const reg = new Map();   // id -> live object
 // Counts the registry's changes (an object put under a key, a key removed, a ghost added or dropped). A mob keeps its last answer for its
 // hottest links (cached below) with the gen and the id it was for, so the answer is reused only while nothing in the registry changed (r15-61).
 let gen = 0;
+// gen and the cluster view (hide) changing: lookAt reads through get(), which hides other clusters' mobs; village, slot and home read the
+// registry itself, so a cluster entering or leaving doesn't drop their answers
+let vgen = 0;
 // onNew(obj, id): a key registered for the first time (js/rworkers.js: a place made while a region worker thinks goes to the others)
 const hooks = { onNew: null };
 // Removed mobs, kept readable for a while (id -> {o, t}): code that held a mob saw it go (m.removed) and acted on that a little later;
@@ -61,7 +64,7 @@ function put(obj, id) {
     stats.collisions++; stats.last = id;
     if (stats.collisions <= 20 && BF.glog) BF.glog.log("WARN", "ids", "Entity id " + id + " was taken over by another object" + (obj.type ? " (" + obj.type + ")" : ""));
   }
-  if (had !== obj) { reg.set(id, obj); gen++; }
+  if (had !== obj) { reg.set(id, obj); gen++; vgen++; }
   if (!had && hooks.onNew) hooks.onNew(obj, id);
   return obj;
 }
@@ -69,7 +72,7 @@ function remove(x) {
   const id = x && typeof x === "object" ? x.id : x;
   if (id == null || (typeof x === "object" && reg.get(id) !== x)) return;
   const o = reg.get(id);
-  reg.delete(id); gen++;
+  reg.delete(id); gen++; vgen++;
   const t = now();
   for (const [k, g] of ghosts) { if (t - g.t < GHOST && g.t <= t) break; ghosts.delete(k); }   // oldest first
   if (o && o.removed) ghosts.set(id, { o, t });
@@ -78,9 +81,9 @@ function remove(x) {
 function idOf(v) {
   if (v == null) return null;
   if (typeof v !== "object") return v;
-  if (BF.player && v === BF.player) { if (reg.get("player") !== v) { reg.set("player", v); gen++; } return "player"; }
+  if (BF.player && v === BF.player) { if (reg.get("player") !== v) { reg.set("player", v); gen++; vgen++; } return "player"; }
   if (v.id == null) put(v);
-  else if (!v.removed && !reg.has(v.id)) { reg.set(v.id, v); gen++; }
+  else if (!v.removed && !reg.has(v.id)) { reg.set(v.id, v); gen++; vgen++; }
   return v.id;
 }
 // A place's key from its block cell: the planet's canonical cell, so a place seen across a face edge has one key.
@@ -183,9 +186,9 @@ cached("home", function () {
 cached("lookAt", function () {
   const id = this.lookAtId;
   if (id == null) return this.lookV;
-  if (this._laK === id && this._laG === gen) return this._laV;
+  if (this._laK === id && this._laG === vgen) return this._laV;
   const o = get(id);
-  if (this._laG !== undefined) { this._laK = id; this._laV = o; this._laG = gen; }
+  if (this._laG !== undefined) { this._laK = id; this._laV = o; this._laG = vgen; }
   return o;
 });
 const CACHE_FIELDS = ["_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG"];   // (tests: test/entity-ids.js)
@@ -224,7 +227,7 @@ BF.ids = {
   reuse(obj, id) {
     if (typeof id !== "string" || !/^e\d+$/.test(id) || (reg.has(id) && reg.get(id) !== obj)) return false;
     if (obj.id != null && obj.id !== id && reg.get(obj.id) === obj) reg.delete(obj.id);
-    obj.id = id; reg.set(id, obj); ghosts.delete(id); gen++;
+    obj.id = id; reg.set(id, obj); ghosts.delete(id); gen++; vgen++;
     bump(+id.slice(1));
     return true;
   },
@@ -232,8 +235,8 @@ BF.ids = {
   seen(id) { const n = typeof id === "string" && /^e\d+$/.test(id) ? +id.slice(1) : 0; bump(n); },
   serialize() { return { next: Math.max(next, top) }; },
   deserialize(o) { const n = o && Math.floor(+o.next); if (n > next) next = n; if (n > top) top = n; },
-  reset() { reg.clear(); ghosts.clear(); gen++; next = top = 1; lim = 0; more = null; stats.collisions = 0; stats.last = null; },
-  get hidden() { return hide; }, set hidden(f) { hide = f || null; gen++; },   // (gen: a cached lookAt read under another cluster's view is not reused)
+  reset() { reg.clear(); ghosts.clear(); gen++; vgen++; next = top = 1; lim = 0; more = null; stats.collisions = 0; stats.last = null; },
+  get hidden() { return hide; }, set hidden(f) { hide = f || null; vgen++; },   // (vgen: a cached lookAt read under another cluster's view is not reused)
   // a live object get() doesn't see now (another cluster's, js/ctick.js): not gone, so nothing should be undone because of it
   away(id) { const o = reg.get(id); return !!(o !== undefined && hide !== null && hide(o)); },
   // the counter's state while a cluster runs ({next, lim, more}; set(null): back to the one counter, past every id handed out)

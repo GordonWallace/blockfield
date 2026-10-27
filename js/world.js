@@ -1271,6 +1271,28 @@ function cellGroup(x, z) {
   return g;
 }
 const mineCell = (x, z) => { const g = clusterCur(); return !g || cellGroup(x, z) === g.key; };
+// The loaded chunks of group key gk (a chunk's group is its centre cell's), in world.chunks order: one pass over the chunks for every group,
+// made again when the groups or the chunk set change (chunks come and go only at meetings), instead of each group's pass sorting out its
+// own from all of them (js/grass.js, js/mobs.js monster spawning, js/wildlife.js areas)
+let byGroup = null, byGroupAt = { gs: null, ep: -1, gen: -1 };
+function groupChunks(gk) {
+  const C = CT();
+  if (!C) return [];
+  const gs = C.groups(), A = byGroupAt;
+  if (!byGroup || A.gs !== gs || A.ep !== C.epoch || A.gen !== CGEN) {
+    A.gs = gs; A.ep = C.epoch; A.gen = CGEN;
+    byGroup = new Map();
+    const live = new Set(gs.map(e => e.key)), first = gs.length ? gs[0].key : null, CS = BF.CS, rg = new Map();
+    for (const c of world.chunks.values()) {
+      const k = BF.regions.keyOf(c.cx * CS + 8, 0, c.cz * CS + 8);
+      let g = rg.get(k);
+      if (g === undefined) { g = BF.clusters.groupOf(BF.clusters.ofRegion(k)); if (!live.has(g)) g = first; rg.set(k, g); }
+      const a = byGroup.get(g);
+      if (a) a.push(c); else byGroup.set(g, [c]);
+    }
+  }
+  return byGroup.get(gk) || [];
+}
 // A cell of another group within r blocks of (x, z) (axis and diagonal), as [x, z], or null when every cell there is the running
 // group's. Regions are 64-block squares, so the four corners of the square are enough.
 function foreignNear(x, z, r) {
@@ -1328,7 +1350,7 @@ function ownCellsNow(name, coll, enc, dec) {
     },
   });
 }
-world.clusterCells = { cellGroup, mineCell, foreignNear, toMeeting, onMeeting, ownCells, later, cur: clusterCur };
+world.clusterCells = { cellGroup, groupChunks, mineCell, foreignNear, toMeeting, onMeeting, ownCells, later, cur: clusterCur };
 // Chunks wait for the next meeting: true while the cluster tick is on and an interval is under way.
 const heldNow = () => !!(CT() && BF.rand && BF.rand.tick % CT().MEET !== 0);
 world.heldNow = heldNow;

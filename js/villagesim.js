@@ -147,11 +147,11 @@ function corridor(a, b) {
 }
 function pin(id, a, b, keys) {
   if (!pins.has(id) && pins.size >= MAX_PINS) return false;
-  pins.set(id, { a, b, keys: keys || corridor(a, b) });
+  pins.set(id, { a, b, keys: keys || corridor(a, b) }); areasV++;
   pinDirty = true;
   return true;
 }
-function unpin(id) { if (pins.delete(id)) { pinDirty = true; } }
+function unpin(id) { if (pins.delete(id)) { pinDirty = true; areasV++; } }
 const pinnedKeys = () => { const s = new Set(); for (const p of pins.values()) { s.add(vKey(p.a)); s.add(vKey(p.b)); } return s; };
 
 // Distance from a point to the village's edge (its bounds), 0 inside.
@@ -329,6 +329,7 @@ function windows() {
   if (same) return false;
   winKeys.clear();
   for (const k of next) winKeys.add(k);
+  areasV++;
   return true;
 }
 
@@ -448,6 +449,7 @@ function check(px, pz, clk, now) {
   const fresh = [...next].filter(([k]) => !active.has(k));
   active.clear();
   for (const [k, e] of next) active.set(k, e);
+  areasV++;
   for (const [k, e] of fresh) startCatchUp(k, e);
   for (const k of dropped) fetchVillage(k);
   for (const k of dropped) if (BF.merchant && BF.merchant.remember) BF.merchant.remember(k, true);   // its prices are written down for merchants elsewhere
@@ -474,8 +476,15 @@ function onChunkLoad(cx, cz, c) {
 // each group of touching villager windows. A window group that overlaps or touches a village or a trip belongs to that area: it is the ground
 // its villagers walk at the village's edge, and as a separate area of its own the monsters spawned in the village drifted into it (zombies
 // after villagers walking the edge at dusk) and took it over its cap. Kept together, nothing loaded lies around the village to drift in from.
-// [{kind: "village" | "trip" | "window", key, keys: [chunk keys]}]
+// [{kind: "village" | "trip" | "window", key, keys: [chunk keys]}], worked out again only when the running villages, the trips' pins or the
+// windows changed (areasV; with clusters every group asks once per meeting): read it, don't change it
+let areasV = 0, areasAt = -1, areasOut = null;
 function areas() {
+  if (areasAt === areasV && areasOut) return areasOut;
+  areasOut = areasNow(); areasAt = areasV;
+  return areasOut;
+}
+function areasNow() {
   const out = [], own = new Map();   // chunk key -> the village or trip area it is in
   for (const [k, e] of active) out.push({ kind: "village", key: k, keys: e.keys.slice(), v: e.v });
   for (const [id, p] of pins) out.push({ kind: "trip", key: id, keys: p.keys.slice() });
@@ -514,7 +523,7 @@ BF.villageSim = {
   pinned: () => { const out = [], seenK = new Set(); for (const p of pins.values()) for (const v of [p.a, p.b]) if (!seenK.has(vKey(v))) { seenK.add(vKey(v)); out.push(v); } return out; },
   isPinned: key => pinnedKeys().has(key),
   isActive: key => active.has(key),
-  areas, LIMITS, mayStart, begin, done, walkSecs, timeLeft, countdown, errors: () => errors, estimates, ALWAYS, MAXT, DROP, EST_MARGIN,
+  areas, get areasV() { return areasV; }, LIMITS, mayStart, begin, done, walkSecs, timeLeft, countdown, errors: () => errors, estimates, ALWAYS, MAXT, DROP, EST_MARGIN,
   _edgeDist: edgeDist, footprint, count: () => active.size,
   extraCount() { let n = 0; for (const e of active.values()) if (e.extra) n++; return n; },   // of count(): the budget's extras, counting down too (js/active.js)
   status: () => `${active.size} sim village${active.size === 1 ? "" : "s"}` + (BF.active && BF.active.extras().length ? ` (${BF.active.extras().length} extra)` : "") + `, ${keepKeys.size} kept chunks` + (pins.size ? `, ${pins.size} trip${pins.size === 1 ? "" : "s"} pinned` : ""),
@@ -523,16 +532,16 @@ BF.villageSim = {
     for (const [id, p] of pins) out["pin:" + id] = { a: vKey(p.a), b: vKey(p.b) };   // the corridor is worked out again on load
   },
   importSeen(o) {
-    seen.clear(); pins.clear(); pinDirty = true;
+    seen.clear(); pins.clear(); pinDirty = true; areasV++;
     if (o) for (const k in o) {
       if (k.slice(0, 5) === "seen:") seen.set(k.slice(5), +o[k]);
       else if (k.slice(0, 4) === "pin:" && o[k] && typeof o[k].a === "string" && typeof o[k].b === "string") {
         const a = villageByKey(o[k].a), b = villageByKey(o[k].b);
-        if (a && b && pins.size < MAX_PINS) pins.set(k.slice(4), { a, b, keys: corridor(a, b) });
+        if (a && b && pins.size < MAX_PINS) { pins.set(k.slice(4), { a, b, keys: corridor(a, b) }); areasV++; }
       }
     }
   },
-  reset() { if (BF.active) BF.active.reset(); simClock.win = simClock.last = realClock.win = realClock.last = -1e9; stepChanged = false; aiCoolUntil = 0; active.clear(); catchQ.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); pinDirty = false; },
+  reset() { if (BF.active) BF.active.reset(); simClock.win = simClock.last = realClock.win = realClock.last = -1e9; stepChanged = false; aiCoolUntil = 0; active.clear(); catchQ.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); pinDirty = false; areasV++; },
   init() {
     BF.world.onChunkLoad(onChunkLoad);
     BF.world.onThink(step, "villageSim");   // re-checks on the game clock (update), in the think phase (js/world.js tickSim)
