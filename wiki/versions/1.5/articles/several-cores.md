@@ -6,9 +6,9 @@ From 1.5 the simulation can use several of your computer's cores at once. Beside
 
 ## How many
 
-By default the game starts one worker for every core but two (left for the page and the rest of your computer), at most 8, and at least one. A computer with 4 cores gets 2, one with 24 cores gets 8.
+By default the game starts none: the simulation runs on its one thread. Region workers cost a core each even when they aren't needed (while one thinks, every other one replays every tick to keep its copy up to date), and splitting hasn't yet made the game faster, so they start only when you ask, until clusters (below) take over.
 
-- `./run.sh --workers <n>` (or `run.cmd --workers <n>`) sets the number for the [[page:world-server]]. `--workers 1` turns the region workers off.
+- `./run.sh --workers <n>` (or `run.cmd --workers <n>`) sets the number for the [[page:world-server]], counting the simulation's own thread: `--workers 4` starts 3 more. `--workers 1` (the default) is none.
 - In the browser, adding `?workers=<n>` to the game's address does the same for that visit.
 - The browser needs the page served with the headers that allow shared memory (`./run.sh` and its debug server send them). A page opened as a file, or served by another web server, runs on one worker, and F3 says why.
 
