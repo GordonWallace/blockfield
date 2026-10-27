@@ -11,7 +11,7 @@
 //                  worker; its key is its smallest base key. Merges are decided from the world's state only (the player's position,
 //                  the village records), never from timing, so every worker count draws the same groups;
 //   a mob's base   its village's ("v:<key>") when it belongs to a simulated village (a member, a pen animal, a stable's horse, an animal
-//                  a villager is working on), else its region's. Kept on the mob (m.cl) and moved only at a meeting: a mob that walks
+//                  a villager is working on), else its region's; a merchant walking or dealing away on a trip, the region's it stands in. Kept on the mob (m.cl) and moved only at a meeting: a mob that walks
 //                  into another cluster stays in its own until then.
 // rebuild() runs at a meeting (js/ctick.js) and works all of it out again from the state then; between meetings the answers don't
 // change, except for regions first met (worked out with the meeting's village list and player position) and new mobs (placed by
@@ -77,6 +77,7 @@ function villageOf(m) {
   return v;
 }
 function baseOf(m) {
+  if (BF.merchant && BF.merchant.roaming(m)) return ofRegion(BF.regions ? BF.regions.keyOf(m.position.x, 0, m.position.z) : -1);   // (a caravan on the road: the ground's, js/merchant.js)
   const v = villageOf(m);
   if (v != null && BF.mobs.villages.has(v)) return "v:" + v;
   return ofRegion(BF.regions ? BF.regions.keyOf(m.position.x, 0, m.position.z) : -1);

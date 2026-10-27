@@ -65,15 +65,15 @@ const SYSTEMS = {
   vstats: true,         // C3 (village stats and economy, js/villagelog.js)
   forester: true,       // C3
   signs: true,          // C3
-  shepherd: false,      // C4: animals
-  horses: false,        // C4
-  stables: false,       // C4
-  poultry: false,       // C4
-  cowherd: false,       // C4
-  pigFarmer: false,     // C4
-  bees: false,          // C4
-  merchant: false,      // C5: merchants and caravans
-  villageSim: false,    // C5 (which villages are simulated, trip pins: js/villagesim.js)
+  shepherd: true,       // C4: animals
+  horses: true,         // C4
+  stables: true,        // C4
+  poultry: true,        // C4
+  cowherd: true,        // C4
+  pigFarmer: true,      // C4
+  bees: true,           // C4
+  merchant: true,       // C5: merchants and caravans
+  villageSim: true,     // C5 (which villages are simulated, trip pins: js/villagesim.js)
   fluids: true,         // C6: world
   growth: true,         // C6
   farmland: true,       // C6
@@ -341,7 +341,7 @@ function local(name, init) {
 
 // Module tables that last longer than an interval and aren't on a mob or village record (claims, records keyed by village, a cell's
 // stamps): each registers how to take the part a group owns and put it back, so the multi-worker runtime (C7) can send it at meetings.
-// owned(name, {snap(groupKey) -> plain JSON, apply(groupKey, plain)}); tables() -> the registered names. Unused on one worker.
+// owned(name, {snap(groupKey, all?) -> plain JSON, apply(groupKey, plain)}); tables() -> the registered names. Unused on one worker.
 const tables = new Map();
 function owned(name, t) {
   if (!t || typeof t.snap !== "function" || typeof t.apply !== "function") throw new Error("BF.ctick.owned(name, {snap, apply})");
@@ -375,17 +375,17 @@ function ownedMap(name, map, groupOfKey, enc, dec, ver) {
   });
 }
 // ver(k, v) given (big tables that change a little at a time: logs, histories): only the entries whose ver changed since this worker last
-// sent or got them go, with the group's key list (for the gone ones)
+// sent or got them go, with the group's key list (for the gone ones); snap(g, true) puts them all (tests: a part sent and snapped again)
 function ownedLog(name, map, groupOfKey, enc, dec, ver) {
   const had = new Map();   // key -> the ver every worker has
   owned(name, {
-    snap(g) {
+    snap(g, all) {
       const keys = [], put = [];
       for (const [k, v] of map) {
         if (groupOfKey(k, v) !== g) continue;
         keys.push(k);
         const n = ver(k, v);
-        if (had.get(k) !== n) { had.set(k, n); put.push([k, enc ? enc(v, k) : v]); }
+        if (all || had.get(k) !== n) { had.set(k, n); put.push([k, enc ? enc(v, k) : v]); }
       }
       return { keys, put };
     },

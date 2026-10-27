@@ -97,6 +97,7 @@ const growK = (growAt, t, days) => (growAt != null ? clamp(1 - (growAt - t) / da
 const toShut = [];
 function shutGates() {
   for (let i = toShut.length - 1; i >= 0; i--) {
+    if (!ownsMob(toShut[i].m)) continue;   // (clusters: another group's herder's gate)
     const g = toShut[i], [x, y, z] = g.at, bk = BF.world.isLoaded(x, z) ? BF.blocks[BF.world.getBlock(x, y, z)] : null;
     if (!bk || !bk.gate || !bk.gate.open || BF.simNow() - g.t > 120) { toShut.splice(i, 1); continue; }
     if ((BF.mobs.isOccupied && BF.mobs.isOccupied(x, y, z)) || (live(g.m) && Math.hypot(x + 0.5 - g.m.position.x, z + 0.5 - g.m.position.z) < 1.5)) continue;
@@ -187,5 +188,89 @@ function startLead(m, S, tk) {
 }
 function reset() { toShut.length = 0; }
 
-BF.herd = { LOCAL_MAX, LOCAL_R, mid, birthSpot, follow, findMate, crowd, mateStep, growK, ledStep, lead, startLead, releaseGate, shutGates, toShut, reset };
+// ---------------------------------------------------------------- clusters (spec r15-39b item C4, js/ctick.js)
+// With the cluster tick on, the animal systems (js/shepherd.js, js/poultry.js, js/cowherd.js, js/pigfarmer.js, js/horses.js, js/stables.js,
+// js/bees.js) run once per cluster group, each touching only its group's mobs, village records and places. What they share:
+//   cluster()        the cluster tick while a group runs (js/ctick.js), else null: the systems then run as before, on the whole world;
+//   ownsVillage(k)   village k's record is the running group's;  ownsAt(x, z): the place at (x, z) is (its region's cluster);
+//   ownsMob(m)       mob m is (by its cluster, m.cl);
+//   every(n)         true once every n ticks by the tick counter, the same in every group and order (timers kept in the module would run
+//                    once per group, and a group's own are new at each meeting);
+//   gateTable(name, list)  registers a list of gates to shut ({at, m, t}) with BF.ctick.owned, by the cluster of the mob that held the gate;
+//   villageTable(name, get)  registers a Map keyed by village key (save data waiting for its pens...) with BF.ctick.owned;
+//   penTable(name, o)  registers the stock of pens kept in a hidden field of the village record (see below).
+// Every group always true without the cluster tick.
+const cluster = () => { const C = BF.ctick; return C && C.on && C.filter ? C : null; };   // (null too in a system not converted yet: it sees everything)
+const ownsVillage = k => { const C = cluster(); return !C || BF.clusters.groupOf("v:" + k) === C.cur.key; };
+const ownsAt = (x, z) => { const C = cluster(); return !C || BF.clusters.groupOf(BF.clusters.ofRegion(BF.regions.keyOf(x, 0, z))) === C.cur.key; };
+const ownsMob = m => { const C = cluster(); return !C || !m || C.mine(m); };
+const every = n => BF.rand.tick % n === 1 % n;
+// (the multi-worker runtime, js/cworkers.js, sends each group's part of these at meetings; one worker never uses them)
+const ofGroup = (m, gk) => !!m && m.cl !== undefined && BF.clusters.groupOf(m.cl) === gk;
+function gateTable(name, list) {
+  if (!BF.ctick || !BF.ctick.owned) return;
+  BF.ctick.owned(name, {
+    snap: gk => list.filter(g => ofGroup(g.m, gk)).map(g => ({ at: g.at.slice(), m: g.m.id, t: g.t })),
+    apply(gk, a) {
+      for (let i = list.length - 1; i >= 0; i--) if (ofGroup(list[i].m, gk)) list.splice(i, 1);
+      for (const g of a || []) { const m = BF.ids.live(g.m); if (m) list.push({ at: g.at, m, t: g.t }); }
+    },
+  });
+}
+function villageTable(name, get) {
+  if (!BF.ctick || !BF.ctick.owned) return;
+  const mine = (k, gk) => BF.clusters.groupOf("v:" + k) === gk;
+  BF.ctick.owned(name, {
+    snap(gk) { const o = {}; for (const [k, v] of get()) if (mine(k, gk)) o[k] = v; return JSON.parse(JSON.stringify(o)); },
+    apply(gk, o) { const M = get(); for (const k of [...M.keys()]) if (mine(k, gk)) M.delete(k); for (const k in o || {}) M.set(k, o[k]); },
+  });
+}
+// The stock of a village's pens: the animal states in each pen, each also the state of its mob (m.cow and the pasture's cows hold one
+// object). Sent as a table at meetings, and the receiver links each state to its mob again: the record and mob diffs would leave two
+// copies. Pens kept in a hidden field of the record (not enumerable: js/cowherd.js _pastures, js/pigfarmer.js _sties) don't travel with
+// the record at all. o = {field ("_pastures"), list ("cows": the animal states), mob ("cow": the mob's state field), pen ("pasture": the
+// mob's pen link), of(rec) -> the record's pens}.
+function penTable(name, o) {
+  if (!BF.ctick || !BF.ctick.owned) return;
+  BF.ctick.owned(name, {
+    snap(gk) {
+      const out = {};
+      for (const rec of BF.mobs.villages.values()) {
+        if (!rec[o.field] || BF.clusters.groupOf("v:" + rec.key) !== gk) continue;
+        out[rec.key] = rec[o.field].filter(p => p[o.list]).map(p => ({ idx: p.idx, list: p[o.list].map(s => Object.assign({}, s)), culls: p.culls }));
+      }
+      return JSON.parse(JSON.stringify(out));
+    },
+    apply(gk, a) {
+      for (const k in a || {}) {
+        const rec = BF.mobs.villages.get(k);
+        if (!rec) { lost(name, "village " + k); continue; }
+        const ps = o.of(rec);
+        for (const e of a[k]) {
+          const p = ps.find(q => q.idx === e.idx);
+          if (!p) { lost(name, "pen " + e.idx + " of village " + k); continue; }
+          // the same objects where there are ones (other records point at them): by mob, and the stock not out yet in its order
+          const had = new Map(), spare = [];
+          for (const s of p[o.list] || []) if (s && s.mobId != null) had.set(s.mobId, s); else if (s) spare.push(s);
+          p[o.list] = e.list.map(s => { const h = s.mobId != null ? had.get(s.mobId) : spare.shift(); return h ? Object.assign(h, BF.ids.refs(s)) : BF.ids.refs(s); });
+          if (e.culls !== undefined) p.culls = e.culls;
+          for (const s of p[o.list]) { const m = s.mobId != null ? BF.ids.live(s.mobId) : null; if (m) { m[o.mob] = s; m[o.pen] = p; } }   // (one state object, as on the owner)
+        }
+      }
+    },
+  });
+}
+// A table's part for something this worker doesn't have: an ERROR (kind clusters), once per table
+const lostSeen = new Set();
+function lost(name, what) {
+  if (lostSeen.has(name) || !BF.glog) return;
+  lostSeen.add(name);
+  BF.glog.log("ERROR", "clusters", "Another worker sent " + name + " for " + what + ", which this worker doesn't have: its animals there may not match");
+}
+// The gates the herders (cowherds, pig farmers) held open: shut by each group for its own herders (js/cowherd.js, js/pigfarmer.js tick)
+let tabled = false;
+function tables() { if (!tabled && BF.ctick) { tabled = true; gateTable("herd.toShut", toShut); } }
+
+BF.herd = { LOCAL_MAX, LOCAL_R, mid, birthSpot, follow, findMate, crowd, mateStep, growK, ledStep, lead, startLead, releaseGate, shutGates, toShut, reset,
+  cluster, ownsVillage, ownsAt, ownsMob, every, gateTable, villageTable, penTable, tables, lost };
 })();
