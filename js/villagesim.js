@@ -71,12 +71,34 @@ function growsTable() {
 // (a third of the speed on dehydrated farmland, js/farmland.js). A world block tick (spec r15-19): a chunk to catch up is queued, and the
 // queue is worked in the tick's block phase in chunk order (catchUpTick), never as a write from the think phase or a chunk load.
 const catchQ = new Map();   // chunk key -> game days away
-function catchUpChunk(c, away) { catchQ.set(c.cx + "," + c.cz, Math.max(away, catchQ.get(c.cx + "," + c.cz) || 0)); }
+// With the cluster tick on (spec r15-39b, item C6: js/ctick.js) the tick runs once per cluster group over the group's own chunks (a
+// chunk's group: its centre's), and a chunk of another group queued during a group's pass is queued at the next meeting.
+const CCs = () => BF.world.clusterCells;
+const chunkGroup = (cx, cz) => CCs().cellGroup(cx * BF.CS + 8, cz * BF.CS + 8);
+function catchUpChunk(c, away) {
+  const CC = CCs(), g = CC && CC.cur();
+  if (g && chunkGroup(c.cx, c.cz) !== g.key) { CC.toMeeting("catchUp", c.cx * BF.CS + 8, c.cz * BF.CS + 8, { x: c.cx, y: 0, z: c.cz, away }); return; }
+  catchQ.set(c.cx + "," + c.cz, Math.max(away, catchQ.get(c.cx + "," + c.cz) || 0));
+}
 function catchUpTick() {
   if (!catchQ.size) return;
-  const list = [...catchQ].map(([k, away]) => { const [cx, cz] = k.split(",").map(Number); return { k, cx, cz, away }; }).sort((a, b) => a.cx - b.cx || a.cz - b.cz);
-  catchQ.clear();
+  const CC = CCs(), g = CC && CC.cur();
+  let list = [...catchQ].map(([k, away]) => { const [cx, cz] = k.split(",").map(Number); return { k, cx, cz, away }; });
+  if (g) list = list.filter(e => chunkGroup(e.cx, e.cz) === g.key);
+  list.sort((a, b) => a.cx - b.cx || a.cz - b.cz);
+  if (g) for (const e of list) catchQ.delete(e.k); else catchQ.clear();
   for (const e of list) { const c = BF.world.chunks.get(e.k); if (c) catchUpNow(c, e.away); }
+}
+if (BF.world.clusterCells) {
+  const CC = BF.world.clusterCells;
+  CC.onMeeting("catchUp", d => { const c = BF.world.chunks.get(d.x + "," + d.z); if (c) catchUpChunk(c, d.away); });
+  CC.later(() => BF.ctick.owned("catchUp", {   // (several workers, C7: a group's chunks waiting to catch up)
+    snap: gk => [...catchQ].filter(([k]) => { const [cx, cz] = k.split(",").map(Number); return chunkGroup(cx, cz) === gk; }),
+    apply: (gk, list) => {
+      for (const k of [...catchQ.keys()]) { const [cx, cz] = k.split(",").map(Number); if (chunkGroup(cx, cz) === gk) catchQ.delete(k); }
+      for (const [k, v] of list) catchQ.set(k, v);
+    },
+  }));
 }
 function catchUpNow(c, away) {
   const rate = f => 1 - Math.exp(-away * CROP_SECS_PER_DAY * GROW_RATE * f), G = growsTable(), CS = BF.CS, W = BF.world;

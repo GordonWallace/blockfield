@@ -243,6 +243,7 @@ world.reset = function () {
   staleFar.clear();
   fluidQ.clear();
   growing.clear();
+  heldChunks.clear(); heldUnloads = false;
   fluidLast = growLast = 0;   // (as in a fresh page: a world started after another ticks the same, spec r15-39)
   if (BF.farmland) BF.farmland.reset();
   lastCenter = null; genList = []; meshList = []; simList = [];
@@ -597,7 +598,7 @@ function updateColumn(c, lx, lz) {
 }
 
 // ---------- loading ----------
-function createChunk(cx, cz) {
+function buildChunk(cx, cz) {
   if (!STONE_ID) { STONE_ID = BF.B.stone; BEDROCK_ID = BF.B.bedrock; }
   const g = BF.worldgen;
   const r = g.generateBand(cx, cz), lo = r.lo, hi = r.hi, data = r.vox;
@@ -619,6 +620,30 @@ function createChunk(cx, cz) {
     for (const [i, id] of e) secSet(c, i & 15, (i >> 8) + BF.MIN_Y, (i >> 4) & 15, id);
   }
   for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) updateColumn(c, x, z);
+  c.eSig = e ? e.size : -1;
+  return c;
+}
+function createChunk(cx, cz) { return installChunk(buildChunk(cx, cz)); }
+// With the cluster tick on, a chunk made during an interval waits for the next meeting (js/world.js heldNow): built now, installed then.
+const heldChunks = new Map();   // key -> built chunk
+let heldUnloads = false;        // the plan left chunks to unload until the meeting
+function holdChunk(cx, cz) {
+  const key = ckey(cx, cz);
+  if (!heldChunks.has(key)) heldChunks.set(key, buildChunk(cx, cz));
+}
+function installHeld() {
+  if (!heldChunks.size) return;
+  const list = [...heldChunks.values()];
+  heldChunks.clear();
+  for (const c of list) {
+    if (world.chunks.has(c.key)) continue;
+    const e = world.edits.get(c.key);
+    installChunk((e ? e.size : -1) === c.eSig ? c : buildChunk(c.cx, c.cz));   // (edited meanwhile: built again)
+  }
+  if (BF.glog) BF.glog.log("DEBUG", "chunks", "Loaded " + list.length + " chunk" + (list.length > 1 ? "s" : "") + " held for the cluster meeting");
+}
+function installChunk(c) {
+  const cx = c.cx, cz = c.cz, key = c.key, e = world.edits.get(key);
   world.chunks.set(key, c); CGEN++;
   if (BF.light) BF.light.onChunkCreated(c);
   if (BF.skyLight) BF.skyLight.onChunkCreated(c);   // sky light spreading (js/skylight.js)
@@ -784,7 +809,9 @@ function plan(pcx, pcz) {
   };
   const RU = world.high ? -1 : R;
   let dropped = 0;
+  const hold = heldNow();   // (clusters: chunks go at the next meeting, the plan runs again then)
   for (const k of [...world.chunks.keys()]) {
+    if (hold) { heldUnloads = true; break; }
     const c = world.chunks.get(k);
     const vk = BF.villageSim && BF.villageSim.keepKeys.has(k);
     if (!keep.has(k) && far(c.cx, c.cz, RU + 3)) { jrec("u", k); unload(k); continue; }
@@ -862,6 +889,8 @@ let loadQ = 0;   // chunks still to generate or mesh for the view (queueLength w
 // Called every frame with the player position. budgetMs bounds generation+meshing time.
 world.update = function (px, pz, budgetMs = 8) {
   const pcx = Math.floor(px / CS), pcz = Math.floor(pz / CS);
+  const hold = heldNow();
+  if (!hold) { installHeld(); if (heldUnloads) { heldUnloads = false; lastCenter = null; } }
   const RJ = BF.rworkers && BF.rworkers.journal ? BF.rworkers : null;   // the region workers' journal (js/rworkers.js): the followers do what streaming did here
   if (RJ && BF.villageSim) RJ.rec(["v", px, pz, RJ.stamp()]);
   if (BF.villageSim && !world.replica && BF.villageSim.update(px, pz)) lastCenter = null;   // simulated-village set changed: re-plan
@@ -912,14 +941,15 @@ world.update = function (px, pz, budgetMs = 8) {
       if ((c && c.mesh !== undefined) || (!c && world.farMeshes.has(ckey(cx, cz)))) { meshList.splice(mi, 1); continue; }
       mi++;
     }
-    while (gi < genList.length && world.chunks.has(ckey(genList[gi][0], genList[gi][1]))) genList.splice(gi, 1);
+    while (gi < genList.length && (world.chunks.has(ckey(genList[gi][0], genList[gi][1])) || heldChunks.has(ckey(genList[gi][0], genList[gi][1])))) genList.splice(gi, 1);
     const meshCand = mi < meshList.length ? meshList[mi] : null;
     const genCand = gi < genList.length ? genList[gi] : null;
     if (!meshCand && !genCand) {
       // everything in view is ready: spend the rest of the budget on data-only chunks of far villages
-      while (simList.length && world.chunks.has(ckey(simList[0][0], simList[0][1]))) simList.shift();
+      while (simList.length && (world.chunks.has(ckey(simList[0][0], simList[0][1])) || heldChunks.has(ckey(simList[0][0], simList[0][1])))) simList.shift();
       if (!simList.length) break;
       const [sx, sz] = simList.shift();
+      if (hold) { holdChunk(sx, sz); continue; }
       if (RJ) RJ.rec(["c", sx, sz]);
       createChunk(sx, sz);
       continue;
@@ -928,6 +958,10 @@ world.update = function (px, pz, budgetMs = 8) {
       const c = world.chunks.get(ckey(meshCand[0], meshCand[1]));
       if (MP.inline) buildMesh(c); else { c.mesh = null; enqueue(c, meshCand[2]); }
       meshList.splice(mi, 1);
+      planTail = true;
+    } else if (hold) {
+      holdChunk(genCand[0], genCand[1]);
+      genList.splice(gi, 1);
       planTail = true;
     } else {
       if (RJ) RJ.rec(["c", genCand[0], genCand[1]]);
@@ -1206,6 +1240,92 @@ const poolPending = () => MP.queue.size + MP.workers.reduce((n, w) => n + w.busy
 world.meshStats = () => ({ workers: MP.workers.length, inline: MP.inline, queued: MP.queue.size, inWorkers: poolPending() - MP.queue.size, sent: MP.sent, done: MP.done,
   dropped: MP.dropped, workMs: Math.round(MP.workMs), prepMs: Math.round(MP.prepMs), pageMeshes: MP.pageMeshes, pageMs: Math.round(MP.pageMs) });
 
+// ---------- clusters (spec r15-39b, item C6) ----------
+// With the cluster tick on (js/ctick.js) the block ticks run once per cluster group, each over the cells of its own regions (a cell's
+// group: its region's cluster's, or the first group's when no group runs that cluster this interval). A tick reads and writes only its
+// group's cells: a cell whose tick would read or write another group's cell (a border cell) is handed to the next meeting as a
+// "blockTick" request aimed at that other cell, which waits for the meeting and applies there, between ticks, for every order and
+// worker alike. Water reaching another group's cell is queued there the same way. Chunks load and unload only between intervals (the
+// tick a multiple of MEET), so a group never sees a chunk come or go mid-interval. The tables the block ticks keep (the fluid queue, the
+// growing set; js/farmland.js, js/forester.js, js/playerinv.js theirs) are registered with BF.ctick.owned for several workers (C7).
+const CT = () => { const C = BF.ctick; return C && C.on ? C : null; };
+// the group running a converted block tick, or null (cluster tick off, or between ticks: every cell is the caller's)
+const clusterCur = () => { const C = BF.ctick; return C && C.filter ? C.cur : null; };
+// the group key of cell (x, z): its region's cluster's group, or the first group's when that isn't a running group
+function cellGroup(x, z) {
+  const C = CT();
+  if (!C || !BF.regions || !BF.clusters) return null;
+  const k = BF.regions.keyOf(x, 0, z), cache = C.cur ? C.local("world.regionGroup", () => new Map()) : null;   // (new at each meeting)
+  let g = cache ? cache.get(k) : undefined;
+  if (g !== undefined) return g;
+  const gs = C.groups();
+  g = BF.clusters.groupOf(BF.clusters.ofRegion(k));
+  if (!gs.some(e => e.key === g)) g = gs.length ? gs[0].key : null;
+  if (cache) cache.set(k, g);
+  return g;
+}
+const mineCell = (x, z) => { const g = clusterCur(); return !g || cellGroup(x, z) === g.key; };
+// A cell of another group within r blocks of (x, z) (axis and diagonal), as [x, z], or null when every cell there is the running
+// group's. Regions are 64-block squares, so the four corners of the square are enough.
+function foreignNear(x, z, r) {
+  const g = clusterCur();
+  if (!g) return null;
+  const R = BF.regions, k = R.keyOf(x, 0, z);
+  for (const [dx, dz] of [[-r, -r], [r, -r], [-r, r], [r, r], [-r, 0], [r, 0], [0, -r], [0, r]]) {
+    if (R.keyOf(x + dx, 0, z + dz) === k) continue;
+    if (cellGroup(x + dx, z + dz) !== g.key) return [x + dx, z + dz];
+  }
+  return null;
+}
+// Hands op on cell (x, y, z) to the next meeting: a request aimed at the other group's cell (ax, az).
+const meetOps = new Map();   // op -> fn(data): what a "blockTick" request does at the meeting
+function toMeeting(op, ax, az, data) {
+  if (BF.glog && !toMeeting.logged) { toMeeting.logged = true; BF.glog.log("INFO", "clusters", "Block ticks at a cluster border wait for the next meeting (first: " + op + " at " + data.x + "," + data.y + "," + data.z + ")"); }
+  data.op = op;
+  BF.req.send("blockTick", ax + "," + data.y + "," + az, data, null);
+}
+function onMeeting(op, fn) { meetOps.set(op, fn); }
+function onBlockTickReq(req) {
+  const d = req.data, fn = meetOps.get(d.op);
+  if (!fn) { if (BF.glog) BF.glog.log("ERROR", "clusters", "Block tick " + d.op + " handed to a meeting has no handler"); return { ok: false, why: "no handler" }; }
+  return fn(d) || { ok: true };
+}
+// A table of cells ("x,y,z" keys: a Set, or a Map with plain values) as BF.ctick.owned wants it: a group's part and putting it back.
+// enc / dec (Maps): a value to plain JSON and back onto the entry already there (dec(plain, old) -> the entry to keep).
+// (js/requests.js and js/ctick.js load after this file: the handler and the tables are registered once every file is in, BF.onLoad)
+const ownQ = [];
+let ownDone = false;
+function clusterSetup() {
+  if (ownDone || !BF.req || !BF.ctick) return;
+  ownDone = true;
+  BF.req.on("blockTick", onBlockTickReq);
+  for (const fn of ownQ) fn();
+}
+function ownCells(name, coll, enc, dec) { later(() => ownCellsNow(name, coll, enc, dec)); }
+function later(fn) { if (ownDone) fn(); else ownQ.push(fn); }
+if (BF.onLoad) BF.onLoad(clusterSetup);   // (every worker registers them, also one that runs no group: js/cworkers.js applies the others' parts)
+function ownCellsNow(name, coll, enc, dec) {
+  const C = BF.ctick;
+  const isMap = coll instanceof Map;
+  const of = k => { const i = k.indexOf(","), j = k.lastIndexOf(","); return cellGroup(+k.slice(0, i), +k.slice(j + 1)); };
+  C.owned(name, {
+    snap(gk) {
+      const out = [];
+      for (const e of coll) { const k = isMap ? e[0] : e; if (of(k) === gk) out.push(isMap ? [k, enc ? enc(e[1]) : e[1]] : k); }
+      return out;
+    },
+    apply(gk, list) {
+      const old = new Map();
+      for (const e of [...coll]) { const k = isMap ? e[0] : e; if (of(k) === gk) { if (isMap) old.set(k, e[1]); coll.delete(k); } }
+      for (const it of list) { if (isMap) coll.set(it[0], dec ? dec(it[1], old.get(it[0])) : it[1]); else coll.add(it); }
+    },
+  });
+}
+world.clusterCells = { cellGroup, mineCell, foreignNear, toMeeting, onMeeting, ownCells, later, cur: clusterCur };
+// Chunks wait for the next meeting: true while the cluster tick is on and an interval is under way.
+const heldNow = () => !!(CT() && BF.rand && BF.rand.tick % CT().MEET !== 0);
+world.heldNow = heldNow;
+
 // ---------- flowing water ----------
 // Cellular water like Minecraft: sources (FLUID 8) feed flowing cells whose level rises
 // by one per block (1 next to a source .. 7 thinnest). Water falls first; flowing water only
@@ -1220,6 +1340,7 @@ const fkey = (x, y, z) => x + "," + y + "," + z;
 function qf(x, y, z) {
   if (!res(x, z)) return;
   x = RX; z = RZ;
+  if (clusterCur() && !mineCell(x, z)) { toMeeting("fluidQ", x, z, { x, y, z }); return; }   // another group's cell: queued at the meeting
   fluidQ.add(fkey(x, y, z));
 }
 
@@ -1282,12 +1403,27 @@ function canonOrder(keys) {
   for (const k of keys) { const p = k.split(","); a.push([+p[0], +p[1], +p[2], k]); }
   return a.sort((p, q) => p[0] - q[0] || p[2] - q[2] || p[1] - q[1]);
 }
+// The level cell (x, y, z) changes to, or null (unchanged, not water's, or concrete powder that hardened)
+function fluidWant(x, y, z) {
+  const FLUID = BF.FLUID, REPL = BF.REPLACEABLE;
+  const id = world.getBlock(x, y, z);
+  const cur = FLUID[id];
+  if (!cur && BF.hardenPowder && BF.blocks[id] && BF.blocks[id].hardensTo != null && BF.hardenPowder(x, y, z, id)) return null; // concrete powder next to water
+  if (!cur && !REPL[id]) return null; // solid or non-replaceable: water can't be here
+  // nothing wet nearby? skip quickly
+  const want = desiredLevel(x, y, z, cur);
+  if (want === cur) return null;
+  if (!cur && !want) return null;
+  return want;
+}
+const fluidSet = (x, y, z, want) => world.setBlock(x, y, z, want === 8 ? BF.B.water : want ? BF.waterFlowId(want) : 0);
 function fluidTick() {
+  const g = clusterCur();
+  if (g) return fluidTickCluster(g);
   const now = BF.simNow();
   if (now - fluidLast < FLUID_TICK) return;
   fluidLast = now;
   if (!fluidQ.size) return;
-  const FLUID = BF.FLUID, REPL = BF.REPLACEABLE;
   const batch = canonOrder(fluidQ);   // in canonical cell order (spec r15-17), so the budget's cut doesn't depend on history
   fluidQ.clear();
   let budget = 3000;
@@ -1295,22 +1431,41 @@ function fluidTick() {
   for (const [x, y, z, k] of batch) {
     if (budget-- <= 0) { fluidQ.add(k); continue; }
     if (!world.isLoaded(x, z)) continue;
-    const id = world.getBlock(x, y, z);
-    const cur = FLUID[id];
-    if (!cur && BF.hardenPowder && BF.blocks[id] && BF.blocks[id].hardensTo != null && BF.hardenPowder(x, y, z, id)) continue; // concrete powder next to water
-    if (!cur && !REPL[id]) continue; // solid or non-replaceable: water can't be here
-    // nothing wet nearby? skip quickly
-    const want = desiredLevel(x, y, z, cur);
-    if (want === cur) continue;
-    if (!cur && !want) continue;
-    changes.push([x, y, z, want]);
+    const want = fluidWant(x, y, z);
+    if (want != null) changes.push([x, y, z, want]);
   }
   // apply after evaluating so one tick spreads exactly one block
-  for (const [x, y, z, want] of changes) {
-    const id = want === 8 ? BF.B.water : want ? BF.waterFlowId(want) : 0;
-    world.setBlock(x, y, z, id);
-  }
+  for (const [x, y, z, want] of changes) fluidSet(x, y, z, want);
 }
+// Per cluster group (js/ctick.js): every FLUID_TICK on the tick counter, the group's own queued cells in canonical order with a budget of
+// its own. A cell that reads a cell of another group (2 blocks along each side: through a fence) is worked out at the next meeting.
+const FLUID_EVERY = Math.round(FLUID_TICK / 0.05);   // ticks (js/timewarp.js TICK)
+function fluidTickCluster(g) {
+  if (BF.rand.tick % FLUID_EVERY !== 0 || !fluidQ.size) return;
+  const own = [];
+  for (const k of fluidQ) { const i = k.indexOf(","), j = k.lastIndexOf(","); if (cellGroup(+k.slice(0, i), +k.slice(j + 1)) === g.key) own.push(k); }
+  if (!own.length) return;
+  const batch = canonOrder(own);
+  for (const k of own) fluidQ.delete(k);
+  let budget = 3000;
+  const changes = [];
+  for (const [x, y, z, k] of batch) {
+    if (budget-- <= 0) { fluidQ.add(k); continue; }
+    if (!world.isLoaded(x, z)) continue;
+    const far = foreignNear(x, z, 2);
+    if (far) { toMeeting("fluid", far[0], far[1], { x, y, z }); continue; }
+    const want = fluidWant(x, y, z);
+    if (want != null) changes.push([x, y, z, want]);
+  }
+  for (const [x, y, z, want] of changes) fluidSet(x, y, z, want);
+}
+onMeeting("fluidQ", d => { fluidQ.add(fkey(d.x, d.y, d.z)); });
+onMeeting("fluid", d => {
+  if (!world.isLoaded(d.x, d.z)) return { ok: false, why: "unloaded" };
+  const want = fluidWant(d.x, d.y, d.z);
+  if (want != null) fluidSet(d.x, d.y, d.z, want);
+});
+ownCells("fluids", fluidQ);
 
 // ---------- crop growth ----------
 // Young crops (blocks with growsInto) mature after ~4 minutes (1/5 game day) on average, only on farmland; on dehydrated
@@ -1319,14 +1474,30 @@ const growing = new Set();
 let growLast = 0;
 const GROW_CHANCE_PER_S = 1 / 240;   // ~4 minutes (a fifth of the 1200 s game day) on average
 function growTick() {
-  const now = BF.simNow();
-  if (now - growLast < 1) return;
-  const dt = Math.min(5, now - growLast);
-  growLast = now;
-  for (const [x, y, z, k] of canonOrder(growing)) {
+  const g = clusterCur();
+  let dt, cells;
+  if (g) {
+    // per cluster group (js/ctick.js): once a second on the tick counter, the group's own cells
+    if (BF.rand.tick % 20 !== 0) return;
+    dt = 1;
+    cells = [];
+    for (const k of growing) { const i = k.indexOf(","), j = k.lastIndexOf(","); if (cellGroup(+k.slice(0, i), +k.slice(j + 1)) === g.key) cells.push(k); }
+  } else {
+    const now = BF.simNow();
+    if (now - growLast < 1) return;
+    dt = Math.min(5, now - growLast);
+    growLast = now;
+    cells = growing;
+  }
+  for (const [x, y, z, k] of canonOrder(cells)) {
     if (!world.isLoaded(x, z)) continue; // keeps waiting until its chunk is back
     const id = world.getBlock(x, y, z), b = BF.blocks[id];
-    if (b && b.growsUp) { if (caneTick(x, y, z, id, b, dt)) growing.delete(k); continue; }
+    if (b && b.growsUp) {
+      const far = g && foreignNear(x, z, 1);   // (cane looks for water beside its bottom block)
+      if (far) { toMeeting("cane", far[0], far[1], { x, y, z, dt }); continue; }
+      if (caneTick(x, y, z, id, b, dt)) growing.delete(k);
+      continue;
+    }
     if (!b || !b.growsInto) { growing.delete(k); continue; }
     const soil = world.getBlock(x, y - 1, z);
     if (soil !== BF.B.farmland && soil !== BF.B.farmland_dry) continue;
@@ -1350,6 +1521,13 @@ function caneTick(x, y, z, id, b, dt) {
   if (BF.rand.at("cane", x, z, null, y).next() < GROW_CHANCE_PER_S * dt * (BF.weather && BF.weather.raining ? 1.5 : 1)) { world.setBlock(x, y + 1, z, id); return true; }
   return false;
 }
+onMeeting("cane", d => {
+  if (!world.isLoaded(d.x, d.z)) return { ok: false, why: "unloaded" };
+  const id = world.getBlock(d.x, d.y, d.z), b = BF.blocks[id];
+  if (!b || !b.growsUp) return { ok: false, why: "changed" };
+  if (caneTick(d.x, d.y, d.z, id, b, d.dt)) growing.delete(fkey(d.x, d.y, d.z));
+});
+ownCells("growth", growing);
 world.growingCount = () => growing.size;
 // The rest of each simulation tick (spec r15-17, js/requests.js), after the sky, mobs, drops, boats and furnaces:
 // - think hooks (world.onThink: villages, their stats and economy, foresters), the end of the think phase;
@@ -1361,7 +1539,7 @@ world.growingCount = () => growing.size;
 const thinkHooks = [], blockHooks = [[fluidTick, "fluids"], [growTick, "growth"]];
 world.onThink = (fn, name) => { thinkHooks.push([fn, name || fn.name || "think"]); };
 world.onBlockTick = (fn, name) => { blockHooks.push([fn, name || fn.name || "blocks"]); };
-const sys = (h) => { const C = BF.ctick; if (C && C.on) C.sys(h[1], h[0]); else h[0](); };
+const sys = (h) => { const C = BF.ctick; if (C && C.on) { clusterSetup(); C.sys(h[1], h[0]); } else h[0](); };
 function blockTicks() { for (const h of blockHooks) sys(h); }
 // The parts of tickSim (js/ctick.js runs them per cluster): the think hooks; apply, block ticks and deliver.
 function thinkPart() { for (const h of thinkHooks) sys(h); }
