@@ -791,12 +791,34 @@ let dynItem = ITEM_BASE + 0x10000;
 // Widest auto map, in 128-block zones a side: 4096 zones = 524288 blocks (512 blocks per pixel). One map that wide peaks around 2 GB of
 // browser memory; the old limit (about 4 million blocks) was of little use and a few such maps in a row crashed the browser.
 BF.AUTO_MAP_MAX_K = 4096;
+// Clusters (spec r15-39b, js/ctick.js): while a cluster runs, a new dynamic item's id comes from a range the meeting handed its slot
+// (dynR: {i, next, lim, more}, as js/ids.js range), and a name another slot made since the meeting isn't seen (each slot makes its own),
+// so the ids don't depend on the order clusters run in or on which worker runs them (js/cworkers.js). The meeting (settle) keeps the
+// lowest id under a name more than one slot made; the others stay items of the same map.
+let dynR = null;
+let fresh = new Map();   // id -> slot index: made since the meeting, inside a slot
+let freshBy = new Map(); // slot index -> Map(name -> id)
 BF.resolveItem = name => {
   if (name === "wool") return I.white_wool;   // old saves: plain wool was merged into white wool
-  if (I[name] !== undefined) return I[name];
+  if (dynR) {
+    const own = freshBy.get(dynR.i), x = own && own.get(name);
+    if (x !== undefined) return x;
+    const g = I[name];
+    if (g !== undefined && !fresh.has(g)) return g;
+  } else if (I[name] !== undefined) return I[name];
   const a = /^auto_map_(\d+)_(-?\d+)_(-?\d+)$/.exec(name || "");
   if (a && +a[1] > BF.AUTO_MAP_MAX_K) return BF.resolveItem("auto_map_" + BF.AUTO_MAP_MAX_K + "_" + a[2] + "_" + a[3]);   // old saves: wider maps shrink to the widest allowed, same centre
   if (!(a && +a[1] >= 1) && !/^filled_map_([1-5])_(-?\d+)_(-?\d+)$/.test(name || "")) return undefined;
+  if (dynR) {
+    if (dynR.next >= dynR.lim) { const r = dynR.more(); dynR.next = r[0]; dynR.lim = r[1]; }
+    const id = dynR.next++;
+    dynMake(name, id);
+    fresh.set(id, dynR.i);
+    let own = freshBy.get(dynR.i);
+    if (!own) freshBy.set(dynR.i, (own = new Map()));
+    own.set(name, id);
+    return id;
+  }
   const id = dynItem;
   dynMake(name, id);
   if (BF.rworkers && BF.rworkers.dynItem) BF.rworkers.dynItem(name, id);   // (region workers: the others make it under the same id, js/rworkers.js)
@@ -814,7 +836,7 @@ function dynMake(name, id) {
     const size = +m[1], zx = +m[2], zz = +m[3], side = 8 * Math.pow(2, size - 1);
     items[id] = { name, id, isBlock: false, stack: 1, color: "#d8c890", sprite: "filled_map", map: { size, zx, zz }, label: "Map (" + side + "x" + side + " chunks)" };
   }
-  I[name] = id;
+  if (I[name] === undefined || !dynR) I[name] = id;   // (inside a slot, a name already there stays until the meeting settles it)
   if (id >= dynItem) dynItem = id + 1;
   return true;
 }
@@ -823,6 +845,26 @@ function dynMake(name, id) {
 // takes the leader's list first)
 BF.dynItems = () => { const out = []; for (let id = ITEM_BASE + 0x10000; id < dynItem; id++) if (items[id]) out.push([items[id].name, id]); return out; };
 BF.dynItemAs = (name, id) => (I[name] !== undefined ? I[name] === id : dynMake(name, id));
+// clusters (js/ctick.js): the slot's range (null: the one counter), the items made since the meeting ([[name, id]]: js/cworkers.js sends
+// them), adopt(name, id) (another worker's: false when the id is another item here), settle() (at the meeting: the lowest id under each
+// name made, then nothing is fresh)
+BF.dynRange = {
+  get: () => dynR,
+  set(r) { dynR = r || null; },
+  get top() { return dynItem; },
+  fresh: () => [...fresh.keys()].map(id => [items[id].name, id]),
+  adopt(name, id) {
+    if (items[id]) return items[id].name === name;
+    if (!dynMake(name, id)) return false;
+    fresh.set(id, -1);
+    return true;
+  },
+  settle() {
+    if (!fresh.size) return;
+    for (const id of [...fresh.keys()].sort((a, b) => a - b)) { const n = items[id].name, g = I[n]; if (g === undefined || g > id) I[n] = id; }
+    fresh = new Map(); freshBy = new Map();
+  },
+};
 // Items dropped when a block breaks: its `drop` plus `extraDrops` [[itemName, min, max, chance], ...].
 // Returns [{id, count}]. Mature crops' extra drops replace nothing: wheat gives wheat + 1-3 seeds.
 // r: the seeded stream to roll with (js/rand.js). Without one: the stream of the mob thinking (BF.rand.thinker), or in the apply phase the

@@ -23,7 +23,7 @@ const nameOf = (s, zx, zz) => "filled_map_" + keyOf(s, zx, zz);
 const centre = z => z * ZONE + ZONE / 2;
 const originX = (s, zx) => centre(zx) - side(s) / 2;
 
-const RW = () => BF.rworkers && BF.rworkers.active;
+const RW = () => BF.rworkers && (BF.rworkers.active || BF.rworkers.onTouch);   // (region workers, or clusters on several workers: js/cworkers.js)
 const data = new Map();     // key -> {size, zx, zz, px: Uint16Array(PX*PX) (RGB565, 0 = unexplored), ver, cur, merged: {size: ver of that smaller map when last merged in}}
 function getData(s, zx, zz, create = true) {
   const k = keyOf(s, zx, zz);

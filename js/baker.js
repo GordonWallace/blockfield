@@ -69,6 +69,14 @@ function ovenAt(x, y, z) {
   return o;
 }
 const ovenState = (x, y, z) => ovens.get(pk(x, y, z)) || null;
+// several workers (clusters, js/cworkers.js): an oven is its cell's cluster's (its baker loads it, js/playerinv.js simTick bakes), sent with
+// its baker as an id
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.ownedMap) return;
+  C.ownedMap("baker.ovens", ovens, (k, o) => C.ofCell(o.pos.x, o.pos.z), o => Object.assign({}, JSON.parse(JSON.stringify(Object.assign({}, o, { by: null }))), { by: o.by ? o.by.id : null }),
+    j => Object.assign(j, { by: j.by != null ? BF.ids.live(j.by) || null : null }));
+});
 const addTo = (arr, id, n) => { if (n <= 0) return; const s = arr.find(e => e.id === id); if (s) s.count += n; else arr.push({ id, count: n }); };
 const takeFrom = (arr, id, n) => { const s = arr.find(e => e.id === id); if (!s || s.count < n) return false; s.count -= n; if (!s.count) arr.splice(arr.indexOf(s), 1); return true; };
 const has = (arr, id, n) => { const s = arr.find(e => e.id === id); return !!s && s.count >= n; };
@@ -113,6 +121,7 @@ function load(m, o, kind, n, fuelOk) {
   for (const [nm, c] of RECIPE[kind]) { T.remove(m.inv, I(nm), c * k); addTo(o.tray, I(nm), c * k); }
   o.kind = kind; o.n = k; o.by = m; o.cook = 0;
   topUp(m, o, fuelOk);
+  touch(o);
   return k;
 }
 // Fuel for what is left in the tray beyond the fire burning now, from m's pack, into the empty fuel slot (one fuel kind fits it).
@@ -127,6 +136,7 @@ function topUp(m, o, fuelOk) {
   const f = fuel[0];
   TR().inv.remove(m.inv, f.id, f.n);
   o.fuel = { id: f.id, count: f.n };
+  touch(o);
   return f.n;
 }
 // Takes out what is done and all the fuel left (and, with `all`, the tray: it gives up). Returns {id: n} taken; what doesn't fit stays.
@@ -138,6 +148,7 @@ function unload(m, o, all) {
   if (all) { o.tray = o.tray.filter(s => grab(s) > 0); if (!o.tray.length) { o.n = 0; o.kind = null; o.cook = 0; } }
   if (!(o.n > 0) && !o.tray.length) { o.kind = null; o.cook = 0; }
   if (empty(o)) o.by = null;
+  touch(o);
   return got;
 }
 function dropOven(x, y, z) {   // the oven block is gone (broken, exploded, /setblock): its contents spill
@@ -657,6 +668,30 @@ function importAll(o) {
     r.burn = +e.b || 0; r.burnMax = +e.bm || 0; r.cook = +e.c || 0;
   }
 }
+// Several workers: a baker loads, fuels and empties its oven while it thinks, on its own worker; the others get the oven's state (region
+// workers: the "oven" channel, js/rworkers.js; clusters on several workers: that channel and the "ovens" owned table, which also carries
+// the baking its group's block ticks did, js/cworkers.js).
+function touch(o) { if (BF.rworkers) BF.rworkers.touch("oven", o); }
+const copyStacks = a => a.map(s => ({ id: s.id, count: s.count }));
+const ovenData = o => ({ kind: o.kind, n: o.n, tray: copyStacks(o.tray), fuel: o.fuel ? { id: o.fuel.id, count: o.fuel.count } : null, out: copyStacks(o.out),
+  burn: o.burn, burnMax: o.burnMax, cook: o.cook, lit: o.lit, baked: o.baked, by: o.by ? o.by.id : null });
+function ovenSet(o, d) {
+  if (!o || !d) return;
+  o.kind = d.kind; o.n = d.n; o.tray = copyStacks(d.tray); o.fuel = d.fuel ? { id: d.fuel.id, count: d.fuel.count } : null; o.out = copyStacks(d.out);
+  o.burn = d.burn; o.burnMax = d.burnMax; o.cook = d.cook; o.lit = d.lit; o.baked = d.baked; o.by = d.by != null ? BF.ids.get(d.by) || null : null;
+}
+if (BF.rworkers) BF.rworkers.channel("oven", { key: o => [o.pos.x, o.pos.y, o.pos.z], get: k => ovenAt(k[0], k[1], k[2]), state: ovenData, set: ovenSet });
+if (BF.world && BF.world.clusterCells) BF.world.clusterCells.later(() => {
+  const grp = p => BF.world.clusterCells.cellGroup(p.x, p.z);
+  BF.ctick.owned("ovens", {
+    snap: gk => { const out = []; for (const o of ovens.values()) if (grp(o.pos) === gk) out.push([o.pos.x, o.pos.y, o.pos.z, ovenData(o)]); return out; },
+    apply: (gk, list) => {
+      const keep = new Set(list.map(e => pk(e[0], e[1], e[2])));
+      for (const [k, o] of [...ovens]) if (grp(o.pos) === gk && !keep.has(k)) ovens.delete(k);
+      for (const e of list) ovenSet(ovenAt(e[0], e[1], e[2]), e[3]);
+    },
+  });
+});
 let hooked = false;
 function hook() {
   if (hooked || !BF.on) return;
