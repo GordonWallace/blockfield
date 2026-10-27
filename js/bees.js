@@ -632,6 +632,7 @@ function hook() {
   tables();
   W().onChunkLoad(scanChunk);
   W().onChunkUnload(unloadChunk);
+  if (W().onReplayedSet) W().onReplayedSet((x, y, z, old, id) => { if (isFlower(old)) delFlower(x, y, z); if (isFlower(id)) addFlower(x, y, z); });   // (another worker's cells, at a meeting: js/cworkers.js)
   for (const c of W().chunks.values()) scanChunk(c.cx, c.cz, c);
   if (BF.on) BF.on("blockBroken", (x, y, z, id) => {   // the player broke a home: its bees that were out sting
     if (!isHome(id) || !lastBroken || ckey(x, y, z) !== pk(lastBroken.x, lastBroken.y, lastBroken.z)) return;
