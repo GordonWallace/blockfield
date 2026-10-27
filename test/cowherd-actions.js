@@ -276,9 +276,13 @@ module.exports = async (pg, out) => {
     for (const s of pair) { s.cd = 0; s.fed = day(); }
     ok("fed cows do not breed while the pasture is over its limit (the calf would take it two over)", pair.length === 2 && pair.every(s => !C.willing(s.mob, day())), pair.map(s => C.willing(s.mob, day())));
     for (const s of pair) s.cd = day() + 5;
-    for (let i = 0; i < 9000 && P.cows.length > P.limit; i++) step();
+    // the three cows put in above raise the wheat it wants (two days' feed for every adult, js/cowherd.js wheatWanted): stocked up front (with
+    // some over for feeding), so it culls here rather than walking off to the farmers first (a trip of ~50 blocks and up to 5000 steps, which
+    // left the cull loop short on a slow runner)
+    T.inv.add(herder.inv, I.wheat_item, C.wheatWanted(herder) + 8);
+    let cullSteps = 0; for (; cullSteps < 9000 && P.cows.length > P.limit; cullSteps++) step();
     const n = crowded - P.limit;
-    ok("the cowherd culled the herd back to the limit", P.cows.length === P.limit && P.culls - culls0 === n, [P.cows.length, P.limit, P.culls]);
+    ok("the cowherd culled the herd back to the limit", P.cows.length === P.limit && P.culls - culls0 === n, [P.cows.length, P.limit, P.culls, cullSteps, BF.villageLife.statusText(herder)]);
     const fedAt = P.cows.find(s => s.mob && !s.mob.dead && s.growAt == null);
     if (fedAt) fedAt.cd = 0;
     ok("back at the limit, a fed cow is willing to breed again", !!fedAt && C.willing(fedAt.mob, day()), fedAt && [fedAt.fed, fedAt.cd, day()]);
