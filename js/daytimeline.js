@@ -39,11 +39,40 @@ const r5 = v => Math.round(v * 1e5) / 1e5, r1 = v => Math.round(v * 10) / 10;
 const keyOf = m => m && m.village && m.slot && m.slot.idx != null ? m.village.key + "#" + m.slot.idx : null;
 const statusOf = m => BF.villagerStatus ? BF.villagerStatus.text(m) : m.sleeping ? "Sleeping" : "Idle";
 
-// several workers (clusters, js/cworkers.js): a villager's timeline is its village's cluster's; only the ones that changed go at a meeting
+// several workers (clusters, js/cworkers.js): a villager's timeline is its village's cluster's; at a meeting only the ones that changed
+// go, and of those only their stretches and events that changed (js/ctick.js tailDiff: cut at the front, the last ones changed or new)
+const had = new Map();   // key -> {ver, s, e (each item's JSON)}: what every worker has
+const verOf = L => L.v + "|" + (L.s.length ? L.s[L.s.length - 1][1] : "") + "|" + (L.name || "");
 BF.onLoad(() => {
   const C = BF.ctick;
-  if (!C || !C.ownedMap) return;
-  C.ownedMap("daytimeline.lines", lines, k => C.ofVillage(k.slice(0, k.lastIndexOf("#"))), null, null, (k, L) => L.v + "|" + (L.s.length ? L.s[L.s.length - 1][1] : ""));
+  if (!C || !C.owned || !C.tailDiff) return;
+  const groupOf = k => C.ofVillage(k.slice(0, k.lastIndexOf("#")));
+  C.owned("daytimeline.lines", {
+    reset() { had.clear(); },
+    snap(g, all) {
+      const keys = [], put = [];
+      for (const k of C.keysOf(lines, g, groupOf)) {
+        const L = lines.get(k), h = all ? null : had.get(k), ver = verOf(L);
+        keys.push(k);
+        if (h && h.ver === ver) continue;
+        const s = C.tailDiff(h ? h.s : null, L.s), e = C.tailDiff(h ? h.e : null, L.e);
+        had.set(k, { ver, s: s.texts, e: e.texts });
+        put.push([k, s.d, e.d, L.v, L.name || null]);
+      }
+      return { keys, put };
+    },
+    apply(g, o) {
+      const got = new Set(o.keys);
+      for (const k of C.keysOf(lines, g, groupOf)) if (!got.has(k)) { lines.delete(k); had.delete(k); }
+      for (const [k, ds, de, v, name] of o.put) {
+        const L = lineOf(k, true), h = had.get(k);
+        const s = ds ? C.tailApply(L.s, h ? h.s : null, ds) : h.s, e = de ? C.tailApply(L.e, h ? h.e : null, de) : h.e;
+        L.v = v; if (name) L.name = name; else delete L.name;
+        had.set(k, { ver: verOf(L), s, e });
+      }
+      C.applied(lines, g);
+    },
+  });
 });
 function lineOf(key, make) {
   let L = lines.get(key);
@@ -133,7 +162,7 @@ function update() {
   if (!BF.mobs || !BF.regions) return;
   for (const m of BF.regions.ofType("villager")) if (!m.dead && !m.removed && m.position) sample(m, now);
 }
-function reset() { lines.clear(); last = -1; }
+function reset() { lines.clear(); had.clear(); last = -1; }
 
 BF.dayTimeline = {
   CATS, catOf, keyOf, sample, event, drop, view, reset, update,
@@ -147,8 +176,9 @@ BF.dayTimeline = {
   // Saved compactly: each villager's texts once (x), stretches as [t0, length in 1e-5 days, text index, x, z]; categories are re-sorted on load.
   serialize() {
     const o = {}, now = dayNow();
-    for (const [k, L] of lines) {
-      trim(L, now);
+    for (const [k, L0] of lines) {
+      const L = { s: L0.s.slice(), e: L0.e.slice(), name: L0.name };
+      trim(L, now);   // (a trimmed copy: the line itself changes only as it runs, the same on every worker: js/cworkers.js swaps its changes)
       if (!L.s.length && !L.e.length) continue;
       const x = [], ix = new Map();
       const s = L.s.map(a => { let i = ix.get(a[2]); if (i == null) { ix.set(a[2], i = x.length); x.push(a[2]); } return [a[0], Math.round((a[1] - a[0]) * 1e5), i, a[4], a[5]]; });

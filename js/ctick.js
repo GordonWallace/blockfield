@@ -380,7 +380,8 @@ function local(name, init) {
 
 // Module tables that last longer than an interval and aren't on a mob or village record (claims, records keyed by village, a cell's
 // stamps): each registers how to take the part a group owns and put it back, so the multi-worker runtime (C7) can send it at meetings.
-// owned(name, {snap(groupKey, all?) -> plain JSON, apply(groupKey, plain)}); tables() -> the registered names. Unused on one worker.
+// owned(name, {snap(groupKey, all?) -> plain JSON, apply(groupKey, plain), reset?() (a table that sends only changes: forget what every
+// worker has, as workers start)}); tables() -> the registered names. Unused on one worker.
 const tables = new Map();
 // warm(fn): a system's set-up (its owned tables, listeners, chunk scans) that it otherwise does at its first tick. With the cluster tick
 // on, every system sets up at the first meeting with groups, on one worker as on several (js/cworkers.js), so a worker that hasn't run
@@ -399,8 +400,8 @@ function owned(name, t) {
 //   ownedMap(name, map, groupOfKey, enc?, dec?)  a Map whose every entry belongs to one group (groupOfKey(key, value) -> group key): a group's part
 //                                                is its keys' entries, values as plain JSON (enc(v, k) -> JSON, dec(j, k) -> value);
 //                                                applying it updates the group's keys in place (the map's order stays), adds its new
-//                                                ones at the end in the owner's order and drops its gone ones
-//                                                ver(k, v) too: only the entries whose ver changed since they were last swapped go
+//                                                ones at the end in the owner's order and drops its gone ones; only the entries
+//                                                whose JSON changed since they were last swapped go (or with ver(k, v), whose ver did)
 //   ownedSet(name, set, groupOfKey)              the same for a Set of keys
 //   ofVillage(key), ofCell(x, z), ofMob(m)       the group a village key, a block cell or a mob belongs to (a mob with no cluster: null)
 //   mineVillage(key), mineCell(x, z)             true when the running group's (always, outside groups or in a system not converted)
@@ -429,41 +430,54 @@ function keysOf(coll, g, groupOf) {
 function applied(coll, g) { const c = parts.get(coll); if (c && c.at === tstep) { c.size = coll.size; c.m.set(g, null); } }
 function tablesStep(on) { inStep = !!on; tstep++; }
 
-function ownedMap(name, map, groupOfKey, enc, dec, ver) {
-  if (ver) return ownedLog(name, map, groupOfKey, enc, dec, ver);
-  owned(name, {
-    snap(g) { const o = []; for (const k of keysOf(map, g, groupOfKey)) o.push([k, enc ? enc(map.get(k), k) : map.get(k)]); return o; },
-    apply(g, list) {
-      const got = new Set();
-      for (const [k] of list) got.add(k);
-      for (const k of keysOf(map, g, groupOfKey)) if (!got.has(k)) map.delete(k);
-      for (const [k, v] of list) map.set(k, dec ? dec(v, k) : v);
-      applied(map, g);
-    },
-  });
-}
-// ver(k, v) given (big tables that change a little at a time: logs, histories): only the entries whose ver changed since this worker last
-// sent or got them go, with the group's key list (for the gone ones); snap(g, true) puts them all (tests: a part sent and snapped again)
+function ownedMap(name, map, groupOfKey, enc, dec, ver) { ownedLog(name, map, groupOfKey, enc, dec, ver); }
+// Only the entries that changed since this worker last sent or got them go, with the group's key list (for the gone ones); snap(g, true)
+// puts them all (tests: a part sent and snapped again). Changed: by ver(k, v) when given (big tables that change a little at a time:
+// logs, histories, where a version is cheaper than the text), else by the entry's JSON text (what every worker has; an entry left as it
+// was keeps its object here)
 function ownedLog(name, map, groupOfKey, enc, dec, ver) {
-  const had = new Map();   // key -> the ver every worker has
+  const had = new Map();   // key -> the ver (or text) every worker has
   owned(name, {
+    reset() { had.clear(); },
     snap(g, all) {
       const keys = [], put = [];
       for (const k of keysOf(map, g, groupOfKey)) {
         const v = map.get(k);
         keys.push(k);
-        const n = ver(k, v);
-        if (all || had.get(k) !== n) { had.set(k, n); put.push([k, enc ? enc(v, k) : v]); }
+        if (ver) { const n = ver(k, v); if (all || had.get(k) !== n) { had.set(k, n); put.push([k, enc ? enc(v, k) : v]); } continue; }
+        const j = enc ? enc(v, k) : v, t = JSON.stringify(j);
+        if (all || had.get(k) !== t) { had.set(k, t); put.push([k, j]); }
       }
       return { keys, put };
     },
     apply(g, o) {
       const got = new Set(o.keys);
       for (const k of keysOf(map, g, groupOfKey)) if (!got.has(k)) { map.delete(k); had.delete(k); }
-      for (const [k, j] of o.put) { const v = dec ? dec(j, k) : j; map.set(k, v); had.set(k, ver(k, v)); }
+      for (const [k, j] of o.put) { const v = dec ? dec(j, k) : j; map.set(k, v); had.set(k, ver ? ver(k, v) : JSON.stringify(j)); }
       applied(map, g);
     },
   });
+}
+// Arrays that grow at the end and are cut at the front (logs, timelines; their items plain JSON) sent as what changed since the items
+// every worker has (texts: each item's JSON, kept by the table per array): tailDiff(texts, arr) -> {texts (now), d: [cut (items gone
+// from the front), from (items kept after that), items (the rest, sent)] or null when nothing changed}; texts null: the whole array.
+// tailApply(arr, texts, d) -> the texts after: arr (and its texts) cut and refilled as the sender's.
+function tailDiff(texts, arr) {
+  const now = arr.map(x => JSON.stringify(x));
+  if (!texts) return { texts: now, d: [0, 0, arr.slice()] };
+  let cut = now.length ? texts.indexOf(now[0]) : texts.length;
+  if (cut < 0) cut = texts.length;
+  let from = 0;
+  while (cut + from < texts.length && from < now.length && texts[cut + from] === now[from]) from++;
+  if (cut === 0 && from === texts.length && from === now.length) return { texts: now, d: null };
+  return { texts: now, d: [cut, from, arr.slice(from)] };
+}
+function tailApply(arr, texts, d) {
+  const [cut, from, items] = d;
+  arr.splice(0, cut); arr.length = from;
+  texts = (texts || []).slice(cut, cut + from);
+  for (const x of items) { arr.push(x); texts.push(JSON.stringify(x)); }
+  return texts;
 }
 function ownedSet(name, set, groupOfKey) {
   owned(name, {
@@ -590,7 +604,7 @@ BF.ctick = {
   mobs, added, stale, get epoch() { return epoch; },   // the running group's mobs (removed ones included), or null when every mob is seen; a new
   // mob; the lists out of date; how many times they were (a module's own lists by group are made again when it changes)
   owned, tables: () => [...tables.keys()], table: name => tables.get(name), onMeet, warm, warmed,
-  ownedMap, ownedSet, ofVillage, ofCell, ofMob, mineVillage, mineCell,
+  ownedMap, ownedSet, tailDiff, tailApply, ofVillage, ofCell, ofMob, mineVillage, mineCell,
   tickOf: b => clocks.get(b), clocks: () => new Map(clocks),   // each cluster's own tick (one clock for now)
   mine, hidden, sys, local, step, interval, meet: meetNow, groups: () => groups, converted, stats, text, hourly, reset,
   get only() { return only; }, set only(v) { only = v ? new Set(v) : null; },

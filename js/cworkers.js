@@ -185,6 +185,7 @@ function sync() {
     for (const k in out) add(k, out[k]);
     for (const [, ops] of mobs) if (ops) for (const op of ops) add("mob." + op[0], op);
     for (const [, ops] of recs) for (const op of ops) add("rec." + op[0], op);
+    for (const [name, , part] of tables) add("table." + name, part);
   }
   R.indexScope = null;
   const t1 = now();
@@ -525,6 +526,7 @@ function setup(o) {
   if (o.n > 1 && !K.on) throw new Error("cluster workers need the cluster tick on (BF.ctick.on)");
   CW.n = o.n; CW.me = o.me; CW.link = o.link; CW.active = o.n > 1;
   if (CW.active && K.warmed) K.warmed();   // (started after the cluster tick's first meeting: every system set up here now, js/ctick.js warm)
+  for (const name of K.tables()) { const t = K.table(name); if (t.reset) t.reset(); }   // (the tables that send only changes start from nothing sent)
   // o.claims (a SharedArrayBuffer of two Int32, the same for every worker: makeShared): the workers pull groups (the cluster order)
   // (only on request, o.pull: with partial copies a group that changes worker is sent whole, so groups stay on their planned owners)
   CW.pull = !!(CW.active && o.pull && o.claims && K.order === "cluster" && !CW.shuffle);
