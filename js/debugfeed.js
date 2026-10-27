@@ -244,6 +244,36 @@ function dayline() {
   return k ? D.view(k) || { key: k, none: true } : null;
 }
 let hooked = false;
+// Fast-forward steps from the debug screen (debug/warp.js: its arrow keys and buttons; debug/server.js /warp): the server answers with
+// the steps after wc, the id of the last one applied here, which each snapshot reports. The page's clock (BF.warp, js/timewarp.js) is the
+// one to step whatever runs the simulation: it sends its speed on to a worker or the world server (js/simhost.js).
+let wc = 0;
+function applyWarp(list) {
+  const W = BF.warp;
+  if (!W || !Array.isArray(list)) return;
+  for (const w of list) {
+    if (!w || !(w.id > wc)) continue;
+    wc = w.id;
+    if (BF.player && BF.player.menu && BF.player.menu()) continue;   // the title screen: no game to speed up (the arrow keys do nothing there either)
+    const was = W.speed;
+    if (w.op === "faster") W.faster();
+    else if (w.op === "slower") W.slower();
+    else if (w.op === "set") { const i = W.SPEEDS.indexOf(+w.speed); if (+w.speed === 0) W.freeze(); else if (i >= 0) W.set(i); }
+    if (BF.glog && W.speed !== was) BF.glog.log("INFO", "warp", "Fast-forward " + was + "x -> " + W.speed + "x from the debug screen");
+  }
+}
+// On the world server the steps come straight from the debug server (GET /warp?wc=), not with the world server's answers: those wait on the
+// simulation and reach the page behind everything else it sends, seconds late at fast-forward.
+let warpBusy = false;
+function warpPoll() {
+  const W = BF.warp;
+  if (warpBusy || !W || !URL_) return;
+  warpBusy = true;
+  const ctl = new AbortController(), stop = setTimeout(() => ctl.abort(), 5000);
+  fetch(URL_ + "/warp?wc=" + wc + "&speed=" + W.speed + "&real=" + Math.round(W.achieved * 10) / 10, { signal: ctl.signal, cache: "no-store" })
+    .then(r => r.json()).then(o => { if (o && o.warp) applyWarp(o.warp); }).catch(() => { /* no debug server */ })
+    .finally(() => { warpBusy = false; clearTimeout(stop); });
+}
 let ptv = "0";   // the last planet-toggle request from the debug screen this game has applied (debug/server.js /planet)
 
 // The Mobs map view (once a second): every loaded mob as [kind, x, z, y, village stock 0|1, doing], kinds and doings as tables, the loaded
@@ -444,6 +474,8 @@ function snapshot() {
     // the planet debug toggles (js/view.js setDebug: F3 + B / C / R, or the debug screen's Planet section) and which request from the
     // screen they include (tv)
     pt: BF.view && BF.view.debug ? { tv: ptv, ...BF.view.debug } : null,
+    wc,   // the last fast-forward step from the debug screen applied here
+    ff: BF.warp ? { speed: BF.warp.speed, real: Math.round(BF.warp.achieved * 10) / 10 } : null,   // fast-forward: the speed asked for and the speed reached
     // alerts (js/alerts.js): which set the game holds (the server answers with a newer one) and how often each has fired
     screens,
     alerts: BF.alerts ? { av: BF.alerts.av, hits: BF.alerts.hits, active: BF.alerts.active ? BF.alerts.active.alert.id : null } : null,
@@ -459,6 +491,7 @@ function update() {
   nextT = now + EVERY;
   if (onServer()) {
     try { BF.simHost.post({ feedPage: snapshot() }); } catch (e) { console.warn("debug feed:", e); nextT = now + RETRY; }
+    warpPoll();
     return;
   }
   let body;
@@ -474,7 +507,7 @@ function update() {
   fetch(URL_ + "/push", { method: "POST", body, headers: { "Content-Type": "text/plain" }, keepalive: body.length < 60000, signal: ctl.signal })
     .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
     .then(t => {
-      if (t.charAt(0) === "{") {   // {resync?, alerts?, av?, pick?, pv?, screens?, glogAt?, build?}: the server's alerts / picked villager, when the game's copy is out of date
+      if (t.charAt(0) === "{") {   // {resync?, alerts?, av?, pick?, pv?, screens?, glogAt?, build?, warp?}: the server's alerts / picked villager, when the game's copy is out of date
         const o = JSON.parse(t);
         const a = {};
         if (o.glogAt != null) a.glogAt = o.glogAt;
@@ -483,6 +516,7 @@ function update() {
         passAck(a);
         if (o.alerts && BF.alerts) BF.alerts.set(o.alerts, o.av);
         if (o.pt && BF.view && BF.view.setDebug) { ptv = o.ptv; BF.view.setDebug(o.pt); }   // a toggle clicked on the debug screen
+        if (o.warp) applyWarp(o.warp);   // arrow keys or buttons on the debug screen
         if (o.screens != null) { screens = o.screens | 0; if (inWorker()) passAck({ screens }); }
         t = o.resync ? "resync" : "ok";
       }
@@ -500,10 +534,11 @@ function update() {
     .finally(() => { busy = false; clearTimeout(stop); });
 }
 
-// The world server's answers that are this page's: alerts, a planet toggle, how many screens are open, the item icons it lacks
+// The world server's answers that are this page's: alerts, a planet toggle, fast-forward steps, how many screens are open, the item icons it lacks
 function serverAck(o) {
   if (o.alerts && BF.alerts) BF.alerts.set(o.alerts, o.av);
   if (o.pt && BF.view && BF.view.setDebug) { ptv = o.ptv; BF.view.setDebug(o.pt); }
+  if (o.warp) applyWarp(o.warp);
   if (o.screens != null) screens = o.screens | 0;
   if (o.resync) resync();
   told = true;

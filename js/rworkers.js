@@ -768,7 +768,7 @@ function checkHashes(hs) {
     const all = RW.link.exchange(JSON.stringify(mine)).map(x => JSON.parse(x));
     if (RW.me === 0) for (let w = 1; w < all.length; w++) for (const k of diff) {
       const p = all[0][k] || "", q = all[w][k] || "";
-      if (p === q) continue;
+      if (p === q) { out_of_step("worker " + w + ", " + k + ": the hashes differ but the texts match (a field the hash reads that the text leaves out)"); continue; }
       let i = 0; while (i < p.length && p[i] === q[i]) i++;
       out_of_step("worker " + w + ", " + k + " from character " + i + ": leader ..." + p.slice(Math.max(0, i - 300), i + 200) + " / worker " + w + " ..." + q.slice(Math.max(0, i - 300), i + 200));
     }

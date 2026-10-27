@@ -287,6 +287,7 @@ function ai(m, dt, out) {
   }
   if (!v2 || (deal.kind === "buy" ? !canSell(v2) : !canBuy(v2))) return giveUp(v2 && v2.sleeping ? "asleep" : v2 && v2.tradingWith ? "busy" : "gone");
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
+  if (BF.mobs.waitFor) BF.mobs.waitFor(v2, m, d);   // the seller stops for its buyer (bug-054)
   a.mode = "idle"; a.t = 2;
   if (sh.stage === "walk") {
     sh.walkT += dt;
