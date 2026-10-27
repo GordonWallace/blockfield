@@ -2099,7 +2099,7 @@ const JOB_CHAIN = [
 ];
 // Prototype (think-proto): THINK.k > 1 runs the whole chain only every k-th tick (staggered by id); between, only last tick's winner
 // runs, and the modules ahead of it (or the whole chain when none took the villager) get the skipped time at the next full run.
-const THINK = { k: +((typeof globalThis !== "undefined" && globalThis.THINK_K) || 1), idleOnly: !!(typeof globalThis !== "undefined" && globalThis.THINK_IDLE) };
+const THINK = globalThis.THINK_OPTS = { k: +((typeof globalThis !== "undefined" && globalThis.THINK_K) || 1), idleOnly: !!(typeof globalThis !== "undefined" && globalThis.THINK_IDLE) };
 function jobsChain(m, dt, out, owe, from) {
   for (let i = from; i < JOB_CHAIN.length; i++) {
     const e = JOB_CHAIN[i];
