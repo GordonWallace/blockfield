@@ -51,6 +51,8 @@ The world's own ticks already run by cluster: flowing water, crops and sugar can
 
 Village life has moved over: builders, jobs, breeding, storage, bakers, explorers, restocking, the day timeline, village stats, foresters and signs each run per cluster, and a village's records belong to its own cluster. A new village is set up at a meeting, which the [[page:game-log]] notes.
 
+The animals have moved over: sheep pens, chicken coops, cow pastures, pig sties, horses and their herds, stables and bees each run with the cluster they belong to (a pen with its village, a horse with where it is or was last seen, a herd with where it was at the last meeting, bees with their home). With the clusters on, two things play a little differently: at most 600 bees are out at once in each cluster rather than in the whole world, and only bees in the player's own cluster follow a flower the player holds (the others are too far away to see it anyway).
+
 ## What it costs
 
 Each worker holds a full copy of the world, so each one takes about as much memory as the simulation does on its own. On a machine with little memory, `--workers 1` or a small number is the better choice.
