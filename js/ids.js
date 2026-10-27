@@ -129,7 +129,7 @@ function place(proto, name, field, keyOf) {
 // refs(o) returns a copy of a plain object with this prototype, any of those fields it had turned into ids.
 const Refs = {};
 const ENT = ["mob", "other", "seller", "goalSeller", "vTarget", "mate", "love", "attacker", "ledBy", "tradingWith", "riding", "rescue", "foe", "revenge", "golemFoe",
-  "buyFrom", "holdFor", "giveUp"];   // (bug-054: the seller a buyer is calling, the buyer a seller stops for; bug-062: the foe a golem left alone)
+  "buyFrom", "buyPrev", "holdFor", "giveUp"];   // (bug-054: the seller a buyer is calling (and the one before), the buyer a seller stops for; bug-062: the foe a golem left alone)
 for (const n of ENT) link(Refs, n, n + "Id");
 const villageKey = r => r.key;
 place(Refs, "village", "villageId", villageKey);
