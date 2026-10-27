@@ -10,8 +10,10 @@
 // against the ticks before it); otherwise back to solo, and it tries again later (BACKOFF ticks, doubling). ?split=always splits as soon as
 // the followers are ready, ?split=never never does. The followers' copies are compared now and then while split (VERIFY ticks): a
 // difference logs an ERROR and the leader goes on alone. A follower that crashes while split stops the simulation (the page offers a
-// reload: js/simworker.js crash); while solo the leader goes on alone. How many: settings.workers (the page's ?workers=, else
-// cores − 2, at least 1, at most MAX); one is none. They need SharedArrayBuffer (a cross-origin isolated page: ./run.sh).
+// reload: js/simworker.js crash); while solo the leader goes on alone. How many: settings.workers (the page's ?workers=, or the world
+// server's BF_WORKERS); none unless asked (2026-10-27: while solo every follower replays every tick, about a core each, and no split has
+// paid yet; clusters on workers, spec r15-39b, take over). One is none. They need SharedArrayBuffer (a cross-origin isolated page:
+// ./run.sh).
 // Game log: INFO "workers" when they start for a world (how many), each switch to split or solo (with ms a tick before and after), and
 // when they stop; ERROR when one crashes, boots a different world or no longer matches.
 // Each follower sends its thread's busy share (js/threadload.js) with a batch's answer about once a second: status().loads, for the
@@ -23,7 +25,7 @@
 const BF = (globalThis.BF = globalThis.BF || {});
 const RW = BF.rworkers;
 const now = () => performance.now();
-const MAX = 8;            // default ceiling: each follower holds a whole copy of the world (memory), and the exchange grows with more
+const MAX = 8;            // the most worth asking for: each follower holds a whole copy of the world (memory), and the exchange grows with more
 const TRIAL = 200;        // ticks of a split trial
 const BACKOFF = 2000;     // ticks before trying a split again after one that didn't pay (doubles each time, up to 16x)
 const BUSY_MS = 2000;     // real ms of dropped ticks before a split is tried
@@ -39,7 +41,8 @@ const L = {
 const log = (l, x) => { if (BF.glog) BF.glog.log(l, "workers", x); };
 function setup(o) {
   const cores = Math.max(1, o.cores | 0 || 2);
-  L.want = o.workers > 0 ? Math.max(1, o.workers | 0) : Math.max(1, Math.min(MAX, cores - 2));
+  L.want = o.workers > 0 ? Math.max(1, o.workers | 0) : 1;
+  if (!(o.workers > 0)) L.why = "region workers start only when asked (?workers=N; " + cores + " cores here)";
   L.spawn = o.spawn || null;
   L.three = o.three || null;
   L.policy = o.split === "always" || o.split === "never" ? o.split : "auto";
