@@ -196,7 +196,7 @@ function sync() {
   }
   const cells = new Map();
   for (const [k, list] of edits) for (const [i] of list) cells.set(k + "|" + i, CW.me);
-  for (let w = 0; w < ps.length; w++) {
+  R.atLater(() => { for (let w = 0; w < ps.length; w++) {   // (objects sent as where they are: looked up once every worker's changes are in)
     const p = ps[w];
     if (!p) continue;
     for (const [key, ops] of p.recs) { const rec = BF.mobs.villages.get(key); if (rec) R.patch(rec, ops); else err("worker " + w + " changed village " + key + ", which this worker doesn't have"); }
@@ -208,10 +208,10 @@ function sync() {
     }
     for (const [k, list] of p.edits) for (const [i] of list) { const at = k + "|" + i; if (cells.has(at) && cells.get(at) !== w) err("workers " + cells.get(at) + " and " + w + " both set cell " + i + " of chunk " + k); cells.set(at, w); }
     replaying = true;
-    try { if (p.edits.length) BF.world.applyEdits(p.edits); } finally { replaying = false; }
+    try { if (p.edits.length) BF.world.applyEdits(p.edits, false, true); } finally { replaying = false; }
     for (const [name, gk, data] of p.tables) { const t = K.table(name); if (t) t.apply(gk, data); }
     for (const [name, key, data] of p.chans) { const ch = R.chan(name); if (ch) ch.set(ch.get(key), data, key); }
-  }
+  } });
   // requests: the crossing ones join the meeting's list (it sorts them by due tick, sending group and order); the queued ones go back
   // into their groups' queues, in their order there, for the meeting to file again
   const byKey = new Map(K.groups().map(g => [g.key, g]));

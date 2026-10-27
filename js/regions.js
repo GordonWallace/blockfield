@@ -235,6 +235,7 @@ function hook() {
   hooked = true;
   BF.world.onChunkLoad(scanChunk);
   BF.world.onChunkUnload(unloadChunk);
+  if (BF.world.onReplayedSet) BF.world.onReplayedSet(onSet);   // (another worker's cells, at a meeting: js/cworkers.js)
   for (const c of BF.world.chunks.values()) scanChunk(c.cx, c.cz, c);
   if (BF.on) BF.on("newWorld", reset);
 }

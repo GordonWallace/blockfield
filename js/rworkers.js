@@ -24,7 +24,7 @@
 // worker crashes or the replicas no longer match (BF.rworkers.verify, tests).
 // API: BF.rworkers = { active, n, me, setup({n, me, link, journal}), stop(why), beginThink(order, spans), thinking(m), afterThink(),
 //   afterDeliver(), owners, stats(), text(), verify (ticks between hash checks; 0 off), enc(v, self), dec(e), Shadow, snap(m), diff(m, s),
-//   patch(m, ops), makeShared(n, bytes), attach(sh, me, n), writes(m) (thinking is about to change another unit's mob) }
+//   patch(m, ops), atLater(fn) (patches whose objects sent as where they are are looked up after fn), makeShared(n, bytes), attach(sh, me, n), writes(m) (thinking is about to change another unit's mob) }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -92,11 +92,11 @@ let decSelf = null;
 function dec(e, me) { const prev = decSelf; if (me !== undefined) decSelf = me; try { return decV(e, []); } finally { decSelf = prev; } }
 function decV(e, objs) {
   if (e === null || typeof e !== "object") return e;
-  if (Array.isArray(e)) { const a = new Array(e.length); objs.push(a); for (let i = 0; i < e.length; i++) a[i] = decV(e[i], objs); return a; }
+  if (Array.isArray(e)) { const a = new Array(e.length); objs.push(a); for (let i = 0; i < e.length; i++) { const x = a[i] = decV(e[i], objs); if (pend && pend.has(x)) placed(a, i, x); } return a; }
   if (e.o !== undefined) {
     const P = PROTO(), o = e.p === 1 ? Object.create(P[0]) : e.p === 2 ? Object.create(P[1]) : {};
     objs.push(o);
-    for (const k in e.o) o[k] = decV(e.o[k], objs);   // own fields (the links' ids: villageId, mobId...), not through the accessors
+    for (const k in e.o) { const x = o[k] = decV(e.o[k], objs); if (pend && pend.has(x)) placed(o, k, x); }   // own fields (the links' ids: villageId, mobId...), not through the accessors
     return o;
   }
   if (e.n !== undefined) return NUMS[e.n];
@@ -109,11 +109,34 @@ function decV(e, objs) {
   if (e.H !== undefined) return BF.bees.homeAt(e.H[0], e.H[1], e.H[2]);
   if (e.v3 !== undefined) return new THREE.Vector3(decV(e.v3[0], objs), decV(e.v3[1], objs), decV(e.v3[2], objs));
   if (e["~"] !== undefined) return objs[e["~"]];
-  if (e["@at"] !== undefined) { const copy = decV(e.f, objs), o = walkTo(decV(e["@at"], objs), e.k); return o !== undefined ? o : copy; }   // (the copy is read either way: it numbers objects for "~")
+  if (e["@at"] !== undefined) {   // (the copy is read either way: it numbers objects for "~")
+    const copy = decV(e.f, objs), root = decV(e["@at"], objs);
+    if (pend && copy !== null && typeof copy === "object") { pend.set(copy, [root, e.k]); return copy; }   // (atLater: looked up once every change is in)
+    const o = walkTo(root, e.k); return o !== undefined ? o : copy;
+  }
   if (e.ta !== undefined) { const C = globalThis[e.ta] || Float64Array, a = new C(e.d.length); objs.push(a); for (let i = 0; i < e.d.length; i++) a[i] = decV(e.d[i], objs); return a; }
-  if (e.m !== undefined) { const m = new Map(); objs.push(m); for (const [k, x] of e.m) m.set(decV(k, objs), decV(x, objs)); return m; }
+  if (e.m !== undefined) { const m = new Map(); objs.push(m); for (const [k, x] of e.m) { const kk = decV(k, objs), v = decV(x, objs); m.set(kk, v); if (pend && pend.has(v)) placed(m, kk, v); } return m; }
   if (e.s !== undefined) { const s = new Set(); objs.push(s); for (const x of e.s) s.add(decV(x, objs)); return s; }
   return undefined;
+}
+// atLater(fn): fn applies several workers' changes (js/cworkers.js, a meeting); an object sent as where it is ({"@at"}) is looked up there
+// only after all of them are in. The paths are the sender's after its changes: looked up halfway (a buyer's deal patched before the
+// seller's rebuilt offers), [i] would be another offer than the one meant. Meanwhile its copy stands in, and where it was put is kept.
+let pend = null, fixes = null;
+function placed(c, k, x) { fixes.push([c, k, x]); }
+function atLater(fn) {
+  const pp = pend, pf = fixes;
+  pend = new Map(); fixes = [];
+  try { fn(); }
+  finally {
+    const P = pend, F = fixes;
+    pend = pp; fixes = pf;
+    for (const [c, k, copy] of F) {
+      const [root, keys] = P.get(copy), o = walkTo(root, keys);
+      if (o === undefined || o === copy) continue;
+      if (c instanceof Map) { if (c.get(k) === copy) c.set(k, o); } else if (c[k] === copy) c[k] = o;
+    }
+  }
 }
 
 // Objects that live inside an entity (a request's data pointing into its sender, such as a trade's escrow entry and the asker's slot
@@ -159,13 +182,24 @@ function pathOf(e) {
   return [e[0], keys.reverse()];
 }
 // fn() with references on: inside the roots given (a request's sender, the mobs it names), then the shared index; never into `not` (the
-// mob being diffed: its own objects are written where they are)
-function withPaths(roots, fn, not) {
+// mob being diffed: its own objects are written where they are), except a plain object it holds under two of its fields, sent from one
+// as where the other workers have it already (its place in the shadow, notS, if it is still there) or else as where another field holds
+// it (looked up once the whole change is in: atLater); so the two stay one object on the other workers. A baker's slot in its asks and
+// its bkr.job.offer hold the same offer, which the seller's list may no longer have (js/trading.js buy; r15-39b C7).
+function withPaths(roots, fn, not, notS) {
   const prev = pathCtx;
-  let index = null;
+  let index = null, own = null, was = null;
   const find = obj => {
     const sh = sharedIndex().get(obj);
     if (sh && !(not && sh[0]["@"] === not.id && (topKey == null || topOf(sh) === topKey))) return pathOf(sh);
+    if (not && topKey != null && !Array.isArray(obj)) {
+      if (!was && notS) { was = new Map(); shadowPaths(notS, [], was, 0); }
+      const p = was && was.get(obj);
+      if (p && p[0] !== topKey && walkTo(not, p) === obj) return [{ "@s": 1 }, p];
+      if (!own) own = ownPaths(not);
+      const l = own.get(obj), e = l && l.find(e => topOf(e) !== topKey);
+      if (e) return pathOf(e);
+    }
     if (!roots.length) return null;
     if (!index) { index = new Map(); for (const r of roots) if (r && typeof r === "object") indexTree(r, [rootRef(r), null, null], index, 0); }
     const e = index.get(obj);
@@ -173,6 +207,26 @@ function withPaths(roots, fn, not) {
   };
   pathCtx = { find, off: 0 };
   try { return fn(); } finally { pathCtx = prev; }
+}
+// a mob's objects by where they are: object -> index entries, the first place under each of its fields
+function ownPaths(m) {
+  const out = new Map(), root = [{ "@s": 1 }, null, null];
+  for (const k of Object.keys(m)) {
+    const x = m[k];
+    if (skipKey(k) || x === null || typeof x !== "object") continue;
+    const idx = new Map();
+    indexOne(k, x, root, idx, 0);
+    for (const [o, e] of idx) { const l = out.get(o); if (l) l.push(e); else out.set(o, [e]); }
+  }
+  return out;
+}
+// the objects of a shadow by their keys from its root (the first place each is met), as the other workers hold them
+function shadowPaths(s, at, out, d) {
+  if (d > 12) return;
+  const one = (k, c) => { if (c instanceof Shadow && c.K !== 3 && c.K !== 4 && !out.has(c.o)) { const p = at.concat([k]); out.set(c.o, p); shadowPaths(c, p, out, d + 1); } };
+  if (s.K === 2) { for (const [k, c] of s.m) if (typeof k !== "object") one(k, c); return; }
+  if (s.K === 1) { for (let i = 0; i < s.vs.length; i++) one(i, s.vs[i]); return; }
+  if (s.ks) for (let i = 0; i < s.ks.length; i++) one(s.ks[i], s.vs[i]);
 }
 const rootRef = r => (BF.player && r === BF.player) ? { "@p": 1 } : recSet.has(r) ? { V: r.key } : { "@": r.id };
 function indexTree(v, at, index, d) {
@@ -388,7 +442,7 @@ function keyChild(vs, i, k, x, ops, top) {
 // topKey: the mob's own field being diffed. An object of its own is written where it is, except one met under another field (a seller's
 // slot in its asks pointing at one of its own offers): that is sent as where it lives, so the other workers keep the two the same object
 let topKey = null;
-function diff(m, s) { const prev = self, pk = topKey; self = m; topKey = null; try { return recSet.has(m) ? diffV(m, s) : withPaths([], () => diffV(m, s), m); } finally { self = prev; topKey = pk; } }
+function diff(m, s) { const prev = self, pk = topKey; self = m; topKey = null; try { return recSet.has(m) ? diffV(m, s) : withPaths([], () => diffV(m, s), m, s); } finally { self = prev; topKey = pk; } }
 
 // patch(obj, ops) on a replica: the same changes, in place, so links into the object stay as they are
 function patchV(o, ops) {
@@ -422,6 +476,7 @@ function patchV(o, ops) {
     }
     const val = decV(op[2], []);
     if (K === 2) o.set(key, val); else o[key] = val;
+    if (pend && pend.has(val)) placed(o, key, val);
   }
   return undefined;
 }
@@ -683,10 +738,12 @@ function afterThink() {
     if (!p) continue;
     adoptDyn(p.dyn, w);   // (first of all: the changes may hold the new items)
     adoptReg(p.reg);   // (and the places they point at)
-    patchRecs(p.recs, w);   // (first: a mob's changes may point into its village's record)
-    patchMobs(p.mobs, w);
-    applyTouched(p.touched);
-    adoptAll(p.reqs, reqs);
+    atLater(() => {   // (objects sent as where they are: looked up once the worker's changes are all in)
+      patchRecs(p.recs, w);   // (first: a mob's changes may point into its village's record)
+      patchMobs(p.mobs, w);
+      applyTouched(p.touched);
+      adoptAll(p.reqs, reqs);
+    });
     if (RW.me === 0) { for (const e of p.logs) BF.glog.put(e); for (const e of p.fx) BF.fx.emit(e); }
   }
   // the tick's think requests numbered in plan order (the mob's place in the plan, then the order it sent them): as on one worker
@@ -748,10 +805,7 @@ function afterDeliver() {
     if (w === RW.me) continue;
     adoptDyn(p.dyn, w);
     adoptReg(p.reg);
-    patchRecs(p.recs, w);
-    patchMobs(p.mobs, w);
-    applyTouched(p.touched);
-    adoptAll(p.reqs, sends);
+    atLater(() => { patchRecs(p.recs, w); patchMobs(p.mobs, w); applyTouched(p.touched); adoptAll(p.reqs, sends); });
     if (RW.me === 0) { for (const e of p.logs) BF.glog.put(e); for (const e of p.fx) BF.fx.emit(e); }
   }
   if (sends.length) {
@@ -967,6 +1021,6 @@ function hourly() {
 Object.assign(RW, { journal: null, clock: null, onTick: null, onTouch: null, chan: name => channels.get(name), rec, stamp, realNow, tick, pause, channel, touch, writes, dynItem, setup, stop, beginThink, thinking, afterThink, beforeDeliver, afterDeliver, stats, text, hourly, replan,
   enc, dec, Shadow, snap, diff, patch, makeShared, attach, SKIP, REBALANCE, SOLO_MS,
   ownerOf, unitOf,   // (read only: the debug screen's Regions map colours each region by the worker its mobs think on, js/debugfeed.js)
-  refs: refsOn, encData });
+  refs: refsOn, encData, atLater });
 BF.rworkers = RW;
 })();
