@@ -261,6 +261,12 @@ function diffChild(old, x, ops, keyOut) {
   }
   if (old instanceof Shadow && old.o === x) { const sub = diffV(x, old); if (sub) ops.push([keyOut, 1, sub]); return old; }
   if (old instanceof EntRef && old.e === x) return old;
+  if (old instanceof Shadow && old.K === 1 && Array.isArray(x) && x !== self && !isEntity(x)) {   // a list made anew (v.trades = v.trades.filter(...)):
+    old.o = x;                                                                                   // its changes from the old one, so objects
+    const sub = diffV(x, old);                                                                   // kept in it stay the other workers' own
+    ops.push([keyOut, 4, sub || []]);
+    return old;
+  }
   if (x === self || isEntity(x)) { ops.push([keyOut, 0, x === self ? { "@s": 1 } : entRef(x)]); return new EntRef(x); }
   if (isGfx(x)) return old === null ? old : null;
   ops.push([keyOut, 0, encV(x, new Map())]);
@@ -287,7 +293,12 @@ function diffV(v, s) {
   const ops = [];
   if (K === 1) {
     const vs = s.vs, n = vs.length;
-    for (let i = 0; i < v.length; i++) vs[i] = diffChild(i < n ? vs[i] : SKIPPED, v[i], ops, i);
+    const moved = movedFrom(v, vs);
+    for (let i = 0; i < v.length; i++) {
+      const x = v[i], old = i < n ? vs[i] : SKIPPED, was = moved && !(old instanceof Shadow && old.o === x) ? moved.get(x) : undefined;
+      if (was) { moved.delete(x); const sub = diffV(x, was[1]); ops.push(sub ? [i, 3, was[0], sub] : [i, 3, was[0]]); vs[i] = was[1]; continue; }
+      vs[i] = diffChild(old, x, ops, i);
+    }
     if (n > v.length) { vs.length = v.length; ops.push(["length", 0, v.length]); }
     return ops.length ? ops : null;
   }
@@ -328,6 +339,23 @@ function diffV(v, s) {
   s.ks = ks; s.vs = nvs; s.fn = null;
   return ops.length ? ops : null;
 }
+// An array's objects that moved to another index since its shadow (a seller's offers, rebuilt in a new order by js/market.js sync,
+// with a buyer's deal pointing at one): object -> [old index, its shadow], or null when none did. Sent as [i, 3, old index, ops]: the
+// other workers move their own object there, so links into it stay links (a copy at the new index would leave the deal on an object no
+// longer in the list).
+function movedFrom(v, vs) {
+  let any = false;
+  for (let i = 0; i < v.length; i++) {
+    const x = v[i];
+    if (x === null || typeof x !== "object") continue;
+    const old = i < vs.length ? vs[i] : SKIPPED;
+    if (!(old instanceof Shadow && old.o === x) && !(old instanceof EntRef && old.e === x)) { any = true; break; }
+  }
+  if (!any) return null;
+  let m = null;
+  for (let j = 0; j < vs.length; j++) { const o = vs[j]; if (o instanceof Shadow && o.K !== 4 && o.K !== 3 && !(m && m.has(o.o))) (m || (m = new Map())).set(o.o, [j, o]); }
+  return m;
+}
 // The usual case's compare, made once for each list of keys (shared by every object with those keys: a mob's 150 fields, its ai table's
 // 50): each field read by name, which is many times faster than v[k] with k changing (a lookup through V8's megamorphic cache each time),
 // and only a child that differs from its shadow, an object or a zero (+0 / -0) goes on to keyChild. Skipped keys are left out. Same ops,
@@ -365,10 +393,26 @@ function diff(m, s) { const prev = self, pk = topKey; self = m; topKey = null; t
 // patch(obj, ops) on a replica: the same changes, in place, so links into the object stay as they are
 function patchV(o, ops) {
   const K = kind(o);
+  const before = K === 1 && ops.some(op => op[1] === 3) ? o.slice() : null;   // (moves read where things were before this patch)
   for (const op of ops) {
     if (op[0] === "*") return decV(op[2], []);   // (a typed array or Set sent whole: the caller puts it in place)
     const key = K === 2 ? decV(op[0], []) : op[0];
     if (op[1] === 2) { if (K === 2) o.delete(key); else if (o === decSelf) o[key] = undefined; else delete o[key]; continue; }   // (never delete a mob's own field: V8's dictionary mode)
+    if (op[1] === 4) {   // a new array: a copy of the one there, changed by op[2]
+      const cur = K === 2 ? o.get(key) : o[key];
+      if (!Array.isArray(cur)) throw new Error("region workers: no list at " + key + " to copy");
+      const copy = cur.slice();
+      patchV(copy, op[2]);
+      if (K === 2) o.set(key, copy); else o[key] = copy;
+      continue;
+    }
+    if (op[1] === 3) {   // an array's object moved from index op[2], changed inside by op[3]
+      const cur = before[op[2]];
+      if (cur === null || typeof cur !== "object") throw new Error("region workers: no object at " + op[2] + " to move to " + key);
+      o[key] = cur;
+      if (op[3]) { const whole = patchV(cur, op[3]); if (whole !== undefined) o[key] = whole; }
+      continue;
+    }
     if (op[1] === 1) {
       const cur = K === 2 ? o.get(key) : o[key];
       if (cur === null || typeof cur !== "object") throw new Error("region workers: no object at " + key + " to change");
