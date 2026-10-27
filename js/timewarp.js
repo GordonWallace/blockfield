@@ -12,7 +12,7 @@
 // The player is not stepped: it keeps normal speed (one update per frame) so you can still move around and observe.
 // BF.simNow() is the simulation clock in seconds: it advances only by simulated ticks (not while paused), and every
 // cooldown / scan timer in the sim modules reads it instead of performance.now(), so they speed up with everything else.
-// API: BF.warp = { speed, frozen, TICK, plan(dt) -> {n, h}, advance(h), done(n, simSec, dt, achieved?), alpha, renderNow(), last, dropped, reset(), set(i),
+// API: BF.warp = { speed, frozen, TICK, plan(dt) -> {n, h}, advance(h), done(n, simSec, dt, achieved?), alpha, renderNow(), last, achieved, dropped, reset(), set(i),
 // freeze(), cycle(), faster(), slower(), BUDGET_MS, MAX_FRAME, SPEEDS, clock }. advance(h) moves the clock only (tests step it by hand).
 // set(i) takes an index into SPEEDS (0 = 1x); speed reads 0 while frozen.
 (() => {
@@ -69,6 +69,7 @@ BF.warp = {
   BUDGET_MS: 40,                       // max simulation time per frame; the speed degrades gracefully past this
   get speed() { return frozen ? 0 : SPEEDS[idx]; },
   get frozen() { return frozen; },
+  get achieved() { return frozen ? 0 : eff; },   // the speed actually reached, smoothed: what the indicator shows in brackets when it falls short
   get last() { return last; },         // achieved speed in the latest frame (game seconds simulated / real seconds)
   get dropped() { return droppedAll; },   // ticks dropped so far this session (the frame budget or MAX_STEPS couldn't fit them)
   TICK, MAX_FRAME,

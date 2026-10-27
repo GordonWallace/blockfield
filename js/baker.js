@@ -377,6 +377,7 @@ function ai(m, dt, out, cont) {
   const v2 = job.other, key = (v2 && v2.slot ? v2.slot.idx : 0) + ":" + job.item;
   if (!F.canSell(m, v2)) return giveUp(v2 && v2.sleeping ? "asleep" : v2 && v2.tradingWith ? "busy" : "gone", key);
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
+  if (BF.mobs.waitFor) BF.mobs.waitFor(v2, m, d);   // the seller stops for its buyer (bug-054)
   if (S.stage === "walk") {
     if (S.walkT > 60) return giveUp("timeout", key);
     if (d <= 2.1 && Math.abs(v2.position.y - m.position.y) < 1.6) { S.stage = "trade"; S.tt = TRADE_PAUSE; a.route = null; return true; }
