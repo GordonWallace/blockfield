@@ -302,7 +302,7 @@ const MOB_FIELDS = [
   "asks", "cart", "mateT", "furnWork", "mateSeek", "eatenTotal", "lastMealFx", "loveId", "breedDay", "bred", "bredKey", "child", "growing", "parents", "_swT",
   "wob", "lastHurt", "homeBedKey", "sleeping", "restored", "attackerId", "attackedAt", "boatCd", "jobPrefer", "cowKit", "cwk", "cwc", "gls", "crumb",
   "penIn", "atOut", "fall", "jobMem", "seek", "exploded", "vdenied", "vanon", "local", "otherId", "sellerId", "goalSellerId", "ledById", "ridingId",
-  "pastureKey", "exitKey",
+  "pastureKey", "exitKey", "buyFromId", "buyFromAt", "holdForId", "holdT",
   "cl",   // the mob's cluster (js/clusters.js, spec r15-39b): set when made, moved only at a meeting
   // caches, never saved, sent or hashed (r15-61): the hottest links' last answers (js/ids.js CACHE_FIELDS), the id as a number (js/regiontick.js)
   "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN"];
@@ -310,7 +310,7 @@ const AI_FIELDS = [
   "t", "mode", "tx", "tz", "fleeT", "target", "losT", "los", "attackCd", "shootCd", "fuse", "strafe", "lookT", "swingT", "provoked", "burnT", "aiming",
   "leaving", "zScanT", "threat", "night", "held", "blockedT", "route", "ri", "stuckT", "routeKind", "doors", "leaveTries", "leaveEnd", "outT",
   "wanderAt", "hScanT", "rescueId", "revengeId", "foeId", "golemFoeT", "gScanT", "golemFoeId", "vScanT", "vTargetId", "doorT", "doorAt", "detour",
-  "fleeJitter", "gLos", "was", "planW", "planL", "planG"];
+  "fleeJitter", "gLos", "was", "pitT", "pitOut", "pitLogged", "climbT", "chase", "giveUpId", "giveUpT", "chaseBest", "chaseSlowT", "planW", "planL", "planG"];
 // The constructors: named stores (the only way V8 sizes an object for all of them), generated from the lists; js/ids.js Refs is the
 // prototype, so the link accessors (m.village, m.ai.foe...) work as on any refs() record and BF.ids.refs passes these through.
 const shapeOf = fields => { const C = new Function(fields.map(k => "this." + k + " = undefined;").join("\n")); C.prototype = BF.ids.Refs; return C; };
@@ -841,15 +841,87 @@ function waterAhead(m, dx, dz) {
   const y0 = Math.floor(m.position.y);
   return isWater(BF.world.getBlock(x, y0, z)) || isWater(BF.world.getBlock(x, y0 - 1, z));
 }
+// ---------- wells and other sunken pools (bug-061) ----------
+// A pit is water a village mob would drop into from where it stands: its surface a block or more below the mob's feet, in a pool too
+// small to swim away across (up to PIT_POOL cells) with no bank level with the water to walk out onto. The plaza well (rim one block
+// above the water) is one. Villagers and golems never step or get pushed into one, and one that ends up in one anyway (knocked in)
+// swims to the lowest bank and jumps out.
+const PIT_POOL = 16;
+// The water cells of the pool whose top water block is at ws, from (x, z): { cells, banks: [[x, y, z] walkable cells beside it, flush first] }, or null when too big.
+function poolAt(x, ws, z) {
+  const W = BF.world, seen = new Set([x + "," + z]), q = [[x, z]], banks = [];
+  for (let i = 0; i < q.length; i++) {
+    const [cx, cz] = q[i];
+    for (const [dx, dz] of BF.DIRS) {
+      const nx = cx + dx, nz = cz + dz, k = nx + "," + nz;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      if (isWater(W.getBlock(nx, ws, nz))) { if (q.length >= PIT_POOL) return null; q.push([nx, nz]); continue; }
+      if (walkCell(nx, ws + 1, nz)) banks.unshift([nx, ws + 1, nz]);
+      else if (walkCell(nx, ws + 2, nz) && !blockAt(cx, ws + 2, cz).solid && !blockAt(cx, ws + 3, cz).solid) banks.push([nx, ws + 2, nz]);   // a block up: room to jump from this water cell (not under the well's bell)
+    }
+  }
+  return { cells: q, banks };
+}
+// Would a mob with its feet in cell y step into a pit at column (x, z)? Falls through air to the first water or floor below.
+function pitAt(x, y, z) {
+  const W = BF.world;
+  if (!W.isLoaded(x, z)) return false;
+  for (let k = 0; k <= 4; k++) {
+    const id = W.getBlock(x, y - k, z);
+    if (isWater(id)) {
+      if (k < 2) return false;   // water level with its floor (k 1) or at its feet: it can walk back out
+      const p = poolAt(x, y - k, z);
+      return !!p && !p.banks.some(b => b[1] === y - k + 1);
+    }
+    if (BF.blocks[id] && BF.blocks[id].solid) return false;
+  }
+  return false;
+}
+// Stops a village mob's walk (and any push) that would take it over the edge into a pit: each horizontal velocity axis that heads for one.
+// A builder at work at its own site (a well it is digging, a foundation): its building route takes it in and out of the dig, and the
+// water a well's builder puts in first can run into it, so that is not a pit to keep it out of or get it out of.
+function atOwnSite(m) {
+  const e = m.bs && m.bs.mode === "build" && m.bs.entry, p = m.position;
+  return !!e && p.x >= e.ox - 2 && p.x < e.ox + e.w + 2 && p.z >= e.oz - 2 && p.z < e.oz + e.d + 2;
+}
+function keepOutOfPits(m) {
+  if (m.inWater || m.onLadder || m.knockT > 0 || atOwnSite(m)) return;
+  const v = m.vel, p = m.position, y = Math.floor(p.y + 0.01), reach = m.halfWidth + 0.1;
+  if (Math.abs(v.x) > 0.01 && pitAt(Math.floor(p.x + Math.sign(v.x) * reach), y, Math.floor(p.z))) v.x = 0;
+  if (Math.abs(v.z) > 0.01 && pitAt(Math.floor(p.x), y, Math.floor(p.z + Math.sign(v.z) * reach))) v.z = 0;
+  if (Math.abs(v.x) > 0.01 && Math.abs(v.z) > 0.01 && pitAt(Math.floor(p.x + Math.sign(v.x) * reach), y, Math.floor(p.z + Math.sign(v.z) * reach))) { v.x = 0; v.z = 0; }
+}
+// In a pit's water: head for its lowest bank (rechecked every second). The jump out is in updateMob. Logged once per fall.
+function swimOutOfPit(m, dt, out) {
+  const ai = m.ai, p = m.position;
+  if ((ai.pitT = (ai.pitT || 0) - dt) <= 0 && m.inWater) {
+    ai.pitT = 1;
+    const x = Math.floor(p.x), z = Math.floor(p.z);
+    let ws = Math.floor(p.y + 0.4);
+    while (isWater(BF.world.getBlock(x, ws + 1, z))) ws++;
+    const pool = isWater(BF.world.getBlock(x, ws, z)) ? poolAt(x, ws, z) : null;
+    ai.pitOut = pool && pool.banks.length ? pool.banks.reduce((a, b) => (Math.hypot(b[0] + 0.5 - p.x, b[2] + 0.5 - p.z) + (b[1] - ws) * 2 < Math.hypot(a[0] + 0.5 - p.x, a[2] + 0.5 - p.z) + (a[1] - ws) * 2 ? b : a)) : null;
+    if (ai.pitOut && ai.pitOut[1] > ws + 1 && !ai.pitLogged) { ai.pitLogged = true; moveLog(m, "ERROR", "fell into a well or pit at " + x + ", " + ws + ", " + z + " and is climbing out"); }
+  }
+  const b = ai.pitOut;
+  if (!b) return false;
+  const dx = b[0] + 0.5 - p.x, dz = b[2] + 0.5 - p.z, d = Math.hypot(dx, dz) || 1;
+  out.x = dx / d * m.def.speed; out.z = dz / d * m.def.speed;
+  return true;
+}
 function pickWander(m, r) {
   if (m.pen && BF.shepherd && BF.shepherd.pickPenTarget(m)) return;   // penned sheep wander inside their pen (js/shepherd.js)
   if (m.coop && BF.poultry && BF.poultry.pickCoopTarget(m)) return;   // coop chickens wander inside their run (js/poultry.js)
   if (m.pasture && BF.cowherd && BF.cowherd.pickPastureTarget(m)) return;   // pasture cows graze inside the pasture (js/cowherd.js)
   if (m.sty && BF.pigFarmer && BF.pigFarmer.pickStyTarget(m)) return;   // sty pigs root about inside the sty (js/pigfarmer.js)
   if (m.horse && m.horse.pen && BF.stables && BF.stables.pickPenTarget(m)) return;   // paddock horses wander inside the paddock (js/stables.js)
-  const a =R(m).next() * Math.PI * 2, d = rnd(R(m), 3, r);
-  m.ai.tx = m.position.x + Math.cos(a) * d;
-  m.ai.tz = m.position.z + Math.sin(a) * d;
+  for (let k = 0; k < (m.def.golem ? 16 : 1); k++) {   // a golem keeps to spots it fits (golemFits; by a wall half the spots round it can be inside)
+    const a = R(m).next() * Math.PI * 2, d = rnd(R(m), 3, r);
+    m.ai.tx = m.position.x + Math.cos(a) * d;
+    m.ai.tz = m.position.z + Math.sin(a) * d;
+    if (!m.def.golem || golemFits(m, m.ai.tx, m.ai.tz)) break;
+  }
 }
 
 // Getting past what blocks a walk (village mobs: villagers and golems). Walks to a point (wanderAI: heading home from far off, a golem's
@@ -1615,10 +1687,12 @@ function atDoor(x, y, z, but) {
 }
 // Villagers open closed doors just ahead on their route, and the one they stand in (spawned or scattered into a doorway: its panel would hold
 // them there for good), and close the ones they opened once clear of them.
+// A detour round something (wanderAI's A*, ai.detour) goes through doors and gates as well: it used to leave them shut, so a villager walking
+// out of a coop or pen pressed against its closed gate until the detour gave up (bug-056).
 function villagerDoors(m) {
   const ai = m.ai, W = BF.world;
-  if (ai.route && !m.sleeping) for (let k = ai.ri - 1; k < Math.min(ai.route.length, ai.ri + 2); k++) {
-    const [x, y, z] = k < ai.ri ? feetCell(m) : ai.route[k], bk = blockAt(x, y, z), d = bk.door || bk.gate;   // fence gates (shepherd pens) open and close the same way
+  if (!m.sleeping) for (const R of [ai.route && { route: ai.route, ri: ai.ri }, ai.detour && ai.detour.route && ai.detour]) if (R) for (let k = R.ri - 1; k < Math.min(R.route.length, R.ri + 2); k++) {
+    const [x, y, z] = k < R.ri ? feetCell(m) : R.route[k], bk = blockAt(x, y, z), d = bk.door || bk.gate;   // fence gates (shepherd pens) open and close the same way
     if (d && !d.open && Math.hypot(x + 0.5 - m.position.x, z + 0.5 - m.position.z) < 1.7) {
       BF.blockReq.door(m, x, y, z, true);   // a request (spec r15-19): the door is open from this tick's apply phase
       (ai.doors || (ai.doors = [])).push([x, y, z, BF.blockReq.tick()]);
@@ -1868,6 +1942,43 @@ function villagerAI(m, dt, out) {
   if (m.child && BF.breeding) BF.breeding.childMove(m, dt, out);   // children run about (js/breeding.js)
 }
 
+// A golem's chase (bug-062). Straight at its foe; pressed against a wall for a moment (a foe indoors or behind a house), it plans a route
+// three blocks high round to it, and with none it leaves that foe alone for GIVE_UP seconds instead of jumping at the wall under the eaves.
+const GIVE_UP = 60;
+function golemChase(m, dt, out) {
+  const ai = m.ai, o = ai.foe, sp = o === ai.rescue ? RESCUE_SPEED : m.def.speed;
+  if (!chaseAndHit(m, o, dt, out, irnd(R(m), 7, 14), 1.2, sp)) return false;
+  if (ai.chase && ai.chase.foe !== o) ai.chase = null;
+  if (ai.chase) {
+    const C = ai.chase, end = C.route[C.route.length - 1], op = seen(m.position, o.position, _sB);
+    if (Math.hypot(end[0] + 0.5 - op.x, end[2] + 0.5 - op.z) > 4 || followRoute(m, dt, out, sp, C) !== "going") ai.chase = null;   // the foe moved off, or the route is walked
+    return true;
+  }
+  // Held up: pushing straight at a wall, or sliding along one (a foe on the far side of a house) without getting any closer to the foe.
+  const d = mdist(m, o);
+  if (d < (ai.chaseBest == null ? Infinity : ai.chaseBest) - 1 || d < 3) { ai.chaseBest = d; ai.chaseSlowT = 0; }
+  else ai.chaseSlowT = (ai.chaseSlowT || 0) + dt;
+  if ((ai.blockedT > DETOUR_AFTER || ai.chaseSlowT > 3) && takePlan()) {
+    ai.blockedT = 0; ai.chaseSlowT = 0; ai.chaseBest = null;
+    const [fx, fy, fz] = feetCell(m), op = seen(m.position, o.position, _sB), ox = Math.floor(op.x), oy = Math.floor(op.y + 0.01), oz = Math.floor(op.z);   // the foe in this golem's frame
+    const route = findPath(fx, fy, fz, { x: ox, z: oz, at: (x, y, z) => Math.abs(x - ox) + Math.abs(z - oz) <= 2 && Math.abs(y - oy) <= 1 }, 1500, true);
+    if (route && route.length) ai.chase = BF.ids.refs({ route, ri: 0, stuckT: 0, foe: o });   // (the foe kept as its id)
+    else {
+      moveLog(m, "INFO", "found no way to the " + o.type.replace(/_/g, " ") + " at " + ox + ", " + oy + ", " + oz + " and leaves it for now");
+      ai.giveUp = o; ai.giveUpT = GIVE_UP; ai.foe = null; ai.rescue = null;
+      out.x = 0; out.z = 0;
+      return false;
+    }
+  }
+  return true;
+}
+// Golems are too tall for doors and low roofs: a patrol spot is open ground at about its own height, with room for all of it (bug-062).
+function golemFits(m, x, z) {
+  const fx = Math.floor(x), fz = Math.floor(z);
+  if (!BF.world.isLoaded(fx, fz)) return false;
+  const y = BF.world.heightAt(fx, fz) + 1;
+  return Math.abs(y - m.position.y) <= 3 && walkCell(fx, y, fz) && !blockAt(fx, y + 2, fz).solid;
+}
 function golemAI(m, dt, out) {
   const ai = m.ai, T = m.def;
   ai.provoked = Math.max(0, ai.provoked - dt);
@@ -1875,13 +1986,16 @@ function golemAI(m, dt, out) {
   if (ai.hScanT <= 0) {
     ai.hScanT = 0.5;
     // a villager under attack comes first (sprint), then whatever is hurting the golem, then the nearest hostile
+    if (ai.giveUp && (ai.giveUpT -= 0.5) <= 0) ai.giveUp = null;
+    const gu = ai.giveUp;   // a foe it found no way to (bug-062): left alone for a while
     ai.rescue = villagerInDanger(m);
-    const rv = ai.revenge && !ai.revenge.dead && !ai.revenge.removed && mdist(m, ai.revenge) < 32 ? ai.revenge : null;
+    if (ai.rescue && ai.rescue === gu) ai.rescue = null;
+    const rv = ai.revenge && !ai.revenge.dead && !ai.revenge.removed && ai.revenge !== gu && mdist(m, ai.revenge) < 32 ? ai.revenge : null;
     if (!rv) ai.revenge = null;
-    ai.foe = ai.rescue || rv || nearestMob(m, 16, o => o.hostile, "h");
+    ai.foe = ai.rescue || rv || nearestMob(m, 16, o => o.hostile && o !== gu, "h");
   }
-  if (ai.foe && chaseAndHit(m, ai.foe, dt, out, irnd(R(m), 7, 14), 1.2, ai.foe === ai.rescue ? RESCUE_SPEED : T.speed)) return;
-  ai.foe = null; ai.rescue = null;
+  if (ai.foe && golemChase(m, dt, out)) return;
+  ai.foe = null; ai.rescue = null; ai.chase = null;
   if (creative()) ai.provoked = 0;
   if (ai.provoked > 0 && playerAlive()) {
     const p = player();
@@ -1906,11 +2020,51 @@ function golemAI(m, dt, out) {
     if (!m.patrol || R(m).next() < dt / 90) { const h = V.houses[irnd(R(m), 0, V.houses.length - 1)]; m.patrol = R(m).next() < 0.3 || !h ? [V.x, V.z] : [h.x + (h.w || 1) / 2, h.z + (h.d || 1) / 2]; }
     px = m.patrol[0]; pz = m.patrol[1];
   }
-  if (V && Math.hypot(px - m.position.x, pz - m.position.z) > 14) { ai.mode = "walk"; ai.tx = px + rnd(R(m), -5, 5); ai.tz = pz + rnd(R(m), -5, 5); ai.t = rnd(R(m), 5, 8); }
+  if (V && Math.hypot(px - m.position.x, pz - m.position.z) > 14 && !(ai.mode === "walk" && Math.hypot(px - ai.tx, pz - ai.tz) < 8)) {
+    ai.mode = "walk"; ai.t = rnd(R(m), 5, 8);
+    for (let k = 0; k < 16; k++) { ai.tx = px + rnd(R(m), -6, 6); ai.tz = pz + rnd(R(m), -6, 6); if (golemFits(m, ai.tx, ai.tz)) break; }
+  }
   wanderAI(m, dt, out);
   out.x *= 0.6; out.z *= 0.6;
 }
 
+// ---------- sellers wait for their buyers (bug-054) ----------
+// A villager walking to buy from another (villagelife.js shopAI and every job's own buying walk) used to chase the seller wherever it was
+// going: a seller walking to its own work drew a line of buyers behind it, each a buyer and seller in turn (a builder after the furniture
+// maker after the shepherd), all the way to wherever the head of the line stopped, where the trades were made and the line broke up.
+// Now a buyer within HOLD_R blocks calls the seller (waitFor, every frame of its walk and trade; it only marks the buyer itself), and the
+// seller, seeing a buyer of its village calling it, stops and faces it, for up to HOLD_MAX seconds at a time, then carries on. A seller that
+// is itself on its way to buy keeps going (its buyers catch it up when it stops to trade): a whole line stopping for each other would stand
+// still for HOLD_MAX seconds, and two villagers buying from each other walk to meet.
+const HOLD_R = 10, HOLD_MAX = 8;
+function waitFor(v2, m, d) {
+  if (!v2 || v2 === m || v2.type !== "villager" || !(d <= HOLD_R)) return;
+  m.buyFrom = v2; m.buyFromAt = m.age;
+}
+const calling = (b, m) => b.buyFrom === m && !b.dead && !b.removed && b.age - b.buyFromAt < 0.25;
+function holdForBuyer(m, dt, out) {
+  const ai = m.ai, R = m.village;
+  let b = null, bd = Infinity;
+  if (R && R.members && !(m.buyFrom && calling(m, m.buyFrom))) for (const o of R.members) {
+    if (o === m || !calling(o, m)) continue;
+    const d = mdist(m, o);
+    if (d < bd) { bd = d; b = o; }
+  }
+  if (!b) { if (m.holdT) { m.holdT = 0; m.holdFor = null; } return; }
+  m.holdFor = b;
+  if ((m.holdT || 0) <= HOLD_MAX && (m.holdT = (m.holdT || 0) + dt) > HOLD_MAX) moveLog(m, "INFO", "waited " + HOLD_MAX + " s for " + (BF.vlog ? BF.vlog.nameOf(b) : "a buyer") + " to come and trade, and carries on");
+  if (m.holdT > HOLD_MAX || ai.fleeT > 0) return;   // waited long enough: gets on with its own errand
+  const bp = seen(m.position, b.position, _sB);
+  out.x = 0; out.z = 0; out.faceX = bp.x; out.faceZ = bp.z; m.lookAt = b;
+  ai.stuckT = 0; if (ai.detour && ai.detour.route) ai.detour.stuckT = 0;   // standing still on purpose is not being stuck on its route
+}
+// A village mob jumps only at a one-block step: a block up and a little ahead, all of it fits. A wall or a house side (with the eaves
+// over a golem's head) is not worth jumping at (bug-062): the detour (wanderAI, golemChase) takes it round instead.
+function stepAhead(m, d) {
+  const l = Math.hypot(d.x, d.z);
+  if (l < 0.01) return false;
+  return !BF.world.boxCollides(m.position.x + d.x / l * 0.4, m.position.y + 1.05, m.position.z + d.z / l * 0.4, m.halfWidth, m.height);
+}
 // ---------- per-mob update ----------
 const _desired = { x: 0, z: 0, faceTarget: false };
 // Villagers on ladders: a ladder cell at the feet or the waist (like the player, js/player.js). Speeds in blocks/s.
@@ -1947,7 +2101,7 @@ function updateMob(m, dt) {
   _desired.x = 0; _desired.z = 0; _desired.faceTarget = false; _desired.faceX = null; _desired.faceZ = null;
   if (m.rider) { /* ridden (js/horses.js): its rider moves it */ }
   else if (T.hostile) { hostileAI(m, dt, _desired); if (m.type === "zombie") zombieBreakDoor(m, dt, _desired); }
-  else if (m.type === "villager") { { const t0 = performance.now(); villagerAI(m, dt, _desired); aiAcc += performance.now() - t0; aiN++; } if (m.profession === "merchant" || m.profession === "explorer") { _desired.x *= TRAVELLER_SPEED; _desired.z *= TRAVELLER_SPEED; } }   // merchants and explorers walk 1.5x as fast
+  else if (m.type === "villager") { { const t0 = performance.now(); villagerAI(m, dt, _desired); aiAcc += performance.now() - t0; aiN++; } holdForBuyer(m, dt, _desired); if (m.profession === "merchant" || m.profession === "explorer") { _desired.x *= TRAVELLER_SPEED; _desired.z *= TRAVELLER_SPEED; } }   // merchants and explorers walk 1.5x as fast
   else if (T.golem) golemAI(m, dt, _desired);
   else if (ai.fleeT > 0) {
     ai.fleeT -= dt;
@@ -1969,6 +2123,10 @@ function updateMob(m, dt) {
   if (m.coop && BF.poultry) BF.poultry.contain(m, _desired);   // nor does a coop chicken
   if (m.pasture && BF.cowherd) BF.cowherd.contain(m, _desired);   // nor a pasture cow
   if (m.sty && BF.pigFarmer) BF.pigFarmer.contain(m, _desired);   // nor a sty pig
+  if (T.village && !m.rider && !atOwnSite(m)) {   // in a well or other pit (bug-061): swim for the lowest bank
+    if (m.inWater || (ai.pitOut && !m.onGround)) swimOutOfPit(m, dt, _desired);   // (still heading for the bank in the air, jumping out)
+    else if (ai.pitOut || ai.pitLogged) { if (ai.pitLogged) moveLog(m, "INFO", "climbed out at " + Math.floor(m.position.x) + ", " + Math.floor(m.position.y) + ", " + Math.floor(m.position.z)); ai.pitOut = null; ai.pitLogged = false; ai.pitT = 0; }
+  }
   if (m.removed) return; // exploded
 
   // ---- physics ----
@@ -1986,7 +2144,8 @@ function updateMob(m, dt) {
   if (m.inWater) {
     m.vel.y += (m.headInWater || m.type === "chicken" ? 22 : 9) * dt; // buoyancy: float up
     m.vel.y -= GRAVITY * 0.5 * dt;
-    m.vel.y = Math.max(-2, Math.min(m.vel.y, 2.5));
+    m.vel.y = Math.max(-2, Math.min(m.vel.y, ai.climbT > 0 ? 7 : 2.5));   // climbing out of a pit (below) is a real jump
+    if (ai.climbT > 0) ai.climbT -= dt;
   } else if (m.onLadder) {
     // on a ladder (villagers): climb towards the route's next cell (just clearing its floor), hold on level with it; with no route hold on while standing still (using a chest beside the ladder) and slide down slowly while walking
     const c = ai.route && ai.route[ai.ri], dy = c ? c[1] - m.position.y : null;
@@ -1997,6 +2156,7 @@ function updateMob(m, dt) {
     if (m.vel.y < -40) m.vel.y = -40;
   }
   if (!coarseStep) separate(m, dt);   // (coarse: no separation)
+  if (T.village) keepOutOfPits(m);   // never walked or pushed over the edge into a well (bug-061)
 
   // standing still on solid ground with nothing pushing it: no move to make (most grazing animals most of the time)
   const resting = m.onGround && !m.inWater && !m.onLadder && m.knockT <= 0 && !_desired.x && !_desired.z && m.vel.y <= 0 &&
@@ -2005,7 +2165,7 @@ function updateMob(m, dt) {
   else {
   const wasGround = m.onGround;
   const offRoofs = keepsOffRoofs(m), px = m.position.x, py = m.position.y, pz = m.position.z;
-  const res = BF.world.moveBox(m.position, m.vel, m.halfWidth, m.height, dt, { stepUp: 1.05, swim: m.inWater,   // swimming, it climbs out onto a bank (world.js moveBox)
+  const res = BF.world.moveBox(m.position, m.vel, m.halfWidth, m.height, dt, { stepUp: 1.05, swim: m.inWater || ai.climbT > 0,   // swimming, it climbs out onto a bank (world.js moveBox)
     canStep: offRoofs ? (x, y, z) => !roofLedge(x, y, z, m.halfWidth) : null });
   // nor walks onto one level from a hillside (or lands on one): back where it was, as if it hit a wall. One already up there can get down.
   if (offRoofs && (m.position.x !== px || m.position.z !== pz) && roofLedge(m.position.x, m.position.y, m.position.z, m.halfWidth) && !roofLedge(px, py, pz, m.halfWidth)) {
@@ -2018,7 +2178,8 @@ function updateMob(m, dt) {
     if (T.climbs && (ai.target || ai.mode === "walk")) m.vel.y = 3.2;  // spiders climb walls
     else if (m.onLadder) { /* climbing: the ladder code above lifts it */ }
     else if (res.onGround && !res.roof && !BF.world.boxCollides(m.position.x, m.position.y + 1.05, m.position.z, m.halfWidth, m.height)
-      && !(offRoofs && roofLedge(m.position.x + Math.sign(_desired.x) * (res.hitX ? 0.6 : 0), m.position.y + 1, m.position.z + Math.sign(_desired.z) * (res.hitZ ? 0.6 : 0), m.halfWidth))) m.vel.y = 7.6;   // jump obstacles, only with headroom to clear one: under a ledge or leaves a jump just bounces off them
+      && !(offRoofs && roofLedge(m.position.x + Math.sign(_desired.x) * (res.hitX ? 0.6 : 0), m.position.y + 1, m.position.z + Math.sign(_desired.z) * (res.hitZ ? 0.6 : 0), m.halfWidth)) && (!T.village || stepAhead(m, _desired))) m.vel.y = 7.6;   // jump obstacles, only with headroom to clear one: under a ledge or leaves a jump just bounces off them
+    else if (m.inWater && T.village && ai.pitOut) { m.vel.y = 6.5; ai.climbT = 0.3; }   // a well's rim, a block above the water: jump out like the player can
     else if (m.inWater) m.vel.y = 4;
     if (!T.hostile && ai.mode === "walk" && !ai.detour && R(m).next() < 0.3) pickWander(m, 8);
   }
@@ -3175,6 +3336,7 @@ BF.mobs = {
   },
   // Navigation helpers for js/builder.js (A* over walkable cells, route following, per-frame search budget).
   isOccupied,
+  waitFor,   // waitFor(seller, buyer, distance): a buyer on its way calls the seller to stop for it (bug-054; marks only the buyer)
   nav: { findPath: (sx, sy, sz, goal, max) => (BF.bridges ? BF.bridges.route(findPath, sx, sy, sz, goal, max) : findPath(sx, sy, sz, goal, max)), followRoute, feetCell, walkCell, blockAt, bedOK, bedtime, takePlan },
   spawning: true,
   // world.setBlock hook: a light source going out or a block that can shade the ground restarts the spawn wait around it

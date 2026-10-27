@@ -380,6 +380,7 @@ function shopStep(m, S, dt, out, tk) {
   const deal = tk.deal, v2 = deal.seller, ai = m.ai;
   if (!BF.villageLife.canSell(v2)) return endTask(m, S, false), false;
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
+  if (BF.mobs.waitFor) BF.mobs.waitFor(v2, m, d);   // the seller stops for its buyer (bug-054)
   if (S.stage !== "trade") {
     if (d <= 2.1 && Math.abs(v2.position.y - m.position.y) < 1.6) { S.stage = "trade"; S.tt = TRADE_PAUSE; ai.route = null; return true; }
     const s = toMob(m, S, dt, out, v2, 2.1);

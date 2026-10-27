@@ -35,6 +35,7 @@ const CAP = 600;                // bees out in the world at once
 const EMERGE = 60;              // seconds for a home's bees to come out
 const REST_IN = [15, 35];       // seconds a bee stays in after a trip before it goes out again
 const DAWN = 0.01, DUSK = 0.5 - 1 / 48;   // out between these times of day (sunset is 0.5; a game hour is 1/24 day)
+const HOME_MAX = 30;   // s on its way home before it gets in anyway
 const SPEED = 2.4, HOME_SPEED = 3.4, STING_SPEED = 5.2, FOLLOW_SPEED = 3.6;
 const ANGRY = 20;               // seconds bees stay angry
 const FOLLOW_R = 8, FOLLOW_MAX = 10, MOVE_IN_R = 2.5, LURE_NEAR_HOME = 5;
@@ -155,7 +156,7 @@ function doorOf(h) {
 function spawnBee(h, at, mode) {
   // (every field a bee ever gets, from the start: one object layout for all bees, so the flight code's property reads stay fast, r15-61)
   const b = { id: ++seq, home: h, x: at.x, y: at.y, z: at.z, vx: 0, vy: 0, vz: 0, mode: mode || "start", t: 0, nectar: false, land: null, tgt: null,
-    phase: 0, yaw: 0, follow: null, angry: 0, stung: false, stuck: 0, lastD: Infinity, trips: 0, rng: undefined, px: undefined, py: undefined,
+    phase: 0, yaw: 0, follow: null, angry: 0, stung: false, stuck: 0, lastD: Infinity, trips: 0, homeT: 0, rng: undefined, px: undefined, py: undefined,
     pz: undefined, pyaw: undefined, followT: undefined, front: undefined, restedOut: undefined, restedBack: undefined, hurry: undefined,
     landYaw: undefined, gone: undefined, hm0: null, hm1: null, cl: undefined };   // hm0 / hm1: the columns under it and ahead (world.heightAtMemo)
   if (cluster()) b.cl = homeBase(h);   // (clusters: the bee stays its home's cluster's while it is out)
@@ -216,7 +217,7 @@ const flowerSpot = (p, q) => ({ x: p[0] + 0.5 + rnd(q, -0.06, 0.06), y: p[1] + 0
 // The bee's next errand after landing (or coming out): a flower, a rest stop on the way, or home.
 function nextErrand(b) {
   const h = b.home;
-  b.land = null; b.stuck = 0; b.lastD = Infinity; b.front = false;
+  b.land = null; b.stuck = 0; b.lastD = Infinity; b.front = false; b.homeT = 0;
   const q = rs(b);
   if (!h) { const s = landingSpot(b.x, b.y, b.z, 6, q); b.mode = "fly"; b.tgt = s; b.t = 0; if (!s) { b.mode = "wander"; b.t = rnd(q, 2, 4); } return; }
   if (b.nectar) {   // flying home with nectar: now and then a short rest on the way
@@ -238,7 +239,8 @@ function nextErrand(b) {
 function flyTo(b, tx, ty, tz, v, dt, low) {
   const w = W(), dx = tx - b.x, dz = tz - b.z, hd = Math.hypot(dx, dz);
   let gy = ty;
-  if (!low && hd > 2.5) {
+  const roofed = [1, 2, 3].some(k => BF.SOLID[w.getBlock(Math.floor(b.x), Math.floor(b.y) + k, Math.floor(b.z))]);   // under leaves or a roof: out from under it first (bug-065)
+  if (!low && hd > 2.5 && !roofed) {
     const ax = b.x + (dx / hd) * Math.min(hd, 2), az = b.z + (dz / hd) * Math.min(hd, 2);
     const gh = Math.max(w.heightAtMemo(b.x, b.z, b.hm0 || (b.hm0 = w.heightMemo())), w.heightAtMemo(ax, az, b.hm1 || (b.hm1 = w.heightMemo())));
     gy = Math.max(ty, gh + 1.6);
@@ -248,9 +250,16 @@ function flyTo(b, tx, ty, tz, v, dt, low) {
   const s = Math.min(d, v * dt);
   let nx = b.x + (dx / d) * s, ny = b.y + (dy / d) * s, nz = b.z + (dz / d) * s;
   ny += Math.sin(simNow() * 7 + b.phase) * 0.12 * dt;   // a little bob
-  if (BF.SOLID[w.getBlock(Math.floor(nx), Math.floor(ny), Math.floor(nz))]) {   // the way is blocked: hop straight up instead
-    nx = b.x; nz = b.z; ny = b.y + v * dt;
-    if (BF.SOLID[w.getBlock(Math.floor(nx), Math.floor(ny + 0.1), Math.floor(nz))]) ny = b.y;
+  const solid = (x, y, z) => BF.SOLID[w.getBlock(Math.floor(x), Math.floor(y), Math.floor(z))];
+  if (solid(nx, ny, nz)) {
+    // The way is blocked. Before bug-065 it only hopped straight up, so a bee under leaves (a nest under its own tree's canopy, whose top
+    // sets the cruising height) pressed into them for good. Now it takes the first open move of: up (only when it wants to climb), level
+    // on its way, sideways along the obstacle (each bee always the same side, so it works round it), up after all, then down.
+    const hx = hd > 1e-4 ? dx / hd : 0, hz = hd > 1e-4 ? dz / hd : 0, side = b.phase > Math.PI ? 1 : -1;
+    const tries = [[b.x + hx * s, b.y, b.z + hz * s], [b.x + hz * s * side, b.y, b.z - hx * s * side], [b.x - hz * s * side, b.y, b.z + hx * s * side], [b.x, b.y + v * dt, b.z], [b.x, b.y - v * dt, b.z]];
+    if (dy > 0) tries.unshift(tries[3]);
+    const ok = tries.find(([x, y, z]) => !solid(x, y + (y > b.y ? 0.1 : 0), z));
+    if (ok) [nx, ny, nz] = ok; else { nx = b.x; ny = b.y; nz = b.z; }
   }
   b.vx = (nx - b.x) / Math.max(dt, 1e-4); b.vy = (ny - b.y) / Math.max(dt, 1e-4); b.vz = (nz - b.z) / Math.max(dt, 1e-4);
   if (Math.abs(b.vx) + Math.abs(b.vz) > 0.05) b.yaw = Math.atan2(b.vx, b.vz);
@@ -319,6 +328,7 @@ function stepBee(b, dt, lp, now) {
     const d0 = doorOf(h), d = flyTo(b, d0.x, d0.y, d0.z, b.hurry ? HOME_SPEED : SPEED, dt, Math.hypot(d0.x - b.x, d0.z - b.z) < 3);
     if (d < 0.3) { enter(b); return; }
     if (d > b.lastD - 0.01 * dt) { if ((b.stuck += dt) > 8) { enter(b); return; } } else { b.stuck = 0; b.lastD = d; }   // stuck behind something: it gets in anyway
+    if ((b.homeT = (b.homeT || 0) + dt) > HOME_MAX) enter(b);   // or working its way round something for too long (still gaining a little now and then)
     return;
   }
   if (b.mode === "land") {
@@ -391,7 +401,7 @@ function housekeeping() {
     if (!h) { if (dusk && b.angry <= now) removeBee(b); continue; }   // a bee whose home was broken vanishes at dusk
     if (!loaded.has(pk(h.x, h.y, h.z))) continue;
     const n = over.get(h) || 0;
-    if (n > 0 && b.mode !== "home" && !(b.angry > now)) { b.mode = "home"; b.follow = null; b.hurry = h.hurry; b.stuck = 0; b.lastD = Infinity; over.set(h, n - 1); }
+    if (n > 0 && b.mode !== "home" && !(b.angry > now)) { b.mode = "home"; b.follow = null; b.hurry = h.hurry; b.stuck = 0; b.lastD = Infinity; b.homeT = 0; over.set(h, n - 1); }
     else if (b.mode === "home") b.hurry = h.hurry;
   }
   if (C) {   // (clusters: only this group's homes are taken out and put back)
@@ -534,7 +544,7 @@ function toFrameOf(b, o) {
   if (q == null) return;
   b.vx = v.x; b.vz = v.z;
   if (Math.abs(b.vx) + Math.abs(b.vz) > 0.05) b.yaw = Math.atan2(b.vx, b.vz);
-  b.follow = null; b.mode = "home"; b.tgt = null; b.land = null; b.stuck = 0; b.lastD = Infinity;
+  b.follow = null; b.mode = "home"; b.tgt = null; b.land = null; b.stuck = 0; b.lastD = Infinity; b.homeT = 0;
 }
 // Bees out of home h (or the bees of a home just broken) go for the player for ANGRY seconds.
 function anger(list, h) {

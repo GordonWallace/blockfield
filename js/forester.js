@@ -525,14 +525,14 @@ function travel(m, st, dt, out, tx, ty, tz, speed, radius, dyTol = 2.6) {
   return "going";
 }
 
-// Task estimates (js/villagesim.js): walk there plus the work, in game seconds. false when its village is counting down and the task would not finish.
+// Task estimates (js/villagesim.js), in game seconds: the task's own time limit (`max`: past it the task is given up, "too slow"), as it can't
+// run longer. Walk there plus the work fell short: a worn axe that breaks mid-tree leaves the rest of the logs to its hands (twice as slow), and
+// paths detour, so a felling outlasted its village's countdown (CI: active-budget). false when its village is counting down and the task would not finish.
 const NAMES = { plant: "Planting a sapling", cut: "Felling a tree", buy: "Buying an axe", gather: "Picking things up" };
 function begins(m, task) {
   const VS = BF.villageSim;
   if (!VS || !VS.begin) return true;
-  const walk = VS.walkSecs(m, [[task.x + 0.5, task.z + 0.5]]);
-  const work = task.kind === "cut" ? chopSecs(task.tree, axeOf(m)) : task.kind === "plant" ? 1 : task.kind === "buy" ? 1 : 0.5;   // chopping log by log; a swing to plant, trade or pick up
-  return VS.begin(m, walk + work, NAMES[task.kind]);
+  return VS.begin(m, task.max, NAMES[task.kind]);
 }
 
 function endTask(m, F, ok) {
