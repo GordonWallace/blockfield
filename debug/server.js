@@ -6,7 +6,7 @@
 //   (--alerts <file> keeps the debug screen's alerts somewhere other than debug/.alerts.json)
 //   (--saves <dir> keeps the world server's saves somewhere other than saves/; --no-world runs no world server; --test lets a test page
 //   run code in the simulation, BFT.sim: tests only, never on a server others can reach; --workers N: the world server's region workers
-//   per world, spec r15-39, default every core but two, at most 8; --split always|never: split the regions' thinking always / never, js/rplay.js; --verify N (tests): compare the workers' copies every N split ticks; --coarse on|off: far villages coarse or full detail whatever each world's option, js/gameopts.js)
+//   per world, spec r15-39, default 1: none besides the simulation thread; --split always|never: split the regions' thinking always / never, js/rplay.js; --verify N (tests): compare the workers' copies every N split ticks; --coarse on|off: far villages coarse or full detail whatever each world's option, js/gameopts.js)
 // It also runs the world server (spec r15-41, server/world.js): the game's simulation in this process, with the page as its client
 // over a WebSocket on the game port (/sim). Ctrl+C saves its worlds before stopping.
 // The game page it serves gets window.BF_DEBUG_FEED set, which turns on js/debugfeed.js; the game POSTs snapshots to

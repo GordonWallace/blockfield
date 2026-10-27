@@ -2,7 +2,7 @@
 // server. Started by debug/server.js (so ./run.sh and run.cmd start everything); serves the simulation/client protocol (r15-36) on
 // ws://<game host>:<game port>/sim (server/ws.js), bound like the game port (localhost unless --lan).
 // The simulation runs in worker_threads (server/simthread.js), each the Web Worker's simulation (js/simworker.js, r15-38) unchanged:
-// one thread per world, which starts its region workers (r15-39, js/rplay.js: --workers N, else every core but two, at most 8).
+// one thread per world, which starts its region workers (r15-39, js/rplay.js: --workers N, else none).
 // One page plays at a time (a second one is refused and runs its own simulation); the world it plays is the one it picks on the title
 // screen (its world message: demo, create, load). Saves are on disk, a folder per world (spec r15-42: <saves>/<world name>/, see
 // server/savedir.js; the simulation writes them through server/idb.js), listed to the page instead of its IndexedDB ones (the saves
@@ -108,9 +108,9 @@ class Sim {
 function start(o) {
   const worlds = IDB.open(o.saves).worlds, rivers = riverCache(o.saves);
   for (const [a, b] of worlds.tidy()) say("renamed folder " + JSON.stringify(a) + " to " + JSON.stringify(b) + " (its world's name)");
-  // region workers per world (spec r15-39, js/rplay.js): --workers N, else every core but two, at most 8 (each holds a copy of the world)
-  const os = require("os"), cores = os.availableParallelism ? os.availableParallelism() : os.cpus().length;
-  const workers = o.workers > 0 ? Math.floor(o.workers) : o.test ? 1 : Math.max(1, Math.min(8, cores - 2));   // (tests: one unless they ask)
+  // region workers per world (spec r15-39, js/rplay.js): --workers N, else one, the simulation thread alone (while one thinks, every
+  // follower still replays every tick on its own copy, about a core each, and the split hasn't paid; clusters, r15-39b, take over)
+  const workers = o.workers > 0 ? Math.floor(o.workers) : 1;
   const srv = { saves: o.saves, build: o.build || null, coarse: o.coarse === "on" || o.coarse === "off" ? o.coarse : null, workers, split: o.split || null, verify: o.verify || 0, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
   const debug = o.debug || null;
   const fresh = () => { const s = srv.spare || new Sim(srv); srv.spare = null; return s; };
