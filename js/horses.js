@@ -167,20 +167,28 @@ function tame(m, owner) {
 // (wheat or hay). Returns false when it has no use for it.
 // (spec r15-71: when a keeper does it while thinking, the change waits for the end of the mob loop, js/mobs.js later)
 function feed(m, itemName, by) {
-  const check = () => { const r = m && m.horse, f = FEED[itemName], t = now(); if (!r || !f || !live(m)) return false;
-    return m.hp < m.maxHp || (!r.tamed && r.temper < 100) || isFoal(r) || (r.tamed && BREEDS.has(itemName) && t >= r.cd && (r.fed == null || t - r.fed >= FEED_DAYS)); };
-  return BF.mobs.later ? BF.mobs.later(m, check, () => feed0(m, itemName, by)) : feed0(m, itemName, by);
+  if (!BF.mobs.later) return feed0(m, itemName, by);
+  let w = null;   // what it wants now: the deferred meal does only that (a horse tamed meanwhile is not made willing to breed by it)
+  return BF.mobs.later(m, () => !!(w = wants(m, itemName)), () => feed0(m, itemName, by, w));
 }
-function feed0(m, itemName, by) {
+function wants(m, itemName) {
+  const r = m && m.horse, f = FEED[itemName], t = now();
+  if (!r || !f || !live(m)) return null;
+  const w = { heal: m.hp < m.maxHp, temper: !r.tamed && r.temper < 100, foal: isFoal(r), breed: false };
+  w.breed = !w.foal && r.tamed && BREEDS.has(itemName) && t >= r.cd && (r.fed == null || t - r.fed >= FEED_DAYS);
+  return w.heal || w.temper || w.foal || w.breed ? w : null;
+}
+function feed0(m, itemName, by, w) {
   if (BF.rworkers) BF.rworkers.writes(m);   // (a villager of another unit may be the one feeding it: js/rworkers.js)
   const r = m && m.horse, f = FEED[itemName];
   if (!r || !f || !live(m)) return false;
   const t = now();
   let used = false;
-  if (m.hp < m.maxHp) { m.hp = Math.min(m.maxHp, m.hp + f.heal); used = true; }
-  if (!r.tamed && r.temper < 100) { r.temper = Math.min(100, r.temper + f.temper); used = true; }
-  if (isFoal(r)) { r.growAt -= FOAL_DAYS * f.grow; syncLook(m); used = true; }
-  else if (r.tamed && BREEDS.has(itemName) && t >= r.cd && (r.fed == null || t - r.fed >= FEED_DAYS)) { r.fed = t; used = true; fx(m, "#ff5a7a", 6); }
+  if (m.hp < m.maxHp && (!w || w.heal)) { m.hp = Math.min(m.maxHp, m.hp + f.heal); used = true; }
+  if (!r.tamed && r.temper < 100 && (!w || w.temper)) { r.temper = Math.min(100, r.temper + f.temper); used = true; }
+  if (isFoal(r)) { if (!w || w.foal) { r.growAt -= FOAL_DAYS * f.grow; syncLook(m); used = true; } }
+  else if (r.tamed && BREEDS.has(itemName) && t >= r.cd && (r.fed == null || t - r.fed >= FEED_DAYS) && (!w || w.breed)) { r.fed = t; used = true; fx(m, "#ff5a7a", 6); }
+  if (w) used = true;   // promised when the keeper fed it: eaten even if it was tamed (temper 100) before the meal landed
   if (used) { fx(m, "#ffd84a", 4); if (BF.emit) BF.emit("horseFed", m, by); }
   return used;
 }
