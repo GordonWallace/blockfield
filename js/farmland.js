@@ -83,10 +83,10 @@ function tillId(x, y, z) { ids(); return DRY != null && hydrated(x, y, z) !== tr
 
 function track(x, y, z) {
   const k = pk(x, y, z);
-  if (!tracked.has(k)) { tracked.set(k, [x, y, z]); orderDirty = true; }
+  if (!tracked.has(k)) { const p = [x, y, z]; tracked.set(k, p); bucketAdd(k, p); orderDirty = true; }
   due.add(k);
 }
-function untrack(k) { if (tracked.delete(k)) orderDirty = true; due.delete(k); }
+function untrack(k) { const p = tracked.get(k); if (tracked.delete(k)) { bucketDel(k, p); orderDirty = true; } due.delete(k); }
 
 // Looks at one block now and applies any change it is due.
 function check(x, y, z) {
@@ -104,7 +104,8 @@ function check(x, y, z) {
   if (t == null) { stamps.set(k, now); return; }   // first sight (generated farms, old saves): the clock starts now
   if (h === null) return;                           // a neighbouring chunk is not loaded: wait for it
   if (!isDry(id)) {
-    if (lastRain > t && lastRain <= now && rainExposed(x, y, z)) { t = lastRain; stamps.set(k, t); }   // it rained since (perhaps while unloaded)
+    const lr = rainSeen();
+    if (lr > t && lr <= now && rainExposed(x, y, z)) { t = lr; stamps.set(k, t); }   // it rained since (perhaps while unloaded)
     const after = dryAfter(x, y, z, t);
     if (now - t >= after && DRY != null) { W.setBlock(x, y, z, DRY); stamps.set(k, t + after); }
     return;
@@ -115,8 +116,55 @@ function check(x, y, z) {
   if (now - t >= dirtAfter(x, y, z, t)) { untrack(k); stamps.delete(k); W.setBlock(x, y, z, BF.B.dirt); }
 }
 
+// ---------------------------------------------------------------- clusters (spec r15-39b, item C6: js/ctick.js)
+// With the cluster tick on, the tick runs once per cluster group over the group's own blocks (js/world.js clusterCells). There is no
+// cursor going round the tracked blocks (it would be shared by every group): each block has a phase, a hash of its position, and is looked
+// at on the ticks whose counter matches it, once every EVAL_EVERY seconds; the blocks just loaded or placed come first as before. A block
+// whose look reaches another group's cells (water within WET_R) is looked at on the next meeting instead. The last rain is kept per
+// interval: every group starts the interval from the same value (rain0) and the meeting takes the newest (rain1), so the order the
+// groups run in doesn't matter.
+const PHASES = Math.round(EVAL_EVERY / 0.05);   // ticks between looks at a block (js/timewarp.js TICK)
+let buckets = null;                             // phase -> Set of keys (made the first time the cluster tick needs them)
+const phaseOf = (x, y, z) => Math.floor(u01(x, y, z, 0, 3) * PHASES);
+function bucketAdd(k, p) { if (buckets) buckets[phaseOf(p[0], p[1], p[2])].add(k); }
+function bucketDel(k, p) { if (buckets && p) buckets[phaseOf(p[0], p[1], p[2])].delete(k); }
+const rainSt = { at: -1, v0: -1e9 };   // the interval (meeting number) and the last rain at its start
+function rainNow() {
+  const C = BF.ctick, g = C && C.filter ? C.cur : null;
+  if (!g) return null;
+  const at = Math.floor((BF.rand.tick - 1) / C.MEET);
+  if (rainSt.at !== at) { rainSt.at = at; rainSt.v0 = lastRain; }
+  return C.local("farmland.rain", () => ({ v: rainSt.v0 }));
+}
+const rainSeen = () => { const r = rainNow(); return r ? r.v : lastRain; };
+function tickCluster(g) {
+  const CC = BF.world.clusterCells, r = rainNow();
+  if (rainingNow()) { r.v = dayNow(); if (r.v > lastRain) lastRain = r.v; }
+  if (!buckets) { buckets = Array.from({ length: PHASES }, () => new Set()); for (const [k, p] of tracked) bucketAdd(k, p); }
+  const mine = p => CC.cellGroup(p[0], p[2]) === g.key;
+  let n = 0;
+  for (const k of [...due]) {
+    if (n >= MAX_PER_TICK) break;
+    const p = tracked.get(k);
+    if (!p) { due.delete(k); continue; }
+    if (!mine(p)) continue;
+    due.delete(k);
+    checkHere(p, CC); n++;
+  }
+  const b = buckets[BF.rand.tick % PHASES];
+  if (!b.size) return;
+  for (const k of [...b]) { const p = tracked.get(k); if (p && mine(p)) checkHere(p, CC); }
+}
+function checkHere(p, CC) {
+  const far = CC.foreignNear(p[0], p[2], WET_R);
+  if (far) CC.toMeeting("farmland", far[0], far[1], { x: p[0], y: p[1], z: p[2] });
+  else check(p[0], p[1], p[2]);
+}
+
 function tick() {
   hook();
+  const C = BF.ctick;
+  if (C && C.filter) return tickCluster(C.cur);
   const now = BF.simNow ? BF.simNow() : 0;
   const dt = Math.max(0, Math.min(5, now - last));
   last = now;
@@ -168,7 +216,7 @@ function hook() {
   });
   for (const c of BF.world.chunks.values()) scanChunk(c.cx, c.cz, c);
 }
-function reset() { stamps.clear(); tracked.clear(); due.clear(); order = []; pos = 0; last = 0; carry = 0; orderDirty = true; lastRain = -1e9; }
+function reset() { stamps.clear(); tracked.clear(); due.clear(); order = []; pos = 0; last = 0; carry = 0; orderDirty = true; lastRain = -1e9; buckets = null; rainSt.at = -1; }
 
 const farmland = {
   isFarmland, isDry, tillId, hydrated, tick, onSet, check, reset,   // reset: called by world.reset (new world / load)
@@ -203,5 +251,24 @@ BF.farmland = farmland;
   const world = BF.world;
   if (world && world.onBlockTick) world.onBlockTick(tick, "farmland");   // a block tick (spec r15-17, js/world.js tickSim)
   hook();
+  if (world && world.clusterCells) {
+    const CC = world.clusterCells;
+    CC.onMeeting("farmland", d => { check(d.x, d.y, d.z); });
+    // several workers (C7): a group's stamps, tracked blocks and blocks due go with it; the last rain with every group
+    CC.ownCells("farmland.stamps", stamps);
+    CC.ownCells("farmland.due", due);
+    const own = () => {
+      if (!BF.ctick || !BF.ctick.owned) return;
+      BF.ctick.owned("farmland.tracked", {
+        snap: gk => { const out = []; for (const p of tracked.values()) if (CC.cellGroup(p[0], p[2]) === gk) out.push(p); return { blocks: out, rain: lastRain }; },
+        apply: (gk, o) => {
+          for (const [k, p] of [...tracked]) if (CC.cellGroup(p[0], p[2]) === gk) { tracked.delete(k); bucketDel(k, p); }
+          for (const p of o.blocks) { const k = pk(p[0], p[1], p[2]); tracked.set(k, [p[0], p[1], p[2]]); bucketAdd(k, tracked.get(k)); orderDirty = true; }
+          if (o.rain > lastRain) lastRain = o.rain;
+        },
+      });
+    };
+    CC.later(own);
+  }
 }
 })();

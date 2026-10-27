@@ -73,14 +73,14 @@ const SYSTEMS = {
   bees: false,          // C4
   merchant: false,      // C5: merchants and caravans
   villageSim: false,    // C5 (which villages are simulated, trip pins: js/villagesim.js)
-  fluids: false,        // C6: world
-  growth: false,        // C6
-  farmland: false,      // C6
-  grass: false,         // C6
-  saplings: false,      // C6
-  catchUp: false,       // C6
-  furnaces: false,      // C6 (the furnaces' block tick, js/playerinv.js)
-  furnaceClock: false,  // C6 (furnaces' and ovens' game time, js/playerinv.js simTick)
+  fluids: true,         // C6: world
+  growth: true,         // C6
+  farmland: true,       // C6
+  grass: true,          // C6
+  saplings: true,       // C6
+  catchUp: true,        // C6
+  furnaces: true,       // C6 (the furnaces' block tick, js/playerinv.js)
+  furnaceClock: true,   // C6 (furnaces' and ovens' game time, js/playerinv.js simTick)
 };
 
 let on = false, order = "tick";

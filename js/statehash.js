@@ -135,6 +135,16 @@ function horsesText() {
 function inv() { return call(BF.inventory, "serialize") || {}; }
 const byPos = a => (a || []).map(text).sort().join("\n");
 
+// Farmland stamps in the save's order (the order blocks were first seen); with the cluster tick on (js/ctick.js) by position, since each
+// cluster group sees its own blocks first and the groups run in either order.
+function farmlandText() {
+  const a = call(BF.farmland, "serialize");
+  if (!Array.isArray(a) || !(BF.ctick && BF.ctick.on)) return text(a);
+  const q = [];
+  for (let i = 1; i + 3 < a.length; i += 4) q.push(a.slice(i, i + 4));
+  q.sort((p, r) => p[0] - r[0] || p[2] - r[2] || p[1] - r[1]);
+  return text([a[0]].concat(...q));
+}
 const PARTS = {
   edits: editsText,
   mobs: mobsText,
@@ -152,7 +162,7 @@ const PARTS = {
   boats: () => text(call(BF.boats, "serialize")),
   horses: horsesText,
   bees: () => text(call(BF.bees, "serialize")),
-  farmland: () => text(call(BF.farmland, "serialize")),
+  farmland: farmlandText,
   // counters that decide what comes next (bug-083): the random streams' tick and creation counter (js/rand.js) and the entity id counter
   // (js/ids.js). Two worlds that differ only here look the same now and play differently later.
   rand: () => text(call(BF.rand, "save")),
