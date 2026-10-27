@@ -437,7 +437,7 @@ function createMob(type, x, y, z, variant, style) {
   keepPrev(mob);
   list.push(mob);
   if (BF.regions) BF.regions.mobAdded(mob);   // the region index (js/regions.js)
-  if (BF.ctick && BF.ctick.on) BF.clusters.place(mob);   // its cluster, by where it is made (js/clusters.js)
+  if (BF.ctick && BF.ctick.on) { BF.clusters.place(mob); BF.ctick.added(mob); }   // its cluster, by where it is made (js/clusters.js), and its group's list
   return mob;
 }
 
@@ -451,6 +451,7 @@ function blankMob(type, id) {
   mob.type = type; mob.def = T; mob.ai = new AiShape(); mob.position = new THREE.Vector3(); mob.vel = new THREE.Vector3(); mob.removed = false;
   BF.ids.put(mob, id);
   list.push(mob);
+  if (BF.ctick && BF.ctick.on) BF.ctick.stale();   // (its cluster comes with its fields)
   return mob;
 }
 // (had: the mob was here already, made between ticks on every worker alike: only its fields are taken)
@@ -1504,14 +1505,16 @@ let curMob = null, planTick = 0;   // (counts mob updates, not BF.rand.tick: tes
 // With clusters (spec r15-39b, js/ctick.js) the mob loop's parts run once per cluster: own(m) -> the mob is the running cluster's
 // (null: every mob is)
 const own = () => { const C = BF.ctick; return C && C.on ? C.filter : null; };
+// the running cluster group's mobs (removed ones included: skip them), or null when every mob is seen (js/ctick.js mobs)
+const ownMobs = () => { const C = BF.ctick; return C && C.on ? C.mobs() : null; };
 let coarseStep = false, walked = false, coarseN = 0;   // this update is a coarse one; its route walk moved the mob (cellWalk); coarse mobs this tick
 let mobUpdates = 0;   // every mob update run (BF.mobs.updates: test/perf-activity.js checks BF.perf.byState counts each once)
 const idNum = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15; };
 const lapsed = (v, t) => v > t || v < t - KEEP;
 function grantPlans() {
-  const C = BF.ctick, t = C && C.on ? (planTick = BF.rand.tick) : ++planTick, w = [], mine = own();
-  for (const m of list) {
-    if (mine && !mine(m)) continue;
+  const C = BF.ctick, t = C && C.on ? (planTick = BF.rand.tick) : ++planTick, w = [], mm = ownMobs();
+  for (const m of mm || list) {
+    if (mm && m.removed) continue;
     const a = m.ai;
     if (!a) continue;
     if (a.planG != null && (m.removed || lapsed(a.planG, t))) a.planG = undefined;
@@ -2599,9 +2602,8 @@ function buildSepGrid() {
   GRID_N.z = GRID_N.h = GRID_N.g = 0;
   if (!gridFast) return buildSepGridRef();
   SEP.clear(); CHUNK.clear();
-  const mine = own();
-  for (const o of list) {
-    if (o.dead || o.removed || (mine && !mine(o))) continue;
+  for (const o of ownMobs() || list) {
+    if (o.dead || o.removed) continue;
     const x = o.position.x, z = o.position.z, gx = Math.floor(x / 2), gz = Math.floor(z / 2), hx = Math.floor(x / 16), hz = Math.floor(z / 16);
     if (inSquare(x, z, GRID_EDGE)) { SEP.add(sepKey(gx, gz), o); countIn(CHUNK.add(sepKey(hx, hz), o), o); }
     else { SEP.add(gridKey(gx, gz, 2), o); countIn(CHUNK.add(gridKey(hx, hz, 16), o), o); }
@@ -3341,10 +3343,10 @@ const waitNoted = new WeakSet();   // (mobs whose wait for the meeting is in the
 function despawn(dt) {
   const pp = playerPos();
   if (!pp) return;
-  const mine = own();
-  for (let i = list.length - 1; i >= 0; i--) {
-    const m = list[i];
-    if (mine && !mine(m)) continue;   // (clusters, C2: the running cluster's mobs)
+  const mine = own(), L = ownMobs() || list;   // (clusters, C2: the running cluster's mobs)
+  for (let i = L.length - 1; i >= 0; i--) {
+    const m = L[i];
+    if (m.removed) continue;
     if (m.riding && BF.world.isLoaded(m.position.x, m.position.z)) continue;   // a mob in a boat stays with it (js/boats.js stows it when its chunk unloads)
     const wild = isWild(m);
     if (!BF.world.isLoaded(m.position.x, m.position.z)) {   // a wild mob that walked off the loaded land waits with its chunk
@@ -3441,14 +3443,13 @@ BF.mobs = {
     // far villages coarse (spec r15-64): past the view distance, from the option in force at this tick's start
     const coarseOn = !!(pp && BF.gameOpts && BF.gameOpts.coarse()), view2 = (BF.world.viewDist * BF.CS) ** 2;
     coarseN = 0;
-    const mine = own();
-    for (const m of list) if (!mine || mine(m)) keepPrev(m);   // where each mob was before this tick, for drawing between ticks (js/mobview.js)
+    const mm = ownMobs();
+    for (const m of mm || list) if (!m.removed) keepPrev(m);   // where each mob was before this tick, for drawing between ticks (js/mobview.js)
     // region by region from the shared queue, each region's mobs in id order (spec r15-33, js/regiontick.js); "list" order on request
     // with several workers (spec r15-39, js/rworkers.js) this worker thinks only the regions it owns; the others' changes come after the loop
     // with clusters (spec r15-39b, js/ctick.js) only the running cluster's mobs
     const RW = BF.rworkers;
-    let order = BF.rtick ? BF.rtick.plan(list) : list.slice();
-    if (mine) order = order.filter(mine);
+    const order = BF.rtick ? BF.rtick.plan(list, mm) : mm ? mm.filter(m => !m.removed) : list.slice();
     for (const m of RW && RW.active ? RW.beginThink(order) : order) {
       if (RW && RW.active) RW.thinking(m);
       if (m.removed) continue;

@@ -423,8 +423,8 @@ const boats = {
       pickUpMobs(b);
       seatMob(b);
     }
-    const f = BF.ctick && BF.ctick.on ? BF.ctick.filter : null;
-    if (BF.mobs) for (const m of BF.mobs.list) if (m.boatCd > 0 && (!f || f(m))) m.boatCd -= dt;
+    const mm = BF.ctick && BF.ctick.on ? BF.ctick.mobs() : null;   // (clusters: the running group's mobs)
+    if (BF.mobs) for (const m of mm || BF.mobs.list) if (m.boatCd > 0 && !m.removed) m.boatCd -= dt;
   },
   clear() { for (const b of list.slice()) { b.rider = false; boats.remove(b, false); } },
   // Boat counts by wood for the debug screen: {oak_boat: n, ...}

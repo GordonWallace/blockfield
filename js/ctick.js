@@ -27,7 +27,8 @@
 // F3 and the debug screen: groups, mobs per group, ms per group, requests that waited for a meeting. Game log: INFO when it is turned on
 // or off, INFO "clusters" once a game hour while the debug overlay or debug screen is on, ERROR when a group's pass throws.
 // API: BF.ctick = { MEET, on (get / set), order (get / set: "tick" | "cluster"), cur (the running group), filter (the running group's
-//                   mob test, or null when every mob is seen), mine(m), hidden(o), sys(name, fn), local(name, init), step(h), interval(h),
+//                   mob test, or null when every mob is seen), mobs() (the running group's mobs, removed ones included, or null as filter),
+//                   added(m), stale(), epoch, mine(m), hidden(o), sys(name, fn), local(name, init), step(h), interval(h),
 //                   meet(), groups(), SYSTEMS, converted() -> [names], only (a Set of system names, or null: all), system (the running one),
 //                   trace, traced() -> [["system file:line", count]], owned(name, {snap, apply}), ownedMap(name, map, groupOfKey, enc, dec, ver), ownedSet(name, set, groupOfKey),
 //                   ofVillage(key), ofCell(x, z), ofMob(m), mineVillage(key), mineCell(x, z), tables(), table(name), onMeet(fn, name, when), tickOf(base), clocks() -> Map base -> tick, stats(), text(), hourly(),
@@ -102,6 +103,23 @@ const groupOfBase = b => byKey.get(CL().groupOf(b)) || NOWHERE;
 function mine(m) { return m.cl === undefined ? cur === groups[0] : CL().groupOf(m.cl) === cur.key; }
 // o belongs to another group than the running one (BF.ids.hidden while a converted system runs)
 function hidden(o) { return o.cl !== undefined && cur !== null && !legacy && CL().groupOf(o.cl) !== cur.key; }
+// Each group's mobs, so a converted system's loops over mobs read only the running group's (BF.ctick.mobs) instead of testing every mob
+// in the world with mine (that cost every group a pass over all mobs, several times a tick). A mob's cluster changes only at meetings
+// and when it is made (js/clusters.js place), so the lists are made at the first use after a meeting, in BF.mobs.list order, and a new
+// mob goes at the end of its group's (BF.mobs.added), as it does in BF.mobs.list. Removed mobs stay in until the next meeting: skip them.
+let lists = null, epoch = 0;   // (epoch: counts the times the lists went out of date: other modules key their own lists by group on it, js/bees.js)
+const NONE = [];
+const groupKeyOf = m => (m.cl === undefined ? (groups[0] ? groups[0].key : null) : CL().groupOf(m.cl));
+function mobLists() {
+  if (lists) return lists;
+  lists = new Map();
+  for (const m of BF.mobs.list) { const k = groupKeyOf(m); const a = lists.get(k); if (a) a.push(m); else lists.set(k, [m]); }
+  return lists;
+}
+// the running group's mobs (removed ones included), or null when every mob is seen (as filter)
+function mobs() { return cur && !legacy ? mobLists().get(cur.key) || NONE : null; }
+function added(m) { if (!lists) return; const k = groupKeyOf(m), a = lists.get(k); if (a) a.push(m); else lists.set(k, [m]); }
+const stale = () => { lists = null; epoch++; };
 
 // ---------------------------------------------------------------- id and creation-number ranges
 // At a meeting, range j of slot i (the groups, then the between-ticks slot) is [h + (j * n + i) * RANGE, + RANGE), n = groups + 1; the
@@ -204,6 +222,7 @@ function meet() {
   for (const g of groups) { useSlot(g); for (const r of BF.req.pending()) pending.push(r); }
   if (between) { useSlot(between); for (const r of BF.req.pending()) pending.push(r); }
   CL().rebuild();
+  stale();
   const list = CL().groups();
   BF.dynRange.settle();   // (the map items the groups made: one id under each name)
   newRanges(list.length + 1);
@@ -445,6 +464,7 @@ function setOn(v) {
     between = slot("between", 0); between.req = BF.req.ctx();
     BF.req.away = away;
     for (const m of BF.mobs.list) if (!m.removed) CL().place(m);
+    stale();
   } else {
     leave();
     // everything still queued goes back to the one context
@@ -504,6 +524,7 @@ function reset() {
   H.ticks = H.deferred = H.meetings = 0;
   if (CL()) CL().reset();
   clocks.clear();
+  stale();
   if (on) {
     startRanges();
     between = slot("between", 0); between.req = BF.req.ctx();
@@ -516,6 +537,8 @@ BF.ctick = {
   get order() { return order; }, set order(o) { setOrder(o); },
   get cur() { return cur; },
   get filter() { return cur && !legacy ? mine : null; },
+  mobs, added, stale, get epoch() { return epoch; },   // the running group's mobs (removed ones included), or null when every mob is seen; a new
+  // mob; the lists out of date; how many times they were (a module's own lists by group are made again when it changes)
   owned, tables: () => [...tables.keys()], table: name => tables.get(name), onMeet,
   ownedMap, ownedSet, ofVillage, ofCell, ofMob, mineVillage, mineCell,
   tickOf: b => clocks.get(b), clocks: () => new Map(clocks),   // each cluster's own tick (one clock for now)
