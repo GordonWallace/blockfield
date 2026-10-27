@@ -102,7 +102,7 @@ function tickOven(o, h) {
   } else if (o.cook > 0) o.cook = Math.max(0, o.cook - h * 2);
   o.lit = o.burn > 0;
 }
-function simTick(h) { for (const o of ovens.values()) if (o.kind || o.burn > 0) tickOven(o, h); }
+function simTick(h, keep) { for (const o of ovens.values()) if ((o.kind || o.burn > 0) && (!keep || keep(o.pos))) tickOven(o, h); }   // keep(pos): a cluster group's own (js/playerinv.js)
 
 // Loads n batches of `kind` from m's pack into the oven at o: the tray, and fuel from its pack when nothing burns there. Returns n loaded.
 function load(m, o, kind, n, fuelOk) {
