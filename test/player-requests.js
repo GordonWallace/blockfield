@@ -69,6 +69,9 @@ function session(steps) {
   const acts = {
     20: () => {   // a platform by command, then break one of its blocks with the player's own breaking
       cmd(`/fill ${rc(X + 1, gy + 1, Z - 3)} ${rc(X + 5, gy + 6, Z + 3)} air`);   // room to work in
+      // walled round with glass, 4 high: a golem's patrol to a house further east can pass right over the platform (four golems walked
+      // across it from tick 800 to 1100), and one standing on the door's cell stops the door being placed
+      for (const [a, b] of [[[X, Z - 4], [X + 6, Z - 4]], [[X, Z + 4], [X + 6, Z + 4]], [[X, Z - 3], [X, Z + 3]], [[X + 6, Z - 3], [X + 6, Z + 3]]]) cmd(`/fill ${rc(a[0], gy + 1, a[1])} ${rc(b[0], gy + 4, b[1])} glass`);
       const before = sent('command');
       cmd(`/fill ${rc(X + 2, gy + 1, Z - 1)} ${rc(X + 4, gy + 1, Z + 1)} stone`);
       say(sent('command') === before + 1 && W.getBlock(X + 3, gy + 1, Z) === BF.B.stone, '/fill is one command request and fills at once');
@@ -133,7 +136,7 @@ function session(steps) {
       const d = W.getBlock(X + 4, gy + 2, Z - 1), b = sent('player.door');
       settle(); aim(X + 4, gy + 2, Z - 1);
       P.setMouse(false, true); P.setMouse(false, false);
-      say(BF.blocks[d] && BF.blocks[d].door && W.getBlock(X + 4, gy + 2, Z - 1) !== d && sent('player.door') === b + 1, 'a door placed and opened by player requests');
+      say(BF.blocks[d] && BF.blocks[d].door && W.getBlock(X + 4, gy + 2, Z - 1) !== d && sent('player.door') === b + 1, `a door placed and opened by player requests (door ${d}, then ${W.getBlock(X + 4, gy + 2, Z - 1)}, ${sent('player.door') - b} door requests, mobs on it: ${BF.mobs.list.filter(m => !m.dead && m.position && Math.abs(m.position.x - X - 4.5) < 1.5 && Math.abs(m.position.z - Z + 0.5) < 1.5).map(m => m.type).join(' ') || 'none'})`);
     },
     1300: () => { cmd(`/setblock ${rc(X + 2, gy + 2, Z - 1)} glass`); cmd('/time add 600'); cmd('/weather rain'); },
     1600: () => {   // more mining: three blocks of the platform
