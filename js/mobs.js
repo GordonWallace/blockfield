@@ -2316,10 +2316,37 @@ function calling(b, m) {
   const t = tickAge(b), late = b.buyFromAt === t && b !== curMob;   // called again this tick, before m thought (a mob reads its own call as it is)
   return (late ? b.buyPrev : b.buyFrom) === m && t - (late ? b.buyPrevAt : b.buyFromAt) < 0.25;
 }
+// Who may be calling each seller this tick (spec r15-72): one pass over a village's members the first time one of its sellers asks in
+// a mob loop, instead of every seller going over every member every tick. A member is listed under the seller its call named at the
+// start of the tick (calling's rule: the one before, if it has already called again this tick), and only while that call is under
+// 0.25 s old; calling() still decides. Lists keep the members' order, so the nearest buyer wins ties as before. The table lives for one
+// mob loop (emptied when the loop starts, each cluster's alike), like the separation grid.
+let callers = new Map();   // village record -> Map(seller id -> [members])
+function callersOf(R, id) {
+  let byS = callers.get(R);
+  if (!byS) {
+    callers.set(R, (byS = new Map()));
+    for (const o of R.members) {
+      if (o.dead || o.removed || o.type !== "villager") continue;
+      const t = tickAge(o), late = o.buyFromAt === t, s = late ? o.buyPrevId : o.buyFromId, at = late ? o.buyPrevAt : o.buyFromAt;
+      if (s == null || !(t - at < 0.25)) continue;
+      const a = byS.get(s);
+      if (a) a.push(o); else byS.set(s, [o]);
+    }
+  }
+  return byS.get(id);
+}
 function holdForBuyer(m, dt, out) {
   const ai = m.ai, R = m.village;
   let b = null, bd = Infinity;
-  if (R && R.members && !(m.buyFrom && calling(m, m.buyFrom))) for (const o of R.members) {
+  const ask = R && R.members && !(m.buyFrom && calling(m, m.buyFrom));
+  const L = !ask ? null : BF.polls.off ? R.members : callersOf(R, m.id);   // (BF.polls.off, tests: every member, as before r15-72)
+  if (ask && BF.polls.verify) {   // (tests: the list against every member)
+    const all = R.members.filter(o => o !== m && calling(o, m)), got = (L || []).filter(o => o !== m && calling(o, m));
+    const same = all.length === got.length && all.every((o, i) => o === got[i]);
+    BF.polls.check("seller callers", same, same ? "" : m.id + ": " + all.map(o => o.id) + " / " + got.map(o => o.id));
+  }
+  if (L) for (const o of L) {
     if (o === m || !calling(o, m)) continue;
     const q = seen(m.position, o.prev || o.position, _sB), d = Math.hypot(q.x - m.position.x, q.y - m.position.y, q.z - m.position.z);   // (where it was at the tick's start)
     if (d < bd) { bd = d; b = o; }
@@ -3477,6 +3504,7 @@ BF.mobs = {
     // the villager-seconds meter (js/perf.js): each lap charges the time since the last to a category; nothing while it's off
     const PF = BF.perf, PC = PF.C, pon = PF.on;
     buildSepGrid();
+    callers.clear();   // (who calls each seller, spec r15-72: one mob loop's)
     PF.lap(PC.other);
     // wild mobs and monsters beyond FAR_R blocks (or the view distance, if nearer) think FAR_HZ times a game second, each update covering the
     // time since the last one (idea-037: mobs live in the whole loaded world); spread out so they don't all update on the same frame
