@@ -39,9 +39,34 @@ function chunks() {
   if (listAt !== n) { list = [...W.chunks.values()].sort((a, b) => a.cx - b.cx || a.cz - b.cz); listAt = n; }   // rebuilt when chunks load or unload; sorted, so a sample doesn't hang on load order
   return list;
 }
+// With the cluster tick on (spec r15-39b, item C6: js/ctick.js) once per cluster group: the group samples its own chunks (a chunk's group
+// is its centre's), its share of SAMPLES_PER_S by its share of the loaded chunks, from streams of its own, and leaves a column at a
+// region border with another group alone (its 26 neighbours would reach that group's cells). Its carry lasts the interval.
+const hashKey = s => { let h = 0; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h | 0; };
+function tickCluster(g) {
+  const W = BF.world, C = BF.ctick, CC = W.clusterCells, CS = BF.CS;
+  const st = C.local("grass", () => {
+    const cs = [...W.chunks.values()].filter(c => CC.cellGroup(c.cx * CS + 8, c.cz * CS + 8) === g.key).sort((a, b) => a.cx - b.cx || a.cz - b.cz);
+    return { cs, share: W.chunks.size ? cs.length / W.chunks.size : 0, carry: 0, salt: hashKey(g.key) };
+  });
+  if (!st.cs.length) return;
+  st.carry += (BF.warp ? BF.warp.TICK : 0.05) * SAMPLES_PER_S * st.share;
+  let n = Math.min(MAX_PER_TICK, Math.floor(st.carry));
+  st.carry -= n;
+  for (; n > 0; n--) {
+    const r = BF.rand.at("grass", n, st.salt), c = st.cs[r.int(st.cs.length)];
+    if (!W.chunks.has(c.key)) continue;
+    const x = c.cx * CS + r.int(CS), z = c.cz * CS + r.int(CS);
+    if (CC.foreignNear(x, z, 1)) continue;
+    const y = W.heightAt(x, z);
+    looked++;
+    check(x, y, z);
+  }
+}
 function tick() {
   const W = BF.world;
   if (!W || !W.chunks || BF.B.dirt == null || BF.B.grass == null) return;
+  if (BF.ctick && BF.ctick.filter && W.clusterCells) return tickCluster(BF.ctick.cur);
   const now = BF.simNow ? BF.simNow() : 0;
   if (last == null) { last = now; return; }
   const dt = Math.max(0, Math.min(30, now - last));

@@ -917,6 +917,8 @@ const api = {
   // During a tick's think (BF.simStep) the step waits for the block-tick phase (spec r15-22), after the tick's "chest" and "furnace"
   // requests have applied, so loading and emptying come first in a fixed order; called outside a tick (tests) it runs at once.
   simTick(h) {
+    const C = BF.ctick;
+    if (C && C.filter) { C.local("furnaceDue", () => ({ h: 0 })).h += h; return; }   // (clusters: each cluster group's own)
     if (BF.req && BF.req.phase === "think" && BF.world.onBlockTick) { furnaceDue += h; return; }
     furnaceStep(h);
   },
@@ -1006,12 +1008,37 @@ const api = {
 BF.inventory = api;
 
 // ---------------------------------------------------------------- furnaces' step as a block tick (spec r15-22)
+// With the cluster tick on (spec r15-39b, item C6: js/ctick.js) once per cluster group: the group's own furnaces and ovens (by their block's
+// cell; the portable one, with no block, goes with the player's group), on the game time the group's think put by.
 let furnaceDue = 0;
-function furnaceStep(h) {
-  for (const f of furnaces.values()) tickFurnace(f, h);
-  if (BF.baker) BF.baker.simTick(h);   // bakers' ovens bake on the same clock (js/baker.js)
+function furnaceStep(h, keep) {
+  for (const f of furnaces.values()) if (!keep || keep(f.pos)) tickFurnace(f, h);
+  if (BF.baker) BF.baker.simTick(h, keep);   // bakers' ovens bake on the same clock (js/baker.js)
 }
-if (BF.world && BF.world.onBlockTick) BF.world.onBlockTick(() => { if (furnaceDue > 0) { const h = furnaceDue; furnaceDue = 0; furnaceStep(h); } }, "furnaces");
+const playerGroup = () => { const g = BF.ctick.groups().find(e => e.player); return g ? g.key : BF.ctick.groups()[0] && BF.ctick.groups()[0].key; };
+const posGroup = p => (p ? BF.world.clusterCells.cellGroup(p.x, p.z) : playerGroup());
+if (BF.world && BF.world.onBlockTick) BF.world.onBlockTick(() => {
+  const C = BF.ctick;
+  if (C && C.filter) {
+    const d = C.local("furnaceDue", () => ({ h: 0 })), g = C.cur.key;
+    if (d.h > 0) { const h = d.h; d.h = 0; furnaceStep(h, p => posGroup(p) === g); }
+    return;
+  }
+  if (furnaceDue > 0) { const h = furnaceDue; furnaceDue = 0; furnaceStep(h); }
+}, "furnaces");
+// several workers (C7): a group's furnaces and chests go with it (plain copies, put back onto the records already there)
+if (BF.world && BF.world.clusterCells) BF.world.clusterCells.later(() => {
+  const table = (map, make) => ({
+    snap: gk => { const out = []; for (const [k, o] of map) if (posGroup(o.pos) === gk) out.push([k, JSON.parse(JSON.stringify(o))]); return out; },
+    apply: (gk, list) => {
+      const keep = new Set(list.map(e => e[0]));
+      for (const [k, o] of [...map]) if (posGroup(o.pos) === gk && !keep.has(k)) map.delete(k);
+      for (const [k, o] of list) { const r = map.get(k) || make(o.pos); for (const f of Object.keys(r)) if (!(f in o)) delete r[f]; Object.assign(r, o); map.set(k, r); }
+    },
+  });
+  BF.ctick.owned("furnaces", table(furnaces, furnaceAt));
+  BF.ctick.owned("chests", table(chests, chestAt));
+});
 
 // ---------------------------------------------------------------- "chest" requests (spec r15-22)
 // Items into and out of a chest go through the request queue (js/requests.js), so two villagers, or a villager and the player, can't
