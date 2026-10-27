@@ -18,10 +18,18 @@ const HW = 0.125, H = 0.25, GRAV = 18, PICKUP_R = 1.6, PICKUP_DELAY = 0.5, LIFE 
 let nextKey = 1;
 const byKey = new Map();   // "d<n>" -> drop
 let ready = false;
+// Clusters (spec r15-39b, C2: js/ctick.js): with the cluster tick on, a drop belongs to the cluster of its region (BF.mobs.cl: the one that
+// made it, until the next meeting) and update runs once per cluster over its own drops; keys come from the cluster's id ranges ("d<n>" with
+// n from BF.ids.alloc, so they don't hang on the order clusters run in), the toss is seeded by the key instead of the list's length, the
+// MAX cap counts the cluster's own drops, and the list is registered with BF.ctick.owned (js/cworkers.js sends each group's drops).
+const CL = () => BF.mobs && BF.mobs.cl;
+const clOn = () => !!(BF.ctick && BF.ctick.on);
+const inPass = () => !!(CL() && CL().owned());
+const mineD = d => !inPass() || CL().ownsThing(d, d.pos);
 
 // An identical stack within a block of d, the first in the list (spec r15-31: from the region index's drops around d; in tests with
 // BF.regions.verifyQueries also by the scan of the whole list it replaced).
-const mergeable = d => o => o !== d && o.id === d.id && o.age > 1 && (q => (q.x - d.pos.x) ** 2 + (o.pos.y - d.pos.y) ** 2 + (q.z - d.pos.z) ** 2)(seenXZ(d.pos, o.pos)) < 1;
+const mergeable = d => o => o !== d && o.id === d.id && mineD(o) && o.age > 1 && (q => (q.x - d.pos.x) ** 2 + (o.pos.y - d.pos.y) ** 2 + (q.z - d.pos.z) ** 2)(seenXZ(d.pos, o.pos)) < 1;
 function mergeWith(d) {
   const R = BF.regions, ok = mergeable(d);
   if (!R || !R.around) return drops.list.find(ok) || null;
@@ -36,18 +44,21 @@ function mergeWith(d) {
 const drops = {
   list: [],
 
-  init() { ready = true; },
+  init() { ready = true; ownTables(); },
 
   // Spawns `count` of item `id` at (x, y, z) with a small random toss. opts.vel (a THREE.Vector3) replaces the toss,
   // and opts.pickupDelay (seconds) holds off the player's pickup, e.g. for items the player threw. opts.wear: uses spent on a dropped tool.
   spawn(id, count, x, y, z, opts) {
     if (!ready || id == null || !BF.items[id] || !(count > 0)) return null;
-    if (drops.list.length >= MAX) drops.remove(drops.list[0]);
-    const r = BF.rand.at("drop", x * 16, z * 16, null, y * 16 + drops.list.length * 4099);   // the toss: seeded by the spot, tick and count (js/rand.js)
+    const cl = clOn(), n = cl ? +BF.ids.alloc().slice(1) : nextKey++;
+    if (cl && inPass()) { let k = 0, first = null; for (const o of drops.list) if (mineD(o)) { if (!first) first = o; k++; } if (k >= MAX) drops.remove(first); }   // (the cluster's own)
+    else if (drops.list.length >= MAX) drops.remove(drops.list[0]);
+    const r = BF.rand.at("drop", x * 16, z * 16, null, y * 16 + (cl ? n : drops.list.length) * 4099);   // the toss: seeded by the spot, tick and count (with clusters the key) (js/rand.js)
     const a = r.next() * Math.PI * 2, s = 1 + r.next() * 1.5;
     const vel = opts && opts.vel ? opts.vel.clone() : new THREE.Vector3(Math.cos(a) * s, 4 + r.next() * 2, Math.sin(a) * s);
-    const d = { key: "d" + nextKey++, id, count, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevAge: 0, vel, age: 0, phase: Math.random() * 6.28, pulled: false,   // visual (the bob)
+    const d = { key: "d" + n, id, count, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevAge: 0, vel, age: 0, phase: Math.random() * 6.28, pulled: false,   // visual (the bob)
       pickupDelay: opts && opts.pickupDelay != null ? opts.pickupDelay : PICKUP_DELAY, wear: (opts && opts.wear) || 0 };
+    if (cl) CL().placeThing(d, d.pos);
     drops.list.push(d);
     byKey.set(d.key, d);
     if (BF.regions) BF.regions.dropAdded(d);   // the region index (js/regions.js)
@@ -101,8 +112,9 @@ const drops = {
   },
 
   update(dt) {
-    const P = BF.player, pp = P && P.position, alive = P && !P.dead;
+    const P = BF.player, c = inPass(), pp = c ? CL().playerPos() : P && P.position, alive = c ? CL().playerLives() : P && !P.dead;   // (clusters: the player as the running cluster sees it)
     for (const d of drops.list.slice()) {
+      if (c && !CL().ownsThing(d, d.pos)) continue;   // (clusters: the running cluster's drops)
       d.prev.copy(d.pos); d.prevAge = d.age; d.pulled = false;   // drawn between this and where the tick leaves it (js/entityview.js)
       // in an unloaded chunk an item neither ages nor falls (it would drop out of the world); it waits for the chunk
       if (!BF.world.isLoaded(d.pos.x, d.pos.z)) continue;
@@ -147,6 +159,29 @@ const drops = {
 };
 
 BF.drops = drops;
+
+// the drops by group (BF.ctick.owned, registered at init): plain [key, id, count, pos, vel, age, pickupDelay, wear, base cluster]
+const V = v => [v.x, v.y, v.z];
+function ownTables() {
+  const C = BF.ctick;
+  if (!C || ownTables.done) return;
+  ownTables.done = true;
+  const G = (d, g) => { const b = CL().clOf(d); return b !== undefined && CL().groupFor(b) === g; };
+  C.owned("drops", {
+    snap: g => drops.list.filter(d => G(d, g)).map(d => [d.key, d.id, d.count, V(d.pos), V(d.vel), d.age, d.pickupDelay, d.wear || 0, CL().clOf(d)]),
+    apply(g, a) {
+      for (const d of drops.list.slice()) if (G(d, g)) drops.remove(d);
+      for (const [key, id, count, p, v, age, delay, wear, cl] of a || []) {
+        const d = { key, id, count, pos: new THREE.Vector3(p[0], p[1], p[2]), prev: new THREE.Vector3(p[0], p[1], p[2]), prevAge: age, vel: new THREE.Vector3(v[0], v[1], v[2]), age,
+          phase: Math.random() * 6.28, pulled: false, pickupDelay: delay, wear };   // visual (phase: the bob)
+        CL().keepThing(d, cl);
+        drops.list.push(d);
+        byKey.set(key, d);
+        if (BF.regions) BF.regions.dropAdded(d);
+      }
+    },
+  });
+}
 
 function take(req, d) {
   if (!d || !byKey.has(d.key)) return { ok: false, why: "gone" };
