@@ -29,7 +29,18 @@ function getData(s, zx, zz, create = true) {
   const k = keyOf(s, zx, zz);
   let d = data.get(k);
   if (!d && create) { d = { size: s, zx, zz, px: new Uint16Array(PX * PX), ver: 0, cur: 0, merged: {} }; data.set(k, d); }
+  if (d && d.pend) settle(d);
   return d || null;
+}
+// Pixels explored while mobs think (explorer villagers) wait in d.pend and land when the tick's think is over: two explorers filling one
+// map in two regions each read the map as it stood at the start of the tick, whichever thinks first (test/region-tick.js). They land at
+// the next look at the map from another tick or outside the think phase (getData, explore, serialize).
+const thinkTick = () => (BF.req && BF.req.phase === "think" ? (BF.rand ? BF.rand.tick : 0) : null);
+function settle(d) {
+  const P = d.pend;
+  if (!P || (d.pendT === thinkTick() && d.pendT !== null)) return;
+  for (const [i, v] of P) d.px[i] = v;
+  d.pend = null; d.ver++;
 }
 const zoneOf = v => Math.floor(v / ZONE);
 // On the planet a map belongs to the face its zone lies on (zones are whole 128-block squares of a face's grid, as 128 divides N) and is
@@ -113,8 +124,12 @@ function sample(wx, wz, s) {
   return shade(col, north);
 }
 
-// Samples the pixels of `d` around the world position (x, z). Returns true when something changed.
-function explore(d, x, z, budget) {
+// Samples the pixels of `d` around the world position (x, z). Returns true when something changed. `st` (an explorer's own state) keeps
+// its own place in the sampling order (st.cur), so what one explorer samples doesn't depend on another sampling the same map first.
+function explore(d, x, z, budget, st) {
+  if (d.pend) settle(d);
+  const T = thinkTick(), cs = st || d;
+  if (cs.cur === undefined) cs.cur = 0;
   { const q = BF.planet.inFrame(faceOf(d), x, z, IF); if (!q) return false; x = q.x; z = q.z; }   // (x, z) in the map's face frame
   const s = scale(d.size), ox = originX(d.size, d.zx), oz = originX(d.size, d.zz);
   const pi = (x - ox) / s, pj = (z - oz) / s, R = revealPx(d.size), RI = Math.ceil(R);
@@ -122,15 +137,20 @@ function explore(d, x, z, budget) {
   const n = 2 * RI + 1, i0 = Math.floor(pi) - RI, j0 = Math.floor(pj) - RI;
   let changed = false, done = 0, guard = budget * 4;
   while (done < budget && guard-- > 0) {
-    const idx = d.cur++ % (n * n), i = i0 + idx % n, j = j0 + ((idx / n) | 0);
+    const idx = cs.cur++ % (n * n), i = i0 + idx % n, j = j0 + ((idx / n) | 0);
     if (i < 0 || j < 0 || i >= PX || j >= PX) continue;
     const dx = i + 0.5 - pi, dz = j + 0.5 - pj;
     if (dx * dx + dz * dz > R * R) continue;
     done++;
     const v = sample(Math.floor(ox + (i + 0.5) * s), Math.floor(oz + (j + 0.5) * s), s);
-    if (v && d.px[j * PX + i] !== v) { d.px[j * PX + i] = v; changed = true; if (RW()) (d.chg || (d.chg = [])).push(j * PX + i, v); }
+    const at = j * PX + i;
+    if (!v || d.px[at] === v || (T !== null && d.pend && d.pend.get(at) === v)) continue;
+    changed = true;
+    if (T !== null) { (d.pend || (d.pend = new Map())).set(at, v); d.pendT = T; }
+    else d.px[at] = v;
+    if (RW()) (d.chg || (d.chg = [])).push(at, v);
   }
-  if (changed) d.ver++;
+  if (changed && T === null) d.ver++;
   if (RW()) BF.rworkers.touch("map", d);   // (an explorer draws while it thinks: the other region workers get the pixels and where it got to, js/rworkers.js)
   return changed;
 }
@@ -362,6 +382,7 @@ const api = {
   serialize() {
     const out = {};
     for (const [k, d] of data) {
+      if (d.pend && thinkTick() === null) settle(d);
       if (!d.ver) continue;
       let bin = "";
       const u8 = new Uint8Array(d.px.buffer, d.px.byteOffset, d.px.byteLength);

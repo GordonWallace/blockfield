@@ -188,7 +188,7 @@ function pickTarget(m, c) {
 function exploreAI(m, c, dt, out) {
   const X = state(m), a = m.ai, M = BF.maps;
   X.sampT -= dt;
-  if (X.sampT <= 0) { X.sampT = 0.2; M.explore(c.d, m.position.x, m.position.z, SAMPLE); }
+  if (X.sampT <= 0) { X.sampT = 0.2; M.explore(c.d, m.position.x, m.position.z, SAMPLE, X); }   // (its own sampling place, X.cur: js/maps.js explore)
   if (isFilled(c.d)) { finish(m, c); return false; }
   X.work = X.work || {};
   if ((X.work[c.it.name] = (X.work[c.it.name] || 0) + dt) > MAP_WORK_CAP) { shelve(m, c, "time"); return false; }
@@ -404,6 +404,8 @@ const CAMPERS = new Set(["explorer", "merchant"]);
 // Changed while the explorer thinks or in its requests' callbacks, which run only on the region worker that thinks it (spec r15-39): each
 // change goes to the other workers (js/rworkers.js channel "camp"), or a worker that missed the explorer striking its tent would take the
 // tent down a second time when the night ends (tick), and the copies' blocks would differ.
+// In key order: campers in two regions pitch in whichever order their regions think, so the map's own order isn't the world's (test/region-tick.js)
+const byKey = () => [...camps].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 const campSet = (k, e) => { camps.set(k, e); if (BF.rworkers) BF.rworkers.touch("camp", k); const C = BF.ctick; if (C && C.filter) campOwner.set(k, C.cur.key); };
 // Clusters (spec r15-39b, js/ctick.js): the cluster that looks after each camp in tick (below) this interval, worked out at each meeting on
 // every worker alike: its camper's cluster when it is loaded (a merchant on the road is in the cluster it walks through), else its
@@ -436,7 +438,7 @@ function tick(dt) {
   const here = new Set();
   for (const m of BF.mobs.list) if (CAMPERS.has(m.profession) && !m.dead && !m.removed && (!C || C.filter(m))) { const k = keyOf(m); if (k) here.add(k); }
   const now = dayNow();
-  for (const [k, e] of camps) {
+  for (const [k, e] of byKey()) {
     if (C && (campOwner.get(k) || C.ofVillage(k.slice(0, k.lastIndexOf("#")))) !== C.cur.key) continue;
     if (here.has(k) && !e.returned) continue;   // its own AI strikes it in the morning
     if (!e.returned && now >= e.until) {
@@ -474,7 +476,7 @@ function onSpawn(m) {
   strike(m);   // the night is over (or the tent is gone): pack up, own bed again
 }
 if (typeof BF.on === "function") BF.on("newWorld", () => camps.clear());
-function exportAll(out) { if (camps.size) out["explorer:camps"] = [...camps].map(([k, e]) => Object.assign({ k }, e)); }
+function exportAll(out) { if (camps.size) out["explorer:camps"] = byKey().map(([k, e]) => Object.assign({ k }, e)); }
 function importAll(o) {
   camps.clear();
   const a = o && o["explorer:camps"];

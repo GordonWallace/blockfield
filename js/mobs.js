@@ -405,7 +405,7 @@ const MOB_FIELDS = [
   "asks", "cart", "mateT", "furnWork", "mateSeek", "eatenTotal", "lastMealFx", "loveId", "breedDay", "bred", "bredKey", "child", "growing", "parents", "_swT",
   "wob", "lastHurt", "homeBedKey", "sleeping", "restored", "attackerId", "attackedAt", "boatCd", "jobPrefer", "cowKit", "cwk", "cwc", "gls", "crumb",
   "penIn", "atOut", "fall", "jobMem", "seek", "exploded", "vdenied", "vanon", "local", "otherId", "sellerId", "goalSellerId", "ledById", "ridingId",
-  "pastureKey", "exitKey", "buyFromId", "buyFromAt", "holdForId", "holdT",
+  "pastureKey", "exitKey", "buyFromId", "buyFromAt", "buyPrevId", "buyPrevAt", "holdForId", "holdT",
   "cl",   // the mob's cluster (js/clusters.js, spec r15-39b): set when made, moved only at a meeting
   // caches, never saved, sent or hashed (r15-61): the hottest links' last answers (js/ids.js CACHE_FIELDS), the id as a number (js/regiontick.js)
   "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN"];
@@ -2296,25 +2296,36 @@ function golemAI(m, dt, out) {
 // seller, seeing a buyer of its village calling it, stops and faces it, for up to HOLD_MAX seconds at a time, then carries on. A seller that
 // is itself on its way to buy keeps going (its buyers catch it up when it stops to trade): a whole line stopping for each other would stand
 // still for HOLD_MAX seconds, and two villagers buying from each other walk to meet.
+// The seller reads its buyers as they stood at the start of the tick (their call and where they were), whether or not they have thought
+// yet this tick, so the tick order of regions can't change what it does (test/region-tick.js): a call is stamped with the buyer's age at
+// the start of the tick it was made in (m.prev.age, keepPrev), and the first call of a tick keeps the one before it in buyPrev.
 const HOLD_R = 10, HOLD_MAX = 8;
+const tickAge = m => (m.prev ? m.prev.age : m.age);
 function waitFor(v2, m, d) {
   if (!v2 || v2 === m || v2.type !== "villager" || !(d <= HOLD_R)) return;
-  m.buyFrom = v2; m.buyFromAt = m.age;
+  const t = tickAge(m);
+  if (m.buyFromAt !== t) { m.buyPrev = m.buyFrom; m.buyPrevAt = m.buyFromAt; }
+  m.buyFrom = v2; m.buyFromAt = t;
 }
-const calling = (b, m) => b.buyFrom === m && !b.dead && !b.removed && b.age - b.buyFromAt < 0.25;
+// Is b calling m? Its call as it stood at the start of this tick (the one before, if b has already called this tick).
+function calling(b, m) {
+  if (b.dead || b.removed) return false;
+  const t = tickAge(b), late = b.buyFromAt === t && b !== curMob;   // called again this tick, before m thought (a mob reads its own call as it is)
+  return (late ? b.buyPrev : b.buyFrom) === m && t - (late ? b.buyPrevAt : b.buyFromAt) < 0.25;
+}
 function holdForBuyer(m, dt, out) {
   const ai = m.ai, R = m.village;
   let b = null, bd = Infinity;
   if (R && R.members && !(m.buyFrom && calling(m, m.buyFrom))) for (const o of R.members) {
     if (o === m || !calling(o, m)) continue;
-    const d = mdist(m, o);
+    const q = seen(m.position, o.prev || o.position, _sB), d = Math.hypot(q.x - m.position.x, q.y - m.position.y, q.z - m.position.z);   // (where it was at the tick's start)
     if (d < bd) { bd = d; b = o; }
   }
   if (!b) { if (m.holdT) { m.holdT = 0; m.holdFor = null; } return; }
   m.holdFor = b;
   if ((m.holdT || 0) <= HOLD_MAX && (m.holdT = (m.holdT || 0) + dt) > HOLD_MAX) moveLog(m, "INFO", "waited " + HOLD_MAX + " s for " + (BF.vlog ? BF.vlog.nameOf(b) : "a buyer") + " to come and trade, and carries on");
   if (m.holdT > HOLD_MAX || ai.fleeT > 0) return;   // waited long enough: gets on with its own errand
-  const bp = seen(m.position, b.position, _sB);
+  const bp = seen(m.position, b.prev || b.position, _sB);
   out.x = 0; out.z = 0; out.faceX = bp.x; out.faceZ = bp.z; m.lookAt = b;
   ai.stuckT = 0; if (ai.detour && ai.detour.route) ai.detour.stuckT = 0;   // standing still on purpose is not being stuck on its route
 }
