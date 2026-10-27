@@ -166,8 +166,10 @@ async function main(argv) {
       for (const [i, st] of [BF.cworkers.stats()].concat(hs.map(x => x.stats)).entries()) {
         const p = st.perMeeting, f = v => v.toFixed(2);
         say(`  worker ${i}: ms a meeting: run ${f(p.run)}, collect ${f(p.collect)}, exchange (waiting) ${f(p.exchange)}, adopt ${f(p.adopt)}, shadows ${f(p.snap)}; ${f(st.kbPerMeeting)} KB sent`);
+        if (st.x) say(`    exchanges a meeting: ` + Object.entries(st.x).map(([k, x]) => `${k} ${f(x.n)}x ${f(x.ms)} ms (waiting ${f(x.wait)})`).join(', '));
       }
       say('  worker 0 swap parts, ms a meeting: ' + Object.entries(BF.cworkers.prof).map(([k, v]) => k + ' ' + (v / Math.max(1, BF.cworkers.stats().meetings)).toFixed(2)).join(', '));
+      say('  mobs a meeting: handed over ' + BF.cworkers.stats().moved.toFixed(1) + ', fetched ' + BF.cworkers.stats().fetched.toFixed(1));
       workers.stats = BF.cworkers.stats(); BF.cworkers.stop();
     }
     else { say(BF.rworkers.text()); BF.rworkers.stop(); }
