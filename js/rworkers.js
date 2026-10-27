@@ -527,7 +527,6 @@ function attach(sh, me, n) {
         Atomics.wait(C, 0, g, 1000);
         if (now() - t0 > TIMEOUT) { link.stop(); throw new Error("region workers: no answer from the other workers in " + TIMEOUT / 1000 + " s"); }
       }
-      link.waitMs += now() - t0;
       if (Atomics.load(C, 2)) throw stopErr();
     },
     // mine (a string) to every other worker; returns every worker's, by index (mine included)

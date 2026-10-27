@@ -22,7 +22,8 @@
 // Game log: INFO "workers" when they start and stop and once a game hour while the debug overlay or debug screen is on; ERROR when two
 // workers set the same cell, a request with callbacks changes worker, or a mob or record arrives that this worker doesn't have.
 // API: BF.cworkers = { active, n, me, setup({n, me, link}), stop(why), owns(group), owners (group key -> worker), workerOf(group key) -> worker, sync(), met(groups),
-//   shuffle (tests: owners by a hash of it at every meeting), fixed (tests, with shuffle: the same owners at every meeting), stats(), text() }
+//   shuffle (tests: owners by a hash of it at every meeting), fixed (tests, with shuffle: the same owners at every meeting), stats() (with x:
+//   each kind of exchange's count, ms and ms waiting a meeting), text() }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -44,6 +45,13 @@ let atMeeting = false;   // (partial copies: from the swap to the end of the mee
 let peers = [], hourAt = null, hourT = null, tRun = 0, warned = 0;
 
 const C = () => BF.ctick;
+// every exchange by what it is for (stats().x): how many, ms in all, ms of it waiting at the barrier for the other workers
+const X = {};
+function xchange(tag, msg) {
+  const L = CW.link, t0 = now(), w0 = L.waitMs, all = L.exchange(msg), x = X[tag] || (X[tag] = { n: 0, ms: 0, wait: 0 });
+  x.n++; x.ms += now() - t0; x.wait += L.waitMs - w0;
+  return all;
+}
 // (tests, CW.prof an object: ms a part of the collect took, summed)
 let lapT = 0;
 const lap = k => { if (!CW.prof) return; const t = now(); if (k) CW.prof[k] = (CW.prof[k] || 0) + t - lapT; lapT = t; };
@@ -166,9 +174,10 @@ function sync() {
   const queued = gs.map(g => [g.key, I.pendingOf(g).map(reqOut)]).filter(q => q[1].length);
   const ms = gs.map(g => [g.key, +g.ms.toFixed(3)]);
   const counters = [I.R2.ids.j, I.R2.made.j, BF.ids.range.top, BF.rand.made, I.R2.dyn.j];
+  const hand = CW.me === 0 && handOwn !== null ? +handOwn.toFixed(3) : null;
   lap("rest");
   const dyn = BF.dynRange.fresh();
-  const out = { born, mobs, sums, gone: goneE, rows, recs, edits, tables, chans, reg, dyn, waited, queued, ms, counters };
+  const out = { born, mobs, sums, gone: goneE, rows, recs, edits, tables, chans, reg, dyn, waited, queued, ms, counters, hand };
   const msg = JSON.stringify(out);
   lap("json");
   if (CW.sizes) {   // (tests: what the bytes are, by part and by the mobs' and records' fields)
@@ -180,7 +189,7 @@ function sync() {
   R.indexScope = null;
   const t1 = now();
   T.collect += t1 - t0;
-  const all = CW.link.exchange(msg);
+  const all = xchange("swap", msg);
   const t2 = now();
   T.exchange += t2 - t1;
   T.bytes += msg.length;
@@ -196,6 +205,8 @@ function sync() {
     for (const [k, v] of p.ms) { groupMs.set(k, v); ranBy.set(k, w); }
     for (let i = 0; i < 5; i++) if (p.counters[i] > lift[i]) lift[i] = p.counters[i];
   }
+  const h0 = CW.me === 0 ? hand : ps[0].hand;
+  if (h0 !== null && h0 !== undefined) handMs = h0;
   I.R2.ids.j = lift[0]; I.R2.made.j = lift[1]; BF.ids.range.lift(lift[2]); BF.rand.range.lift(lift[3]); I.R2.dyn.j = lift[4];
   const fresh = new Set();
   bornHere = new Set();
@@ -290,17 +301,23 @@ function sync() {
 function met(groups) {
   if (!CW.active) return;
   const t0 = now();
+  lap("meeting");
   plan(groups);
+  lap("met.plan");
   const R = RW();
   R.refs();
+  lap("met.refs");
   shadows = new Map(); recShadows = new Map(); known = new Set(BF.mobs.list);
   meetings++;
   if (CW.partial) {
     atMeeting = false;
     handover();
+    lap("met.handover");
     mine = new Set();
     for (const m of BF.mobs.list) if (!m.removed && ownsKey(groupOf(m))) mine.add(m);
+    lap("met.mine");
     for (const rec of BF.mobs.villages.values()) if (ownsKey(BF.clusters.groupOf("v:" + rec.key))) recShadows.set(rec, R.snap(rec));
+    lap("met.recsnap");
     T.snap += now() - t0;
     tRun = now();
     hourly();
@@ -336,7 +353,7 @@ function handover() {
   R.refs();
   const out = [mineOut.map(m => m.id), R.encMany(mineOut.map(whole))];
   T.moved += moves.length;
-  const all = CW.link.exchange(JSON.stringify(out));
+  const all = xchange("handover", JSON.stringify(out));
   T.exchange += now() - t0;
   const got = [];
   R.atLater(() => { for (let w = 0; w < all.length; w++) if (w !== CW.me) { const [ids, e] = JSON.parse(all[w]); got.push([w, ids, R.decAll(e)]); } });
@@ -344,6 +361,8 @@ function handover() {
   for (const [w, ids, [os, made]] of got) { for (const x of made) fresh.add(x); ids.forEach((id, i) => { const m = BF.ids.live(id); if (m) pairs.push([m, os[i]]); else err("worker " + w + " handed over mob " + id + ", which this worker doesn't have"); }); }
   refillAll(pairs, fresh);
   if (BF.regions) BF.regions.tick();
+  const per = (now() - t0) / moves.length;   // (ms a mob handed over, for the plan: the first worker's goes to all at the next swap)
+  handOwn = handOwn === null ? per : handOwn + SMOOTH * (per - handOwn);
 }
 // a mob's own fields as a plain object (the codec writes the mob itself as a reference); refill: a stale copy made the sent one
 const vecs = m => { const a = []; for (const k of Object.keys(m)) { const v = m[k]; if (v && v.isVector3) a.push([v, v.x, v.y, v.z]); } return a; };
@@ -399,17 +418,26 @@ function refillAll(list, fresh) {
 }
 const kids = (v, fn) => { if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) fn(i, v[i]); } else if (v instanceof Map) { for (const [k, x] of v) fn(k, x); } else if (v instanceof Set) { for (const x of v) fn(null, x); } else for (const k of Object.keys(v)) fn(k, v[k]); };
 
-// Owners for the new groups, worked out alike on every worker from the run times swapped at the last sync: the player's group on the
-// first worker; then the rest longest first, each staying on its last worker while that has room, else to the least loaded (the
-// first worker counts LEAD of its load as room). A group not met before is guessed from its bases' share of their old groups' time.
-let est = new Map();
+// Owners for the new groups, worked out alike on every worker from the run times swapped at the last sync. A group's time swings a
+// lot from one interval to the next (a village's think: 2-5x), so the plan uses each group's time smoothed over the last few
+// intervals (SMOOTH); a group not met before is guessed from its bases' share of their old groups' smoothed time. With partial
+// copies, a group that changes worker costs its mobs' handover (every mob whose current copy is on another worker, sent whole at the
+// meeting, which every worker waits for: about half a ms a villager), so the plan starts from where each group's mobs are and moves
+// a group only when the time it saves over the next HORIZON intervals pays for that; it also works out the plain plan (the player's
+// group on the first worker, the rest longest first, each to the least loaded, the first worker counting LEAD of its load as room)
+// and keeps whichever costs less. With full copies a move costs nothing, so the plain plan wins unless the other is as good.
+const SMOOTH = 0.3, HORIZON = 4;
+let est = new Map(), smooth = new Map(), handMs = 0.5, handOwn = null;
 function plan(groups) {
   const prev = CW.owners;
+  const fresh = new Map();
+  for (const [k, ms] of groupMs) { const s0 = smooth.get(k); fresh.set(k, s0 === undefined ? ms : s0 + SMOOTH * (ms - s0)); }
+  smooth = fresh;
   est = new Map();
   const perBase = new Map();
-  for (const [k, ms] of groupMs) { const g = lastGroups.get(k); if (g) for (const b of g) perBase.set(b, ms / g.length); }
+  for (const [k, ms] of smooth) { const g = lastGroups.get(k); if (g) for (const b of g) perBase.set(b, ms / g.length); }
   for (const g of groups) {
-    let ms = groupMs.get(g.key);
+    let ms = smooth.get(g.key);
     if (ms === undefined) { ms = 0; for (const b of g.bases || []) ms += perBase.get(b) || 0; }
     est.set(g.key, ms);
   }
@@ -430,22 +458,61 @@ function plan(groups) {
   for (const v of est.values()) total += v;
   CW.solo = total / C().MEET < SOLO_MS;
   if (CW.solo) { CW.owners = new Map(); return; }
-  const room = w => (w === 0 ? LEAD : 1);
-  const load = new Array(CW.n).fill(0), share = total / (CW.n - 1 + LEAD);
+  const n = CW.n, room = w => (w === 0 ? LEAD : 1);
   const order = groups.slice().sort((a, b) => est.get(b.key) - est.get(a.key) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-  for (const g of order) {
-    const ms = est.get(g.key);
-    let w;
-    if (g.player) w = 0;
-    else {
-      const was = prev.get(g.key);
-      if (was !== undefined && was < CW.n && load[was] + ms <= share * room(was) * 1.1) w = was;
-      else { w = 0; for (let i = 1; i < CW.n; i++) if (load[i] / room(i) < load[w] / room(w)) w = i; }
-    }
-    next.set(g.key, w);
-    load[w] += ms;
+  // held.get(key)[w]: the group's mobs whose current copy is on worker w only (partial copies; the holders from the last swap, the
+  // same on every worker); a group on w costs the handover of the rest
+  const held = new Map();
+  if (CW.partial) for (const m of BF.mobs.list) {
+    if (m.removed) continue;
+    const h = holder.get(m.id);
+    if (h === undefined) continue;
+    const k = groupOf(m);
+    let a = held.get(k);
+    if (!a) held.set(k, (a = new Array(n + 1).fill(0)));
+    a[h]++; a[n]++;
   }
-  CW.owners = next;
+  const cost = (k, w) => { const a = held.get(k); return a ? (a[n] - a[w]) * handMs : 0; };
+  const least = load => { let w = 0; for (let i = 1; i < n; i++) if (load[i] / room(i) < load[w] / room(w)) w = i; return w; };
+  const score = (own, load) => { let mx = 0, c = 0; for (let w = 0; w < n; w++) mx = Math.max(mx, load[w] / room(w)); for (const g of groups) c += cost(g.key, own.get(g.key)); return mx + c / HORIZON; };
+  // the plain plan
+  const A = new Map(), loadA = new Array(n).fill(0);
+  for (const g of order) { const w = g.player ? 0 : least(loadA); A.set(g.key, w); loadA[w] += est.get(g.key); }
+  // from where the mobs are: each group where it costs least (its last worker on a tie, else none yet), the free ones longest first to
+  // the least loaded, then single moves off the most loaded worker while one saves more than it costs
+  const B = new Map(), loadB = new Array(n).fill(0);
+  for (const g of order) {
+    if (g.player) { B.set(g.key, 0); loadB[0] += est.get(g.key); continue; }
+    const a = held.get(g.key);
+    if (!a) continue;
+    const was = prev.has(g.key) ? prev.get(g.key) : 0;
+    let w = was < n ? was : 0;
+    for (let i = 0; i < n; i++) if (cost(g.key, i) < cost(g.key, w)) w = i;
+    B.set(g.key, w); loadB[w] += est.get(g.key);
+  }
+  for (const g of order) if (!B.has(g.key)) { const w = least(loadB); B.set(g.key, w); loadB[w] += est.get(g.key); }
+  for (let it = 0; it < 2 * groups.length; it++) {
+    let top = 0;
+    for (let w = 1; w < n; w++) if (loadB[w] / room(w) > loadB[top] / room(top)) top = w;
+    let best = null, bestNet = 0.01;
+    for (const g of order) {
+      if (g.player || B.get(g.key) !== top) continue;
+      const ms = est.get(g.key);
+      for (let to = 0; to < n; to++) {
+        if (to === top) continue;
+        loadB[top] -= ms; loadB[to] += ms;
+        let mx = 0;
+        for (let w = 0; w < n; w++) mx = Math.max(mx, loadB[w] / room(w));
+        loadB[top] += ms; loadB[to] -= ms;
+        const net = loadB[top] / room(top) - mx - (cost(g.key, to) - cost(g.key, top)) / HORIZON;
+        if (net > bestNet) { bestNet = net; best = [g, to]; }
+      }
+    }
+    if (!best) break;
+    const [g, to] = best, ms = est.get(g.key);
+    B.set(g.key, to); loadB[top] -= ms; loadB[to] += ms;
+  }
+  CW.owners = score(B, loadB) <= score(A, loadA) ? B : A;
 }
 let lastGroups = new Map();
 
@@ -470,6 +537,8 @@ function setup(o) {
   CW.owners = new Map(); CW.solo = false;
   shadows = new Map(); recShadows = new Map(); known = new Set(BF.mobs.list); journal = new Map(); regNew = []; groupMs = new Map(); lastGroups = new Map(); meetings = 0; warned = 0;
   for (const k in T) T[k] = 0;
+  for (const k in X) delete X[k];
+  smooth = new Map(); handMs = 0.5; handOwn = null; lapT = now();
   if (BF.ids && BF.ids.hooks) BF.ids.hooks.onNew = onNewPlace;
   RW().onTouch = CW.active ? onTouch : null;
   touched = new Map();
@@ -498,7 +567,8 @@ function stats() {
   const n = Math.max(1, T.meetings), per = new Array(CW.n).fill(0), groups = new Array(CW.n).fill(0);
   for (const g of C().groups()) { const w = workerOf(g.key); groups[w]++; per[w] += groupMs.get(g.key) || 0; }
   return { active: CW.active, n: CW.n, me: CW.me, solo: !!CW.solo, pull: CW.pull, meetings: T.meetings, groups, ms: per.map(v => v / C().MEET),
-    moved: T.moved / n, fetched: T.fetched / n, perMeeting: { run: T.run / n, collect: T.collect / n, exchange: T.exchange / n, adopt: T.adopt / n, snap: T.snap / n }, kbPerMeeting: T.bytes / n / 1024 };
+    moved: T.moved / n, fetched: T.fetched / n, perMeeting: { run: T.run / n, collect: T.collect / n, exchange: T.exchange / n, adopt: T.adopt / n, snap: T.snap / n }, kbPerMeeting: T.bytes / n / 1024,
+    x: Object.fromEntries(Object.entries(X).map(([k, x]) => [k, { n: x.n / n, ms: x.ms / n, wait: x.wait / n }])) };
 }
 // The F3 line: "Cluster workers 4: groups 2/3/2/2, ms a tick 1.20/1.10/0.90/1.30, swap 3.10 ms a meeting"
 function text(s) {
@@ -532,7 +602,7 @@ function gathered(fn) {
   const R = RW();
   R.refs();
   const list = [...mine].filter(m => !m.removed);
-  const all = CW.link.exchange(JSON.stringify([list.map(m => m.id), R.encMany(list.map(whole))]));
+  const all = xchange("gathered", JSON.stringify([list.map(m => m.id), R.encMany(list.map(whole))]));
   const keep = [];
   const got = [];
   R.atLater(() => { for (let w = 0; w < all.length; w++) if (w !== CW.me) { const [ids, e] = JSON.parse(all[w]); got.push([ids, R.dec(e)]); } });
@@ -564,7 +634,7 @@ function fetch(ms, pred) {
   if (!pred && !need) return;
   const R = RW();
   R.refs();
-  const all = CW.link.exchange(JSON.stringify([out.map(m => m.id), R.encMany(out.map(whole))]));
+  const all = xchange(atMeeting ? "fetch" : "fetch.tick", JSON.stringify([out.map(m => m.id), R.encMany(out.map(whole))]));
   const got = [];
   R.atLater(() => { for (let w = 0; w < all.length; w++) if (w !== CW.me) { const [ids, e] = JSON.parse(all[w]); got.push([ids, R.decAll(e)]); } });
   const pairs = [], fresh = new Set();
