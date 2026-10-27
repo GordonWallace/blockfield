@@ -104,11 +104,11 @@ const onNewPlace = (o, k) => {
 // ---------------------------------------------------------------- requests, as plain JSON
 function reqOut(r) {
   const R = RW();
-  return [r.kind, R.enc(r.target, null), R.encData(r), r.from, r.tick, r.region == null ? -1 : r.region, r._from, r._n, r._at, r._due, r.seq];
+  return [r.kind, R.enc(r.target, null), R.encData(r), r.from, r.tick, r.region == null ? -1 : r.region, r._from, r._n, r._at, r._due, r.seq, r.by];
 }
 function reqIn(a) {
   const R = RW();
-  const r = BF.req.revive({ kind: a[0], target: R.dec(a[1], null), data: R.dec(a[2], null), from: a[3], tick: a[4], region: a[5], seq: a[10] });
+  const r = BF.req.revive({ kind: a[0], target: R.dec(a[1], null), data: R.dec(a[2], null), from: a[3], tick: a[4], region: a[5], seq: a[10], by: a[11] });
   if (a[6] !== undefined && a[6] !== null) { r._from = a[6]; r._n = a[7]; r._at = a[8]; r._due = a[9]; }
   return r;
 }

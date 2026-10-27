@@ -696,10 +696,10 @@ function thinking(m) {
   const k = unitOf(m, BF.regions ? BF.regions.regionOf(m) : -1), t = now();
   if (k !== curRegion) { if (curRegion != null) load.set(curRegion, (load.get(curRegion) || 0) + t - regionT0); curRegion = k; regionT0 = t; }
 }
-const reqOut = (e, req) => [e[0], e[1], req.kind, enc(req.target, null), encData(req), req.from, req.tick, req.region == null ? -1 : req.region];
+const reqOut = (e, req) => [e[0], e[1], req.kind, enc(req.target, null), encData(req), req.from, req.tick, req.region == null ? -1 : req.region, req.by];
 function adoptAll(list, into) {
   for (const r of list) {
-    const req = BF.req.adopt({ kind: r[2], target: dec(r[3], null), data: dec(r[4], null), from: r[5], seq: 0, tick: r[6], region: r[7] });
+    const req = BF.req.adopt({ kind: r[2], target: dec(r[3], null), data: dec(r[4], null), from: r[5], seq: 0, tick: r[6], region: r[7], by: r[8] });
     into.push([r[0], r[1], req]);
   }
 }
@@ -807,7 +807,7 @@ function afterDeliver() {
   foreignOps(mobs);
   const mineSends = dSends.filter(e => e[1] === 1);   // (those from callbacks: only this worker made them; onResult's are made everywhere)
   const plan = T.ticks % REBALANCE === 0;
-  const out = { mobs, recs: recDirty.size ? recOps(recDirty) : [], touched: takeTouched(), dyn: takeDyn(), reg: takeReg(), reqs: mineSends.map(e => [e[0] * 2 + e[1], e[2], e[3].kind, enc(e[3].target, null), encData(e[3]), e[3].from, e[3].tick, e[3].region == null ? -1 : e[3].region]),
+  const out = { mobs, recs: recDirty.size ? recOps(recDirty) : [], touched: takeTouched(), dyn: takeDyn(), reg: takeReg(), reqs: mineSends.map(e => [e[0] * 2 + e[1], e[2], e[3].kind, enc(e[3].target, null), encData(e[3]), e[3].from, e[3].tick, e[3].region == null ? -1 : e[3].region, e[3].by]),
     logs, fx, load: plan ? [...load] : null };
   const msg = JSON.stringify(out);
   const all = RW.link.exchange(msg);
