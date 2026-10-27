@@ -158,7 +158,9 @@ function explore(d, x, z, budget, st) {
 if (BF.rworkers) BF.rworkers.channel("map", {
   key: d => [d.size, d.zx, d.zz], get: k => getData(k[0], k[1], k[2]),
   state: d => { const ch = d.chg || []; d.chg = null; return { ver: d.ver, cur: d.cur, ch }; },
-  set: (d, o) => { if (!d || !o) return; for (let i = 0; i < o.ch.length; i += 2) d.px[o.ch[i]] = o.ch[i + 1]; d.ver = o.ver; d.cur = o.cur; },
+  // (the sender's own pixels of this tick are still in its d.pend, ver not yet moved on: this copy moves its ver on itself, so coverage,
+  // cached by ver, sees the new pixels here too)
+  set: (d, o) => { if (!d || !o) return; for (let i = 0; i < o.ch.length; i += 2) d.px[o.ch[i]] = o.ch[i + 1]; d.ver = Math.max(d.ver, o.ver) + (o.ch.length ? 1 : 0); d.cur = o.cur; },
 });
 
 // ---------------------------------------------------------------- bigger maps
