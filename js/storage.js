@@ -24,7 +24,9 @@ const TAKE_FREE = 2;         // taking things back leaves at least this many fre
 const LOW = 0.5;             // an item is fetched from the chest when the villager holds less than half of what it keeps
 const FETCH_CD = 0.5;        // days before something it stored is fetched back (food for a hungry villager excepted)
 const CHECK = 6;             // seconds between a villager's storage checks
-const TRIP_MAX = 60;         // seconds before a walk to a chest is given up
+const TRIP_MAX = 60;         // seconds before a walk to a chest is given up (plus the straight-line walk there, for a villager far from home)
+const HOP = 20;              // a villager further than HOP_FROM blocks from the chest walks there in legs of HOP blocks (one route search is capped)
+const HOP_FROM = 22;
 const AVOID = 0.3;           // days a chest that could not be reached is left alone
 const ORDER_DAYS = 1;        // an order for a chest stands this long (renewed while the villager still needs one)
 const WORK_END = 0.5;        // villagers stop at sunset (bedtime in mobs.js starts then too)
@@ -77,12 +79,18 @@ const nm = id => (BF.items[id] ? BF.items[id].name : "");
 const INPUTS = {
   farmer: m => [[id => BF.items[id] && BF.items[id].plants != null, (BF.food ? BF.food.SEED_KEEP : 8) * 2], ["wheat_item", BF.villageLife ? BF.villageLife.WHEAT_SPARE : 24], ["bone_meal", 16]],
   shepherd: m => [["wheat_item", 16]],
+  cowherd: m => [["wheat_item", 16], ["bucket", 2], ["milk_bucket", 4], ["glass_bottle", 64], ["raw_beef", 32]],   // feed, its bucket, milk to bottle, bottles, beef to cook (js/cowherd.js)
+  baker: m => [["wheat_item", 16], ["milk_bottle", 14], ["egg", 16], ["sugar", 16], ["sugar_cane", 32], ["pumpkin", 10], ["coal", 16], ["charcoal", 16], ["cake_slice", 64], ["pumpkin_pie", 16], ["cake", 2]],   // ingredients, fuel and its wares (js/baker.js)
+  pig_farmer: m => [["carrot", 24], ["potato", 24], ["beetroot", 24], ["coal", 16], ["charcoal", 16], ["raw_porkchop", 32], ["cooked_porkchop", 32]],   // feed, fuel and its pork (js/pigfarmer.js)
+  glassmaker: m => [["sand", 64], ["coal", 16], ["charcoal", 16], ["glass", 64], ["glass_pane", 64], ["glass_bottle", 32]],   // sand and fuel, and its wares (js/glassmaker.js)
+  beekeeper: m => [["glass_bottle", 32], ["honey_bottle", 32], ["honeycomb", 32], ["candle", 32], ["string", 8], [id => /planks$/.test(nm(id)), 12]],   // bottles, its wares, string and planks (js/beekeeper.js)
   forester: m => [[id => /_sapling$/.test(nm(id)), 16]],
   furniture_maker: m => [[id => /_wool$|^wool$/.test(nm(id)), 6], [id => /planks$/.test(nm(id)), 16], [id => /_log$/.test(nm(id)) && !/^stripped/.test(nm(id)), 8], ["cobblestone", 16]],
   cartographer: m => [["iron_ingot", 4], ["gold_ingot", 1], ["paper", 32], ["compass", 1]],
   miner: m => [["torch", 16]],   // shaft torches (js/miner.js)
   toolsmith: m => [[id => /planks$/.test(nm(id)), 12], ["stick", 8], ["cobblestone", 9], ["iron_ingot", 9], ["gold_ingot", 6], ["diamond", 6], ["raw_iron", 9], ["raw_gold", 6], ["coal", 8], ["furnace", 1]],   // tool materials (js/toolsmith.js)
-  builder: m => (TR().profile("builder").wants ? [...TR().profile("builder").wants.keys()].map(id => [nm(id), 128]) : []).concat([["red_bed", 4], ["oak_door", 8], ["torch", 32], ["chest", 2], ["glass", 64]]),
+  fletcher: m => [["stick", 16], [id => /planks$/.test(nm(id)), 8], ["flint", 8], ["feather", 8], ["string", 6]],   // arrow and bow materials (js/fletcher.js)
+  builder: m => (TR().profile("builder").wants ? [...TR().profile("builder").wants.keys()].map(id => [nm(id), 128]) : []).concat([["red_bed", 4], ["oak_door", 8], ["torch", 32], ["chest", 2], ["glass", 64], ["glass_pane", 64]]),
 };
 const SCRAPS = /^(rotten_flesh|spider_eye|poisonous_potato|pufferfish)$/;
 const goodFood = id => !!(BF.food && BF.food.isFood(id) && !SCRAPS.test(nm(id)));
@@ -232,17 +240,17 @@ function orders(rec) {
 // js/furniture.js: furniture maker f puts a chest it holds at spot for villager m and takes 1 emerald from m. Returns true when done.
 function deliver(f, m, spot) {
   const W = BF.world, T = TR(), I = BF.I;
-  if (!m.store || !m.store.order || W.getBlock(spot.x, spot.y, spot.z) !== 0 || count(f.inv, I.chest) < 1 || count(m.inv, I.emerald) < 1) return false;
-  if (!T.inv.canFit(f.inv, [{ id: I.emerald, n: 1 }], [{ id: I.chest, n: 1 }])) return false;
+  const o = (f.trades || []).find(x => x.sell.id === I.chest && x.sell.n === 1 && x.buy.length === 1 && x.buy[0].id === I.emerald);   // its chest offer: the player can buy one too
+  if (!o || !m.store || !m.store.order || W.getBlock(spot.x, spot.y, spot.z) !== 0 || T.blockReason(f, o) || count(m.inv, I.emerald) < o.buy[0].n) return false;
   const inCell = o => o && o.position && Math.abs(o.position.x - spot.x - 0.5) < 0.5 + (o.halfWidth || 0.3) && Math.abs(o.position.z - spot.z - 0.5) < 0.5 + (o.halfWidth || 0.3) && o.position.y < spot.y + 1 && o.position.y + (o.height || 1.8) > spot.y;
   if (BF.mobs.list.some(o => !o.removed && !o.dead && inCell(o)) || inCell(BF.player)) return false;   // somebody is standing there
   if (!W.setBlock(spot.x, spot.y, spot.z, BF.chestId(BF.openFacing(spot, f.position)))) return false;
-  T.inv.remove(f.inv, I.chest, 1); T.inv.remove(m.inv, I.emerald, 1); T.inv.add(f.inv, I.emerald, 1);
+  T.exchange(f, o); T.inv.remove(m.inv, I.emerald, o.buy[0].n);
   const c = INV().chestRecord(spot.x, spot.y, spot.z);
   c.reserved = { key: keyOf(m), until: dayNow() + ORDER_DAYS, name: nameOf(m) };
   m.store.order = null; m.store.checkT = 0.5;
   houseCache.clear();
-  if (BF.vlog) BF.vlog.trade(m, f, "gave 1 Emerald, got 1 Chest");
+  if (BF.vlog) BF.vlog.trade(m, f, o, 1);
   log(m.village, who(f) + " placed a chest at " + at(spot) + " in the house of " + who(m));
   return true;
 }
@@ -318,28 +326,38 @@ const chestEmpty = c => !c.slots.some(Boolean);
 function ai(m, dt, out) {
   if (!m.inv || m.dead || m.child || m.sleeping || m.tradingWith || !m.village || !BF.mobs || !BF.mobs.nav || !BF.inventory || !BF.inventory.chestState || !keyOf(m)) return false;
   const st = m.store || (m.store = { stage: null, checkT: rnd(1, CHECK), avoid: {}, stored: {}, order: null }), a = m.ai, N = BF.mobs.nav;
-  const stop = () => { st.stage = null; st.p = null; if (a.routeKind === "chest") a.route = null; return false; };
+  const stop = () => { st.stage = null; st.p = null; if (a.routeKind === "chest") a.route = null; if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m); return false; };
   if (skyT() >= WORK_END) return st.stage ? stop() : false;
   if (!st.stage) {
     if ((st.checkT -= dt) > 0) return false;
     st.checkT = CHECK * rnd(0.8, 1.2);
     const d = decide(m);
     if (!d) return false;
-    st.stage = "go"; st.act = d.act; st.p = d.p; st.t = 0; a.route = null;
+    const VS = BF.villageSim;   // estimate: the walk to the chest and the time at it
+    if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [[d.p.x + 0.5, d.p.z + 0.5]]) + PUT_T, d.act === "store" ? "Putting things away in their chest" : "Fetching things from their chest")) return false;
+    st.stage = "go"; st.act = d.act; st.p = d.p; st.t = 0; st.navFail = 0; st.navWait = 0; a.route = null;
+    st.tMax = TRIP_MAX + Math.hypot(d.p.x + 0.5 - m.position.x, d.p.z + 0.5 - m.position.z) / (m.def.speed * 1.2);
   }
   const p = st.p, giveUp = () => { st.avoid[pk(p.x, p.y, p.z)] = dayNow() + AVOID; return stop(); };
   if (!BF.isChest(BF.world.getBlock(p.x, p.y, p.z)) || !usable(p, keyOf(m))) return stop();
   st.t += dt;
   a.mode = "idle"; a.t = 2;
   if (st.stage === "go") {
-    if (st.t > TRIP_MAX) return giveUp();
+    if (st.t > (st.tMax || TRIP_MAX)) return giveUp();
     const [x, y, z] = N.feetCell(m);
     if (adjacent(p, x, y, z)) { a.route = null; st.stage = "use"; st.useT = PUT_T; return true; }
     if (!a.route || a.routeKind !== "chest") {
+      if ((st.navWait -= dt) > 0) return true;
       if (!N.takePlan()) return true;
-      const route = N.findPath(x, y, z, { x: p.x, z: p.z, at: (cx, cy, cz) => adjacent(p, cx, cy, cz) }, 2500);
-      if (!route) return giveUp();
-      a.route = route; a.ri = 0; a.stuckT = 0; a.routeKind = "chest";
+      // Far from the chest (out at work or shopping across the village), one capped route search often finds no way: walk there in
+      // legs (as js/furniture.js travel does), so a chest that is only far away is not taken for unreachable (avoided, and a new one ordered).
+      const px = m.position.x, pz = m.position.z, dd = Math.hypot(p.x + 0.5 - px, p.z + 0.5 - pz);
+      const hop = dd > HOP_FROM ? [Math.floor(px + (p.x + 0.5 - px) * HOP / dd), Math.floor(pz + (p.z + 0.5 - pz) * HOP / dd)] : null;
+      const goal = hop ? { x: hop[0], z: hop[1], at: (cx, cy, cz) => Math.abs(cx - hop[0]) + Math.abs(cz - hop[1]) <= 2 }
+        : { x: p.x, z: p.z, at: (cx, cy, cz) => adjacent(p, cx, cy, cz) };
+      const route = N.findPath(x, y, z, goal, 2500);
+      if (!route) { if (hop && ++st.navFail < 5) { st.navWait = 0.6; return true; } return giveUp(); }
+      st.navFail = 0; a.route = route; a.ri = 0; a.stuckT = 0; a.routeKind = "chest";
     }
     const r = N.followRoute(m, dt, out, m.def.speed * 1.2);
     if (r === "stuck") return giveUp();

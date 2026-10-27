@@ -24,6 +24,9 @@ module.exports = async (pg) => {
     const C = vs.find(m => m !== A && m.profession !== "builder" && m.profession !== "explorer");
     for (const o of vs) if (o !== A && o !== C && o.profession === "builder") BF.jobs.setProfession(o, "nitwit");
     BF.jobs.setProfession(C, "builder"); C.inv = Bd.startStock(C); C.bs = null; C.xp = 0;
+    // the test calls the AI without moving anyone, so put the new builder at the site: the stall watchdog only counts time spent near the
+    // next block (a long walk to a far site isn't a stall, js/builder.js), and from here it can reach the first blocks
+    { const x = e.ox - 1, z = e.oz - 1; C.position.set(x + 0.5, BF.world.heightAt(x, z) + 1, z + 0.5); }
     const progBefore = e.prog, modes = new Set();
     for (let k = 0; k < 600; k++) { BF.sky.setTime(0.2); Bd.ai(C, 0.5, out); if (C.bs) { C.bs.cool = 0; modes.add(C.bs.mode); } }
     Object.assign(r, { Cslot: C.slot.idx, ownerAfter: e.owner, progBefore, progAfter: e.prog, state: e.state, modes: [...modes], status: Bd.statusText(C) });

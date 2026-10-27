@@ -33,7 +33,7 @@ const FURNACE_COBBLE = 8;                     // one furnace = 8 cobblestone
 const FURNACE_STOCK = 1;                      // keeps this many furnaces in stock, demand or not
 const CRAFT_PAUSE = 1.8, WORK_END = 0.45, TRADE_PAUSE = 1.6;
 const LOG = [];
-const log = (kind, m, data) => { LOG.push(Object.assign({ kind, day: +dayNow().toFixed(3), who: m.profession + (m.slot ? "#" + m.slot.idx : "") }, data)); if (LOG.length > 200) LOG.shift(); };
+const log = (kind, m, data) => { LOG.push(BF.glog.job("furniture", Object.assign({ kind, day: +dayNow().toFixed(3), who: m.profession + (m.slot ? "#" + m.slot.idx : "") }, data))); if (LOG.length > 200) LOG.shift(); };
 
 const nameOf = id => (BF.items[id] ? BF.items[id].name : "");
 const isWool = id => { const n = nameOf(id); return n === "wool" || /_wool$/.test(n); };
@@ -126,7 +126,7 @@ function shortfall(m) {
 }
 // The kind of ingredient an item is, and how many planks one item is worth.
 const kindOf = id => (isWool(id) ? ["wool", 1] : isPlanks(id) ? ["planks", 1] : isLog(id) ? ["planks", LOG_PLANKS] : isCobble(id) ? ["cobble", 1] : null);
-const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && v2.profession !== "furniture_maker" && Array.isArray(v2.inv) && Array.isArray(v2.trades);
+const canSell = v2 => v2 && v2.type === "villager" && !v2.dead && !v2.removed && !v2.sleeping && !v2.tradingWith && Array.isArray(v2.inv) && Array.isArray(v2.trades);
 function findSeller(m, short, avoid) {
   const R = m.village, T = TR();
   if (!R) return null;
@@ -257,7 +257,7 @@ function travel(m, st, dt, out, tx, ty, tz, speed, near) {
 function ai(m, dt, out) {
   if (!m.inv || m.dead || m.child || !BF.mobs || !BF.mobs.nav || !m.village) return false;
   const sh = m.furn || (m.furn = { stage: null, deal: null, checkT: rnd(1, 5), avoid: {}, cd: 0 }), a = m.ai;
-  if (skyT() >= WORK_END || m.tradingWith) { if (sh.stage) { sh.stage = null; sh.deal = null; a.route = null; } return false; }
+  if (skyT() >= WORK_END || m.tradingWith) { if (sh.stage) { sh.stage = null; sh.deal = null; a.route = null; if (BF.villageSim) BF.villageSim.done(m); } return false; }
   if (!sh.stage) {
     sh.checkT -= dt;
     if (sh.checkT > 0) return false;
@@ -268,13 +268,17 @@ function ai(m, dt, out) {
     if (!deal && TR().inv.count(m.inv, BF.I.emerald) > 0) {
       const short = shortfall(m);
       if (Object.keys(short).length) deal = findSeller(m, short, sh.avoid);
+      if (!deal && BF.econ) for (const k in short) BF.econ.want(m, { cobble: "Cobblestone", planks: "Planks", wool: "Wool" }[k] || k);   // dead ends (js/economy.js)
     }
     if (!deal) { sh.cd = now + 0.04; return false; }
+    const VS = BF.villageSim;
+    if (VS && VS.begin && !VS.begin(m, VS.walkSecs(m, [deal.kind === "deliver" ? deal.spot : deal.other.position]) / 1.3 + TRADE_PAUSE,
+      deal.kind === "deliver" ? "Delivering a chest" : deal.kind === "sell" ? "Taking beds to a builder" : "Buying " + (isWool(deal.item) ? "wool" : isCobble(deal.item) ? "cobblestone" : "boards"))) return false;   // walk at 1.3x speed + one trade / put-down pause
     sh.deal = deal; sh.stage = "walk"; sh.walkT = 0; sh.navFail = 0; sh.gx = null; a.route = null;
   }
   const deal = sh.deal, v2 = deal && deal.other;
   const avoidKey = () => (v2 && v2.slot ? v2.slot.idx : 0) + ":" + deal.item;
-  const giveUp = why => { log("giveup", m, { to: v2 ? v2.profession : "?", item: deal ? (deal.item === "bed" || deal.item === "chest" ? deal.item : BF.itemName(deal.item)) : "?", why }); if (v2) sh.avoid[avoidKey()] = dayNow() + 0.05; sh.stage = null; sh.deal = null; a.route = null; sh.checkT = 0.5; return false; };
+  const giveUp = why => { log("giveup", m, { to: v2 ? v2.profession : "?", item: deal ? (deal.item === "bed" || deal.item === "chest" ? deal.item : BF.itemName(deal.item)) : "?", why }); if (v2) sh.avoid[avoidKey()] = dayNow() + 0.05; sh.stage = null; sh.deal = null; a.route = null; sh.checkT = 0.5; if (BF.villageSim) BF.villageSim.done(m); return false; };
   if (deal && deal.kind === "deliver") {   // carry the chest to the house and put it down on the spot the villager picked
     if (!v2 || v2.dead || v2.removed || !v2.store || !v2.store.order) return giveUp("order gone");
     const s = deal.spot;
@@ -293,10 +297,12 @@ function ai(m, dt, out) {
     log(ok ? "deliver" : "giveup", m, { to: v2.profession, item: "chest", at: s.x + "," + s.y + "," + s.z, why: ok ? undefined : "spot taken or unpaid" });
     if (!ok) { sh.avoid[avoidKey()] = dayNow() + 0.05; if (v2.store) v2.store.order = null; }   // the villager picks a new spot next time
     sh.stage = null; sh.deal = null; sh.gx = null; sh.checkT = 1;
+    if (BF.villageSim) BF.villageSim.done(m);
     return true;
   }
   if (!v2 || (deal.kind === "buy" ? !canSell(v2) : !canBuy(v2))) return giveUp(v2 && v2.sleeping ? "asleep" : v2 && v2.tradingWith ? "busy" : "gone");
   const d = Math.hypot(v2.position.x - m.position.x, v2.position.z - m.position.z);
+  if (BF.mobs.waitFor) BF.mobs.waitFor(v2, m, d);   // the seller stops for its buyer (bug-054)
   a.mode = "idle"; a.t = 2;
   if (sh.stage === "walk") {
     sh.walkT += dt;
@@ -315,6 +321,7 @@ function ai(m, dt, out) {
   if (sh.tt <= 0) {
     const done = deal.kind === "buy" ? doBuy(m, deal) : doSell(m, deal);
     sh.stage = null; sh.deal = null; sh.gx = null; sh.checkT = 1;
+    if (BF.villageSim) BF.villageSim.done(m);
     if (!done) { sh.avoid[avoidKey()] = dayNow() + 0.05; log("giveup", m, { to: v2.profession, item: deal.item === "bed" ? "bed" : BF.itemName(deal.item), why: "trade refused" }); }
   }
   return true;

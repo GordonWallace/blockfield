@@ -2,7 +2,7 @@
 // A killed village iron golem stays gone after saving and reloading (bug-040): the kill count is saved with the village's
 // dead roster ("dead:<village key>"), so the respawn check still counts it. Usage: node test/run.js /tmp/gks test/golem-kills-saved.js
 module.exports = async (pg, out) => {
-  const id = await pg.evaluate(async () => (await BF.save.create({ name: "golem-kills-saved", seed: 1337, gameMode: "creative" })).id);
+  const id = await pg.evaluate(async () => (await BF.save.create({ name: "golem-kills-saved", seed: 1337, gameMode: "creative", villages: 9 })).id);
   await require('./lib').toVillage(pg);
   const golems = () => pg.evaluate(() => BF.mobs.list.filter(m => m.type === "iron_golem" && !m.dead && m.village).length);
   const before = await golems();

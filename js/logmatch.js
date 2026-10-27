@@ -4,15 +4,17 @@
 // js/villagelog.js (and mobs.js, storage.js, toolwear.js, villagelife.js): "Name (Job) traded with Name (Job): ...", "Name (Job)
 // placed a bed at ...", "Name (Job) claimed the bed/chest at ...", "Name became a Job", "Name was born to ...", "Name (Job)
 // died: ...", "Name (Job)'s Iron Pickaxe broke", "Name (Farmer) started harvesting Wheat at ...", "Name (Builder) started building a ... at ...".
-// API: BFLog = { ACTIONS, KINDS, ACTS_FOR(type), kindName(k), typeOf(party), actorsOf(entry), matches(alert, entry), describe(alert) }
+// It also writes game log lines (js/gamelog.js), so the game's log file and the debug screen's copy and download are the same text.
+// API: BFLog = { ACTIONS, KINDS, ACTS_FOR(type), kindName(k), typeOf(party), actorsOf(entry), matches(alert, entry), describe(alert),
+//                LEVELS, sysStamp(ms), gameStamp(days), chunkSpan(days), gameLine(e) }
 // (BF.logmatch in the game is the same object.)
 (() => {
 "use strict";
 
-const ACTIONS = { buy: "Buying", sell: "Selling", bed: "Placing or claiming beds", chest: "Claiming chests", job: "Taking the job", tool: "Wearing out tools", harvest: "Harvesting", build: "Building", born: "Being born", death: "Dying" };
+const ACTIONS = { buy: "Buying", sell: "Selling", bed: "Placing or claiming beds", chest: "Claiming chests", job: "Taking the job", tool: "Wearing out tools", harvest: "Harvesting", build: "Building", born: "Being born", death: "Dying", horse: "Handling horses", caravan: "Travelling with goods", cattle: "Tending cattle", bake: "Baking", map: "Mapping" };
 const ACTS_FOR = t => t === "Player" ? ["buy", "bed", "chest"] : t === "Child" ? ["born", "death"] :
-  t === "Farmer" ? ["buy", "sell", "bed", "chest", "job", "tool", "harvest", "death"] : t === "Builder" ? ["buy", "sell", "bed", "chest", "job", "tool", "build", "death"] : ["buy", "sell", "bed", "chest", "job", "tool", "death"];
-const KINDS = { trade: "Trades", bed: "Beds and tents", chest: "Chests", job: "Job changes", tool: "Tools wearing out", farm: "Harvests", build: "Building", birth: "Births", death: "Deaths" };
+  t === "Farmer" ? ["buy", "sell", "bed", "chest", "job", "tool", "harvest", "death"] : t === "Builder" ? ["buy", "sell", "bed", "chest", "job", "tool", "build", "death"] : t === "Stable Hand" ? ["buy", "sell", "bed", "chest", "job", "tool", "horse", "death"] : t === "Merchant" ? ["buy", "sell", "bed", "job", "caravan", "death"] : t === "Cowherd" ? ["buy", "sell", "bed", "chest", "job", "tool", "cattle", "death"] : t === "Baker" ? ["buy", "sell", "bed", "chest", "job", "tool", "bake", "death"] : t === "Explorer" ? ["buy", "sell", "bed", "job", "map", "death"] : ["buy", "sell", "bed", "chest", "job", "tool", "death"];
+const KINDS = { trade: "Trades", bed: "Beds and tents", chest: "Chests", job: "Job changes", tool: "Tools wearing out", farm: "Harvests", build: "Building", birth: "Births", death: "Deaths", horse: "Horses", caravan: "Caravans", cattle: "Cattle", bake: "Baking", map: "Maps", loading: "Village loading" };
 const kindName = k => KINDS[k] || k.charAt(0).toUpperCase() + k.slice(1);
 const typeOf = party => party === "Player" ? "Player" : (/\(([^()]+)\)\s*$/.exec(party) || [])[1] || null;
 
@@ -30,6 +32,12 @@ function actorsOf(e) {
   if (k === "tool" && (m = /^(.*?\))'s .* broke$/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "tool"]] : null; }
   if (k === "farm" && (m = /^(.*?\)) started harvesting /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "harvest"]] : null; }
   if (k === "build" && (m = /^(.*?\([^()]+\)) /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "build"]] : null; }
+  if (k === "horse" && (m = /^(.*?\([^()]+\)) /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "horse"]] : null; }   // js/stables.js
+  if (k === "caravan" && (m = /^(.*?\(Merchant\)) /.exec(tx))) return [["Merchant", "caravan"]];   // js/merchant.js
+  if (k === "cattle" && (m = /^(.*?\([^()]+\)) /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "cattle"]] : null; }   // js/cowherd.js (a calf born in the pasture names no villager)
+  if (k === "pigs" && (m = /^(.*?\([^()]+\)) /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "pigs"]] : null; }   // js/pigfarmer.js (a piglet born in the sty names no villager)
+  if (k === "bake" && (m = /^(.*?\([^()]+\)) /.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "bake"]] : null; }   // js/baker.js: baked, bought milk, sold a treat
+  if (k === "map" && (m = /^(.*?\(Explorer\)) /.exec(tx))) return [["Explorer", "map"]];   // js/explorer.js: maps finished, put aside, taken up again
   if (k === "birth") return [["Child", "born"]];
   if (k === "death" && (m = /^(.*?\)) died/.exec(tx))) { const t = typeOf(m[1]); return t ? [[t, "death"]] : null; }
   return null;
@@ -54,7 +62,30 @@ function describe(a) {
   return s;
 }
 
-const api = { ACTIONS, KINDS, ACTS_FOR, kindName, typeOf, actorsOf, matches, describe };
+// ---- game log lines (js/gamelog.js). e = {s: system time (ms), d: game time (days), c: chunk time (game days the chunk has been
+// loaded, or null), l: level, k: kind, v: village name or null, x: text}. A line:
+// 2026-10-17 16:55:13.123  Day 3 07:15  chunk 1d 02:10  INFO   trade  Village of Ohope: Aroha Parata (Farmer) traded with ...
+const LEVELS = ["ERROR", "WARN", "INFO", "DEBUG"];
+const p2 = n => String(n).padStart(2, "0");
+function sysStamp(ms) {
+  const t = new Date(ms);
+  return t.getFullYear() + "-" + p2(t.getMonth() + 1) + "-" + p2(t.getDate()) + " " + p2(t.getHours()) + ":" + p2(t.getMinutes()) + ":" + p2(t.getSeconds()) + "." + String(t.getMilliseconds()).padStart(3, "0");
+}
+// Game time as the village log shows it (a game day starts at 06:00)
+function gameStamp(t) {
+  const d = Math.floor(t), h = (((t - d) * 24 + 6) % 24 + 24) % 24;
+  return "Day " + (d + 1) + " " + p2(Math.floor(h)) + ":" + p2(Math.floor((h % 1) * 60));
+}
+// A length of game time: "2d 03:10" (game days, hours and minutes); "-" when there is none
+function chunkSpan(t) {
+  if (t == null || !Number.isFinite(t)) return "-";
+  const d = Math.floor(t), m = Math.floor((t - d) * 1440);
+  return d + "d " + p2(Math.floor(m / 60)) + ":" + p2(m % 60);
+}
+const gameLine = e => sysStamp(e.s) + "  " + gameStamp(e.d).padEnd(13) + "  chunk " + chunkSpan(e.c).padEnd(9) + "  " + String(e.l).padEnd(5) + "  " + e.k + "  " +
+  (e.v ? e.v + ": " : "") + String(e.x).replace(/\n/g, "\n    ");   // a multi-line text (a stack trace) is indented under its line
+
+const api = { ACTIONS, KINDS, ACTS_FOR, kindName, typeOf, actorsOf, matches, describe, LEVELS, sysStamp, gameStamp, chunkSpan, gameLine };
 window.BFLog = api;
 if (window.BF) window.BF.logmatch = api; else window.BF = { logmatch: api };
 })();

@@ -29,16 +29,20 @@ module.exports = async (pg, out) => {
   await pg.evaluate(() => { BF.player.yaw = Math.atan2(-4 + 5, 6) ; });
   await pg.waitForTimeout(800);
   await pg.screenshot({ path: out + "-view.png" });
+  // the open grass east of the village (14 past its box) loaded before the camping checks: under load it can lag the village
+  await pg.waitForFunction(() => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.wg && m.village.wg.maxX != null).every(m => { const ox = Math.floor(m.village.wg.maxX + 14), oz = Math.floor(m.village.z); return [[-5, -5], [5, 5], [-5, 5], [5, -5]].every(([dx, dz]) => BF.world.isLoaded(ox + dx, oz + dz)); }), null, { timeout: 90000, polling: 500 }).catch(() => {});
   const r2 = await pg.evaluate(async () => {
     const vs = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.inv && !m.child);
     const open = m => { const c = BF.world.chunkAt(m.position.x, m.position.z); return c && c.top[(Math.floor(m.position.z) - c.cz * 16) * 16 + Math.floor(m.position.x) - c.cx * 16] < m.position.y; };
     const T = BF.trades, I = BF.I, A = vs.find(open) || vs[0], res = {};   // a villager outdoors (one inside a house would pitch on its roof)
     const tx = Math.floor(A.position.x) + 2, ty = Math.floor(A.position.y), tz = Math.floor(A.position.z);
     BF.world.setBlock(tx, ty, tz, BF.B.survey_table); BF.emit("blockPlaced", tx, ty, tz, BF.B.survey_table);
-    BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.inv = T.stockFor("explorer", A); A.trades = [];
+    BF.mobs.setProfession(A, "explorer"); A.xp = 0; A.inv = T.stockFor("explorer", A); A.trades = []; A.jobStocked = true;   // its kit is set here: claiming the table below must not hand it a second one (a villager that never had a job gets its starting wares on its first claim)
     res.hasTent = T.inv.count(A.inv, I.tent);
     BF.jobs.claim(A, { site: { x: tx, y: ty, z: tz, id: BF.B.survey_table, prof: "explorer" } });
     T.inv.remove(A.inv, I.tent, 1); BF.sky.setTime(0.2);   // lost its tent: collects a spare at home by day
+    { const h0 = A.bed || A.village, hx = Math.floor(h0.x) + 4, hz = Math.floor(h0.z); A.position.set(hx + 0.5, BF.world.heightAt(hx, hz) + 1, hz + 0.5);   // at home: villagers load scattered up to 40 blocks from their bed, and the spare is only handed over within 30
+    }
     { const p0 = A.position.clone(), h = A.bed || A.village; res.spareFrom = Math.round(Math.hypot(h.x + 0.5 - p0.x, h.z + 0.5 - p0.z));
       for (let i = 0; i < 600; i++) {   // held where it stands until it has the spare (left to roam it can walk out mapping past the 30 blocks one is handed over in)
         BF.mobs.update(0.1);
@@ -64,12 +68,19 @@ module.exports = async (pg, out) => {
     A.position.set(A.position.x, A.position.y, A.position.z);
     res.homeDist = BF.explorer.pitch ? 0 : -1;
     BF.sky.setTime(0.1);
-    // pretend it is 120 blocks from home by moving the home bed marker
+    // out of its village (anywhere inside it is home, bug-052), on open grass, and 150 blocks from its bed
+    { const W = BF.world, wg = A.village.wg || {}, ox = Math.floor(wg.maxX != null ? wg.maxX + 14 : A.village.x + 50), oz = Math.floor(A.village.z);
+      res.outside = !BF.vlog.villageAt(ox, oz) && W.isLoaded(ox, oz);
+      const oy = W.heightAt(ox, oz) + 1;
+      for (let dx = -5; dx <= 5; dx++) for (let dz = -5; dz <= 5; dz++) { W.setBlock(ox + dx, oy - 1, oz + dz, BF.B.grass); for (let k = 0; k < 40; k++) W.setBlock(ox + dx, oy + k, oz + dz, 0); }
+      A.position.set(ox + 0.5, oy, oz + 0.5); A.ai.route = null; }
     A.bed = { x: A.position.x - 150, y: A.position.y, z: A.position.z, f: 0 };
     BF.sky.setTime(0.47);
     BF.sky.setTime(0.2); BF.explorer.ai(A, 0.1, {});   // a new day: tonight's camping decision is still to be made
     BF.sky.setTime(0.47);
-    for (let i = 0; i < 300; i++) { BF.sky.setTime(0.47); BF.mobs.update(0.1); if (!(A.ex && A.ex.camp)) BF.explorer.ai(A, 0.1, {}); if (A.ex && A.ex.camp) break; }
+    // held on the open ground cleared above: left to walk, its village AI can take it off the cleared patch before its own step pitches
+    const at = A.position.clone();
+    for (let i = 0; i < 300; i++) { BF.sky.setTime(0.47); BF.mobs.update(0.1); if (!(A.ex && A.ex.camp)) { A.position.copy(at); A.ai.route = null; BF.explorer.ai(A, 0.1, {}); } if (A.ex && A.ex.camp) break; }
     res.camp = A.ex && A.ex.camp; res.bed = A.bed && A.bed.tent; res.tentLeft = T.inv.count(A.inv, I.tent);
     window.__A = A; window.__home = A.homeBed;
     // a zombie nearby

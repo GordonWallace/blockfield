@@ -14,7 +14,7 @@ module.exports = async (pg, out) => {
     const roster = () => BF.mobs.list.filter(m => m.type === "villager" && !m.dead && !m.removed && !m.bred && m.village && m.village.key === KEY);
     const settle = async () => { for (let k = 0; k < 60; k++) { BF.world.update(30, 43, 8); run(0.5); await new Promise(r => setTimeout(r, 0)); } };
     BF.state.paused = true;
-    BF.newWorld(1, { gen: 3, gameMode: "creative" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
     BF.sky.setTime(0.1);
     await load(30, 43); await settle();
@@ -30,7 +30,7 @@ module.exports = async (pg, out) => {
     ok("three villagers killed", victims.length === 3 && roster().length === n0 - 3, [victims.length, roster().length]);
     ok("their slots are recorded as dead", deadIdx.every(i => rec.dead && rec.dead.has(i)), rec.dead && [...rec.dead]);
     // walk away (the village unloads) and come back
-    await load(1500, 1500); for (let k = 0; k < 20; k++) { BF.world.update(1500, 1500, 8); run(0.5); await new Promise(r => setTimeout(r, 0)); }
+    await load(1500, 1500); for (let k = 0; k < 20; k++) { BF.world.update(1500, 1500, 8); run(0.5); await new Promise(r => setTimeout(r, 0)); if (k >= 5 && roster().length) { const t = BF.villageSim.timeLeft(KEY); BF.sky.time += Math.min(0.25, (isFinite(t) ? t + 2 : 36) / 1200); } }   // (the clock jumps past the unload countdown, which lasts as long as the longest task: frames are slow here)
     ok("villagers unloaded while away", roster().length === 0, roster().length);
     await load(30, 43); await settle();
     const back = roster().map(m => m.slot.idx).sort((a, b) => a - b);
@@ -43,7 +43,7 @@ module.exports = async (pg, out) => {
     const info = saved["dead:" + KEY] && saved["dead:" + KEY].info || [];
     ok("save keeps who died (name, profession, cause, day)", deadIdx.every(i => info.some(e => e.i === i && e.name && e.prof && /zombie/.test(e.cause) && Number.isFinite(e.day))), info);
     const vc0 = BF.breeding.villagerCount(rec), vb0 = (rec.bred || []).reduce((k, e) => Math.max(k, e.k + 1), 0);
-    BF.newWorld(1, { gen: 3, gameMode: "creative" });
+    BF.newWorld(1, { gen: 3, villages: 9, gameMode: "creative" });
     BF.mobs.spawning = false;
     BF.mobs.importVillagers(saved);
     BF.sky.setTime(0.1);

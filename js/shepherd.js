@@ -12,6 +12,10 @@
 // Shepherds (profession "shepherd"): feed hungry sheep, shear woolly ones, buy wheat when low (js/villagelife.js shopAI), and cull
 //  adults once the pen is too full: THRESHOLD = ceil(room cells / 6), i.e. one sheep per 6 cells, and the pen counts as full from that many sheep
 //  on. They never kill before that, and always leave at least 2 adults. Their mutton is cooked daily and sold through the village food market.
+// Spinning (a Blockfield recipe for the shepherd's job only, not a player recipe): at its loom (BF.jobs "work" state) the shepherd spins 1 white
+//  wool into 2 string, SPIN_HOURS (a quarter of a game hour) per wool, up to SPIN_BATCH wool per sitting, while it holds more than WOOL_KEEP wool
+//  (for its wool sales and the furniture maker) and fewer than STRING_CAP string. The wool is taken when the batch is done (nothing is lost
+//  if the day or the game ends first), logged as "spun N string". It sells the string ("1 emerald > 9 string"): the fletcher's bowstrings.
 (() => {
 "use strict";
 const BF = (window.BF = window.BF || {});
@@ -27,7 +31,12 @@ const FREE_RADIUS = 10, FREE_THRESHOLD = 8;   // a shepherd without a pen tends 
 const TEND_R = 12;            // stray sheep this near the pen / loom are also fed and shorn
 const MIN_ADULTS = 2;         // the shepherd never culls below this many adults
 const WORK_END = 0.5;
-const TASK_MAX = 45;
+const WOOL_KEEP = 16, STRING_CAP = 16;     // spins only wool beyond 16, and only while it holds fewer than 16 string
+const SPIN_BATCH = 4, SPIN_HOURS = 0.25;   // up to 4 wool a sitting, a quarter of a game hour each (1 wool -> 2 string)
+const TASK_MAX = 45, LEAD_MAX = 240;
+const STOCK_TO = 2;           // a builder's pen (idea-044) starts empty: the shepherd fetches wild sheep until it holds this many
+const FIND_R = 100;           // how far it looks for a wild sheep (100 for every keeper)
+const H = () => BF.herd;      // shared herding helpers (js/herd.js): leading a sheep home
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const rndInt = (a, b) => Math.floor(rnd(a, b + 1));
@@ -143,6 +152,10 @@ function breed(a, b, t) {
 }
 // Movement for a willing sheep: walks to its mate. Returns true when it is steering the sheep.
 function sheepAI(m, dt, out) {
+  if (m.ledBy) {   // walk the shepherd's trail (through the gate) into its pen (js/herd.js)
+    const S = live(m.ledBy) ? m.ledBy.shp : null;
+    if (H() && H().ledStep(m, dt, out, S, S && S.task && S.task.pen, inRoom)) return true;
+  }
   const t = now();
   if (!willing(m, t)) { m.mate = null; return false; }
   m.mateT = (m.mateT || 0) - dt;
@@ -181,11 +194,28 @@ function makePen(rec, b, idx) {
   return { key: rec.key + "|" + idx, idx, rec, b, x0: room[0], z0: room[1], x1: room[2], z1: room[3], fx0: foot[0], fz0: foot[1], fx1: foot[2], fz1: foot[3],
     y: b.y, cells, threshold: Math.ceil(cells / PEN_DENSITY), sheep: null, gate: at(b.du, 0), out: at(b.du, -1) };
 }
+// A builder's pen (js/blueprints.js "pen", idea-044): read from the blueprint's marks (turned with the building). It starts empty.
+function makeBuiltPen(rec, e) {
+  const bp = BF.builder && BF.builder.bpOf ? BF.builder.bpOf(e) : BF.blueprints && BF.blueprints.get(e.type, e.rot, e.style, e.h, e.opts, e.wood);
+  const M = bp && bp.marks;
+  if (!M || !M.room || !M.gate || !M.out || !M.fence) return null;
+  const at = ([x, z]) => [e.ox + x, e.oz + z], R = M.room.map(at), F = M.fence.map(at);
+  const x0 = Math.min(R[0][0], R[1][0]), z0 = Math.min(R[0][1], R[1][1]), x1 = Math.max(R[0][0], R[1][0]) + 1, z1 = Math.max(R[0][1], R[1][1]) + 1;
+  const cells = (x1 - x0) * (z1 - z0);
+  return { key: rec.key + "|b" + e.id, idx: "b" + e.id, built: true, rec, b: null, x0, z0, x1, z1,
+    fx0: Math.min(F[0][0], F[1][0]), fz0: Math.min(F[0][1], F[1][1]), fx1: Math.max(F[0][0], F[1][0]) + 1, fz1: Math.max(F[0][1], F[1][1]) + 1,
+    y: e.oy - 1, cells, threshold: Math.ceil(cells / PEN_DENSITY), sheep: null, gate: at(M.gate[0]), out: at(M.out[0]) };
+}
 function pensOf(rec) {
   if (!rec._pens) {
     rec._pens = [];
     const bl = (rec.wg && rec.wg.buildings) || [];
     bl.forEach((b, i) => { if (b.type === "pen") rec._pens.push(makePen(rec, b, i)); });
+  }
+  for (const e of rec.built || []) {   // builders' pens join once they are finished
+    if (e.type !== "pen" || e.state !== "done" || rec._pens.some(k => k.idx === "b" + e.id)) continue;
+    const k = makeBuiltPen(rec, e);
+    if (k) rec._pens.push(k);
   }
   return rec._pens;
 }
@@ -214,6 +244,7 @@ function unpackSt(a) {
 }
 // Whether the village plan put a shepherd's loom on the ring right outside this pen (jobs.js planVillage `beside`).
 function hasLoom(pen) {
+  if (!pen.b) return false;   // a builder's pen: its loom is its own, and it starts empty
   const b = pen.b, plan = (BF.jobs && BF.jobs.planFor && BF.jobs.planFor(pen.rec)) || [];
   for (const j of plan) {
     if (j.prof !== "shepherd") continue;
@@ -230,7 +261,7 @@ function initPen(pen) {
     return;
   }
   pen.sheep = [];
-  if (!hasLoom(pen)) return;   // only a pen with a shepherd's loom beside it starts with sheep (spare pens stay empty)
+  if (pen.built || !hasLoom(pen)) return;   // only a pen with a shepherd's loom beside it starts with sheep (spare pens stay empty)
   const r = seeded("pen:" + pen.key), n = 2 + (r() < 0.5 ? 1 : 0) + (r() < 0.2 ? 1 : 0);   // a new pen starts with 2-4 sheep
   for (let i = 0; i < n; i++) pen.sheep.push({ fed: null, shorn: false, woolAt: null, growAt: null, cd: 0, x: pen.x0 + 0.6 + r() * (pen.x1 - pen.x0 - 1.2), z: pen.z0 + 0.6 + r() * (pen.z1 - pen.z0 - 1.2), mob: null });
 }
@@ -250,7 +281,7 @@ function tickPens() {
   if (!pp || !BF.mobs || !BF.mobs.spawn) return;
   const W = BF.world;
   for (const rec of BF.mobs.villages.values()) {
-    if (!rec.wg || !rec.wg.buildings) continue;
+    if (!(rec.wg && rec.wg.buildings) && !(rec.built && rec.built.some(e => e.type === "pen"))) continue;
     if (Math.hypot(rec.x - pp.x, rec.z - pp.z) > 80 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
     for (const pen of pensOf(rec)) {
       if (!W.isLoaded(pen.fx0, pen.fz0) || !W.isLoaded(pen.fx1, pen.fz1) || !W.isLoaded(pen.fx0, pen.fz1) || !W.isLoaded(pen.fx1, pen.fz0)) continue;
@@ -346,12 +377,12 @@ function exportAll(out) {
 function importAll(o) {
   pending = new Map();
   if (!o || typeof o !== "object") return;
-  for (const k in o) if (k.slice(0, 5) === "pens:" && Array.isArray(o[k])) pending.set(k.slice(5), o[k].filter(e => e && Number.isFinite(+e.i) && Array.isArray(e.s)));
+  for (const k in o) if (k.slice(0, 5) === "pens:" && Array.isArray(o[k])) pending.set(k.slice(5), o[k].filter(e => e && (Number.isFinite(+e.i) || /^b\d+$/.test(e.i)) && Array.isArray(e.s)));
 }
 function reset() { pending = new Map(); activePens.length = 0; acc = 0; penT = 0; }
 
 // ---------------------------------------------------------------- the shepherd
-const shp = m => m.shp || (m.shp = { task: null, stage: null, t: 0, actT: 0, cd: rnd(0, 2), avoid: new Map(), navFail: 0 });
+const shp = m => m.shp || (m.shp = { task: null, stage: null, t: 0, actT: 0, cd: rnd(0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 });
 
 // Starting kit: a shepherd alive when its village was generated starts with shears and 8 wheat (trading.js stockFor); one hired later gets
 // emeralds and buys its shears (js/villagelife.js toolAI) and wheat. Kept as a no-op for callers of the old API.
@@ -384,9 +415,9 @@ const adults = a => a.filter(o => !isLamb(o));
 // Wheat the shepherd wants to buy right now (0 = enough): under 2 days of feed it tops up to ~5 days.
 function wheatWanted(m) {
   if (m.profession !== "shepherd" || !m.inv || !BF.mobs) return 0;
-  const n = adults(tended(m).sheep).length;
+  const T = tended(m), n = adults(T.sheep).length, have = cnt(m, idsOf().wheat);
+  if (T.pen && T.pen.sheep && T.pen.sheep.length < STOCK_TO && have < 2) return 6 - have;   // wheat to lure wild sheep into an empty pen
   if (!n) return 0;
-  const have = cnt(m, idsOf().wheat);
   if (have >= Math.max(4, n * 2)) return 0;
   return n * 5 + 4 - have;
 }
@@ -401,21 +432,56 @@ function pickTask(m, S) {
     const pool = adults(T.flock).filter(ok);
     if (adults(T.flock).length > MIN_ADULTS) { const o = nearest(pool.filter(x => x.sheep.shorn)) || nearest(pool); if (o) return { kind: "cull", mob: o }; }   // shorn sheep first: their wool is already in the bag
   }
+  const p = T.pen;   // an empty (builder's) pen: fetch wild sheep until it holds STOCK_TO, with wheat in hand to lure them
+  if (p && p.sheep && p.sheep.length < STOCK_TO && cnt(m, c.wheat) > 0 && t >= S.stockAt) {
+    const o = wildSheep(m, p, S);
+    if (o) return { kind: "fetch", mob: o, pen: p };
+    if (wildSheep(m, p, { avoid: new Map() })) { S.stockAt = t + 0.1; return null; }   // only ones it just failed to bring in: again in a while
+    S.stockAt = Math.floor(t) + 1 + 0.03;   // none in range: look again tomorrow morning
+    if (BF.vlog && m.village) BF.vlog.log(m.village, "work", BF.vlog.nameOf(m) + " (Shepherd) found no wild sheep within " + FIND_R + " blocks of the pen; will look again tomorrow", m);
+  }
   return null;
+}
+function wildSheep(m, p, S) {
+  const c = { x: (p.x0 + p.x1) / 2, z: (p.z0 + p.z1) / 2 }, sim = BF.simNow();
+  let best = null, bd = FIND_R;
+  for (const o of BF.mobs.list) {
+    if (o.type !== "sheep" || !live(o) || o.pen || o.ledBy || isLamb(o) || (S.avoid.get(o) || 0) > sim) continue;
+    const d = Math.hypot(o.position.x - c.x, o.position.z - c.z);
+    if (d < bd) { bd = d; best = o; }
+  }
+  return best;
+}
+const inRoom = (p, pos) => pos.x > p.x0 && pos.x < p.x1 && pos.z > p.z0 && pos.z < p.z1 && Math.abs(pos.y - (p.y + 1)) < 3;
+// Leading a wild sheep home: to the path in front of the gate, then into the pen (js/herd.js lead; the sheep walks the trail, sheepAI).
+function lead(m, S, tk, dt, out) {
+  const P = tk.pen;
+  return H().lead(m, S, tk, dt, out, {
+    pen: P, max: LEAD_MAX, penned: o => o.pen === P,
+    arrived: () => {
+      if (BF.vlog && m.village) BF.vlog.log(m.village, "work", BF.vlog.nameOf(m) + " (Shepherd) brought a wild sheep into the pen (" + P.sheep.length + " sheep)", m);
+      endTask(m, true); S.cd = rnd(0.5, 1);
+    },
+    failed: () => endTask(m, false),
+  });
 }
 function stillWanted(m, tk) {
   const o = tk.mob;
   if (!live(o) || isLamb(o)) return false;
   const t = now(), c = idsOf();
+  if (tk.kind === "fetch") return !o.pen && cnt(m, c.wheat) > 0 && !(o.ledBy && o.ledBy !== m);
   if (tk.kind === "feed") return hungry(o, t) && cnt(m, c.wheat) > 0;
   if (tk.kind === "shear") return !o.sheep.shorn && cnt(m, c.shears) > 0;
   const T = tended(m);
   return T.flock.length >= T.threshold && adults(T.flock).length > MIN_ADULTS && T.flock.indexOf(o) >= 0;
 }
 function endTask(m, ok) {
-  const S = shp(m);
-  if (S.task && !ok) S.avoid.set(S.task.mob, BF.simNow() + 40);
-  S.task = null; S.stage = null; m.ai.route = null;
+  const S = shp(m), tk = S.task;
+  if (tk && !ok) S.avoid.set(tk.mob, BF.simNow() + (tk.kind === "fetch" ? 120 : 40));
+  if (tk && tk.mob && tk.mob.ledBy === m) tk.mob.ledBy = null;
+  if (H()) H().releaseGate(m, S);
+  S.task = null; S.stage = null; m.ai.route = null; S.trail = []; S.trailBase = 0;
+  if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
 }
 function loot(m, id, n, where) {
   if (id == null || n <= 0) return;
@@ -442,6 +508,7 @@ function perform(m, tk) {
   return true;
 }
 const ACT = { feed: 0.7, shear: 1.1, cull: 0.8 };
+const TASK_TEXT = { feed: "Feeding the sheep", shear: "Shearing a sheep", cull: "Culling the flock", fetch: "Fetching a wild sheep" };
 // A shepherd with nothing to do inside a pen walks out through the gate (opening and closing it, mobs.js villagerDoors)
 // and stands on the path outside, so it never wanders around stuck among the sheep. True while it is walking out.
 function leave(m, S, dt, out) {
@@ -477,22 +544,30 @@ function ai(m, dt, out) {
     S.cd = rnd(1.5, 3);
     const tk = pickTask(m, S);
     if (!tk) return false;
-    S.task = tk; S.stage = "walk"; S.t = 0; S.navFail = 0; S.gx = null;
+    const VS = BF.villageSim;
+    let est = VS && VS.walkSecs ? VS.walkSecs(m, [[tk.mob.position.x, tk.mob.position.z]]) + (ACT[tk.kind] || 0) : 0;
+    if (VS && tk.kind === "fetch") { const w1 = VS.walkSecs(m, [[tk.mob.position.x, tk.mob.position.z]]); est = w1 / 1.2 + (VS.walkSecs(m, [[tk.mob.position.x, tk.mob.position.z], tk.pen.out]) - w1) / 0.8 + 8; }
+    if (VS && VS.begin && !VS.begin(m, est, TASK_TEXT[tk.kind])) return false;   // won't finish before the village stops
+    S.task = tk; S.stage = "walk"; S.t = 0; S.navFail = 0; S.gx = null; S.lostT = 0;
   }
   const tk = S.task, o = tk.mob;
   S.t += dt;
-  if (S.t > TASK_MAX || !stillWanted(m, tk)) { endTask(m, S.t <= TASK_MAX); return false; }
+  if (tk.kind === "fetch" && o.pen === tk.pen && tk.pen) return lead(m, S, tk, dt, out);   // it walked in: lead() ends the task
+  const limit = tk.kind === "fetch" ? LEAD_MAX : TASK_MAX;
+  if (S.t > limit || !stillWanted(m, tk)) { endTask(m, S.t <= limit && tk.kind !== "fetch"); return false; }
   ai.mode = "idle"; ai.t = 2;
+  if (tk.kind === "fetch" && S.stage !== "walk") return lead(m, S, tk, dt, out);
   const d = Math.hypot(o.position.x - m.position.x, o.position.z - m.position.z);
-  const close = d <= 1.9 && Math.abs(o.position.y - m.position.y) < 1.6;
+  const close = d <= (tk.kind === "fetch" ? 2.3 : 1.9) && Math.abs(o.position.y - m.position.y) < 1.6;
   if (S.stage === "walk") {
+    if (close && tk.kind === "fetch") { H().startLead(m, S, tk); return true; }
     if (close) { S.stage = "act"; S.actT = ACT[tk.kind]; ai.route = null; ai.swingT = 0.35; return true; }
     const g = { x: Math.floor(o.position.x), y: Math.floor(o.position.y + 0.01), z: Math.floor(o.position.z) };
     if (S.gx != null && Math.hypot(S.gx - g.x, S.gz - g.z) > 2) ai.route = null;   // the sheep moved: plan again
     S.gx = g.x; S.gz = g.z;
     const st = BF.villageLife.travel(m, S, dt, out, g.x, g.y, g.z, m.def.speed * 1.2);
     if (st === "failed") { endTask(m, false); return false; }
-    if (st === "arrived") { S.stage = "act"; S.actT = ACT[tk.kind]; ai.swingT = 0.35; }
+    if (st === "arrived" && tk.kind !== "fetch") { S.stage = "act"; S.actT = ACT[tk.kind]; ai.swingT = 0.35; }
     return true;
   }
   if (d > 2.8) { S.stage = "walk"; return true; }
@@ -506,10 +581,44 @@ function ai(m, dt, out) {
   }
   return true;
 }
+// ---------------------------------------------------------------- spinning string at the loom
+const woolOf = m => cnt(m, idsOf().wool), stringOf = m => cnt(m, BF.I.string);
+// Wool it would spin now (0 = none): the wool beyond WOOL_KEEP, while it holds fewer than STRING_CAP string, at most SPIN_BATCH.
+function spinnable(m) {
+  if (m.profession !== "shepherd" || !m.inv || BF.I.string == null) return 0;
+  const room = Math.ceil((STRING_CAP - stringOf(m)) / 2);
+  return Math.max(0, Math.min(SPIN_BATCH, woolOf(m) - WOOL_KEEP, room));
+}
+const wantsSpin = m => !!(m && (spinnable(m) > 0 || (m.shp && m.shp.spin)));
+// Called by jobs.js while the shepherd stands at its loom: spins a batch of wool, SPIN_HOURS of game time per wool (dt is simulation time).
+function work(m, J, dt) {
+  const S = shp(m), j = m.jobsite;
+  if (S.task || !j || Math.hypot(j.x + 0.5 - m.position.x, j.z + 0.5 - m.position.z) > 3) return;   // only at the loom (a pen task may have taken it away)
+  if (!S.spin) {
+    const n = spinnable(m);
+    if (!n) return;
+    const VS = BF.villageSim, secs = n * ((BF.sky && BF.sky.dayLength) || 1200) * SPIN_HOURS / 24;
+    if (VS && VS.begin && !VS.begin(m, secs, "Spinning string")) return;
+    S.spin = { n, t: n * ((BF.sky && BF.sky.dayLength) || 1200) * SPIN_HOURS / 24 };
+  }
+  S.spin.t -= dt;
+  if (m.ai && Math.random() < dt) m.ai.swingT = 0.3;
+  if (J && J.t < 3) J.t = 3;   // stays at the loom until the batch is done
+  if (S.spin.t > 0) return;
+  const c = idsOf(), T = TR().inv;
+  let n = Math.min(S.spin.n, woolOf(m));   // the wool it still holds (some may have been sold meanwhile)
+  while (n > 0 && !T.canFit(m.inv, [{ id: BF.I.string, n: 2 * n }], [{ id: c.wool, n }])) n--;
+  S.spin = null;
+  if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
+  if (n <= 0) return;
+  T.remove(m.inv, c.wool, n); T.add(m.inv, BF.I.string, 2 * n);
+  if (BF.vlog && m.village) BF.vlog.log(m.village, "craft", (BF.vlog.nameOf ? BF.vlog.nameOf(m) : "Shepherd") + " (Shepherd) spun " + 2 * n + " string", m);
+}
 function statusText(m) {
   const S = m.shp;
+  if (S && !S.task && S.spin && m.job && m.job.mode === "work") return "Spinning string";
   if (!S || !S.task) return "";
-  return { feed: "Feeding the sheep", shear: "Shearing a sheep", cull: "Culling the flock" }[S.task.kind] || "";
+  return TASK_TEXT[S.task.kind] || "";
 }
 
 // ---------------------------------------------------------------- shears: recipe + sprite
@@ -543,7 +652,9 @@ if (BF.texKit) {
 BF.shepherd = {
   FEED_DAYS, BREED_CD, LAMB_DAYS, REGROW_DAYS, PEN_DENSITY,
   feed, shear, playerUse, sheepAI, syncLook, hungry, willing, isLamb,
+  STOCK_TO, FIND_R,
   pensOf, penOf, hasLoom, tended, wheatWanted, ensureKit, ai, tick, statusText, pickPenTarget, contain,
+  WOOL_KEEP, STRING_CAP, SPIN_BATCH, SPIN_HOURS, spinnable, wantsSpin, work,
   exportAll, importAll, reset,
   pens: () => activePens,
 };

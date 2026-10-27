@@ -1,0 +1,234 @@
+// Saved worlds in the browser's IndexedDB: a list of worlds (name, seed, mode, last played),
+// each storing block edits, player, inventory, time of day and the dropped items lying around. Autosaves while playing.
+// Each world's game log (js/gamelog.js) is kept next to its save in the same "data" store: a head record ("<id>#loghead") and
+// numbered batches of entries ("<id>#log:000000012"), written as the log grows (logStore).
+(() => {
+"use strict";
+const BF = (window.BF = window.BF || {});
+
+const DB_NAME = "blockfield", DB_VER = 1, AUTOSAVE_S = 30;
+let dbp = null;
+
+function db() {
+  if (dbp) return dbp;
+  dbp = new Promise((resolve, reject) => {
+    let req;
+    try { req = indexedDB.open(DB_NAME, DB_VER); } catch (e) { reject(e); return; }
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      if (!d.objectStoreNames.contains("worlds")) d.createObjectStore("worlds", { keyPath: "id" });
+      if (!d.objectStoreNames.contains("data")) d.createObjectStore("data");
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  dbp.catch(() => { dbp = null; });
+  return dbp;
+}
+function tx(stores, mode, fn) {
+  return db().then(d => new Promise((resolve, reject) => {
+    const t = d.transaction(stores, mode);
+    let out;
+    t.oncomplete = () => resolve(out);
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error);
+    out = fn(t);
+  }));
+}
+const reqP = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+
+// ---------- snapshot / restore ----------
+function snapshot() {
+  const edits = {};
+  for (const [k, m] of BF.world.edits) {
+    if (!m.size) continue;
+    const a = new Int32Array(m.size * 2);
+    let i = 0;
+    for (const [idx, id] of m) { a[i++] = idx; a[i++] = id; }
+    edits[k] = a;
+  }
+  const P = BF.player, p = P.position;
+  const player = P.serialize ? P.serialize() : {
+    x: p.x, y: p.y, z: p.z, yaw: P.yaw, pitch: P.pitch,
+    health: P.health, hunger: P.hunger, gameMode: P.gameMode,
+  };
+  return {
+    version: 1,
+    seed: BF.state.seed,
+    gen: BF.state.gen, biomeScale: BF.state.biomeScale,   // worldgen version + biome size (old saves have neither => gen 1)
+    villages: BF.state.villages,                           // village generator (old saves have none => 1, the classic villages)
+    time: { t: BF.sky.time, day: BF.sky.day },
+    spawn: BF.spawnPoint,
+    player,
+    inventory: BF.inventory.serialize ? BF.inventory.serialize() : null,
+    villagers: BF.mobs && BF.mobs.exportVillagers ? BF.mobs.exportVillagers() : undefined,
+    mobs: BF.mobSave ? BF.mobSave.serialize() : undefined,   // where every loaded mob was and what it was doing, for an exact reload (js/mobsave.js)
+    wildlife: BF.wildlife ? BF.wildlife.serialize() : undefined,   // wild mobs stored with unloaded chunks, chunks that rolled their animals, village nights (js/wildlife.js)
+    weather: BF.weather && BF.weather.serialize ? BF.weather.serialize() : undefined,
+    signs: BF.signs && BF.signs.serialize ? BF.signs.serialize() : undefined,
+    vlog: BF.vlog ? BF.vlog.serialize() : undefined,   // village action logs (js/villagelog.js)
+    vstats: BF.vstats ? BF.vstats.serialize() : undefined,   // population per game day, last 7 days (js/villagestats.js)
+    econ: BF.econ ? BF.econ.serialize() : undefined,   // Economy view tallies, last 7 game days (js/economy.js)
+    happy: BF.happiness ? BF.happiness.serialize() : undefined,   // village happiness: last week's events + last scores (js/happiness.js)
+    days: BF.dayTimeline ? BF.dayTimeline.serialize() : undefined,   // villagers' day timelines, today and yesterday (js/daytimeline.js)
+    maps: BF.maps && BF.maps.serialize ? BF.maps.serialize() : undefined, // explored pixels of filled maps (js/maps.js)
+    drops: BF.drops && BF.drops.serialize ? BF.drops.serialize() : undefined, // dropped items lying in the world, with their age (js/drops.js)
+    boats: BF.boats ? BF.boats.serialize() : undefined, // placed boats, the player's included, with any mob passenger (js/boats.js)
+    horses: BF.horses ? BF.horses.serialize() : undefined, // every horse, wild or tamed, with its stats, saddle, owner and lead (js/horses.js)
+    farmland: BF.farmland ? BF.farmland.serialize() : undefined, // farmland hydration clocks + last rain (js/farmland.js)
+    bees: BF.bees ? BF.bees.serialize() : undefined, // every bee nest and hive: its bee count, honey level and last growth day (js/bees.js)
+    chunkTime: BF.glog ? BF.glog.chunkTimes() : undefined, // game days each chunk has been loaded, the game log's chunk time (js/gamelog.js)
+    edits,
+  };
+}
+
+function restore(data) {
+  BF.newWorld(data.seed, { gameMode: data.player && data.player.gameMode, gen: data.gen || 1, biomeScale: data.biomeScale || 1, villages: data.villages || 1 });
+  for (const k in data.edits || {}) {
+    const a = data.edits[k], m = new Map();
+    for (let i = 0; i < a.length; i += 2) m.set(a[i], a[i + 1]);
+    BF.world.edits.set(k, m);
+  }
+  if (data.spawn) BF.spawnPoint = data.spawn;
+  if (data.time) { BF.sky.day = data.time.day || 0; if (BF.sky.setTime) BF.sky.setTime(data.time.t); else BF.sky.time = data.time.t; }
+  const pl = data.player || {};
+  if (BF.player.deserialize) BF.player.deserialize(pl);
+  else {
+    BF.player.spawn(pl.x, pl.y, pl.z);
+    if (pl.health != null) BF.player.health = pl.health;
+    if (pl.hunger != null) BF.player.hunger = pl.hunger;
+    if (BF.player.setLook && pl.yaw != null) BF.player.setLook(pl.yaw, pl.pitch);
+  }
+  if (data.inventory && BF.inventory.deserialize) BF.inventory.deserialize(data.inventory);
+  if (data.villagers && BF.mobs && BF.mobs.importVillagers) BF.mobs.importVillagers(data.villagers); // old saves have none
+  if (BF.wildlife) BF.wildlife.deserialize(data.wildlife); // old saves: every chunk rolls its animals once, the first time it loads
+  if (BF.mobSave) BF.mobSave.deserialize(data.mobs); // old saves: nothing to restore exactly (wild mobs go to js/wildlife.js, so after it)
+  if (data.weather && BF.weather && BF.weather.deserialize) BF.weather.deserialize(data.weather); // old saves: newWorld's seeded default
+  if (BF.vlog) BF.vlog.deserialize(data.vlog); // old saves: no logs
+  if (BF.vstats) BF.vstats.deserialize(data.vstats); // old saves: no population history
+  if (BF.econ) BF.econ.deserialize(data.econ); // old saves: empty tallies
+  if (BF.happiness) BF.happiness.deserialize(data.happy || { fromLog: data.vlog }); // old saves: last week's events from the log
+  if (BF.dayTimeline) BF.dayTimeline.deserialize(data.days); // old saves: empty timelines
+  if (BF.maps && BF.maps.deserialize) BF.maps.deserialize(data.maps); // old saves: no maps
+  if (BF.signs && BF.signs.deserialize) BF.signs.deserialize(data.signs); // sign texts + auto-sign state (old saves: none)
+  if (BF.drops && BF.drops.deserialize) BF.drops.deserialize(data.drops); // dropped items (old saves: none)
+  if (BF.boats) BF.boats.deserialize(data.boats); // boats, after the player: one saved with the player aboard puts them back in it (old saves: none)
+  if (BF.horses) BF.horses.deserialize(data.horses); // horses come back when the player is near their chunk (old saves: none)
+  if (BF.farmland) BF.farmland.deserialize(data.farmland); // farmland clocks (old saves: each block's clock starts when first seen)
+  if (BF.bees) BF.bees.deserialize(data.bees); // bee homes (old saves: none)
+  if (BF.glog) BF.glog.loadChunkTimes(data.chunkTime); // chunk times (old saves: every chunk starts at 0)
+}
+
+// A typed number seed -> world seed (the terrain noise takes 32 bits and treats 0 as 1). 1..4294967295 are used as they
+// are, so those seeds keep giving the worlds they always have. 0, negative and larger numbers used to wrap onto that range
+// (0 gave seed 1's terrain, 4294967297 gave 1, -1 gave 4294967295, huge numbers gave 0); they are now hashed from their digits
+// instead, so different numbers give different worlds. Saved worlds store the resulting seed, so they never change.
+function numberSeed(text) {
+  const n = BigInt(text);
+  if (n >= 1n && n <= 4294967295n) return Number(n);
+  let h = 0x811c9dc5;
+  for (const ch of "#" + n.toString()) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);   // FNV-1a of the canonical number
+  return (h >>> 0) || 0x9e3779b9;
+}
+
+// ---------- game logs (js/gamelog.js) ----------
+const LOGH = id => id + "#loghead", LOGK = id => id + "#log:", logKey = (id, seq) => LOGK(id) + String(seq).padStart(9, "0");
+const logRange = id => IDBKeyRange.bound(LOGK(id), LOGK(id) + "\uffff");
+const logStore = {
+  // -> {head, entries} (head null when the world has no log yet)
+  read(id) {
+    return tx(["data"], "readonly", t => { const s = t.objectStore("data"); return Promise.all([reqP(s.get(LOGH(id))), reqP(s.getAll(logRange(id)))]); })
+      .then(([head, batches]) => ({ head: head || null, entries: head ? [].concat(...(batches || [])) : [] }));
+  },
+  // adds batch number seq and drops the batches numbered in drop, with the head that lists them
+  write(id, head, seq, list, drop) {
+    return tx(["data"], "readwrite", t => {
+      const s = t.objectStore("data");
+      s.put(list, logKey(id, seq)); s.put(head, LOGH(id));
+      for (const d of drop || []) s.delete(logKey(id, d));
+    });
+  },
+};
+
+// ---------- public API ----------
+const save = {
+  current: null,          // meta of the world being played, or null (unsaved demo world)
+  lastSaved: 0,
+  supported: typeof indexedDB !== "undefined",
+  numberSeed,             // exposed for tests
+  logStore,               // the game log's storage (js/gamelog.js)
+
+  // -> [{id, name, seed, gameMode, created, lastPlayed}] newest first; [] if storage is unavailable
+  list() {
+    return tx(["worlds"], "readonly", t => reqP(t.objectStore("worlds").getAll()))
+      .then(p => p).then(a => (a || []).sort((x, y) => y.lastPlayed - x.lastPlayed))
+      .catch(() => []);
+  },
+
+  // Starts a brand-new saved world. opts: {name, seed (number|string|blank), gameMode, biomeScale (>=1, default 1), gen (default 3)}
+  create(opts = {}) {
+    let seed = opts.seed;
+    if (seed === undefined || seed === null || seed === "") seed = 1 + Math.floor(Math.random() * 4294967295);
+    else if (!/^-?\d+$/.test(String(seed).trim())) { let h = 0; for (const ch of String(seed)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0; seed = h >>> 0; }
+    else seed = numberSeed(String(seed).trim());
+    const now = Date.now();
+    const meta = { id: "w" + now.toString(36) + Math.floor(Math.random() * 1e6).toString(36), name: (opts.name || "New World").slice(0, 40), seed, gameMode: opts.gameMode || "survival", gen: opts.gen || 3, biomeScale: Math.max(1, Number(opts.biomeScale) || 1), villages: opts.villages || 10, created: now, lastPlayed: now };
+    BF.newWorld(seed, { gameMode: meta.gameMode, gen: meta.gen, biomeScale: meta.biomeScale, villages: meta.villages });
+    save.current = meta;
+    BF.emit("worldLoaded", meta);
+    return save.saveNow().then(() => meta);
+  },
+
+  // Loads a saved world by id. Resolves to its meta.
+  load(id) {
+    return tx(["worlds", "data"], "readonly", t => Promise.all([reqP(t.objectStore("worlds").get(id)), reqP(t.objectStore("data").get(id))]))
+      .then(([meta, data]) => {
+        if (!meta || !data) throw new Error("World not found");
+        restore(data);
+        meta.lastPlayed = Date.now();
+        save.current = meta;
+        BF.emit("worldLoaded", meta);
+        return save.saveNow().then(() => meta);
+      });
+  },
+
+  remove(id) {
+    if (save.current && save.current.id === id) save.current = null;
+    if (BF.glog) BF.glog.forget(id);   // its game log goes too, with nothing more written
+    return tx(["worlds", "data"], "readwrite", t => { t.objectStore("worlds").delete(id); const d = t.objectStore("data"); d.delete(id); d.delete(LOGH(id)); d.delete(logRange(id)); });
+  },
+
+  rename(id, name) {
+    return tx(["worlds"], "readwrite", t => {
+      const s = t.objectStore("worlds");
+      const r = s.get(id);
+      r.onsuccess = () => { if (r.result) { r.result.name = String(name).slice(0, 40); s.put(r.result); if (save.current && save.current.id === id) save.current.name = r.result.name; } };
+    });
+  },
+
+  // Writes the current world now. Resolves true when saved (false when there's nothing to save).
+  saveNow() {
+    if (!save.current || !save.supported) return Promise.resolve(false);
+    let data;
+    try { data = snapshot(); } catch (e) { console.error(e); return Promise.resolve(false); }
+    const meta = Object.assign({}, save.current, { lastPlayed: Date.now(), gameMode: data.player && data.player.gameMode || save.current.gameMode, seed: data.seed, gen: data.gen || 1, biomeScale: data.biomeScale || 1, villages: data.villages || 1 });
+    save.current = meta;
+    return tx(["worlds", "data"], "readwrite", t => { t.objectStore("worlds").put(meta); t.objectStore("data").put(data, meta.id); })
+      .then(() => { save.lastSaved = Date.now(); BF.emit("worldSaved", meta); return true; })
+      .catch(e => { console.error("Save failed", e); BF.emit("saveFailed", e); return false; });
+  },
+
+  update(dt) {
+    if (!save.current) return;
+    acc += dt;
+    if (acc >= AUTOSAVE_S) { acc = 0; save.saveNow(); }
+  },
+};
+let acc = 0;
+BF.save = save;
+
+// save when the tab is hidden or closed, and when the game pauses
+const flush = () => { if (save.current) save.saveNow(); };
+addEventListener("pagehide", flush);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
+})();

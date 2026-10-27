@@ -6,6 +6,7 @@
 // The game page it serves gets window.BF_DEBUG_FEED set, which turns on js/debugfeed.js; the game POSTs snapshots to
 // /push on the debug port and every open debug screen receives them over Server-Sent Events (/events).
 // The game can also be served some other way and pointed here with index.html?debugfeed=8001.
+// The game page also gets window.BF_BUILD, the commit and branch of this checkout (read from .git), for the game log (js/gamelog.js).
 // No dependencies: Node's built-in http, fs and path only.
 "use strict";
 const http = require("http"), fs = require("fs"), path = require("path");
@@ -20,11 +21,38 @@ const ROOT = path.resolve(__dirname, ".."), PAGE = path.join(__dirname, "index.h
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css", ".json": "application/json",
   ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".txt": "text/plain; charset=utf-8", ".md": "text/plain; charset=utf-8", ".ico": "image/x-icon" };
 
+// ------------------------------------------------------------------ the checkout's commit
+// Read from .git directly (no git needed): HEAD, then the branch's ref file or packed-refs. A worktree's .git file points at its
+// own git dir, whose commondir holds the refs. Re-read at most every 2 s; the game version comes from js/version.js.
+let buildAt = 0, buildCache = { commit: null, branch: null, version: null };
+function readBuild() {
+  if (Date.now() - buildAt < 2000) return buildCache;
+  buildAt = Date.now();
+  const out = { commit: null, branch: null, version: null };
+  try { out.version = (/BF\.VERSION\s*=\s*"([^"]+)"/.exec(fs.readFileSync(path.join(ROOT, "js", "version.js"), "utf8")) || [])[1] || null; } catch (e) { /* none */ }
+  try {
+    let gd = path.join(ROOT, ".git");
+    if (fs.statSync(gd).isFile()) gd = path.resolve(ROOT, fs.readFileSync(gd, "utf8").replace(/^gitdir:\s*/, "").trim());
+    let common = gd;
+    try { common = path.resolve(gd, fs.readFileSync(path.join(gd, "commondir"), "utf8").trim()); } catch (e) { /* not a worktree */ }
+    const h = fs.readFileSync(path.join(gd, "HEAD"), "utf8").trim(), m = /^ref:\s*(\S+)/.exec(h);
+    if (!m) out.commit = h;
+    else {
+      out.branch = m[1].replace(/^refs\/heads\//, "");
+      try { out.commit = fs.readFileSync(path.join(common, m[1]), "utf8").trim(); }
+      catch (e) { const l = fs.readFileSync(path.join(common, "packed-refs"), "utf8").split("\n").find(x => x.endsWith(" " + m[1])); out.commit = l ? l.split(" ")[0] : null; }
+    }
+    if (out.commit && !/^[0-9a-f]{7,64}$/.test(out.commit)) out.commit = null;
+  } catch (e) { /* not a git checkout */ }
+  return (buildCache = out);
+}
+
 // ------------------------------------------------------------------ game (static files)
 function serveGame(req, res) {
   let rel;
   try { rel = decodeURIComponent(new URL(req.url, "http://x").pathname); } catch (e) { res.writeHead(400).end(); return; }
   if (rel.includes("\0")) { res.writeHead(404).end(); return; }   // fs throws on a NUL byte (/%00)
+  if (rel === "/wiki") { res.writeHead(301, { Location: "/wiki/" }).end(); return; }   // Blockfieldpedia (wiki/index.html)
   if (rel.endsWith("/")) rel += "index.html";
   const file = path.join(ROOT, rel);
   if (!file.startsWith(ROOT + path.sep) || rel.split("/").some(p => p.startsWith(".") && p.length > 1)) { res.writeHead(404).end(); return; }
@@ -34,7 +62,8 @@ function serveGame(req, res) {
     if (rel === "/index.html") {
       // point the game at this server's debug port, on whatever host name the browser used to reach the game
       const host = (req.headers.host || "localhost").replace(/:\d+$/, "");
-      const tag = `<script>window.BF_DEBUG_FEED = ${JSON.stringify("http://" + host + ":" + DEBUG_PORT)};</script>\n`;
+      const b = readBuild();
+      const tag = `<script>window.BF_DEBUG_FEED = ${JSON.stringify("http://" + host + ":" + DEBUG_PORT)}; window.BF_BUILD = ${JSON.stringify({ commit: b.commit, branch: b.branch }).replace(/</g, "\\u003c")};</script>\n`;
       // and stamp each script with its file's time, so a browser can't keep running an old copy it saved (from another server
       // on this port, say) next to new ones: a stale js/villagelog.js once stopped the feed with nothing on the debug screen
       const html = data.toString("utf8").replace(/(<script src="(js\/[\w.-]+\.js))"/g, (m, a, f) => {
@@ -65,7 +94,14 @@ function setAlerts(list) {
   broadcast("alerts", { av, alerts });
 }
 let latest = null, lastPush = 0, pushes = 0, seed = null;
-const layouts = new Map(), details = new Map(), history = new Map(), icons = new Map();   // icons: item id -> {url, name}, sent once by the game
+// The villager picked on the debug screen (its village key#slot, js/daytimeline.js): passed to the game in the answer to its next
+// snapshot, like the alerts; the game then adds that villager's day timeline to its snapshots. day: the last timeline it sent.
+let pick = null, pv = "0", day = null;
+// The open world's game log (js/gamelog.js): {w (world id), name, head (its header line), base (index of lines[0]), lines}, all of it
+// once the game has sent it. Debug screens get it whole when they connect (/events cache, or /glog) and the new entries in each snap.
+let glog = null;
+const GLOG_CAP = 100000;
+const layouts = new Map(), details = new Map(), history = new Map(), icons = new Map(), econ = new Map();   // econ: each village's Economy tallies (js/economy.js)   // icons: item id -> {url, name}, sent once by the game
 
 function send(res, event, data) { res.write("event: " + event + "\ndata: " + data + "\n\n"); }
 function broadcast(event, obj) { const d = JSON.stringify(obj); for (const c of clients) send(c, event, d); }
@@ -90,32 +126,52 @@ function push(body, res) {
   if (!s || typeof s !== "object" || Array.isArray(s)) { res.writeHead(400, cors()).end("not a snapshot"); return; }
   const fresh = !lastPush || Date.now() - lastPush > 5000;
   lastPush = Date.now();
-  if (s.info && typeof s.info === "object" && s.info.seed !== seed) { if (seed !== null) { layouts.clear(); details.clear(); history.clear(); } seed = s.info.seed; }
+  if (s.info && typeof s.info === "object" && s.info.seed !== seed) { if (seed !== null) { layouts.clear(); details.clear(); history.clear(); econ.clear(); day = null; } seed = s.info.seed; }
   const obj = o => (o && typeof o === "object" ? o : {});
   for (const k in obj(s.layouts)) layouts.set(k, s.layouts[k]);
   for (const k in obj(s.detail)) details.set(k, s.detail[k]);
   for (const k in obj(s.icons)) icons.set(k, s.icons[k]);
+  for (const k in obj(s.econ)) econ.set(k, s.econ[k]);
+  if (s.day !== undefined) day = s.day && typeof s.day === "object" ? s.day : null;
   const logs = {};
   for (const k in obj(s.logs)) {
     const l = s.logs[k], a = l && Array.isArray(l.entries) ? l.entries.filter(Array.isArray) : [];   // log entries are arrays; skip anything else
     logs[k] = { key: k, cap: l && l.cap, entries: mergeLog(k, a) };
   }
-  latest = { ...s, layouts: undefined, logs: undefined };
-  broadcast("snap", { ...s, logs });
+  // the game log: append when the entries follow on from what we hold; otherwise tell the game where we are (glogAt)
+  let glogAt = null, gl;
+  const g = s.glog && typeof s.glog === "object" && Array.isArray(s.glog.lines) ? s.glog : null;
+  if (g && (g.reset || !glog || glog.w !== g.w)) {
+    if (g.from === g.base) { glog = { w: g.w, name: g.name, head: g.head, base: g.base, lines: g.lines.slice() }; gl = { w: g.w, name: g.name, head: g.head, base: g.base, from: g.from, lines: g.lines, reset: true }; }
+    else glogAt = g.base;
+  } else if (g) {
+    if (g.from === glog.base + glog.lines.length) {
+      glog.lines.push(...g.lines); glog.head = g.head; glog.name = g.name;
+      if (g.base > glog.base) { glog.lines.splice(0, Math.min(glog.lines.length, g.base - glog.base)); glog.base = g.base; }   // the game dropped its oldest
+      if (glog.lines.length > GLOG_CAP) { const n = glog.lines.length - GLOG_CAP; glog.lines.splice(0, n); glog.base += n; }
+      if (g.lines.length) gl = { w: g.w, name: g.name, head: g.head, base: glog.base, from: g.from, lines: g.lines };
+    } else glogAt = glog.base + glog.lines.length;
+  }
+  const disk = readBuild(), build = s.build !== undefined && disk.commit && s.build !== disk.commit ? disk : null;   // the files on disk changed
+  latest = { ...s, layouts: undefined, logs: undefined, econ: undefined, glog: undefined };
+  broadcast("snap", { ...s, logs, glog: gl });
   if (fresh) console.log("[debug] game connected");
   // a fresh server holds no layouts or logs yet: ask the game to send them all again
   const resync = pushes++ === 0, stale = !s.alerts || s.alerts.av !== av;   // the game's alerts are out of date: send them along
-  res.writeHead(200, cors({ "Content-Type": "text/plain" })).end(stale ? JSON.stringify({ resync, av, alerts }) : resync ? "resync" : "ok");
+  const staleP = !!s.pick && s.pick.pv !== pv;                                 // so is its picked villager
+  const o = stale || staleP || glogAt != null || build ? Object.assign({ resync }, stale ? { av, alerts } : {}, staleP ? { pick, pv } : {}, glogAt != null ? { glogAt } : {}, build ? { build } : {}) : null;
+  res.writeHead(200, cors({ "Content-Type": "text/plain" })).end(o ? JSON.stringify(o) : resync ? "resync" : "ok");
 }
 // Allow-Private-Network: Chrome asks before a page from a network address (a LAN IP) talks to this machine's localhost
 const cors = (h = {}) => Object.assign({ "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Allow-Private-Network": "true" }, h);
 const cached = () => {
-  const logs = {}, ls = {}, ds = {}, ic = {};
+  const logs = {}, ls = {}, ds = {}, ic = {}, ec = {};
   for (const [k, i] of icons) ic[k] = i;
+  for (const [k, e] of econ) ec[k] = e;
   for (const [k, h] of history) logs[k] = { key: k, cap: 300, entries: h };
   for (const [k, l] of layouts) ls[k] = l;
   for (const [k, d] of details) ds[k] = d;
-  return { layouts: ls, logs, details: ds, icons: ic };
+  return { layouts: ls, logs, details: ds, icons: ic, econ: ec, day, glog };
 };
 
 function serveDebug(req, res) {
@@ -140,6 +196,18 @@ function serveDebug(req, res) {
     }).bind(null, req, res));
     return;
   }
+  if (url.pathname === "/pick" && req.method === "POST") {   // the debug screen picked a villager ({key}) or none ({key: null})
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", c => { body += c; if (body.length > 1e4) req.destroy(); });
+    req.on("end", safe(() => {
+      let o; try { o = JSON.parse(body); } catch (e) { res.writeHead(400, cors()).end("bad json"); return; }
+      const k = o && typeof o.key === "string" ? o.key.slice(0, 80) : null;
+      if (k !== pick) { pick = k; pv = String(Date.now()); if (!k) day = null; }
+      res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ pick, pv }));
+    }).bind(null, req, res));
+    return;
+  }
   if (url.pathname === "/alerts") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ av, alerts })); return; }
   if (url.pathname === "/logmatch.js") {   // the log reader the game uses too, so the screen's filters and alerts read entries the same way
     fs.readFile(path.join(ROOT, "js", "logmatch.js"), (err, data) => err ? res.writeHead(404).end() : res.writeHead(200, { "Content-Type": TYPES[".js"], "Cache-Control": "no-cache" }).end(data));
@@ -156,6 +224,7 @@ function serveDebug(req, res) {
     req.on("close", () => clients.delete(res));
     return;
   }
+  if (url.pathname === "/glog") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify(glog)); return; }   // the game log as the server holds it
   if (url.pathname === "/state") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ latest, ...cached() })); return; }
   if (url.pathname === "/" || url.pathname === "/index.html") {
     fs.readFile(PAGE, (err, data) => err ? res.writeHead(500).end(String(err)) : res.writeHead(200, { "Content-Type": TYPES[".html"], "Cache-Control": "no-cache" }).end(data));
@@ -192,5 +261,6 @@ listen(serveDebug, DEBUG_PORT, "debug screen");
 if (!NO_GAME) listen(serveGame, GAME_PORT, "game");
 console.log(`Blockfield debug server
   ${NO_GAME ? `Game:         serve it yourself and open index.html?debugfeed=${DEBUG_PORT}` : `Game:         http://${shown}:${GAME_PORT}`}
-  Debug screen: http://${shown}:${DEBUG_PORT}   (open this one on your second monitor)
+  Debug screen: http://${shown}:${DEBUG_PORT}   (open this one on your second monitor)${NO_GAME ? "" : `
+  Blockfieldpedia: http://${shown}:${GAME_PORT}/wiki/   (the Blockfield wiki)`}
 Ctrl+C to stop.`);

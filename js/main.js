@@ -32,13 +32,16 @@ resize();
 // ---------- world lifecycle ----------
 // Starts (or restarts) a world from a seed and places the player on solid ground near the origin.
 BF.newWorld = function (seed, opts) {
+  BF.emit("worldClosing");   // the world being replaced is unloaded (js/gamelog.js logs it while its clock still reads right)
   BF.state.seed = seed >>> 0;
   BF.state.gen = opts && opts.gen ? opts.gen | 0 : 3;                       // worldgen version: 1 = classic, 2 = continents, 3 = mile-high (default)
   BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier (gen 2 and 3)
-  BF.state.villages = opts && opts.villages ? opts.villages | 0 : 3;         // village generator: 1 = classic (capped at 24 villagers), 2 = 2-100 villagers, 3 = 3-100 with the core trades and desert gardens (default)
+  BF.state.villages = opts && opts.villages ? opts.villages | 0 : 10;        // village generator: 1 = classic (capped at 24 villagers), 2 = 2-100 villagers, 3 = 3-100 with the core trades and desert gardens, 4 = 3 + a poultry keeper and coop in villages of 8+, 5 = 4 + a cowherd and pasture in grass villages of 10+, 6 = 5 + a baker and oven per 15 villagers, 7 = 6 + pane windows and a glassmaker near sand, 8 = 7 + bee nests in trees and a beekeeper in grass villages, 9 = 8 + a pig farmer and sty in 60% of grass villages of 10+, 10 = paddocks and keepers from village size and native animals, no spawn village (default)
   BF.noise = BF.makeNoise(BF.state.seed);
   BF.mobs.clear && BF.mobs.clear();
   BF.drops.clear();
+  if (BF.boats) BF.boats.clear();
+  if (BF.horses) BF.horses.reset();
   BF.world.reset();
   BF.worldgen.init(BF.noise, { gen: BF.state.gen, biomeScale: BF.state.biomeScale, villages: BF.state.villages });
   // pick a dry spawn column near the origin
@@ -81,7 +84,7 @@ function debugInfo() {
     sections: cc ? { lo: cc.lo, hi: cc.hi - 1, y0: cc.y0, y1: cc.y1 - 1 } : null,
     biome: biome ? biome.name : "?",
     chunksDrawn: BF.world.meshedCount(), chunksLoaded: BF.world.chunks.size, chunksQueued: BF.world.queueLength,
-    mobs: BF.mobs.list.length, seed: BF.state.seed, gen: BF.state.gen, biomeScale: BF.state.biomeScale, sim: BF.villageSim.status(),
+    mobs: BF.mobs.list.length, boats: BF.boats ? BF.boats.list.length : 0, seed: BF.state.seed, gen: BF.state.gen, biomeScale: BF.state.biomeScale, sim: BF.villageSim.status(),
     day: BF.sky.day + BF.sky.time, clock: BF.vlog.stamp(BF.sky.day + BF.sky.time), light: BF.sky.light,
     blockLight: BF.world.getBlockLight(p.x, p.y + 0.05, p.z), calls: renderer.info.render.calls,
     weather: BF.weather && BF.weather.debugText ? BF.weather.debugText() : "",
@@ -95,7 +98,7 @@ function debugText(d) {
     `XYZ ${d.x.toFixed(1)} / ${d.y.toFixed(1)} / ${d.z.toFixed(1)}\n` +
     `Chunk ${d.chunkX}, ${d.chunkZ}${s ? `  Sections ${s.lo}..${s.hi} (y ${s.y0}..${s.y1})` : ""}  Biome ${d.biome}\n` +
     `Chunks ${d.chunksDrawn} drawn / ${d.chunksLoaded} loaded, ${d.chunksQueued} queued\n` +
-    `Mobs ${d.mobs}  Seed ${d.seed}  Gen ${d.gen} Biomes x${d.biomeScale}  ${d.sim}\n` +
+    `Mobs ${d.mobs}${d.boats ? `  Boats ${d.boats}` : ""}  Seed ${d.seed}  Gen ${d.gen} Biomes x${d.biomeScale}  ${d.sim}\n` +
     `${d.clock}  Light ${d.light.toFixed(2)}  BL ${d.blockLight}  Calls ${d.calls}` +
     (d.weather ? "\n" + d.weather : "") +
     `\nClouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}` +
@@ -125,13 +128,16 @@ function frame(now) {
       BF.state.time += h;
       BF.sky.update(h);
       BF.mobs.update(h);
+      if (BF.dayTimeline) BF.dayTimeline.update();   // villagers' day timelines, once a game minute (js/daytimeline.js)
       BF.drops.update(h);
+      BF.boats.update(h);   // boats without the player: drift, mob passengers (the player's own boat moves in real time, js/player.js)
       if (BF.inventory.simTick) BF.inventory.simTick(h);   // furnaces
       BF.world.tickSim();
       done++;
     }
     // the player stays in real time (movement, physics, mining, hunger, air): one step per frame, whatever the speed
     BF.player.update(dt);
+    if (BF.horses) BF.horses.drawLeads();   // lead ropes follow the player and the horses every frame
     W.done(done, done * plan.h, dt);
   } else if (BF.player.updatePaused) {
     BF.player.updatePaused(dt);
@@ -155,11 +161,12 @@ BF.mobs.init(scene);
 BF.villageSim.init();
 BF.vlog.init();
 BF.drops.init(scene);
+BF.boats.init(scene);
 BF.player.init();
 BF.inventory.init();
 let seed = 1337;
-const m = /^#seed(\d+)(?:gen(\d))?$/.exec(location.hash);   // e.g. #seed1337gen2 starts a legacy-generator world
+const m = /^#seed(\d+)(?:gen(\d))?(?:v(\d+))?$/.exec(location.hash);   // e.g. #seed1337gen2 starts a legacy-generator world, #seed1337gen3v9 one with village generator 9
 if (m) seed = +m[1];
-BF.newWorld(seed, m && m[2] ? { gen: +m[2] } : undefined);
+BF.newWorld(seed, m && (m[2] || m[3]) ? Object.assign(m[2] ? { gen: +m[2] } : {}, m[3] ? { villages: +m[3] } : {}) : undefined);
 requestAnimationFrame(frame);
 })();

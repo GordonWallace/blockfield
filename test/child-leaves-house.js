@@ -23,9 +23,14 @@ const seed = +(process.argv[2] || 1337);
     const rec = BF.mobs.villages.get(Math.round(v.x) + "," + Math.round(v.z));
     const ad = rec.members.filter(m => m.type === "villager" && !m.dead && !m.child);
     const kids = [];
-    for (let i = 0; i + 1 < ad.length && kids.length < 3; i += 2) { const c = BF.breeding.forceBirth(ad[i], ad[i + 1]); if (c) kids.push(c); }
+    // Each parent pays 5 bread-eq for a birth (js/breeding.js birth); how much an adult holds this early is down to what it ate and sold
+    // since the village loaded (often 4-6), so the parents get bread first, as in villagelog.js.
+    for (let i = 0; i + 1 < ad.length && kids.length < 3; i += 2) {
+      for (const m of [ad[i], ad[i + 1]]) BF.trades.inv.add(m.inv, BF.I.bread, 20);
+      const c = BF.breeding.forceBirth(ad[i], ad[i + 1]); if (c) kids.push(c);
+    }
     window.__kids = kids; window.__seen = kids.map(() => ({ slept: false, outAfter: false }));
-    return { x: v.x, z: v.z, kids: kids.length };
+    return { x: v.x, z: v.z, kids: kids.length, adults: ad.length };
   });
   console.log(JSON.stringify(v));
   let last;
@@ -37,6 +42,7 @@ const seed = +(process.argv[2] || 1337);
         window.__kids.forEach((m, j) => {
           const s = window.__seen[j], b = m.bed, rec = m.village;
           if (m.sleeping) s.slept = true;
+          if (s.slept && !m.sleeping && s.woke == null) s.woke = +(BF.sky.day + BF.sky.time).toFixed(3);
           const H = b && rec && (rec.houses || []).find(h => h && h.w && b.x >= h.x && b.x < h.x + h.w && b.z >= h.z && b.z < h.z + h.d);
           if (!H) return;
           if (m.sleeping) s.house = true;
@@ -51,5 +57,13 @@ const seed = +(process.argv[2] || 1337);
   const tested = last.seen.filter(s => s.house);
   console.log((tested.length ? 'PASS ' : 'FAIL ') + `${tested.length} children slept in a house bed`);
   console.log((tested.length && tested.every(s => s.outAfter) ? 'PASS ' : 'FAIL ') + `children walked out of their house after sleeping: ${tested.filter(s => s.outAfter).length}/${tested.length}`);
+  // a child that stayed in: where it is, its house and door, and how its morning walk out ended (js/mobs.js morningAI), to find the cause
+  if (tested.some(s => !s.outAfter)) console.log('stayed in: ' + JSON.stringify(await pg.evaluate(() => window.__kids.map((m, j) => {
+    const s = window.__seen[j], b = m.bed, rec = m.village, ai = m.ai || {};
+    if (!s.house || s.outAfter) return null;
+    const H = b && rec && (rec.houses || []).find(h => h && h.w && b.x >= h.x && b.x < h.x + h.w && b.z >= h.z && b.z < h.z + h.d);
+    return { j, woke: s.woke, sleeping: !!m.sleeping, at: [m.position.x, m.position.y, m.position.z].map(v => +v.toFixed(1)), bed: b && [b.x, b.y, b.z],
+      house: H && { x: H.x, z: H.z, w: H.w, d: H.d, door: [H.doorX, H.doorZ], out: [H.outX, H.outZ] }, mode: ai.mode, leaving: !!ai.leaving, leaveEnd: ai.leaveEnd || null, route: ai.routeKind || null };
+  }).filter(Boolean))));
   await b.close();
 })();

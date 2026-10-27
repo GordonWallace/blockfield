@@ -113,7 +113,7 @@ function buildRecipes() {
   // smelting
   smelt(I.raw_porkchop, I.cooked_porkchop); smelt(I.raw_beef, I.steak); smelt(I.raw_mutton, I.cooked_mutton);
   smelt(I.raw_chicken, I.cooked_chicken); smelt(I.potato, I.baked_potato);
-  smelt(I.raw_cod, I.cooked_cod); smelt(I.raw_salmon, I.cooked_salmon);
+  smelt(I.raw_cod, I.cooked_cod); if (I.egg !== undefined) smelt(I.egg, I.cooked_egg); smelt(I.raw_salmon, I.cooked_salmon);
   smelt([I.sand, I.red_sand], I.glass); smelt(C, I.stone);
   if (I.brick !== undefined && I.clay_ball !== undefined) { smelt(I.clay_ball, I.brick); smelt(I.clay, I.terracotta); }
   else smelt(I.clay, I.bricks);
@@ -175,8 +175,16 @@ function recompute() {
   const r = matchRecipe();
   result = r ? { id: r.out, count: r.n } : null;
 }
+// Takes one of each grid ingredient. An ingredient with a container (a milk bucket, a milk bottle: blocks.js `container`) leaves it behind:
+// in its grid slot when that empties, as in vanilla, else back in the inventory (js/cowherd.js).
 function consumeGrid() {
-  for (let i = 0; i < grid.length; i++) if (grid[i] && --grid[i].count <= 0) grid[i] = null;
+  for (let i = 0; i < grid.length; i++) {
+    const s = grid[i];
+    if (!s) continue;
+    const it = BF.items[s.id], back = it && it.container && BF.I[it.container];
+    if (--s.count <= 0) grid[i] = back != null ? { id: back, count: 1 } : null;
+    else if (back != null) giveBack({ id: back, count: 1 });
+  }
   recompute();
 }
 
@@ -441,11 +449,13 @@ function performTrade(o) {
   const sold = BF.trades.exchange(villager, o, wear);
   if (BF.trades.addXp(villager, o)) { levelFlashT = 2.5; BF.emit("villagerLevelUp", villager, villager.level); }
   BF.emit("villagerTrade", villager, o);
+  if (BF.prices) BF.prices.filled(villager, o, 1);
   return sold || [];
 }
 function clickTrade(shift) {
   if (!tradeOffer) return;
   const o = tradeOffer, out = o.sell;
+  if (o.horse) { performTrade(o); topUp(o); recomputeTrade(); return; }   // a stable's horse (js/stables.js): it walks out to the player, nothing goes into a slot
   if (shift) {
     let got = 0;
     for (let g = 0; g < 64 && tradeOffer === o; g++) {
@@ -489,7 +499,7 @@ const NATURAL = /(^grass$|dirt|^sand$|red_sand|gravel|snow|ice|_log$|leaves|cact
 let creList = null;
 function creativeItems() {
   if (creList) return creList;
-  const growTargets = new Set(BF.blocks.filter(b => b && b.growsInto != null)
+  const growTargets = new Set(BF.blocks.filter(b => b && b.growsInto != null && !b.fruit)   // a pumpkin stem's pumpkin stays in the menu (js/baker.js)
     .map(b => typeof b.growsInto === "number" ? (BF.blocks[b.growsInto] || {}).name : b.growsInto));
   creList = [];
   for (const it of BF.items) { // sparse: holes between block ids and ITEM_BASE iterate as undefined
@@ -651,6 +661,7 @@ const css = `
 .bf-vgrid.edit .bf-slot { opacity: 1; filter: none; cursor: pointer; }
 .bf-vgrid.edit .bf-slot:hover { background: rgba(255,255,255,.12); }
 .bf-none { color: var(--muted); font: 12px/1.5 var(--mono); padding: 8px 2px; }
+.bf-osep { color: var(--muted); font: 11px/1.4 var(--mono); padding: 6px 2px 2px; border-top: 1px solid rgba(255,255,255,.12); margin-top: 4px; }
 .bf-tabs { display: flex; gap: 2px; margin-bottom: 6px; }
 .bf-tab { width: calc(var(--s) * 1.05); height: calc(var(--s) * .95); display: grid; place-items: center; background: rgba(255,255,255,.05);
   border: 1px solid var(--panel-edge); border-radius: 2px 2px 0 0; cursor: pointer; padding: 0; }
@@ -1209,13 +1220,18 @@ function renderFurnaceProgress() {
 let offersKey = "";
 function renderOffers() {
   const v = villager;
-  const key = v ? v.trades.map(o => tradeReason(o) || "").join("|") + "#" + offerSel + "#" + v.level : "-";
+  const key = v ? v.trades.map(o => (tradeReason(o) || "") + o.buy.map(b => b.id + "x" + b.n).join("+") + ">" + o.sell.id + "x" + o.sell.n).join("|") + "#" + offerSel + "#" + v.level : "-";   // amounts too: prices move (js/prices.js)
   if (key !== offersKey) {
     offersKey = key;
     offersEl.textContent = "";
     if (!v || !v.trades.length) {
       const d = div("bf-none", offersEl); d.textContent = "This villager has nothing to trade.";
     } else v.trades.forEach((o, i) => {
+      if (o.off) return;   // set aside: it only buys or only sells an item at a time (js/market.js oneSide)
+      // spare goods and what it needs now (js/market.js) come after its job's offers
+      const extra = x => !!(x.spare || x.need || x.feed);
+      const prev = v.trades.slice(0, i).filter(x => !x.off).pop();
+      if (extra(o) && (!prev || !extra(prev))) { const d = div("bf-osep", offersEl); d.textContent = "Spare goods and needs"; }
       const row = document.createElement("button"); row.type = "button";
       row.className = "bf-offer" + (i === offerSel ? " sel" : "") + (tradeReason(o) ? " out" : "");
       row.dataset.i = i;
@@ -1228,6 +1244,7 @@ function renderOffers() {
       const ar = document.createElement("span"); ar.className = "ar"; ar.textContent = tradeReason(o) ? "X" : "\u2192";
       row.append(cell(o.buy[0]), cell(o.buy[1]), ar, cell(o.sell));
       row.setAttribute("aria-label", o.buy.map(b => b.n + " " + nameOf(b.id)).join(" + ") + " for " + o.sell.n + " " + nameOf(o.sell.id));
+      if (o.note) row.title = o.note;   // e.g. a stable horse's stats (js/stables.js)
       offersEl.appendChild(row);
     });
   }
@@ -1371,7 +1388,7 @@ function closeScreen(silent) {
   giveBack(cursor); cursor = null; result = null;
   if (villager) {
     const v = villager; villager = null;
-    BF.trades.syncFeed(v, false);   // food offers of a hungry unemployed villager only exist while the screen is open
+    BF.trades.syncFeed(v, false);   // food offers of a hungry villager, spare goods and needs (js/market.js)
     try { if (v.position && BF.mobs && BF.mobs.setTrading) BF.mobs.setTrading(v, false); } catch (e) { console.error(e); }
   }
   tradeOffer = tradeResult = null; offerSel = -1;
@@ -1415,6 +1432,8 @@ const api = {
   levelNames: LEVELS,
   isCreative,
   iconURL,          // item id -> icon image URL, as the slots show it (js/debugfeed.js sends these to the debug screen)
+  creativeItems,    // [{id, cat, name}] in creative-menu order, and the tabs: Blockfieldpedia (wiki/) groups its block and item lists by them
+  creativeTabs: CRE_TABS,
   init() {
     buildRecipes();
     buildDOM();
@@ -1499,6 +1518,12 @@ const api = {
     if (r === "broken") emitChange();
     return r;
   },
+  // Crafting grid for tests (headless): gridSet(stacks, w) fills a w x w grid; craftResult() is what it makes; craftTake() takes one craft
+  // (as a click on the result slot) and returns it; gridGet() is the grid's contents.
+  gridSet(stacks, w) { gw = w || 3; grid = Array.from({ length: gw * gw }, (_, i) => (stacks && stacks[i] ? { id: stacks[i].id, count: stacks[i].count || 1 } : null)); recompute(); return result; },
+  craftResult() { return result ? { id: result.id, count: result.count } : null; },
+  craftTake() { if (!result) return null; const r = { id: result.id, count: result.count }; addTo(r.id, r.count, ORDER_ALL); consumeGrid(); return r; },
+  gridGet() { return grid.map(s => (s ? { id: s.id, count: s.count } : null)); },
   consumeSelected(n = 1) {
     const s = slots[selected];
     if (!s) return 0;
@@ -1528,6 +1553,7 @@ const api = {
     if (open_) closeScreen(true);
     ensureTrades(v);
     BF.trades.restock(v);
+    if (BF.prices) BF.prices.tick(v);   // prices follow demand (js/prices.js)
     villager = v; offerSel = -1; pay = [null, null]; levelFlashT = 0;
     recomputeTrade();
     openScreen("trade");
@@ -1538,7 +1564,10 @@ const api = {
   furnaceState(x, y, z) { return furnaces.get(`${x},${y},${z}`) || null; },
   furnaceRecord(x, y, z) { return furnaceAt({ x, y, z }); },   // creates the furnace's state when it has none yet (villagers: js/toolsmith.js)
   // One simulation step for every furnace (main.js runs it with the world, so it follows the fast-forward).
-  simTick(h) { for (const f of furnaces.values()) if (tickFurnace(f, h) && f === furnace) furnaceDirty = true; },
+  simTick(h) {
+    for (const f of furnaces.values()) if (tickFurnace(f, h) && f === furnace) furnaceDirty = true;
+    if (BF.baker) BF.baker.simTick(h);   // bakers' ovens bake on the same clock (js/baker.js)
+  },
   chestState(x, y, z) { return chests.get(`${x},${y},${z}`) || null; },
   // Puts items into the chest at x,y,z (creating its contents); returns how many did not fit. For villagers, commands and tests.
   chestAdd(x, y, z, itemId, count = 1, wear = 0) {   // wear: uses spent on a worn tool

@@ -349,11 +349,237 @@ if (SPRITES) SPRITES.tent = (G, m) => {
   put(G, 7, 2, pole); put(G, 8, 2, pole); put(G, 7, 1, hex("#c83a3a")); put(G, 8, 1, hex("#c83a3a"));
   for (let x = 1; x <= 14; x++) put(G, x, 13, pole);
 };
+// ---------- tack rack (stable hand, not vanilla): a dark board on oak posts; the front carries a saddle on its peg, the sides a bridle and
+// a coiled lead on hooks, the top the rack's shelf with a brush. Leather browns over spruce so it reads apart from the plank blocks. ----------
+const LEATHER = pal(["#3e200e", "#552d14", "#6b3e1e", "#80502a", "#966438"]);
+const BRASS = hex("#c8a040");
+T.tack_rack_side = p => {
+  vboards(p, SPRUCE, 8, "#1a1108");
+  band(p, 0, 2, WOOD_OAK); band(p, 29, 31, WOOD_OAK);
+  rect(p, 2, 8, 29, 9, hex("#2a1a0c"), 0.95, 0.03);                                                            // the hook rail
+  for (const x of [8, 23]) { rect(p, x, 7, x + 1, 10, (xx, y) => (y === 7 ? BRASS : mul(BRASS, 0.7)), 1, 0.02); }   // brass hooks
+  // bridle: headstall loop hanging from the left hook, a brass bit ring at the bottom
+  for (let a = 0; a < 40; a++) { const t = a / 40 * Math.PI * 2, x = Math.round(9 + Math.sin(t) * 4), y = Math.round(18 + Math.cos(t) * 7.5); if (y > 10) { p.set(x, y, jit(p, ramp(LEATHER, 0.35 + (x < 9 ? 0.25 : 0)), 0.03)); p.setH(x, y, 0.95); } }
+  circle(p, 9, 26.5, 1.8, (x, y, d) => { if (d > 0.9) { p.set(x, y, BRASS); p.setH(x, y, 1); } });
+  // lead: a coil on the right hook
+  for (let r = 3; r <= 5; r += 2) for (let a = 0; a < 36; a++) { const t = a / 36 * Math.PI * 2, x = Math.round(24 + Math.cos(t) * r), y = Math.round(16 + Math.sin(t) * (r + 1)); p.set(x, y, jit(p, hex(a % 6 < 3 ? "#a07a4a" : "#7a5a32"), 0.03)); p.setH(x, y, 0.9); }
+  p.relief(1.1);
+};
+T.tack_rack_front = p => {
+  vboards(p, SPRUCE, 8, "#1a1108");
+  band(p, 0, 2, WOOD_OAK); band(p, 29, 31, WOOD_OAK);
+  rect(p, 4, 9, 27, 11, (x, y) => ramp(WOOD_OAK, y === 9 ? 0.85 : 0.35), 1, 0.03);                              // the saddle peg (a rail)
+  // saddle: seat curving over the peg, cantle and pommel raised, skirts hanging down, stirrups on irons
+  for (let x = 5; x <= 26; x++) {
+    const u = (x - 15.5) / 10.5, top = Math.round(8 - (1 - u * u) * 2 + (Math.abs(u) > 0.8 ? -2 : 0));
+    for (let y = top; y <= 16; y++) { p.set(x, y, jit(p, ramp(LEATHER, 0.75 - (y - top) * 0.05 + (y === top ? 0.15 : 0)), 0.03)); p.setH(x, y, 1 - (y - top) * 0.03); }
+  }
+  rect(p, 7, 17, 24, 22, (x, y) => ramp(LEATHER, 0.4 - (y - 17) * 0.04 + (x === 7 || x === 24 ? -0.15 : 0)), 0.85, 0.03);   // skirt
+  for (let x = 7; x <= 24; x += 3) p.set(x, 20, hex("#2a140a"));                                                // stitching
+  for (const x of [9, 22]) {
+    rect(p, x, 23, x, 26, hex("#3e200e"), 0.8, 0.02);                                                           // stirrup leathers
+    rect(p, x - 2, 27, x + 2, 27, hex("#b0b0b8"), 1, 0.02); p.set(x - 2, 26, hex("#8e8e96")); p.set(x + 2, 26, hex("#8e8e96"));   // irons
+  }
+  p.relief(1.0);
+};
+T.tack_rack_top = p => {
+  planksBase(p, WOOD_OAK, "#3d2c18");
+  frame(p, 2, "#2a1c0e", "#5e4222");
+  rect(p, 6, 13, 25, 17, (x, y) => ramp(WOOD_SPRUCE, y === 13 ? 0.8 : 0.4), 0.9, 0.03);                         // a grooming brush on the shelf
+  for (let x = 7; x <= 24; x += 2) { p.set(x, 18, hex("#c8a878")); p.set(x, 19, hex("#a88858")); }               // its bristles
+  p.relief(1.0);
+};
+
+// ---------- merchant's counter (merchant, not vanilla): a plank shop counter with a green cloth top; the top carries an open ledger, brass
+// scales and a cash box, the front a hanging cloth with an emerald sign, the sides bolts of goods stacked on the shelf under the board. ----------
+const CLOTH = pal(["#1e4a2a", "#265a34", "#2e6a3e", "#387a48", "#428a52"]);
+const EMER = pal(["#0c6a2a", "#149a3c", "#22c050", "#4ae070", "#9af0b0"]);
+T.merchant_counter_side = p => {
+  vboards(p, WOOD_OAK, 8, "#2a1c0e");
+  band(p, 0, 3, CLOTH);                                                                                          // cloth over the board
+  rect(p, 2, 14, 29, 15, hex("#3a2814"), 0.95, 0.03);                                                            // the shelf
+  const bolt = (x0, x1, y0, y1, c) => rect(p, x0, y0, x1, y1, (x, y) => ramp(c, 0.35 + (y === y0 ? 0.35 : 0) + ((x + y) % 4 === 0 ? 0.1 : 0)), 0.9, 0.03);
+  bolt(4, 13, 8, 13, pal(["#5a1a1a", "#7a2222", "#9a2c2c", "#b23a3a", "#c84a4a"]));                            // cloth bolts on the shelf
+  bolt(16, 27, 9, 13, pal(["#2a3a6a", "#344a82", "#3e5a9a", "#4a6ab0", "#5a7ac4"]));
+  rect(p, 5, 18, 12, 27, (x, y) => ramp(WOOD_SPRUCE, 0.3 + (y === 18 ? 0.4 : 0)), 0.85, 0.03);                   // a crate under it
+  for (const y of [21, 24]) rect(p, 5, y, 12, y, hex("#2a1a0c"), 0.6, 0.02);
+  p.relief(1.0);
+};
+T.merchant_counter_front = p => {
+  vboards(p, WOOD_OAK, 8, "#2a1c0e");
+  band(p, 0, 3, CLOTH);
+  rect(p, 3, 4, 28, 21, (x, y) => ramp(CLOTH, 0.45 + (y === 4 ? 0.3 : 0) - (x % 5 === 0 ? 0.12 : 0) + (y > 19 ? -0.15 : 0)), 0.8, 0.03);   // the hanging cloth
+  for (let x = 3; x <= 28; x += 2) p.set(x, 21, hex("#c8a040"));                                                // gold fringe
+  circle(p, 15.5, 12.5, 4.6, (x, y, d) => { const t = 1 - d / 4.6 + (x < 15 && y < 12 ? 0.25 : 0); p.set(x, y, jit(p, ramp(EMER, t), 0.03)); p.setH(x, y, 1); });   // the emerald sign
+  circle(p, 15.5, 12.5, 5.6, (x, y, d) => { if (d > 4.7) { p.set(x, y, hex("#c8a040")); p.setH(x, y, 1); } });
+  p.relief(1.0);
+};
+T.merchant_counter_top = p => {
+  rect(p, 0, 0, TS - 1, TS - 1, (x, y) => ramp(CLOTH, 0.45 + p.noise(x, y, 8, 2, 170) * 0.3), 0.6, 0.04);       // green cloth
+  rect(p, 0, 0, TS - 1, 1, (x) => ramp(WOOD_OAK, 0.6), 0.8, 0.03); rect(p, 0, TS - 2, TS - 1, TS - 1, (x) => ramp(WOOD_OAK, 0.4), 0.8, 0.03);
+  rect(p, 3, 4, 14, 14, (x, y) => (x === 8 || x === 9 ? hex("#b8a888") : ramp(pal(["#c8b890", "#d8c8a0", "#e4d6b0", "#eee2c0", "#f6eed8"]), 0.6)), 0.9, 0.02);   // open ledger
+  for (let y = 6; y <= 12; y += 2) { rect(p, 4, y, 7, y, hex("#5a4a3a"), 0.9, 0.01); rect(p, 10, y, 13, y, hex("#5a4a3a"), 0.9, 0.01); }
+  const B2 = hex("#c8a040"), B3 = hex("#8a6a20");
+  rect(p, 19, 5, 28, 5, B2, 1, 0.02); rect(p, 23, 5, 24, 13, B3, 1, 0.02);                                      // scales: beam and post
+  circle(p, 19.5, 8, 2.4, (x, y) => { p.set(x, y, B2); p.setH(x, y, 0.95); }); circle(p, 27.5, 8, 2.4, (x, y) => { p.set(x, y, B2); p.setH(x, y, 0.95); });
+  rect(p, 6, 19, 17, 27, (x, y) => ramp(DARK_OAK, 0.5 + (y === 19 ? 0.3 : 0)), 0.95, 0.03);                      // cash box
+  rect(p, 10, 22, 13, 24, B2, 1, 0.02);
+  for (const [x, y] of [[22, 20], [25, 22], [21, 25], [26, 26]]) circle(p, x, y, 1.5, (xx, yy) => { p.set(xx, yy, jit(p, ramp(EMER, 0.7), 0.03)); p.setH(xx, yy, 1); });   // a few emeralds
+  p.relief(1.0);
+};
+
 ICON_T.grindstone = p => {
   clearTile(p);
   rect(p, 4, 14, 7, 30, (x) => ramp(DARK_OAK, x === 4 ? 0.8 : 0.4), 0.8, 0.05);
   rect(p, 24, 14, 27, 30, (x) => ramp(DARK_OAK, x === 24 ? 0.8 : 0.4), 0.8, 0.05);
   circle(p, 16, 14, 11, (x, y, d) => { p.set(x, y, jit(p, ramp(pal(STONE_G), d > 9.5 ? 0.2 : 0.55 + (y < 10 ? 0.25 : 0)), 0.04)); p.setH(x, y, 0.9); });
   circle(p, 16, 14, 2.2, (x, y) => p.set(x, y, hex("#3a2c1c")));
+};
+
+// ---------- nesting box (poultry keeper, not vanilla): an oak box of straw with eggs in it, a hen-sized opening in the front ----------
+const STRAW = pal(["#8a6a24", "#a8862e", "#c8a43a", "#dcbc50", "#ecd27a"]);
+function straw(p, x0, y0, x1, y1) {
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const n = p.noise(x, y, 8, 3, 230), s = Math.sin((x * 1.7 + y * 0.6 + n * 9)) * 0.5 + 0.5;
+    p.set(x, y, jit(p, ramp(STRAW, 0.25 + s * 0.6 + (p.rand() - 0.5) * 0.15), 0.06)); p.setH(x, y, 0.4 + s * 0.4);
+  }
+}
+const egg = (p, cx, cy) => circle(p, cx, cy, 2.6, (x, y, d) => { p.set(x, y, jit(p, mix(hex("#fbf3e0"), hex("#d8c4a0"), Math.min(1, d / 2.6 + (y + 0.5 - cy) * 0.12)), 0.02)); p.setH(x, y, 1 - d / 4); });
+T.nesting_box_top = p => {
+  planksBase(p, WOOD_OAK, "#3d2c18");
+  straw(p, 4, 4, 27, 27);
+  frame(p, 3, "#5a4224", "#94734a");
+  egg(p, 12, 14); egg(p, 19, 18); egg(p, 15, 21);
+  p.relief(1.1, 0.3);
+};
+T.nesting_box_side = p => {
+  vboards(p, WOOD_OAK, 8, "#3d2c18");
+  band(p, 0, 2, WOOD_SPRUCE); band(p, 29, 31, WOOD_SPRUCE);
+  straw(p, 0, 3, 31, 5);
+  p.relief(1.2);
+};
+T.nesting_box_front = p => {
+  T.nesting_box_side(p);
+  circle(p, 16, 19, 7.5, (x, y, d) => { if (y > 27) return; p.set(x, y, jit(p, d > 6.3 ? hex("#2e2010") : ramp(STRAW, 0.15 + (y - 12) * 0.03), 0.05)); p.setH(x, y, d > 6.3 ? 0.9 : 0.2); });
+  egg(p, 15, 23);
+  p.relief(1.0);
+};
+
+// ---------- milk churn (cowherd, not vanilla): an oak churn bound with two iron hoops, a plank lid and the dasher handle through it ----------
+// Box model (blocks.js): the body spans rows 6-31 of the side tile (y 0-13), the lid samples the top tile, the handle the bottom tile.
+T.milk_churn_side = p => {
+  vboards(p, WOOD_OAK, 5, "#3d2c18");
+  band(p, 9, 11, IRON); band(p, 25, 27, IRON);
+  for (const x of [3, 13, 23]) { rivet(p, x, 10); rivet(p, x + 2, 26); }
+  rect(p, 6, 13, 25, 14, (x, y) => mix(hex("#f4f2ea"), hex("#d8d2c0"), p.noise(x, y, 4, 4, 251)), 0.75, 0.02);   // a milk drip
+  p.relief(1.25);
+};
+T.milk_churn_top = p => {
+  planksBase(p, WOOD_OAK, "#3d2c18");
+  frame(p, 2, "#4a4a52", "#9a9aa2");
+  circle(p, 16, 16, 3.2, (x, y, d) => { p.set(x, y, jit(p, ramp(WOOD_SPRUCE, 0.3 + d * 0.1), 0.04)); p.setH(x, y, 1 - d / 5); });   // the dasher through the lid
+  p.relief(1.2);
+};
+T.milk_churn_bottom = p => { planksBase(p, WOOD_SPRUCE, "#2a1e10"); p.relief(1.2); };
+
+// ---------- baker's oven (baker, not vanilla): a brick oven, a dark arched mouth with embers in the front, a stone hearth top ----------
+const BRICK_R = pal(["#6a2a1c", "#7e3422", "#923e28", "#a64a30", "#b85a3c"]);
+T.bakers_oven_side = p => {
+  for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) {
+    const row = Math.floor(y / 6), off = row % 2 ? 4 : 0, mortar = y % 6 === 5 || (x + off) % 12 === 11;
+    const b = Math.floor((x + off) / 12) + row * 7;
+    p.set(x, y, jit(p, mortar ? hex("#b8ad9c") : ramp(BRICK_R, 0.3 + K.ihash(b, p.seed, 11) * 0.5 + p.noise(x, y, 8, 4, 301) * 0.2), 0.05));
+    p.setH(x, y, mortar ? 0.1 : 0.8);
+  }
+  p.relief(1.2);
+};
+T.bakers_oven_front = p => {
+  T.bakers_oven_side(p);
+  for (let y = 8; y < 28; y++) for (let x = 6; x < 26; x++) {
+    const d = Math.hypot((x + 0.5 - 16) / 10, (y + 0.5 - 18) / 10);
+    if (y < 18 && d > 1) continue;
+    const edge = (y < 18 ? d > 0.82 : x < 8 || x > 23) || y > 25;
+    const ember = y >= 22 && !edge && p.rand() < 0.5;
+    p.set(x, y, edge ? jit(p, hex("#4a4440"), 0.05) : ember ? jit(p, p.rand() < 0.5 ? hex("#ff8a1c") : hex("#d0401a"), 0.06) : jit(p, hex("#1a1210"), 0.04));
+    p.setH(x, y, edge ? 0.9 : 0.05);
+  }
+  p.relief(1.0);
+};
+T.bakers_oven_top = p => { cobbleBase(p); frame(p, 2, "#6a2a1c", "#a64a30"); p.relief(1.1); };
+T.bakers_oven_bottom = p => { cobbleBase(p); p.relief(1.1); };
+
+// ---------- glass kiln (glassmaker, not vanilla): grey stone blocks, a round mouth glowing with molten glass in the front, a sooty chimney top ----------
+const KILN_S = pal(["#58585c", "#66666a", "#747478", "#828286", "#909094"]);
+T.glass_kiln_side = p => {
+  for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) {
+    const row = Math.floor(y / 8), off = row % 2 ? 6 : 0, mortar = y % 8 === 7 || (x + off) % 12 === 11;
+    const b = Math.floor((x + off) / 12) + row * 7;
+    p.set(x, y, jit(p, mortar ? hex("#3e3e42") : ramp(KILN_S, 0.25 + K.ihash(b, p.seed, 13) * 0.5 + p.noise(x, y, 8, 4, 331) * 0.25), 0.05));
+    p.setH(x, y, mortar ? 0.1 : 0.8);
+  }
+  p.relief(1.2);
+};
+T.glass_kiln_front = p => {
+  T.glass_kiln_side(p);
+  circle(p, 16, 18, 8.5, (x, y, d) => {
+    const rim = d > 6.8, glow = 1 - d / 6.8;
+    p.set(x, y, rim ? jit(p, hex("#2e2e32"), 0.05) : jit(p, mix(hex("#ff7a18"), hex("#ffe28a"), Math.max(0, glow * 1.3 - 0.2)), 0.05));
+    p.setH(x, y, rim ? 0.95 : 0.05);
+  });
+  for (const [x, y] of [[13, 16], [18, 19], [15, 21]]) { p.set(x, y, hex("#bfe8f2")); p.set(x + 1, y, hex("#9fd2e2")); }   // beads of glass in the melt
+  p.relief(1.0);
+};
+T.glass_kiln_top = p => {
+  cobbleBase(p);
+  circle(p, 16, 16, 6, (x, y, d) => { p.set(x, y, jit(p, d > 4.5 ? hex("#3a3a3e") : hex("#141416"), 0.05)); p.setH(x, y, d > 4.5 ? 0.9 : 0); });   // the chimney
+  p.relief(1.1);
+};
+T.glass_kiln_bottom = p => { cobbleBase(p); p.relief(1.1); };
+
+// ---------- feed trough (pig farmer, not vanilla): a low plank trough on two dark cross boards, heaped with carrots, potatoes and beetroot ----------
+// Box model (blocks.js): the body spans y 0-9, rows 14-31 of the side tile; the top tile is the feed seen from above inside a plank rim.
+T.feed_trough_side = p => {
+  planksBase(p, WOOD_OAK, "#3d2c18");
+  band(p, 14, 16, pal(["#2e2010", "#3a2a16", "#46331c", "#523d22", "#5e4728"]));
+  band(p, 28, 30, pal(["#2e2010", "#3a2a16", "#46331c", "#523d22", "#5e4728"]));
+  p.relief(1.2);
+};
+T.feed_trough_top = p => {
+  planksBase(p, WOOD_OAK, "#3d2c18");
+  const FEED = [["#e8892a", "#c86a18"], ["#c8a85a", "#a88a40"], ["#a8323a", "#7a2028"]];   // carrot, potato, beetroot
+  rect(p, 4, 6, 27, 25, (x, y) => mix(hex("#4a3418"), hex("#5e4422"), p.noise(x, y, 8, 4, 361)), 0.2, 0.04);   // the inside
+  for (let k = 0; k < 26; k++) {
+    const cx = 6 + Math.floor(K.ihash(k, p.seed, 17) * 20), cy = 8 + Math.floor(K.ihash(k, p.seed, 19) * 16), [a, b] = FEED[k % 3];
+    for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < (k % 3 === 0 ? 3 : 2); dx++) { p.set(cx + dx, cy + dy, jit(p, hex(dy ? b : a), 0.06)); p.setH(cx + dx, cy + dy, 0.6); }
+  }
+  p.relief(1.1);
+};
+
+// ---------- cake (vanilla): white icing with red berries on top, sponge and cream on the sides ----------
+T.cake_top = p => {
+  p.fill((x, y) => { p.set(x, y, jit(p, mix(hex("#fbf8f2"), hex("#ece4d8"), p.noise(x, y, 8, 4, 311)), 0.02)); p.setH(x, y, 0.6); });
+  for (const [x, y] of [[7, 7], [16, 5], [24, 9], [9, 17], [20, 16], [13, 25], [25, 24]]) circle(p, x, y, 1.6, (xx, yy) => { p.set(xx, yy, jit(p, hex("#c8202a"), 0.05)); p.setH(xx, yy, 1); });
+  p.relief(0.8);
+};
+T.cake_side = p => {
+  p.fill((x, y) => {
+    let c;
+    const r = y % 16;                                                                // box models sample rows 16-31 (the cake's half block)
+    if (r < 5) c = hex(r === 4 && x % 5 === 2 ? "#e8dccc" : "#fbf8f2");             // the icing
+    else if (r === 10 || r === 11) c = hex("#f0e6d8");                              // a cream layer
+    else c = ramp(pal(["#a8642a", "#b8743a", "#c8844a", "#d69458"]), 0.4 + p.noise(x, y, 8, 4, 313) * 0.4);
+    p.set(x, y, jit(p, c, 0.03)); p.setH(x, y, y % 16 < 5 ? 0.7 : 0.5);
+  });
+  p.relief(0.8);
+};
+T.cake_bottom = p => { p.fill((x, y) => { p.set(x, y, jit(p, hex("#b8743a"), 0.05)); p.setH(x, y, 0.5); }); p.relief(0.6); };
+
+// ---------- pumpkin stem (young pumpkin, cross plant): a curly green vine with leaves ----------
+T.pumpkin_stem = p => {
+  clearTile(p);
+  const G = pal(["#3a6a1e", "#4a7e26", "#5a9230", "#6aa63a"]);
+  for (let y = 10; y < TS; y++) { const x = Math.round(16 + Math.sin(y * 0.45) * 3); for (const dx of [0, 1]) { p.set(x + dx, y, jit(p, ramp(G, 0.3 + dx * 0.3), 0.05)); p.setH(x + dx, y, 0.8); } }
+  for (const [cx, cy, r] of [[10, 14, 4.5], [22, 18, 4.5], [13, 24, 3.8], [20, 9, 3.6]]) circle(p, cx, cy, r, (x, y, d) => { p.set(x, y, jit(p, ramp(G, 0.85 - d / r * 0.6), 0.06)); p.setH(x, y, 1 - d / r * 0.5); });
+  p.relief(0.9);
 };
 })();
