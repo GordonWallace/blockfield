@@ -89,9 +89,12 @@ const herds = new Map();       // herd id -> {id, cx, cz, dir}
 let nextHerd = 1;
 const isHorseBiome = (x, z) => { try { return HORSE_BIOMES.has(BF.worldgen.biomeAt(x, z).id); } catch (_) { return false; } };
 function newRec(o) {
-  const rs = BF.rand.at("horse", o.x, o.z, null, nextId);   // a new horse's looks and stats: from where, when and its number
+  // (clusters, spec r15-39b: with the cluster tick on, a record's number comes from the running cluster's id ranges (js/ids.js), so it
+  // doesn't hang on the order clusters run in; wild herds rolled by js/wildlife.js are made per cluster (C2). C4 owns the rest of this file.)
+  const hid = BF.ctick && BF.ctick.on ? +BF.ids.alloc().slice(1) : nextId++;
+  const rs = BF.rand.at("horse", o.x, o.z, null, hid);   // a new horse's looks and stats: from where, when and its number
   const st = o.stats || rollStats(rs);
-  const r = BF.ids.mobRef({ hid: nextId++, x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, coat: o.coat || COATS[irnd(rs, 0, 6)], mark: o.mark || MARKS[irnd(rs, 0, 4)],
+  const r = BF.ids.mobRef({ hid, x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, coat: o.coat || COATS[irnd(rs, 0, 6)], mark: o.mark || MARKS[irnd(rs, 0, 4)],
     maxHp: st.hp, hp: st.hp, speed: st.speed, jump: st.jump, tamed: !!o.tamed, owner: o.owner || null, saddle: !!o.saddle, temper: 0,
     growAt: o.growAt != null ? o.growAt : null, cd: o.cd || 0, fed: null, herd: o.herd || null, lead: null, post: null, pen: o.pen || null, rider: false, mob: null, avoid: null, mate: null });
   recs.set(r.hid, r);

@@ -73,7 +73,7 @@ function seen(a, o, out) {
 }
 const _pAt = new THREE.Vector3(), _sA = new THREE.Vector3(), _sB = new THREE.Vector3(), _sEye = new THREE.Vector3();
 const _rHead = new THREE.Vector3();   // raycast: a sleeping mob's head end
-const pAt = m => seen(m.position, player().position, _pAt);          // the player's position in m's frame
+const pAt = m => seen(m.position, playerPos(), _pAt);          // the player's position in m's frame
 const mdist = (a, b) => seen(a.position, b.position, _sB).distanceTo(a.position);   // distance between two mobs (any frames)
 // The face whose frame a mob is kept in, or -1: its own face's canonical square. Anything ridden or riding goes with its rider or boat,
 // which keep to the canonical square (js/player.js crossEdge, js/boats.js).
@@ -117,6 +117,89 @@ function inSquare(x, z, d) {
 }
 const player = () => BF.player;
 function playerAlive() { const p = BF.player; return !!(p && p.position && !p.dead); }
+// Clusters (spec r15-39b, C2): a cluster other than the player's sees the player as it was at the last meeting (where, alive), so what
+// its mobs do doesn't hang on how far the player's cluster has run; the player's own cluster sees it live. Taken at the first mob update
+// after each meeting (js/ctick.js makes a new groups list at each), before any cluster has run.
+const pSeen = { tok: null, pos: null, alive: false };
+function seePlayer() {
+  const C = BF.ctick;
+  if (!C || !C.on) return;
+  const tok = C.groups();
+  if (pSeen.tok === tok) return;
+  pSeen.tok = tok;
+  const p = BF.player;
+  pSeen.pos = p && p.position ? p.position.clone() : null;
+  pSeen.alive = playerAlive();
+}
+const farFromPlayer = () => { const C = BF.ctick; return !!(C && C.on && C.cur && !C.cur.player && pSeen.tok); };
+const playerPos = () => (farFromPlayer() ? pSeen.pos : BF.player && BF.player.position);
+const playerLives = () => (farFromPlayer() ? pSeen.alive : playerAlive());
+// Things that aren't mobs (arrows; drops and boats, js/drops.js, js/boats.js) belong to a cluster too (C2): the one of the region they
+// were in at the last meeting (or of(o)'s: a boat's passenger's), or, when made while a cluster runs, that cluster's until the next
+// meeting. placeThing(o, p) when made; ownsThing(o, p, of?) -> o is the running cluster's (true while every cluster is seen: the cluster
+// tick off, between ticks); clOf(o) -> its base (undefined: not worked out since it came). Kept beside the object, not on it: an object
+// with a cl field is hidden from other clusters' links (js/ids.js), and a mob's link to its boat must not be.
+const thingCl = new WeakMap();   // o -> [the groups list (the meeting) it was worked out at, base]
+const baseAt = p => BF.clusters.ofRegion(BF.regions ? BF.regions.keyOf(p.x, 0, p.z) : -1);
+function placeThing(o, p) {
+  const C = BF.ctick;
+  if (C && C.on) thingCl.set(o, [C.groups(), C.cur ? C.cur.key : baseAt(p)]);
+  return o;
+}
+function ownsThing(o, p, of) {
+  const C = BF.ctick;
+  if (!C || !C.on || !C.filter) return true;
+  const tok = C.groups();
+  let t = thingCl.get(o);
+  if (!t || t[0] !== tok) thingCl.set(o, (t = [tok, (of && of(o)) || baseAt(p)]));
+  return ownsBase(t[1]);
+}
+const clOf = o => { const t = thingCl.get(o); return t ? t[1] : undefined; };
+// a thing sent at a meeting (js/cworkers.js: an owned table's apply) keeps the base it had where it ran, until it is worked out again
+function keepThing(o, b) { const C = BF.ctick; if (C && b !== undefined && b !== null) thingCl.set(o, [C.groups(), b]); return o; }
+// The running cluster handles base cluster b: b is in its group, or b is in no group this interval (land with no mob and no village, a
+// trip corridor say: the first group handles it, so its chunks still roll animals, spawn monsters and bring stored mobs back)
+const runKeys = { tok: null, set: null };
+function ownsBase(b) {
+  const C = BF.ctick;
+  if (!C || !C.on || !C.filter) return true;
+  const gs = C.groups(), g = BF.clusters.groupOf(b);
+  if (g === C.cur.key) return true;
+  if (C.cur !== gs[0]) return false;
+  if (runKeys.tok !== gs) { runKeys.tok = gs; runKeys.set = new Set(gs.map(x => x.key)); }
+  return !runKeys.set.has(g);
+}
+// the group that handles base b this interval (ownsBase's answer from outside a pass: the owned tables' snap)
+function groupFor(b) {
+  const C = BF.ctick, gs = C.groups(), g = BF.clusters.groupOf(b);
+  if (runKeys.tok !== gs) { runKeys.tok = gs; runKeys.set = new Set(gs.map(x => x.key)); }
+  return runKeys.set.has(g) || !gs.length ? g : gs[0].key;
+}
+// The tables of C2's systems in this file that last longer than an interval and aren't on mobs or village records, registered with
+// BF.ctick.owned so the multi-worker runtime (js/cworkers.js) sends each group's part at meetings: the monster spawn tries owed per base,
+// the villager-update counts per group, the arrows (their owner and victim as ids).
+const v3 = v => (v ? [v.x, v.y, v.z] : null), V3 = a => (a ? new THREE.Vector3(a[0], a[1], a[2]) : null);
+function ownTables() {
+  const C = BF.ctick;
+  if (!C || ownTables.done) return;
+  ownTables.done = true;
+  const part = (map, g) => { const o = []; for (const [k, v] of map) if (groupFor(k) === g) o.push([k, v]); return o; };
+  const put = (map, g, a) => { for (const k of [...map.keys()]) if (groupFor(k) === g) map.delete(k); for (const [k, v] of a || []) map.set(k, v); };
+  C.owned("mobs.spawnAcc", { snap: g => part(spawnAcc, g), apply: (g, a) => put(spawnAcc, g, a) });
+  C.owned("mobs.aiBy", { snap: g => aiBy.get(g) || null, apply: (g, v) => { if (v) aiBy.set(g, v); else aiBy.delete(g); } });
+  const enc = a => ({ pos: v3(a.pos), prev: v3(a.prev), vel: v3(a.vel), look: v3(a.look), dir: v3(a.dir), life: a.life, stuck: a.stuck, owner: a.owner ? a.owner.id : null,
+    victim: a.victim ? a.victim.id : null, byPlayer: !!a.byPlayer, damage: a.damage, crit: a.crit, pickup: a.pickup, cell: a.cell, rng: a.rng, cl: clOf(a) });
+  const dec = o => keepThing(Object.assign({}, o, { pos: V3(o.pos), prev: V3(o.prev), vel: V3(o.vel), look: V3(o.look), dir: V3(o.dir), owner: o.owner ? BF.ids.live(o.owner) || null : null,
+    victim: o.victim ? BF.ids.live(o.victim) || null : null, hit: null, cl: undefined }), o.cl);
+  C.owned("mobs.arrows", {
+    snap: g => arrows.filter(a => clOf(a) !== undefined && groupFor(clOf(a)) === g).map(enc),
+    apply(g, a) {
+      for (let i = arrows.length - 1; i >= 0; i--) if (clOf(arrows[i]) !== undefined && groupFor(clOf(arrows[i])) === g) arrows.splice(i, 1);
+      for (const o of a || []) arrows.push(dec(o));
+    },
+  });
+}
+const strHash = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; };
 function creative() { const p = BF.player; return !!(p && p.gameMode === "creative"); }
 function skyLight() { return BF.sky && typeof BF.sky.light === "number" ? BF.sky.light : 1; }
 function isNight() {
@@ -630,7 +713,7 @@ function shootArrow(m, target, victim) {
   dir.x += rnd(R(m), -0.03, 0.03); dir.y += rnd(R(m), -0.03, 0.03); dir.z += rnd(R(m), -0.03, 0.03);
   dir.normalize();
   from.addScaledVector(dir, 0.5);
-  arrows.push({ pos: from.clone(), prev: from.clone(), vel: dir.multiplyScalar(speed), look: null, life: 6, stuck: false, owner: m, victim: victim || null });
+  arrows.push(placeThing({ pos: from.clone(), prev: from.clone(), vel: dir.multiplyScalar(speed), look: null, life: 6, stuck: false, owner: m, victim: victim || null }, from));
   noiseSound(0.15, 2500, 0.25, from);
   if (BF.emit) BF.emit("arrowShot", m, from);
 }
@@ -643,7 +726,7 @@ function shootPlayerArrow(from, vel, o) {
   o = o || {};
   const a = { pos: from.clone(), prev: from.clone(), vel: vel.clone(), look: vel.clone(), life: PLAYER_ARROW_LIFE, stuck: false, owner: null, victim: null,
     byPlayer: true, damage: o.damage || 1, crit: !!o.crit, pickup: o.pickup | 0, cell: null, hit: null };
-  arrows.push(a);
+  arrows.push(placeThing(a, from));
   if (BF.emit) BF.emit("arrowShot", null, from);
   return a;
 }
@@ -695,9 +778,10 @@ function mobAtIn(L, q) {
 }
 const _dir = new THREE.Vector3();
 function updateArrows(dt) {
-  const p = playerAlive() ? player() : null;
+  const p = !farFromPlayer() && playerAlive() ? player() : null;   // (clusters: only the player's cluster's arrows reach the player)
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
+    if (!ownsThing(a, a.pos)) continue;   // (clusters, C2: the running cluster's arrows)
     a.prev.copy(a.pos);   // drawn between this and where the tick leaves it (js/entityview.js)
     a.life -= dt;
     if (a.life <= 0) { arrows.splice(i, 1); continue; }
@@ -989,7 +1073,7 @@ function wanderAI(m, dt, out) {
   ai.lookT -= dt;
   if (ai.lookT <= 0) {
     ai.lookT = rnd(R(m), 1.5, 4);
-    if (playerAlive() && pAt(m).distanceTo(m.position) < 8 && R(m).next() < 0.6) m.lookAt = "player";
+    if (playerLives() && pAt(m).distanceTo(m.position) < 8 && R(m).next() < 0.6) m.lookAt = "player";
     else m.lookAt = { yaw: rnd(R(m), -1, 1), pitch: rnd(R(m), -0.4, 0.3) };
   }
   if (ai.mode === "walk") {
@@ -1017,7 +1101,8 @@ function coarseIdle(m, dt) {
 
 function hostileAI(m, dt, out) {
   const ai = m.ai, T = m.def;
-  const p = playerAlive() && !creative() && !(BF.player && BF.player.hiddenInTent) ? player() : null;   // asleep in a tent: unseen
+  // asleep in a tent: unseen (clusters, C2: nor by a monster of a cluster other than the player's, which was past the view at the meeting)
+  const p = !farFromPlayer() && playerAlive() && !creative() && !(BF.player && BF.player.hiddenInTent) ? player() : null;
   ai.aiming = false;
   if (golemFight(m, dt, out)) { ai.fuse = 0; return; }
   if (!p) { ai.target = false; ai.fuse = Math.max(0, ai.fuse - dt); if (!zombieHuntVillagers(m, dt, out)) wanderAI(m, dt, out); return; }
@@ -1672,7 +1757,7 @@ function goFine(m) {
 function isOccupied(x, y, z) {
   const hit = (p, hw, h) => p.x + hw > x && p.x - hw < x + 1 && p.z + hw > z && p.z - hw < z + 1 && p.y < y + 2 && p.y + h > y;
   const c = { x: x + 0.5, z: z + 0.5 };   // (seen from the cell's frame)
-  if (playerAlive() && hit(seen(c, player().position, _sA), 0.3, 1.8)) return true;
+  if (playerLives() && hit(seen(c, playerPos(), _sA), 0.3, 1.8)) return true;
   const any = L => L.some(o => !o.dead && !o.removed && hit(seen(c, o.position, _sB), o.halfWidth, o.height));
   return vq("mobs.isOccupied", any(nearMobs(c, 3, true)), any);
 }
@@ -1681,7 +1766,7 @@ function isOccupied(x, y, z) {
 function atDoor(x, y, z, but) {
   const c = { x: x + 0.5, z: z + 0.5 };
   const by = (p, h) => { const dx = p.x - c.x, dz = p.z - c.z; return dx * dx + dz * dz < 1.69 && p.y < y + 2 && p.y + h > y; };
-  if (playerAlive() && by(seen(c, player().position, _sA), 1.8)) return true;
+  if (playerLives() && by(seen(c, playerPos(), _sA), 1.8)) return true;
   const any = L => L.some(o => o !== but && !o.dead && !o.removed && !o.sleeping && by(seen(c, o.position, _sB), o.height));
   return vq("mobs.atDoor", any(nearMobs(c, 3, true)), any);
 }
@@ -1883,7 +1968,7 @@ function villagerAI(m, dt, out) {
   if (m.tradingWith) {
     // auto-release if the trade screen closed without telling us
     const inv = BF.inventory;
-    if (m.dead || !playerAlive() || (inv && typeof inv.isOpen === "function" && !inv.isOpen()) || pAt(m).distanceTo(m.position) > 8) m.tradingWith = null;
+    if (m.dead || !playerLives() || (inv && typeof inv.isOpen === "function" && !inv.isOpen()) || pAt(m).distanceTo(m.position) > 8) m.tradingWith = null;
     else { out.faceTarget = true; m.lookAt = "player"; ai.mode = "idle"; ai.t = 2; ai.fleeT = 0; return; }
   }
   // flee nearby zombies
@@ -1892,7 +1977,7 @@ function villagerAI(m, dt, out) {
   if (ai.threat && !ai.threat.dead && !ai.threat.removed) ai.fleeT = Math.max(ai.fleeT, 1);
   if (ai.fleeT > 0) {
     ai.fleeT -= dt;
-    const src = ai.threat && !ai.threat.removed ? seen(m.position, ai.threat.position, _sA) : (playerAlive() ? pAt(m) : null);
+    const src = ai.threat && !ai.threat.removed ? seen(m.position, ai.threat.position, _sA) : (playerLives() ? pAt(m) : null);
     let fx = Math.cos(m.yaw), fz = Math.sin(m.yaw);
     if (src) { fx = m.position.x - src.x; fz = m.position.z - src.z; }
     ai.fleeJitter = (ai.fleeJitter || R(m).next() * 6) + rnd(R(m), -3, 3) * dt;
@@ -1997,7 +2082,7 @@ function golemAI(m, dt, out) {
   if (ai.foe && golemChase(m, dt, out)) return;
   ai.foe = null; ai.rescue = null; ai.chase = null;
   if (creative()) ai.provoked = 0;
-  if (ai.provoked > 0 && playerAlive()) {
+  if (ai.provoked > 0 && playerLives()) {
     const p = player();
     const pp = pAt(m), dx = pp.x - m.position.x, dz = pp.z - m.position.z, hd = Math.hypot(dx, dz);
     if (hd < 24) {
@@ -2117,7 +2202,7 @@ function updateMob(m, dt) {
   else if (ai.fleeT > 0) {
     ai.fleeT -= dt;
     let fx = Math.cos(m.yaw), fz = Math.sin(m.yaw);
-    if (playerAlive()) { const pp = pAt(m); fx = m.position.x - pp.x; fz = m.position.z - pp.z; }
+    if (playerLives()) { const pp = pAt(m); fx = m.position.x - pp.x; fz = m.position.z - pp.z; }
     ai.fleeJitter = (ai.fleeJitter || R(m).next() * 6) + rnd(R(m), -3, 3) * dt;
     const a = Math.atan2(fz, fx) + Math.sin(ai.fleeJitter) * 0.8;
     _desired.x = Math.cos(a) * T.flee; _desired.z = Math.sin(a) * T.flee;
@@ -2226,7 +2311,7 @@ function updateMob(m, dt) {
   const hs = Math.hypot(m.vel.x, m.vel.z);
   let targetYaw = m.yaw;
   if (m.rider) targetYaw = m.yaw;
-  else if (_desired.faceTarget && playerAlive()) {
+  else if (_desired.faceTarget && playerLives()) {
     const p = pAt(m);
     targetYaw = Math.atan2(p.x - m.position.x, p.z - m.position.z);
   } else if (_desired.faceX != null) targetYaw = Math.atan2(_desired.faceX - m.position.x, _desired.faceZ - m.position.z);
@@ -2236,7 +2321,7 @@ function updateMob(m, dt) {
   // head look (the angles; js/mobview.js turns the head)
   let hy = 0, hp = 0;
   if (m.rider) hp = -0.35;   // a ridden horse holds its head a little low, out of the rider's view
-  else if (m.lookAt === "player" && playerAlive()) {
+  else if (m.lookAt === "player" && playerLives()) {
     const p = player(), e = seen(m.position, p.eyePos ? p.eyePos() : p.position, _sA);
     const dx = e.x - m.position.x, dz = e.z - m.position.z, dy = e.y - (m.position.y + m.height * 0.85);
     hy = wrapAngle(Math.atan2(dx, dz) - m.yaw);
@@ -2393,7 +2478,7 @@ function separate(m, dt) {
     m.vel.x += (dx / d) * 6 * dt; m.vel.z += (dz / d) * 6 * dt;
   }
   }
-  if (playerAlive()) {
+  if (playerLives()) {
     const p = player(), pp = pAt(m);
     const dx = m.position.x - pp.x, dz = m.position.z - pp.z;
     const min = m.halfWidth + (p.halfWidth || 0.3);
@@ -2486,6 +2571,7 @@ function pickHostileType(r) {
 const SURFACE_EVERY = 8, CAVE_EVERY = 8, MAX_TRIES = 64;
 let surfAcc = 0, caveAcc = 0, chunkArr = [], chunkArrT = 0;
 function spawnMonsters(dt) {
+  if (own()) return spawnInCluster(dt);
   if (!playerAlive()) return;
   const W = BF.world;
   chunkArrT -= dt;
@@ -2500,6 +2586,38 @@ function spawnMonsters(dt) {
   // each try has its own stream, keyed by the tick and the try's number, that picks its chunk, mob and spot
   for (let i = 0; i < s; i++) { const r = BF.rand.at("surface", i, 0), ch = chunkArr[r.int(n)]; if (W.chunks.get(ch.key) === ch) trySurface(ch, r); }
   for (let i = 0; i < c; i++) { const r = BF.rand.at("cave", i, 0), ch = chunkArr[r.int(n)]; if (W.chunks.get(ch.key) === ch) tryCave(ch, r); }
+}
+// With clusters (spec r15-39b, C2) each cluster spawns in its own regions' chunks, base by base (in key order): the same odds per chunk,
+// each base owing its own tries (spawnAcc: base -> [surface, cave], a table that lasts, so registered with BF.ctick.owned), its tries'
+// streams keyed by the base too. The running cluster's chunks are sorted out once an interval (chunks load only between ticks).
+const spawnAcc = new Map();
+function spawnInCluster(dt) {
+  if (!playerLives()) return;
+  const C = BF.ctick, W = BF.world, CS = BF.CS;
+  const by = C.local("spawnChunks", () => {
+    const m = new Map();
+    for (const ch of W.chunks.values()) {
+      const b = baseAt({ x: ch.cx * CS + CS / 2, z: ch.cz * CS + CS / 2 });
+      if (!ownsBase(b)) continue;
+      const a = m.get(b);
+      if (a) a.push(ch); else m.set(b, [ch]);
+    }
+    for (const a of m.values()) a.sort((p, q) => p.cx - q.cx || p.cz - q.cz);
+    return [...m].sort((p, q) => (p[0] < q[0] ? -1 : 1));
+  });
+  const dark = skyLightAt(BF.sky ? BF.sky.time || 0 : 0) <= SPAWN_LIGHT || stormy();
+  for (const [b, chs] of by) {
+    const n = chs.length;
+    let acc = spawnAcc.get(b);
+    if (!acc) spawnAcc.set(b, (acc = [0, 0]));
+    if (dark) acc[0] += dt * n / SURFACE_EVERY; else acc[0] = 0;
+    acc[1] += dt * n / CAVE_EVERY;
+    const s = Math.min(MAX_TRIES, Math.floor(acc[0])), c = Math.min(MAX_TRIES, Math.floor(acc[1]));
+    acc[0] -= Math.floor(acc[0]); acc[1] -= Math.floor(acc[1]);
+    const h = strHash(b);
+    for (let i = 0; i < s; i++) { const r = BF.rand.at("surface", i, h), ch = chs[r.int(n)]; if (W.chunks.get(ch.key) === ch) trySurface(ch, r); }
+    for (let i = 0; i < c; i++) { const r = BF.rand.at("cave", i, h), ch = chs[r.int(n)]; if (W.chunks.get(ch.key) === ch) tryCave(ch, r); }
+  }
 }
 // In the think phase a "spawn" request from "world" (r15-23): the density cap is checked again when it applies, with the tick's earlier spawns in.
 function spawnHostile(type, x, y, z) {
@@ -2593,7 +2711,31 @@ function freshVillage(key, slotKey) {
 // Villager AI work per step, averaged over about 5 game seconds: aiN counts villager AI updates, which the force-unload limit looks at
 // (js/villagesim.js), so it acts the same on any machine (spec r15-16). aiAcc/aiEma is the same in wall-clock ms, for the debug screen only.
 let aiAcc = 0, aiEma = 0, aiN = 0, aiWork = 0;
-function aiTick(dt) { const k = Math.min(1, dt / 5); aiEma += (aiAcc - aiEma) * k; aiWork += (aiN - aiWork) * k; aiAcc = 0; aiN = 0; }
+function aiTick(dt) {
+  if (own()) return aiTickCluster(dt);
+  const k = Math.min(1, dt / 5); aiEma += (aiAcc - aiEma) * k; aiWork += (aiN - aiWork) * k; aiAcc = 0; aiN = 0;
+}
+// With clusters (spec r15-39b, C2) each cluster's pass counts its own villager updates (aiN, aiAcc: the mob loop just before), summed
+// by group over the interval (aiBy: group key -> [updates, ms], registered with BF.ctick.owned); the first pass after a meeting folds the
+// last interval's sums into the averages, so aiWork changes only at meetings and reads the same in every cluster and order.
+let aiTok = null;
+const aiBy = new Map();
+function aiTickCluster(dt) {
+  const C = BF.ctick, tok = C.groups();
+  if (aiTok !== tok) {
+    aiTok = tok;
+    if (aiBy.size) {
+      let n = 0, ms = 0;
+      for (const v of aiBy.values()) { n += v[0]; ms += v[1]; }
+      aiBy.clear();
+      const k = Math.min(1, dt * C.MEET / 5);
+      aiEma += (ms / C.MEET - aiEma) * k; aiWork += (n / C.MEET - aiWork) * k;
+    }
+  }
+  const v = aiBy.get(C.cur.key);
+  if (v) { v[0] += aiN; v[1] += aiAcc; } else aiBy.set(C.cur.key, [aiN, aiAcc]);
+  aiAcc = 0; aiN = 0;
+}
 // Puts a villager back at its bed, else at its village centre (a forced stop of an errand).
 function sendHome(m) {
   const b = m.bed, rec = m.village;
@@ -2995,14 +3137,26 @@ function updateVillages(dt) {
   }
 }
 
+const waitNoted = new WeakSet();   // (mobs whose wait for the meeting is in the game log)
 function despawn(dt) {
-  if (!BF.player || !BF.player.position) return;
-  const pp = BF.player.position;
+  const pp = playerPos();
+  if (!pp) return;
+  const mine = own();
   for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i];
+    if (mine && !mine(m)) continue;   // (clusters, C2: the running cluster's mobs)
     if (m.riding && BF.world.isLoaded(m.position.x, m.position.z)) continue;   // a mob in a boat stays with it (js/boats.js stows it when its chunk unloads)
     const wild = isWild(m);
-    if (!BF.world.isLoaded(m.position.x, m.position.z)) { if (wild && BF.wildlife) BF.wildlife.stow(m); removeMob(m); continue; }   // a wild mob that walked off the loaded land waits with its chunk
+    if (!BF.world.isLoaded(m.position.x, m.position.z)) {   // a wild mob that walked off the loaded land waits with its chunk
+      if (wild && BF.wildlife) {
+        if (mine && !ownsBase(baseAt(m.position))) {   // (clusters: its chunk is another cluster's, whose table it goes in: at the meeting it is that one's)
+          if (!waitNoted.has(m)) { waitNoted.add(m); BF.glog.log("INFO", "wildlife", "A " + m.type + " walked off the loaded land into another cluster's chunk: it waits there until the next meeting, then that cluster stores it", { at: m }); }
+          continue;
+        }
+        BF.wildlife.stow(m);
+      }
+      removeMob(m); continue;
+    }
     const d = seen(m.position, pp, _sA).distanceTo(m.position);
     const vv = m.village || m.penVillage, simmed = !!(vv && BF.villageSim && BF.villageSim.isActive(vv.key));   // villagers of a far simulated village stay
     if (d > DESPAWN_DIST && !simmed && !m.village && !wild && !m.def.herd) { removeMob(m); continue; }   // a village's own mobs go with the village (BF.mobs.unloadVillage), wild ones with their chunk, not by distance
@@ -3026,6 +3180,9 @@ function rayAABB(o, d, mn, mx) {
 // ---------- public API ----------
 BF.mobs = {
   shapeAi, MOB_FIELDS, AI_FIELDS,   // one mob layout (test/mob-shape.js, js/mobsave.js)
+  // clusters (spec r15-39b, C2) for the other systems of C2 (js/drops.js, js/boats.js, js/wildlife.js, js/mobsave.js): see placeThing,
+  // ownsThing, ownsBase, groupFor; baseAt(p) -> the base cluster of p's region; the player as the running cluster sees it
+  cl: { placeThing, ownsThing, clOf, keepThing, ownsBase, groupFor, baseAt, playerPos, playerLives, owned: () => !!own() },
   list,
   toolHolders,   // profession -> (villager => item id of the tool drawn in its hands, or null): sets the villager's `held`
   types: Object.keys(TYPES),
@@ -3061,6 +3218,8 @@ BF.mobs = {
       }
     });
     if (BF.wildlife) BF.wildlife.init();
+    ownTables();
+    if (BF.mobSave && BF.mobSave.ownTables) BF.mobSave.ownTables();
   },
   update(dt) {
     if (!ready) return;
@@ -3076,7 +3235,9 @@ BF.mobs = {
     PF.lap(PC.other);
     // wild mobs and monsters beyond FAR_R blocks (or the view distance, if nearer) think FAR_HZ times a game second, each update covering the
     // time since the last one (idea-037: mobs live in the whole loaded world); spread out so they don't all update on the same frame
-    const pp = BF.player && BF.player.position, farR = Math.min(FAR_R, BF.world.viewDist * BF.CS), far2 = farR * farR;
+    // (clusters, C2: a cluster other than the player's measures from where the player was at the last meeting)
+    seePlayer();
+    const pp = playerPos(), farR = Math.min(FAR_R, BF.world.viewDist * BF.CS), far2 = farR * farR;
     // far villages coarse (spec r15-64): past the view distance, from the option in force at this tick's start
     const coarseOn = !!(pp && BF.gameOpts && BF.gameOpts.coarse()), view2 = (BF.world.viewDist * BF.CS) ** 2;
     coarseN = 0;

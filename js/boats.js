@@ -92,11 +92,20 @@ function flowAt(p) {
 }
 
 // ---------- boats ----------
+// Clusters (spec r15-39b, C2: js/ctick.js): with the cluster tick on, update runs once per cluster over its own boats: a boat goes with its
+// mob passenger's cluster, else its region's (BF.mobs.cl: the one that made it, until the next meeting). It gets an id when made, and the
+// list is registered with BF.ctick.owned (js/cworkers.js sends each group's boats at meetings).
+const CL = () => BF.mobs && BF.mobs.cl;
+const inPass = () => !!(CL() && CL().owned());
+const passengerCl = b => { const m = b.mobId != null ? BF.ids.live(b.mobId) : null; return m && m.cl !== undefined ? m.cl : undefined; };
+const mineB = b => !inPass() || CL().ownsThing(b, b.pos, passengerCl);
+const seenMob = o => !(BF.ctick && BF.ctick.on && BF.ctick.hidden(o));   // (clusters: another running cluster's mob isn't there)
 const list = [];
 function create(wood, x, y, z, yaw) {
   if (!ready || BF.I[wood + "_boat"] == null) return null;
   const b = BF.ids.refs({ kind: "boat", ctl: RIDE, wood, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevYaw: yaw || 0, vel: new THREE.Vector3(), yaw: yaw || 0, damage: 0, hurtT: 0, rider: false, mob: null, stowed: null,
     stowT: 0, row: [0, 0], rowing: [0, 0], onGround: false, inWater: false, medium: "air" });
+  if (BF.ctick && BF.ctick.on) { BF.ids.put(b); CL().placeThing(b, b.pos); }
   list.push(b);
   return b;
 }
@@ -154,7 +163,7 @@ function step(b, dt, input) {
 function pushByPlayer(b, dt) {
   const P = BF.player;
   if (!P || P.dead || P.vehicle) return;
-  const pp = P.position, q = seenXZ(b.pos, pp), dx = b.pos.x - q.x, dz = b.pos.z - q.z, reach = HW + P.halfWidth;
+  const pp = inPass() ? CL().playerPos() : P.position, q = seenXZ(b.pos, pp), dx = b.pos.x - q.x, dz = b.pos.z - q.z, reach = HW + P.halfWidth;
   if (Math.abs(dx) > reach || Math.abs(dz) > reach || pp.y > b.pos.y + H || pp.y + P.height < b.pos.y) return;
   const d = Math.hypot(dx, dz) || 1;
   b.vel.x += dx / d * 6 * dt; b.vel.z += dz / d * 6 * dt;
@@ -236,7 +245,7 @@ function restoreStowed(b, dt) {
   if (!s || !BF.mobs) return;
   b.stowT += dt;
   if (s.key) {   // a villager: its village respawns it; take it back once it is around
-    const m = BF.mobs.list.find(o => !o.dead && !o.removed && !o.riding && o.village && o.slot && o.village.key + "#" + o.slot.idx === s.key);
+    const m = BF.mobs.list.find(o => !o.dead && !o.removed && !o.riding && seenMob(o) && o.village && o.slot && o.village.key + "#" + o.slot.idx === s.key);
     if (m) { b.stowed = null; takeMob(b, m); }
     else if (b.stowT > 10) b.stowed = null;   // its village didn't bring it back (dead, or the village is far): the seat is free again
     return;
@@ -326,6 +335,7 @@ const boats = {
   HW, H, SIT_EYE,
   init() {
     ready = true;
+    ownTables();
     for (const n of ["ice", "packed_ice", "blue_ice"]) if (BF.B[n] != null) ICE_IDS.add(BF.B[n]);
   },
   spawn(wood, x, y, z, yaw) { return create(wood, x, y, z, yaw); },
@@ -400,6 +410,7 @@ const boats = {
   // World simulation step (main.js, runs with the fast-forward): boats without the player drift, pick up mobs, keep theirs seated.
   update(dt) {
     for (const b of list.slice()) {
+      if (!mineB(b)) continue;   // (clusters: the running cluster's boats)
       b.prev.copy(b.pos); b.prevYaw = b.yaw;   // drawn between this and where the tick leaves it (js/entityview.js)
       if (b.mob && (b.mob.removed || b.mob.dead)) { if (b.mob.removed && !b.mob.dead) stow(b); else { b.mob.riding = null; b.mob = null; } }
       if (!loadedAt(b.pos.x, b.pos.z)) continue;
@@ -412,7 +423,8 @@ const boats = {
       pickUpMobs(b);
       seatMob(b);
     }
-    if (BF.mobs) for (const m of BF.mobs.list) if (m.boatCd > 0) m.boatCd -= dt;
+    const f = BF.ctick && BF.ctick.on ? BF.ctick.filter : null;
+    if (BF.mobs) for (const m of BF.mobs.list) if (m.boatCd > 0 && (!f || f(m))) m.boatCd -= dt;
   },
   clear() { for (const b of list.slice()) { b.rider = false; boats.remove(b, false); } },
   // Boat counts by wood for the debug screen: {oak_boat: n, ...}
@@ -444,4 +456,30 @@ const boats = {
 };
 
 BF.boats = boats;
+
+// The boats by group (BF.ctick.owned): a group's boats as plain data, by id; those that come replace the group's own (updated in place
+// where this worker has the boat, so its passenger's link holds).
+const F = ["wood", "yaw", "prevYaw", "damage", "hurtT", "rider", "mobId", "stowed", "stowT", "row", "rowing", "onGround", "inWater", "medium"];
+function ownTables() {
+  const C = BF.ctick;
+  if (!C || ownTables.done) return;
+  ownTables.done = true;
+  const G = (b, g) => { const k = CL().clOf(b); return k !== undefined && CL().groupFor(k) === g; };
+  const V = v => [v.x, v.y, v.z];
+  C.owned("boats", {
+    snap: g => list.filter(b => b.id != null && G(b, g)).map(b => { const o = { id: b.id, cl: CL().clOf(b), pos: V(b.pos), prev: V(b.prev), vel: V(b.vel) }; for (const k of F) o[k] = b[k]; return o; }),
+    apply(g, a) {
+      const got = new Map((a || []).map(o => [o.id, o]));
+      for (const b of list.slice()) if (G(b, g) && !got.has(b.id)) { list.splice(list.indexOf(b), 1); BF.ids.remove(b); }
+      for (const o of a || []) {
+        let b = BF.ids.live(o.id);
+        if (!b || b.kind !== "boat" || !list.includes(b)) { b = BF.ids.refs({ kind: "boat", ctl: RIDE, pos: new THREE.Vector3(), prev: new THREE.Vector3(), vel: new THREE.Vector3() }); BF.ids.put(b, o.id); list.push(b); }
+        b.pos.set(o.pos[0], o.pos[1], o.pos[2]); b.prev.set(o.prev[0], o.prev[1], o.prev[2]); b.vel.set(o.vel[0], o.vel[1], o.vel[2]);
+        for (const k of F) b[k] = o[k];
+        CL().keepThing(b, o.cl);
+        if (b.mobId != null && !BF.ids.live(b.mobId) && BF.glog) BF.glog.log("ERROR", "boats", "A boat sent at a cluster meeting carries mob " + b.mobId + ", which this worker doesn't have", { at: b.pos });
+      }
+    },
+  });
+}
 })();
