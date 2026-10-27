@@ -42,7 +42,7 @@ const num = v => Number.isInteger(v) ? String(v) : Number.isFinite(v) ? "f" + Ma
 const SKIP = new Set(["def", "root", "model", "meshes", "material", "mesh", "geo", "geometry", "walkPhase", "walkAmt", "headYaw", "headPitch",
   "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg", "_ri", "_rs", "_res",
   "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN",   // caches on mobs (r15-61: js/ids.js links, js/regiontick.js ids)
-  "swingT", "cl"]);   // ai.swingT: the arm swing, drawn and heard only, set by the professions' unseeded "visual" rolls (r15-20 report)
+  "swingT", "cl", "thinkW", "thinkOwe"]);   // ai.swingT: the arm swing, drawn and heard only, set by the professions' unseeded "visual" rolls (r15-20 report)
 // cl: a mob's cluster (js/clusters.js, spec r15-39b), worked out from the rest of the world at each meeting.
 // Fields named _snd...: mobs' sound timers (js/audio.js), heard only.
 const skipKey = k => SKIP.has(k) || k.startsWith("_snd");

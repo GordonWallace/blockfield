@@ -413,7 +413,7 @@ const AI_FIELDS = [
   "t", "mode", "tx", "tz", "fleeT", "target", "losT", "los", "attackCd", "shootCd", "fuse", "strafe", "lookT", "swingT", "provoked", "burnT", "aiming",
   "leaving", "zScanT", "threat", "night", "held", "blockedT", "route", "ri", "stuckT", "routeKind", "doors", "leaveTries", "leaveEnd", "outT",
   "wanderAt", "hScanT", "rescueId", "revengeId", "foeId", "golemFoeT", "gScanT", "golemFoeId", "vScanT", "vTargetId", "doorT", "doorAt", "detour",
-  "fleeJitter", "gLos", "was", "pitT", "pitOut", "pitLogged", "climbT", "chase", "giveUpId", "giveUpT", "chaseBest", "chaseSlowT", "planW", "planL", "planG"];
+  "fleeJitter", "gLos", "was", "pitT", "pitOut", "pitLogged", "climbT", "chase", "giveUpId", "giveUpT", "chaseBest", "chaseSlowT", "planW", "planL", "planG", "thinkW", "thinkOwe"];
 // The constructors: named stores (the only way V8 sizes an object for all of them), generated from the lists; js/ids.js Refs is the
 // prototype, so the link accessors (m.village, m.ai.foe...) work as on any refs() record and BF.ids.refs passes these through.
 const shapeOf = fields => { const C = new Function(fields.map(k => "this." + k + " = undefined;").join("\n")); C.prototype = BF.ids.Refs; return C; };
@@ -1769,6 +1769,7 @@ pathStatsReset();
 // findPath: the route search every caller uses (findPathFast, compared with findPathOld when asked).
 function findPath(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
   if (BF.perf) BF.perf.count.paths++;   // activity per villager-second (js/perf.js, spec r15-60)
+  if (globalThis.PATH_TAP) { const t0 = performance.now(), r = findPathFast(sx, sy, sz, goal, maxNodes, tall); globalThis.PATH_TAP(r, performance.now() - t0, maxNodes); return r; }
   if (!DBG.pathCompare) return findPathFast(sx, sy, sz, goal, maxNodes, tall);
   const S = DBG.pathStats || pathStatsReset();
   const t0 = performance.now(), a = findPathFast(sx, sy, sz, goal, maxNodes, tall), t1 = performance.now(), b = findPathOld(sx, sy, sz, goal, maxNodes, tall), t2 = performance.now();
@@ -2066,36 +2067,60 @@ function morningAI(m, dt, out) {
 // ---------- village mobs ----------
 // The jobs, in order: the first that has something to do this frame takes the villager (true). Each one says how long a task will take before
 // starting it (BF.villageSim.begin); a villager none of them takes for a few seconds is idle and has no task left to wait for.
-function jobsAI(m, dt, out) {
-  if (m.love && BF.breeding && BF.breeding.ai(m, dt, out)) return true;   // breeding pair: stand still, face each other (js/breeding.js)
-  if (BF.storage && BF.storage.ai(m, dt, out)) return true;   // full inventory: stores surplus in a chest of its house, fetches it back when low (js/storage.js)
-  if (BF.eggCook && BF.eggCook.ai(m, dt, out, true)) return true;   // carries on cooking eggs it started: at the furnace, buying fuel (js/eggcook.js)
-  if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.cookAI(m, dt, out, true)) return true;   // carries on cooking beef it started (js/cowherd.js)
-  if (m.profession === "baker" && BF.baker && BF.baker.ai(m, dt, out, true)) return true;   // carries on baking or buying it started (js/baker.js)
-  if (m.profession === "glassmaker" && BF.glassmaker && BF.glassmaker.ai(m, dt, out, true)) return true;   // carries on digging, smelting or buying it started (js/glassmaker.js)
-  if (m.profession === "beekeeper" && BF.beekeeper && BF.beekeeper.ai(m, dt, out, true)) return true;   // carries on harvesting, leading bees or buying it started (js/beekeeper.js)
-  if (m.profession === "pig_farmer" && BF.pigFarmer && BF.pigFarmer.cookAI(m, dt, out, true)) return true;   // carries on cooking pork it started (js/pigfarmer.js)
-  if (BF.villageLife && BF.villageLife.ai(m, dt, out)) return true;   // buys food when hungry, farmers farm (js/villagelife.js)
-  if (m.profession === "builder" && BF.builder && BF.builder.ai(m, dt, out)) return true;   // builds / shops for materials (js/builder.js)
-  if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.ai(m, dt, out)) return true;   // feeds, shears and culls the pen sheep (js/shepherd.js)
-  if (m.profession === "poultry_keeper" && BF.poultry && BF.poultry.ai(m, dt, out)) return true;   // collects eggs, feeds, culls and stocks the coop (js/poultry.js)
-  if (m.profession === "cowherd" && BF.cowherd && BF.cowherd.ai(m, dt, out)) return true;   // milks, feeds, culls and stocks the pasture, cooks its beef (js/cowherd.js)
-  if (m.profession === "baker" && BF.baker && BF.baker.ai(m, dt, out, false)) return true;   // buys ingredients and fuel, bakes cakes and pies in its oven (js/baker.js)
-  if (m.profession === "glassmaker" && BF.glassmaker && BF.glassmaker.ai(m, dt, out, false)) return true;   // digs and buys sand, smelts glass, makes panes and bottles (js/glassmaker.js)
-  if (m.profession === "beekeeper" && BF.beekeeper && BF.beekeeper.ai(m, dt, out, false)) return true;   // harvests hives, plants flowers, builds hives, leads bees, makes candles (js/beekeeper.js)
-  if (m.profession === "pig_farmer" && BF.pigFarmer && BF.pigFarmer.ai(m, dt, out)) return true;   // feeds, culls and stocks the sty, cooks its pork (js/pigfarmer.js)
-  if (m.profession === "cartographer" && BF.cartography && BF.cartography.ai(m, dt, out)) return true;   // buys compass / map ingredients (js/cartography.js)
-  if (m.profession === "forester" && BF.forester && BF.forester.ai(m, dt, out)) return true;   // plants saplings, fells trees, picks up what falls (js/forester.js)
-  if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.ai(m, dt, out)) return true;   // sells beds to builders, buys wool and boards (js/furniture.js)
-  if (m.profession === "miner" && BF.miner && BF.miner.ai(m, dt, out)) return true;
-  if (m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.ai(m, dt, out)) return true;   // buys tool materials, smelts ore, puts a furnace down (js/toolsmith.js)   // quarries surface stone or digs a mineshaft, sells cobblestone to builders (js/miner.js)
-  if (m.profession === "stable_hand" && BF.stables && BF.stables.ai(m, dt, out)) return true;   // catches wild horses, leads them home, breeds them, buys feed (js/stables.js)
-  if (m.profession === "fletcher" && BF.fletcher && BF.fletcher.ai(m, dt, out)) return true;   // buys flint, sticks, feathers and string for arrows and bows (js/fletcher.js)
-  if (m.profession === "explorer" && BF.explorer && BF.explorer.ai(m, dt, out)) return true;   // fetches a map from a cartographer, explores until it is filled (js/explorer.js)
-  if (m.profession === "merchant" && BF.merchant && BF.merchant.ai(m, dt, out)) return true;   // carries surplus goods to a neighbouring village and back (js/merchant.js)
-  if (BF.eggCook && BF.eggCook.ai(m, dt, out)) return true;   // nothing else to do: takes its raw eggs to a furnace (js/eggcook.js)
-  if (BF.jobs && BF.jobs.ai(m, dt, out)) return true;   // daytime visits to the jobsite; villagers without a job walk to a free one (js/jobs.js)
+const JOB_CHAIN = [
+  [m => m.love && BF.breeding, (m, dt, out) => BF.breeding.ai(m, dt, out)],
+  [m => BF.storage, (m, dt, out) => BF.storage.ai(m, dt, out)],
+  [m => BF.eggCook, (m, dt, out) => BF.eggCook.ai(m, dt, out, true)],
+  [m => m.profession === "cowherd" && BF.cowherd, (m, dt, out) => BF.cowherd.cookAI(m, dt, out, true)],
+  [m => m.profession === "baker" && BF.baker, (m, dt, out) => BF.baker.ai(m, dt, out, true)],
+  [m => m.profession === "glassmaker" && BF.glassmaker, (m, dt, out) => BF.glassmaker.ai(m, dt, out, true)],
+  [m => m.profession === "beekeeper" && BF.beekeeper, (m, dt, out) => BF.beekeeper.ai(m, dt, out, true)],
+  [m => m.profession === "pig_farmer" && BF.pigFarmer, (m, dt, out) => BF.pigFarmer.cookAI(m, dt, out, true)],
+  [m => BF.villageLife, (m, dt, out) => BF.villageLife.ai(m, dt, out)],
+  [m => m.profession === "builder" && BF.builder, (m, dt, out) => BF.builder.ai(m, dt, out)],
+  [m => m.profession === "shepherd" && BF.shepherd, (m, dt, out) => BF.shepherd.ai(m, dt, out)],
+  [m => m.profession === "poultry_keeper" && BF.poultry, (m, dt, out) => BF.poultry.ai(m, dt, out)],
+  [m => m.profession === "cowherd" && BF.cowherd, (m, dt, out) => BF.cowherd.ai(m, dt, out)],
+  [m => m.profession === "baker" && BF.baker, (m, dt, out) => BF.baker.ai(m, dt, out, false)],
+  [m => m.profession === "glassmaker" && BF.glassmaker, (m, dt, out) => BF.glassmaker.ai(m, dt, out, false)],
+  [m => m.profession === "beekeeper" && BF.beekeeper, (m, dt, out) => BF.beekeeper.ai(m, dt, out, false)],
+  [m => m.profession === "pig_farmer" && BF.pigFarmer, (m, dt, out) => BF.pigFarmer.ai(m, dt, out)],
+  [m => m.profession === "cartographer" && BF.cartography, (m, dt, out) => BF.cartography.ai(m, dt, out)],
+  [m => m.profession === "forester" && BF.forester, (m, dt, out) => BF.forester.ai(m, dt, out)],
+  [m => m.profession === "furniture_maker" && BF.furniture, (m, dt, out) => BF.furniture.ai(m, dt, out)],
+  [m => m.profession === "miner" && BF.miner, (m, dt, out) => BF.miner.ai(m, dt, out)],
+  [m => m.profession === "toolsmith" && BF.toolsmith, (m, dt, out) => BF.toolsmith.ai(m, dt, out)],
+  [m => m.profession === "stable_hand" && BF.stables, (m, dt, out) => BF.stables.ai(m, dt, out)],
+  [m => m.profession === "fletcher" && BF.fletcher, (m, dt, out) => BF.fletcher.ai(m, dt, out)],
+  [m => m.profession === "explorer" && BF.explorer, (m, dt, out) => BF.explorer.ai(m, dt, out)],
+  [m => m.profession === "merchant" && BF.merchant, (m, dt, out) => BF.merchant.ai(m, dt, out)],
+  [m => BF.eggCook, (m, dt, out) => BF.eggCook.ai(m, dt, out)],
+  [m => BF.jobs, (m, dt, out) => BF.jobs.ai(m, dt, out)],
+];
+// Prototype (think-proto): THINK.k > 1 runs the whole chain only every k-th tick (staggered by id); between, only last tick's winner
+// runs, and the modules ahead of it (or the whole chain when none took the villager) get the skipped time at the next full run.
+const THINK = { k: +((typeof globalThis !== "undefined" && globalThis.THINK_K) || 1), idleOnly: !!(typeof globalThis !== "undefined" && globalThis.THINK_IDLE) };
+function jobsChain(m, dt, out, owe, from) {
+  for (let i = from; i < JOB_CHAIN.length; i++) {
+    const e = JOB_CHAIN[i];
+    if (e[0](m) && e[1](m, i < m.ai.thinkW ? dt + owe : dt, out)) { m.ai.thinkW = i; return true; }
+  }
+  m.ai.thinkW = JOB_CHAIN.length;
   return false;
+}
+function jobsAI(m, dt, out) {
+  const ai = m.ai, K = THINK.k;
+  if (ai.thinkW == null) ai.thinkW = JOB_CHAIN.length;
+  if (K <= 1) return jobsChain(m, dt, out, 0, 0);
+  const full = ((BF.rand ? BF.rand.tick : 0) + idNum(m)) % K === 0;
+  const w = ai.thinkW, none = w >= JOB_CHAIN.length;
+  if (!full && !(THINK.idleOnly && !none)) {
+    if (none) { ai.thinkOwe = (ai.thinkOwe || 0) + dt; return false; }
+    const e = JOB_CHAIN[w];
+    if (e[0](m) && e[1](m, dt, out)) { ai.thinkOwe = (ai.thinkOwe || 0) + dt; return true; }
+  }
+  const owe = ai.thinkOwe || 0; ai.thinkOwe = 0;
+  return jobsChain(m, dt, out, owe, 0);
 }
 function villagerAI(m, dt, out) {
   const ai = m.ai, T = m.def, V = m.village;
