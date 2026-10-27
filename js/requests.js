@@ -41,7 +41,9 @@ let hourAt = null;
 const unhandled = new Set();
 const HOUR = 1200 / 24;   // game seconds (js/sky.js: a 1200 s day)
 
-// Requester order: the player, then mob ids "e<n>" by n, then other requesters ("player", village keys, "test") by name, then none; ties by sequence.
+// Requester order: the player, then mob ids "e<n>" by n, then other requesters ("player", village keys, "test") by name, then none; ties by
+// the mob whose think sent it (req.by: its id number, -1 outside a think; two mobs may send for one requester, a buyer and the seller
+// selling to it, and think order must not matter, spec r15-71), then by sequence.
 function rank(from) {
   if (from == null) return [2, 0, ""];
   if (from === "player") return [-1, 0, ""];   // the player first, on every client alike (spec r15-20)
@@ -50,14 +52,15 @@ function rank(from) {
 }
 function order(a, b) {
   const ra = a._r || (a._r = rank(a.from)), rb = b._r || (b._r = rank(b.from));
-  return ra[0] - rb[0] || ra[1] - rb[1] || (ra[2] < rb[2] ? -1 : ra[2] > rb[2] ? 1 : 0) || a.seq - b.seq;
+  return ra[0] - rb[0] || ra[1] - rb[1] || (ra[2] < rb[2] ? -1 : ra[2] > rb[2] ? 1 : 0) || (a.by | 0) - (b.by | 0) || a.seq - b.seq;
 }
 
 function bump(o, kind, key) { const k = o.byKind[kind] || (o.byKind[kind] = { sent: 0, applied: 0, refused: 0 }); k[key]++; }
 
+function byOf() { const t = BF.rand && BF.rand.thinker, id = t && BF.ids ? BF.ids.idOf(t) : null, m = id == null ? null : /^e(\d+)$/.exec(String(id)); return m ? +m[1] : -1; }
 function make(kind, target, data, from) {
   const req = { kind, target, data: data || {}, from: from == null ? null : BF.ids && typeof from === "object" ? BF.ids.idOf(from) : from,
-    seq: seq++, tick: BF.rand ? BF.rand.tick : 0, cbs: null, result: undefined, delivered: false };
+    seq: seq++, tick: BF.rand ? BF.rand.tick : 0, by: byOf(), cbs: null, result: undefined, delivered: false };
   req.then = fn => { if (req.delivered) { try { fn(req.result, req); } catch (e) { console.error(e); } } else (req.cbs || (req.cbs = [])).push(fn); return req; };
   S.sent++; H.sent++; bump(S, kind, "sent"); bump(H, kind, "sent");
   return req;
@@ -93,7 +96,7 @@ function adopt(o) {
 }
 // The same request made again from o, filed nowhere (clusters on several workers, js/cworkers.js: the caller files it)
 function revive(o) {
-  const req = { kind: o.kind, target: o.target, data: o.data || {}, from: o.from == null ? null : o.from, seq: o.seq, tick: o.tick,
+  const req = { kind: o.kind, target: o.target, data: o.data || {}, from: o.from == null ? null : o.from, seq: o.seq, tick: o.tick, by: o.by == null ? -1 : o.by,
     region: o.region != null && o.region >= 0 ? o.region : -1, cbs: null, result: undefined, delivered: false };
   req.then = fn => { if (req.delivered) { try { fn(req.result, req); } catch (e) { console.error(e); } } else (req.cbs || (req.cbs = [])).push(fn); return req; };
   return req;
