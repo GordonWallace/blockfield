@@ -34,9 +34,9 @@ function world(roundTrip) {
     const before = BF.stateHash.full().hash;
     const names = C.tables(), parts = [];
     for (const name of names) for (const g of C.groups()) {
-      const t = C.table(name), a = JSON.stringify(t.snap(g.key));
+      const t = C.table(name), a = JSON.stringify(t.snap(g.key, true));   // (true: every entry, also of the tables that send only changes)
       t.apply(g.key, JSON.parse(a));
-      parts.push([name, g.key, a, JSON.stringify(t.snap(g.key))]);
+      parts.push([name, g.key, a, JSON.stringify(t.snap(g.key, true))]);
     }
     res.names = names; res.parts = parts;
     res.same = before === BF.stateHash.full().hash;
