@@ -39,7 +39,7 @@ function child() {
     BF.cworkers.shuffle = shuffle;
     BF.cworkers.fixed = fixed;
     BF.cworkers.sizes = {};
-    BF.cworkers.setup({ n, me, link: BF.rworkers.attach(shared, me, n), claims: shared.claims });
+    BF.cworkers.setup({ n, me, link: BF.rworkers.attach(shared, me, n), claims: shared.claims, shm: shared.shm });
   }
   const md5 = t => crypto.createHash('md5').update(t).digest('hex').slice(0, 16);
   const objs = () => {
@@ -79,7 +79,7 @@ async function main() {
   const profile = arg('profile', 'converted'), plan = process.argv.includes('--plan'), fixed = !plan && !pull && arg('shuffle') == null;
   const shuffle = plan || pull ? 0 : +arg('shuffle', 1);
   const { load } = require('../tools/headless.js');
-  const shared = load().BF.cworkers.makeShared(n);
+  const shared = load().BF.cworkers.makeShared(n, 0, process.argv.includes('--shm'));   // (--shm: the shared-memory prototype, js/shm.js)
   const spawn = data => {
     const w = new Worker(__filename, { workerData: Object.assign({ seed, extra, order, shuffle, fixed, profile }, data) });
     const waiting = [];

@@ -248,6 +248,7 @@ function onSet(x, y, z, oldId, id) {
 }
 // js/mobs.js createMob / removeMob, js/drops.js spawn / remove.
 const mobAdded = m => { m._rs = ++mseq; mobs.add(m); typeAdd(m); };
+const mobMoved = m => { if (mobs.has(m)) mobs.ps[m._ri] = mobs.pos(m); };   // (its position is a new object: js/shm.js, the shared-memory prototype)
 const mobRemoved = m => { mobs.remove(m); typeDel(m); };
 const dropAdded = d => drops.add(d);
 const dropRemoved = d => drops.remove(d);
@@ -437,7 +438,7 @@ const regions = {
   get: k => ({ mobs: mobs.in(k), drops: drops.in(k), villages: villages.in(k), blockEntities: beBy.get(k) }),
   mobsIn: k => mobs.in(k), dropsIn: k => drops.in(k), villagesIn: k => villages.in(k), blockEntitiesIn: k => beBy.get(k),
   mobIdsIn: k => idsOf(mobs.in(k), m => m.id), villageIdsIn: k => idsOf(villages.in(k), v => v.key),
-  onSet, mobAdded, mobRemoved, dropAdded, dropRemoved, tick, stats, counts, check, reset, Index,
+  onSet, mobAdded, mobMoved, mobRemoved, dropAdded, dropRemoved, tick, stats, counts, check, reset, Index,
   regionOf, dropRegionOf, mobsByRegion, mobIndex,
   mobsAround, mobsInBox, hostilesAround, ofType, villageMobs, checkQuery, queryStats, resetQueryStats, verifyQueries: false,
 };

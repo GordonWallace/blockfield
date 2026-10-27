@@ -458,6 +458,7 @@ function createMob(type, x, y, z, variant, style) {
   list.push(mob);
   if (BF.regions) BF.regions.mobAdded(mob);   // the region index (js/regions.js)
   if (BF.ctick && BF.ctick.on) { BF.clusters.place(mob); BF.ctick.added(mob); }   // its cluster, by where it is made (js/clusters.js), and its group's list
+  if (BF.shm && BF.shm.solo) BF.shm.bind(mob, true);   // (shared-memory prototype, js/shm.js: one thread, every mob bound when made)
   return mob;
 }
 

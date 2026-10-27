@@ -38,6 +38,9 @@ const SKIP = new Set(["def", "root", "model", "meshes", "material", "mesh", "geo
   "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg", "_ri", "_rs", "_res", "prev", "cbs", "_r", "_tm",
   "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN"]);   // (and each replica's own caches on mobs: js/ids.js links, js/regiontick.js ids, r15-61)
 const skipKey = k => SKIP.has(k) || (k.charCodeAt(0) === 95 && k.startsWith("_snd"));
+// (shared-memory prototype, js/shm.js: a mob's own fields that live in shared memory, skipped on the mob only, not on objects inside it)
+const TOP = new Set();
+const isMobV = v => v.ai !== undefined && v.def !== undefined && v.position !== undefined;
 let mobSet = null, recSet = null, dropSet = null, hiveSet = null, self = null;
 function refsOn() {
   mobSet = new Set(BF.mobs ? BF.mobs.list : []);
@@ -300,7 +303,7 @@ function snapV(v, top) {
   if (K === 2) { s.m = new Map(); for (const [k, x] of v) if (typeof x !== "function") s.m.set(k, child(x)); return s; }
   if (K === 1) { s.vs = new Array(v.length); for (let i = 0; i < v.length; i++) s.vs[i] = child(v[i]); return s; }
   const ks = Object.keys(v), vs = new Array(ks.length);
-  for (let i = 0; i < ks.length; i++) { const k = ks[i], x = v[k]; vs[i] = skipKey(k) || typeof x === "function" ? SKIPPED : child(x); }
+  for (let i = 0; i < ks.length; i++) { const k = ks[i], x = v[k]; vs[i] = skipKey(k) || (top && TOP.size && TOP.has(k) && isMobV(v)) || typeof x === "function" ? SKIPPED : child(x); }
   s.ks = ks; s.vs = vs;
   return s;
 }
@@ -384,7 +387,7 @@ function diffV(v, s) {
   const nvs = new Array(ks.length);
   for (let i = 0; i < ks.length; i++) {
     const k = ks[i], x = v[k];
-    if (skipKey(k)) { nvs[i] = SKIPPED; continue; }
+    if (skipKey(k) || (v === self && TOP.size && TOP.has(k) && isMobV(v))) { nvs[i] = SKIPPED; continue; }
     const old = at.has(k) ? at.get(k) : SKIPPED;
     at.delete(k);
     if (v === self) topKey = k;
@@ -418,7 +421,7 @@ function movedFrom(v, vs) {
 const cmps = new Map();
 const seenKs = new Map();   // key list -> uses before it is compiled (an object with keys of its own, a cell table, is compared by name)
 function cmpFor(ks) {
-  const id = ks.join("\u0001");
+  const id = ks.join("\u0001") + (TOP.size ? "\u0002" + [...TOP].join(",") : "");
   let fn = cmps.get(id);
   if (fn) return fn;
   const u = (seenKs.get(id) || 0) + 1;
@@ -429,9 +432,9 @@ function cmpFor(ks) {
     const k = ks[i];
     if (skipKey(k)) continue;
     const ref = JSON.stringify(k);
-    body.push(`x = v[${ref}]; o = vs[${i}]; if (x !== o || x === 0 || (typeof x === "object" && x !== null)) keyChild(vs, ${i}, ${ref}, x, ops, top);`);
+    body.push(`${TOP.has(k) ? "if (!top || !isMobV(v)) { " : ""}x = v[${ref}]; o = vs[${i}]; if (x !== o || x === 0 || (typeof x === "object" && x !== null)) keyChild(vs, ${i}, ${ref}, x, ops, top);${TOP.has(k) ? " }" : ""}`);
   }
-  fn = new Function("keyChild", "return function cmp(v, vs, ops, top) {\n" + body.join("\n") + "\n};")(keyChild);
+  fn = new Function("keyChild", "isMobV", "return function cmp(v, vs, ops, top) {\n" + body.join("\n") + "\n};")(keyChild, isMobV);
   if (cmps.size < 4000) cmps.set(id, fn);
   return fn;
 }
@@ -1024,7 +1027,7 @@ function hourly() {
 }
 
 Object.assign(RW, { journal: null, clock: null, onTick: null, onTouch: null, chan: name => channels.get(name), rec, stamp, realNow, tick, pause, channel, touch, writes, dynItem, setup, stop, beginThink, thinking, afterThink, beforeDeliver, afterDeliver, stats, text, hourly, replan,
-  enc, dec, Shadow, snap, diff, patch, makeShared, attach, SKIP, REBALANCE, SOLO_MS, refsOn,
+  enc, dec, Shadow, snap, diff, patch, makeShared, attach, SKIP, TOP, REBALANCE, SOLO_MS, refsOn,
   ownerOf, unitOf,   // (read only: the debug screen's Regions map colours each region by the worker its mobs think on, js/debugfeed.js)
   refs: refsOn, encData, atLater });
 BF.rworkers = RW;

@@ -109,6 +109,11 @@ function sync() {
   lap(null);
   const R = RW(), K = C(), I = K.inner;
   R.refs();
+  const SM = BF.shm && BF.shm.on && !BF.shm.solo ? BF.shm : null;
+  if (SM) {   // (shared-memory prototype, js/shm.js: the mobs this worker runs that aren't bound yet put their hot state in their slots)
+    for (const m of BF.mobs.list) if (!m.removed && !SM.bound(m) && (bornHere.has(m) || ownsKey(groupOf(m)))) SM.bind(m, true);
+    lap("shm");
+  }
   // the shared index (objects that live inside an entity, sent as where they are) of the mobs and records this worker ran: nothing it
   // changed can reach into another group's between meetings
   R.indexScope = { mobs: new Set(shadows.keys()), recs: new Set(recShadows.keys()) };
@@ -120,7 +125,7 @@ function sync() {
   for (const m of BF.mobs.list) {
     if (m.removed || known.has(m) || !(bornHere.has(m) || ownsKey(groupOf(m)))) continue;
     const o = {};
-    for (const k of Object.keys(m)) o[k] = m[k];   // (a plain copy, its own fields: the codec writes m itself as a reference)
+    for (const k of Object.keys(m)) if (!SM || (k !== "position" && k !== "vel" && k !== "prev")) o[k] = m[k];   // (a plain copy, its own fields: the codec writes m itself as a reference)
     born.push([m.id, m.type, R.enc(o, m)]);
   }
   lap("born");
@@ -162,6 +167,7 @@ function sync() {
     for (const k in out) add(k, out[k]);
     for (const [, ops] of mobs) if (ops) for (const op of ops) add("mob." + op[0], op);
     for (const [, ops] of recs) for (const op of ops) add("rec." + op[0], op);
+    for (const [name, , data] of tables) add("table." + name, data);
   }
   R.indexScope = null;
   const t1 = now();
@@ -198,6 +204,7 @@ function sync() {
     if (!p) continue;
     for (const [id, , e] of p.born) { const m = BF.ids.live(id); if (m) BF.mobs.filled(m, R.dec(e, m), !fresh.has(id)); }
   }
+  if (SM) for (const m of BF.mobs.list) if (!m.removed && !SM.bound(m)) SM.bindRead(m);   // (the others' mobs: their owners filled the slots)
   lap("in.born");
   const cells = new Map();
   for (const [k, list] of edits) for (const [i] of list) cells.set(k + "|" + i, CW.me);
@@ -337,6 +344,8 @@ function setup(o) {
   // a mob's start-of-tick place (prev: js/mobs.js keepPrev) is set only where the mob runs, so it is sent too (js/rworkers.js leaves it
   // out: there every copy sets it); the first worker draws every mob from it
   if (CW.active) RW().SKIP.delete("prev"); else RW().SKIP.add("prev");
+  // (shared-memory prototype, js/shm.js: o.shm, the slots every worker maps; position, vel and prev then never go through the swap)
+  if (CW.active && o.shm) { BF.shm.attach(o.shm, false); for (const k of ["position", "vel", "prev"]) RW().TOP.add(k); }
   if (!hooked && BF.world && BF.world.onBlockSet) { BF.world.onBlockSet(onSet); hooked = true; }
   tRun = now();
   if (CW.active) note(CW.n + " workers share the clusters (worker " + CW.me + " of " + CW.n + ")");
@@ -385,7 +394,7 @@ function hourly() {
 }
 
 // The shared memory every worker attaches to: js/rworkers.js's mailboxes and barrier, and the claim counters
-function makeShared(n, bytes) { return Object.assign(RW().makeShared(n, bytes || 128 << 20), { claims: new SharedArrayBuffer(8) }); }
+function makeShared(n, bytes, shm) { return Object.assign(RW().makeShared(n, bytes || 128 << 20), { claims: new SharedArrayBuffer(8), shm: shm ? BF.shm.make() : null }); }
 Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, pull: false });
 BF.cworkers = CW;
 })();

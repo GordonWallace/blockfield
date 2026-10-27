@@ -65,7 +65,7 @@ if (!isMainThread && workerData && workerData.me != null && !workerData.saves &&
         const s = d.cstart;
         BF.ctick.only = s.only; BF.ctick.on = true; BF.ctick.order = s.order || "tick";
         BF.cworkers.shuffle = s.shuffle || 0;
-        BF.cworkers.setup({ n: s.n, me: s.me, link: BF.rworkers.attach(s.shared, s.me, s.n), claims: s.shared.claims });
+        BF.cworkers.setup({ n: s.n, me: s.me, link: BF.rworkers.attach(s.shared, s.me, s.n), claims: s.shared.claims, shm: s.shared.shm });
         parentPort.postMessage({ started: true });
       } else if (d.ticks) {
         h.tick(d.ticks);

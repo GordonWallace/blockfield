@@ -92,6 +92,9 @@ async function main(argv) {
   const p = BF.player.position;
   say(`booted ${a.load ? a.load : 'seed ' + BF.state.seed} in ${((performance.now() - t0) / 1000).toFixed(1)} s: ${BF.world.chunks.size} chunks, ` +
     `${BF.mobs.list.length} mobs, player at ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}${h.village ? ' (nearest village)' : ''}`);
+  const probe = process.env.SM_PROBE ? require(path.resolve(process.env.SM_PROBE)) : null;   // (shared-memory prototype: measuring hooks)
+  if (probe && probe.boot) probe.boot(BF, h, a);
+  if (a.shm === 'solo') { BF.shm.attach(BF.shm.make(), true); for (const m of BF.mobs.list) BF.shm.bind(m, true); }   // (shared-memory prototype: one thread, hot mob state in shared slots)
   const H0 = h.stateHash();
   say(`hash at the start ${H0.hash}`);
   // --workers n (spec r15-39): n - 1 followers (server/regionthread.js) boot the same world from this one's river network, then every
@@ -111,11 +114,11 @@ async function main(argv) {
     const boots = await Promise.all(pool.list.map(f => f.ask({ boot: { seed, rivers,
       settings: { at: a.at || 'village', villages: a.villages != null ? +a.villages : undefined, viewDist: a.view != null ? +a.view : undefined, extra: a.extra != null ? +a.extra : undefined } } })));
     for (const [i, b] of boots.entries()) if (b.booted !== H0.hash) throw new Error(`cluster worker ${i + 1} booted a different world (${b.booted}, not ${H0.hash})`);
-    const shared = BF.cworkers.makeShared(ncw), order = a.order || 'cluster';
+    const shared = BF.cworkers.makeShared(ncw, 0, a.shm === 'workers'), order = a.order || 'cluster';
     await Promise.all(pool.list.map(f => f.ask({ cstart: { shared, me: f.me, n: ncw, only, order, shuffle: +a.shuffle || 0 } })));
     BF.ctick.order = order;
     BF.cworkers.shuffle = +a.shuffle || 0;
-    BF.cworkers.setup({ n: ncw, me: 0, link: BF.rworkers.attach(shared, 0, ncw), claims: shared.claims });
+    BF.cworkers.setup({ n: ncw, me: 0, link: BF.rworkers.attach(shared, 0, ncw), claims: shared.claims, shm: shared.shm });
     BF.cworkers.prof = {};
     say(`${ncw} cluster workers: ${ncw - 1} followers booted the same world in ${((performance.now() - t1) / 1000).toFixed(1)} s`);
   } else if (nw > 1) {
@@ -147,6 +150,7 @@ async function main(argv) {
     if (i % 20 === 0) BF.perf.frame();   // the meter's window moves on about once a game second
     if (every && i % every === 0) say(`t ${(i * BF.warp.TICK).toFixed(0)} s  ${h.stateHash().hash}  mobs ${BF.mobs.list.length}`);
   }
+  if (probe && probe.end) probe.end(BF, h, a);
   const T = BF.perf.totals();
   BF.perf.ask(false);
   const H = h.stateHash();
