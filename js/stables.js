@@ -404,7 +404,7 @@ function leave(m, S, dt, out) {
   if (!st) { S.leave = null; return false; }
   if (!S.leave) {
     if (!inBox(st.box, p.x, p.z, 0.2) || Math.abs(p.y - st.y) > 2.5) return false;
-    S.leave = { t: 0 }; m.ai.route = null; S.navFail = 0;
+    S.leave = { t: 0 }; if (m.ai.routeKind === "farm") m.ai.route = null; S.navFail = 0;   // (only its own route, as the keepers' leave)
   }
   S.leave.t += dt;
   const [ox, oz] = st.out[0], oy = groundY(ox, oz);
