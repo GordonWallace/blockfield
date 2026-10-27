@@ -349,6 +349,7 @@ function lay(s, coop, m) {
   if (m && BF.drops && BF.I.egg != null) BF.drops.spawn(BF.I.egg, 1, m.position.x, m.position.y + 0.3, m.position.z);   // a wild chicken drops it, as in vanilla
 }
 let acc = 0, coopT = 0;
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(hook); });   // (cluster workers: set up on every worker, js/ctick.js warm)
 function hook() {
   if (hooked || !BF.on) return;
   hooked = true;

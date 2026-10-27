@@ -73,6 +73,7 @@ function score(rec) {
 }
 
 function reset() { events.clear(); lastScore.clear(); }
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(hook); });   // (cluster workers: set up on every worker, js/ctick.js warm)
 function hook() {
   if (hooked || typeof BF.on !== "function") return;
   hooked = true;

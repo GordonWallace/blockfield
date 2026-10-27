@@ -639,6 +639,7 @@ function tables() {
     },
   });
 }
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(() => { ids(); if (NEST != null) hook(); }); });   // (clusters: set up at the first meeting, js/ctick.js warm)
 function hook() {
   if (hooked || !W() || !W().onChunkLoad) return;
   hooked = true;

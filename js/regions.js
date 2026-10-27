@@ -230,6 +230,7 @@ function unloadChunk(cx, cz) {
   }
 }
 let hooked = false;
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(hook); });   // (cluster workers: set up on every worker, js/ctick.js warm)
 function hook() {
   if (hooked || !BF.world || !BF.world.onChunkLoad || !flags()) return;
   hooked = true;

@@ -313,6 +313,7 @@ function dropChunk(cx, cz) {
   for (const [k, s] of sites) if (Math.floor(s.x / CS) === cx && Math.floor(s.z / CS) === cz) sites.delete(k);
 }
 function addSite(x, y, z, id) { const p = profOfBlock(id); if (p) sites.set(pk(x, y, z), { x, y, z, id, prof: p }); }
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(hook); });   // (cluster workers: set up on every worker, js/ctick.js warm)
 function hook() {
   if (hooked || !BF.world || !BF.on) return;
   hooked = true;

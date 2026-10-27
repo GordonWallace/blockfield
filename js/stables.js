@@ -532,6 +532,7 @@ function playerSells(v) {
 
 // ---------------------------------------------------------------- global tick: foal log lines, offers
 let hooked = false, offT = 0;
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(hook); });   // (cluster workers: set up on every worker, js/ctick.js warm)
 function hook() {
   if (hooked || !BF.on) return;
   hooked = true;

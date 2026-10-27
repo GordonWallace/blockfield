@@ -3478,11 +3478,15 @@ BF.mobs = {
     ready = true;   // (mobs, arrows and effects are drawn by js/mobview.js and js/entityview.js)
     if (BF.mobView) BF.mobView.init(sceneRef);
     BF.world.onChunkUnload((cx, cz) => {
-      for (let i = list.length - 1; i >= 0; i--) {
-        const m = list[i];
+      const inChunk = m => {
         let mx = m.position.x, mz = m.position.z;   // (by its canonical cell: it may be kept in another face's frame)
         { const c = BF.planet.canon(mx, mz, GC); if (!c.off) { mx = c.x; mz = c.z; } }
-        if (Math.floor(mx / BF.CS) === cx && Math.floor(mz / BF.CS) === cz) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
+        return Math.floor(mx / BF.CS) === cx && Math.floor(mz / BF.CS) === cz;
+      };
+      if (BF.cworkers && BF.cworkers.partial) BF.cworkers.fetch(list.filter(m => !m.removed && inChunk(m)));   // (partial copies: stored and saved as they are now)
+      for (let i = list.length - 1; i >= 0; i--) {
+        const m = list[i];
+        if (inChunk(m)) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
       }
       for (let i = arrows.length - 1; i >= 0; i--) {
         const a = arrows[i];

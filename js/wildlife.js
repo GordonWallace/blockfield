@@ -302,6 +302,7 @@ function watchVillages() {
     if (rec && (!c || CL().ownsBase("v:" + rec.key))) { const r = nightRec(rec.key, n); if (!r[0]) { r[0] = 1; log("reached", { village: rec.key, night: n }); } }
   }
 }
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(hook); });   // (cluster workers: set up on every worker, js/ctick.js warm)
 function hook() {
   if (hooked || !BF.on) return;
   hooked = true;

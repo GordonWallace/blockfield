@@ -130,6 +130,7 @@ function panelData(rec) {
     occupations: Object.entries(prof).sort(byName), free: Object.entries(uc).sort(byName),
     loaded: Object.values(prof).reduce((x, y) => x + y, 0) };
 }
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(hook); });   // (cluster workers: set up on every worker, js/ctick.js warm)
 function hook() {
   if (hooked || typeof BF.on !== "function") return;
   hooked = true;

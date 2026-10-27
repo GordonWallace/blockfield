@@ -17,7 +17,8 @@
 // change, except for regions first met (worked out with the meeting's village list and player position) and new mobs (placed by
 // where they are made).
 // API: BF.clusters = { MEET, REACH, rebuild(), ofRegion(key) -> base, groupOf(base) -> group key, groups() -> [{key, bases}], baseOf(mob)
-//                      -> base (worked out now), place(mob) (sets m.cl), of(mob) -> m.cl, stats(), text(), reset() }
+//                      -> base (worked out now), place(mob) (sets m.cl), of(mob) -> m.cl, summary(mob) -> what rebuild reads of it, remote
+//                      (set: id -> summary, the other workers' mobs for the next rebuild), stats(), text(), reset() }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -61,6 +62,12 @@ const PEN_KEYS = ["penKey", "coopKey", "styKey", "pastureKey"];
 const TASKS = ["pkp", "shp", "cwk", "pgk", "stb"];
 let claimed = null;
 function villageOf(m) {
+  const v = ownVillage(m);
+  if (v == null && claimed) { const c = claimed.get(m.id); if (c != null) return c; }
+  return v;
+}
+// its village by its own fields (the claims of the villagers working on it aside)
+function ownVillage(m) {
   let v = m.villageId != null ? m.villageId : m.penVillageId;
   if (v == null) for (const f of PEN_KEYS) {
     const p = m[f];
@@ -73,15 +80,28 @@ function villageOf(m) {
     if (typeof r.owner === "string" && r.owner.startsWith("stable:")) v = r.owner.slice(7);
     else if (r.lead && r.lead.kind === "mob" && r.lead.mob && r.lead.mob.villageId != null) v = r.lead.mob.villageId;
   }
-  if (v == null && claimed) { const c = claimed.get(m.id); if (c != null) v = c; }
-  return v;
+  return v == null ? null : v;
 }
-function baseOf(m) {
-  if (BF.merchant && BF.merchant.roaming(m)) return ofRegion(BF.regions ? BF.regions.keyOf(m.position.x, 0, m.position.z) : -1);   // (a caravan on the road: the ground's, js/merchant.js)
-  const v = villageOf(m);
+// What a meeting reads of a mob to place it: [x, z, its own village (or null), roaming (1 / 0), the mob ids its tasks claim (a living
+// villager of a village; else none), y, dead (1 / 0)]. With partial copies (js/cworkers.js) the mobs another worker runs come as these,
+// worked out by it (BF.clusters.remote: id -> summary, for the next rebuild; the place and dead go into the stale copy too, for the
+// meeting's other readers: js/villagesim.js windows); every mode places every mob by its summary alike.
+function summary(m) {
+  const tasks = [];
+  if (m.type === "villager" && m.villageId != null && !m.dead) for (const f of TASKS) { const t = m[f] && m[f].task; if (t && t.mobId != null) tasks.push(t.mobId); }
+  return [m.position.x, m.position.z, ownVillage(m), BF.merchant && BF.merchant.roaming(m) ? 1 : 0, tasks, m.position.y, m.dead ? 1 : 0];
+}
+let remote = null;
+const sumOf = m => (remote && remote.get(m.id)) || summary(m);
+function baseFrom(s, id) {
+  const ground = () => ofRegion(BF.regions ? BF.regions.keyOf(s[0], 0, s[1]) : -1);
+  if (s[3]) return ground();   // (a caravan on the road: the ground's, js/merchant.js)
+  let v = s[2];
+  if (v == null && claimed) { const c = claimed.get(id); if (c != null) v = c; }
   if (v != null && BF.mobs.villages.has(v)) return "v:" + v;
-  return ofRegion(BF.regions ? BF.regions.keyOf(m.position.x, 0, m.position.z) : -1);
+  return ground();
 }
+function baseOf(m) { return baseFrom(summary(m), m.id); }
 function place(m) { m.cl = baseOf(m); }
 
 function rebuild() {
@@ -90,14 +110,15 @@ function rebuild() {
   const pp = BF.player && BF.player.position;
   player = pp ? { x: pp.x, z: pp.z, r: ((BF.world && BF.world.viewDist) || 8) * (BF.CS || 16) + VIEW_PAD } : null;
   regionBase.clear();
-  // the animals villagers are working on (as js/rworkers.js claims)
+  // every mob by its summary; the animals villagers are working on (as js/rworkers.js claims) go with their villages
   claimed = new Map();
   for (const m of BF.regions ? BF.regions.ofType("villager") : BF.mobs.list) {
-    if (m.villageId == null || m.dead || m.removed) continue;
-    for (const f of TASKS) { const t = m[f] && m[f].task; if (t && t.mobId != null && !claimed.has(t.mobId)) claimed.set(t.mobId, m.villageId); }
+    if (m.removed) continue;
+    const s = sumOf(m);
+    for (const id of s[4]) if (!claimed.has(id)) claimed.set(id, s[2]);
   }
-  for (const m of BF.mobs.list) if (!m.removed) place(m);
-  claimed = null;
+  for (const m of BF.mobs.list) if (!m.removed) m.cl = baseFrom(sumOf(m), m.id);
+  claimed = null; remote = null;
   // groups: the bases the player's view touches go together
   const bases = new Set();
   for (const m of BF.mobs.list) if (!m.removed) bases.add(m.cl);
@@ -126,7 +147,7 @@ function stats() {
   return { meetings, groups: groupList.map(g => ({ key: g.key, bases: g.bases.length, mobs: per.get(g.key) || 0, player: g.player })) };
 }
 const text = () => { const s = stats(); return "Clusters: " + s.groups.length + " (" + s.groups.map(g => g.key + (g.player ? "*" : "") + " " + g.mobs).join(", ") + ")"; };
-function reset() { villages = []; player = null; regionBase.clear(); groupOfBase = new Map(); groupList = []; meetings = 0; claimed = null; }
+function reset() { villages = []; player = null; regionBase.clear(); groupOfBase = new Map(); groupList = []; meetings = 0; claimed = null; remote = null; }
 
-BF.clusters = { MEET, REACH, rebuild, ofRegion, groupOf, groups: () => groupList, baseOf, place, of: m => m.cl, villageOf, stats, text, reset };
+BF.clusters = { MEET, REACH, rebuild, ofRegion, groupOf, groups: () => groupList, baseOf, place, summary, set remote(r) { remote = r; }, of: m => m.cl, villageOf, stats, text, reset };
 })();

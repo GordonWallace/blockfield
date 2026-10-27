@@ -513,6 +513,7 @@ function reset() {
 
 // ---------- events (BF.on comes from main.js, loaded later: registered on first use) ----------
 let hooked = false;
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(hookEvents); });   // (cluster workers: set up on every worker, js/ctick.js warm)
 function hookEvents() {
   if (hooked || typeof BF.on !== "function") return;
   hooked = true;

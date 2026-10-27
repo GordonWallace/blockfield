@@ -206,6 +206,7 @@ function scanChunk(cx, cz, c) {
   const CS = BF.CS;
   BF.world.scanFlagged(c, SCANF, (lx, y, lz) => track(cx * CS + lx, y, cz * CS + lz));
 }
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(hook); });   // (cluster workers: set up on every worker, js/ctick.js warm)
 function hook() {
   if (hooked || !BF.world || !BF.world.onChunkLoad) return;
   hooked = true;

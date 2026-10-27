@@ -10,9 +10,10 @@
 // canonical text are compared with the reference's, and the first objects that differ are printed with where their text first differs.
 // Owners: by default (and CI) by a hash of each group, never moving. --shuffle k: the groups change workers at every meeting (by a hash
 // of k), so every hand-over is tried: module state left behind on the old worker shows up here (the C2-C6 bar once C3 has made the mob
-// loop's tables owned). --plan: planned from the measured times (js/cworkers.js plan). --order cluster (without --shuffle): nobody owns
-// a group, each worker takes the next one when it is free (js/cworkers.js claim), so groups move between workers as with --shuffle.
-// Usage: node test/cluster-workers.js [--workers 2] [--seed 3] [--extra 3] [--seconds 30] [--shuffle k | --plan] [--order tick|cluster]
+// loop's tables owned). --plan: planned from the measured times (js/cworkers.js plan). --order cluster --pull (without --shuffle): nobody
+// owns a group, each worker takes the next one when it is free (js/cworkers.js claim), so groups move between workers as with --shuffle.
+// --partial: partial copies (js/cworkers.js CW.partial): each worker is compared with every mob's current copy gathered in (gathered).
+// Usage: node test/cluster-workers.js [--workers 2] [--seed 3] [--extra 3] [--seconds 30] [--shuffle k | --plan] [--order tick|cluster] [--pull] [--partial]
 //                                    [--profile converted|a,b,c]
 const path = require('path'), crypto = require('crypto');
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
@@ -23,7 +24,7 @@ else main().catch(e => { console.error(e); process.exit(1); });
 
 // ---------------------------------------------------------------- a worker: one world
 function child() {
-  const { me, n, seed, extra, order, shuffle, fixed, profile, shared } = workerData;
+  const { me, n, seed, extra, order, shuffle, fixed, profile, shared, pull, partial } = workerData;
   for (const k of ['log', 'info', 'debug']) console[k] = () => {};
   const { load } = require('../tools/headless.js');
   const { BF } = load();
@@ -39,29 +40,31 @@ function child() {
     BF.cworkers.shuffle = shuffle;
     BF.cworkers.fixed = fixed;
     BF.cworkers.sizes = {};
-    BF.cworkers.setup({ n, me, link: BF.rworkers.attach(shared, me, n), claims: shared.claims });
+    BF.cworkers.setup({ n, me, link: BF.rworkers.attach(shared, me, n), claims: shared.claims, pull, partial });
   }
   const md5 = t => crypto.createHash('md5').update(t).digest('hex').slice(0, 16);
   const objs = () => {
     const o = {};
-    for (const m of BF.mobs.list) if (!m.removed) o['mob ' + m.id] = md5(BF.stateHash.canon(m));
+    for (const m of BF.mobs.list) if (!m.removed) o['mob ' + m.id] = md5(BF.stateHash.canon(m)) + ' in ' + m.cl;   // (and its cluster: the meetings place it alike)
     for (const [k, v] of BF.mobs.villages) o['village ' + k] = md5(BF.stateHash.canon(v));
     return o;
   };
   const textOf = k => {
     const kind = k.slice(0, k.indexOf(' ')), id = k.slice(k.indexOf(' ') + 1);
     const o = kind === 'mob' ? BF.ids.live(id) : BF.mobs.villages.get(id);
-    return o ? BF.stateHash.canon(o) : null;
+    return o ? (kind === 'mob' ? 'in ' + o.cl + ' ' : '') + BF.stateHash.canon(o) : null;
   };
   parentPort.on('message', msg => {
     try {
+      const all = fn => (shared ? BF.cworkers.gathered(fn) : fn());   // (partial copies: every mob's current copy, from its worker)
       if (msg.do === 'interval') {
         BF.boot.stream();
         C.interval(BF.warp.TICK);
         const s = C.stats();
-        parentPort.postMessage({ parts: BF.stateHash.parts(), objs: objs(), tick: BF.rand.tick, mobs: BF.mobs.list.length, groups: s.groups.length,
+        const [parts, os] = all(() => [BF.stateHash.parts(), objs()]);
+        parentPort.postMessage({ parts, objs: os, tick: BF.rand.tick, mobs: BF.mobs.list.length, groups: s.groups.length,
           errors: errors.splice(0), owners: shared ? [...BF.cworkers.owners] : null, text: shared ? BF.cworkers.text() : null });
-      } else if (msg.do === 'text') parentPort.postMessage({ texts: msg.keys.map(textOf), parts: msg.parts.map(p => BF.stateHash.text(p)) });
+      } else if (msg.do === 'text') parentPort.postMessage(all(() => ({ texts: msg.keys.map(textOf), parts: msg.parts.map(p => BF.stateHash.text(p)) })));
       else if (msg.do === 'stats') parentPort.postMessage({ stats: shared ? BF.cworkers.stats() : null, sizes: shared ? BF.cworkers.sizes : null });
       else if (msg.do === 'stop') process.exit(0);
     } catch (e) {
@@ -75,13 +78,14 @@ function child() {
 // ---------------------------------------------------------------- the parent
 async function main() {
   const n = +arg('workers', 2), seed = +arg('seed', 3), extra = +arg('extra', 3), seconds = +arg('seconds', 30);
-  const order = arg('order', 'tick'), pull = order === 'cluster' && arg('shuffle') == null;
+  const partial = process.argv.includes('--partial');
+  const order = arg('order', 'tick'), pull = order === 'cluster' && process.argv.includes('--pull') && arg('shuffle') == null;
   const profile = arg('profile', 'converted'), plan = process.argv.includes('--plan'), fixed = !plan && !pull && arg('shuffle') == null;
   const shuffle = plan || pull ? 0 : +arg('shuffle', 1);
   const { load } = require('../tools/headless.js');
   const shared = load().BF.cworkers.makeShared(n);
   const spawn = data => {
-    const w = new Worker(__filename, { workerData: Object.assign({ seed, extra, order, shuffle, fixed, profile }, data) });
+    const w = new Worker(__filename, { workerData: Object.assign({ seed, extra, order, shuffle, fixed, profile, pull, partial }, data) });
     const waiting = [];
     w.on('message', m => { const f = waiting.shift(); if (f) f(m); });
     w.on('error', e => { console.error(e); process.exit(1); });
@@ -92,7 +96,7 @@ async function main() {
   const ws = [];
   for (let me = 0; me < n; me++) ws.push(spawn({ me, n, shared }));
   await Promise.all([ref, ...ws].map(x => x.next()));
-  console.log(`booted the reference and ${n} cluster workers in ${((Date.now() - t0) / 1000).toFixed(1)} s (seed ${seed}, extra ${extra}, ${order} order${pull ? ', groups pulled' : shuffle ? (fixed ? ', fixed owners ' : ', shuffle ') + shuffle : ''}, profile ${profile})`);
+  console.log(`booted the reference and ${n} cluster workers in ${((Date.now() - t0) / 1000).toFixed(1)} s (seed ${seed}, extra ${extra}, ${order} order${partial ? ', partial copies' : ''}${pull ? ', groups pulled' : shuffle ? (fixed ? ', fixed owners ' : ', shuffle ') + shuffle : ''}, profile ${profile})`);
   let fails = 0, errs = 0;
   const all = [ref, ...ws];
   for (let s = 1; s <= seconds; s++) {
@@ -117,7 +121,9 @@ async function main() {
       for (const d of diffs) {
         console.log(`  worker ${d.w} differs in ${d.parts.join(', ')}: ${d.objs.length} objects (${d.objs.slice(0, 6).join(', ')}${d.objs.length > 6 ? ', ...' : ''})`);
         const keys = d.objs.slice(0, 3), ps = d.parts.filter(p => p !== 'mobs' && p !== 'villages').slice(0, 2);
-        const [a, b] = await Promise.all([ref.ask({ do: 'text', keys, parts: ps }), ws[d.w].ask({ do: 'text', keys, parts: ps })]);
+        const q = { do: 'text', keys, parts: ps };   // (partial copies: every worker gathers, so every worker is asked)
+        const [a, ...bs] = await Promise.all([ref.ask(q), ...(partial ? ws : [ws[d.w]]).map(x => x.ask(q))]);
+        const b = partial ? bs[d.w] : bs[0];
         const show = (label, p, q) => {
           if (p == null || q == null) { console.log(`    ${label}: ${p == null ? 'missing in the reference' : 'missing on the worker'}`); return; }
           let i = 0; while (i < p.length && p[i] === q[i]) i++;
