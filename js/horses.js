@@ -420,21 +420,28 @@ function tables() {
   tabled = true;
   const K = BF.ctick, plain = o => JSON.parse(JSON.stringify(o));
   K.owned("horses.records", {
-    snap: gk => { const out = []; for (const r of recs.values()) if (recGroup(K, r) === gk) { const c = plain(Object.assign({}, r, { mobId: r.mobId })); c.cl = r.cl; out.push(c); } return out; },
+    snap: gk => { const out = []; for (const r of recs.values()) if (recGroup(K, r) === gk) { const c = plain(Object.assign({}, r, { mobId: r.mobId })); c.cl = r.cl; out.push(c); } return out.sort((p, q) => p.hid - q.hid); },
     apply(gk, a) {
-      for (const r of [...recs.values()]) if (recGroup(K, r) === gk) recs.delete(r.hid);
+      const keep = new Set((a || []).map(e => e.hid));
+      for (const r of [...recs.values()]) if (!keep.has(r.hid) && recGroup(K, r) === gk) recs.delete(r.hid);
       for (const e of a || []) {
-        const r = recs.get(e.hid) || BF.ids.mobRef({ hid: e.hid, mobId: null });
-        Object.assign(r, e); recs.set(r.hid, r); if (r.hid >= nextId) nextId = r.hid + 1;
+        if (e.lead && e.lead.kind === "mob") e.lead = BF.ids.refs(e.lead);   // the holder by id again
+        const old = recs.get(e.hid), r = old ? Object.assign(old, e) : BF.ids.mobRef(e);   // the same object where there is one (m.horse, key order)
+        recs.set(r.hid, r); if (r.hid >= nextId) nextId = r.hid + 1;
         const m = r.mob; if (m && m.horse && m.horse !== r && m.horse.hid === r.hid) m.horse = r;   // a mob that came over carries a copy: the record is the one
       }
+      // back in hid order (the order they were made in), so the horses tick in the same order as on a worker that never sent them
+      const all = [...recs.values()].sort((p, q) => p.hid - q.hid);
+      recs.clear(); for (const r of all) recs.set(r.hid, r);
     },
   });
   K.owned("horses.herds", {
-    snap: gk => [...herds.values()].filter(h => h.cl !== undefined && BF.clusters.groupOf(h.cl) === gk).map(h => Object.assign({}, h)),
+    snap: gk => [...herds.values()].filter(h => h.cl !== undefined && BF.clusters.groupOf(h.cl) === gk).map(h => Object.assign({}, h)).sort((p, q) => p.id - q.id),
     apply(gk, a) {
       for (const h of [...herds.values()]) if (h.cl !== undefined && BF.clusters.groupOf(h.cl) === gk) herds.delete(h.id);
       for (const h of a || []) { herds.set(h.id, h); if (h.id >= nextHerd) nextHerd = h.id + 1; }
+      const all = [...herds.values()].sort((p, q) => p.id - q.id);   // id order, as for the records
+      herds.clear(); for (const h of all) herds.set(h.id, h);
     },
   });
 }

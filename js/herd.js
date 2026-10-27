@@ -249,7 +249,10 @@ function penTable(name, o) {
         for (const e of a[k]) {
           const p = ps.find(q => q.idx === e.idx);
           if (!p) { lost(name, "pen " + e.idx + " of village " + k); continue; }
-          p[o.list] = e.list.map(s => BF.ids.refs(s));
+          // the same objects where there are ones (other records point at them): by mob, and the stock not out yet in its order
+          const had = new Map(), spare = [];
+          for (const s of p[o.list] || []) if (s && s.mobId != null) had.set(s.mobId, s); else if (s) spare.push(s);
+          p[o.list] = e.list.map(s => { const h = s.mobId != null ? had.get(s.mobId) : spare.shift(); return h ? Object.assign(h, BF.ids.refs(s)) : BF.ids.refs(s); });
           if (e.culls !== undefined) p.culls = e.culls;
           for (const s of p[o.list]) { const m = s.mobId != null ? BF.ids.live(s.mobId) : null; if (m) { m[o.mob] = s; m[o.pen] = p; } }   // (one state object, as on the owner)
         }
