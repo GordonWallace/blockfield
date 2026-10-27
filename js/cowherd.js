@@ -242,7 +242,7 @@ function grassAt(x, z) {
 }
 
 let pending = new Map();      // village key -> [{i, c: [packed], k: culls}] from a save, taken as each pasture is first seen
-const activePastures = [];    // pastures that are loaded and near the player (rebuilt by tickPastures)
+let activePastures = [];      // pastures that are loaded and near the player (rebuilt by tickPastures; with clusters the running group's)
 let hooked = false;
 
 function seeded(str) {
@@ -292,6 +292,7 @@ function tickPastures() {
   if (!pp || !BF.mobs || !BF.mobs.spawn) return;
   const W = BF.world;
   for (const rec of BF.mobs.villages.values()) {
+    if (!BF.herd.ownsVillage(rec.key)) continue;   // (clusters: another group's village)
     if (!rec.wg && !(rec.built || []).some(e => e.type === "pasture")) continue;
     if (BF.planet.distance(rec, pp) > 80 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
     for (const p of pasturesOf(rec)) {
@@ -348,13 +349,24 @@ function hook() {
   if (hooked || !BF.on) return;
   hooked = true;
   BF.on("mobKilled", m => { if (m && m.type === "cow" && m.pasture) leavePasture(m); });
+  BF.herd.villageTable("cowherd.pending", () => pending);   // (clusters: save data waiting for its pastures, by village)
+  BF.herd.penTable("cowherd.pastures", { field: "_pastures", list: "cows", mob: "cow", pen: "pasture", of: pasturesOf });   // (and the herds)
+  H().tables();
 }
 function tick(dt) {
   hook();
-  acc += dt; pastureT -= dt;
-  if (pastureT <= 0 && BF.world) { pastureT = 1; try { tickPastures(); } catch (e) { console.error(e); } }
-  if (acc < 0.5 || !BF.mobs) return;
-  acc = 0;
+  const C = H().cluster();
+  if (C) {   // (clusters, js/ctick.js: the running group's pastures, filled in its first pass after each meeting; timers by the tick counter)
+    const L = C.local("cowherd", () => ({ pastures: [], fresh: true }));
+    activePastures = L.pastures;
+    if (L.fresh && BF.world) { L.fresh = false; try { tickPastures(); } catch (e) { console.error(e); } }
+    if (!H().every(10) || !BF.mobs) return;
+  } else {
+    acc += dt; pastureT -= dt;
+    if (pastureT <= 0 && BF.world) { pastureT = 1; try { tickPastures(); } catch (e) { console.error(e); } }
+    if (acc < 0.5 || !BF.mobs) return;
+    acc = 0;
+  }
   if (H().toShut.length) H().shutGates();
   const t = now();
   for (const m of BF.mobs.ofType("cow")) {   // (spec r15-31: the cow only)

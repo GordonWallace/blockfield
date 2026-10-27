@@ -89,13 +89,28 @@ const herds = new Map();       // herd id -> {id, cx, cz, dir}
 let nextHerd = 1;
 const isHorseBiome = (x, z) => { try { return HORSE_BIOMES.has(BF.worldgen.biomeAt(x, z).id); } catch (_) { return false; } };
 function newRec(o) {
-  const rs = BF.rand.at("horse", o.x, o.z, null, nextId);   // a new horse's looks and stats: from where, when and its number
+  const hid = newId();
+  const rs = BF.rand.at("horse", o.x, o.z, null, hid);   // a new horse's looks and stats: from where, when and its number
   const st = o.stats || rollStats(rs);
-  const r = BF.ids.mobRef({ hid: nextId++, x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, coat: o.coat || COATS[irnd(rs, 0, 6)], mark: o.mark || MARKS[irnd(rs, 0, 4)],
+  const r = BF.ids.mobRef({ hid, x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, coat: o.coat || COATS[irnd(rs, 0, 6)], mark: o.mark || MARKS[irnd(rs, 0, 4)],
     maxHp: st.hp, hp: st.hp, speed: st.speed, jump: st.jump, tamed: !!o.tamed, owner: o.owner || null, saddle: !!o.saddle, temper: 0,
-    growAt: o.growAt != null ? o.growAt : null, cd: o.cd || 0, fed: null, herd: o.herd || null, lead: null, post: null, pen: o.pen || null, rider: false, mob: null, avoid: null, mate: null });
+    growAt: o.growAt != null ? o.growAt : null, cd: o.cd || 0, fed: null, herd: o.herd || null, lead: null, post: null, pen: o.pen || null, rider: false, mob: null, avoid: null, mate: null, cl: undefined });
   recs.set(r.hid, r);
   return r;
+}
+// A new record's or herd's number. With clusters (js/ctick.js) it comes from the running group's entity id range (js/ids.js), so it
+// doesn't depend on the order groups run in; the counters then just stay past it.
+function newId() {
+  if (!BF.herd.cluster()) return nextId++;
+  const n = +BF.ids.alloc().slice(1);
+  if (n >= nextId) nextId = n + 1;
+  return n;
+}
+function newHerdId() {
+  if (!BF.herd.cluster()) return nextHerd++;
+  const n = +BF.ids.alloc().slice(1);
+  if (n >= nextHerd) nextHerd = n + 1;
+  return n;
 }
 const variantOf = r => r.coat + "/" + r.mark;
 // Puts the record's horse into the world as a mob.
@@ -109,6 +124,7 @@ function embody(r) {
   const m = BF.mobs.spawn("horse", r.x, r.y, r.z);
   if (!m) return null;
   m.horse = r; r.mob = m;
+  if (m.cl !== undefined) r.cl = m.cl;   // (clusters: the record goes with its horse)
   m.kind = "horse"; m.ctl = RIDE;
   m.maxHp = r.maxHp; m.hp = clamp(r.hp, 1, r.maxHp);
   m.yaw = r.yaw;
@@ -327,7 +343,9 @@ function dropLead(m) {
 
 // ---------------------------------------------------------------- herds and spawning
 function moveHerds(dt) {
+  const C = BF.herd.cluster();
   for (const h of herds.values()) {
+    if (C && !herdMine(C, h)) continue;   // (clusters: another group's herd)
     let n = 0, sx = 0, sz = 0;
     const hc = { x: h.cx, z: h.cz };
     for (const r of recs.values()) if (r.herd === h.id && r.mob && live(r.mob)) { const q = seenXZ(hc, r.mob.position); n++; sx += q.x; sz += q.z; }   // (seen from the centre's frame)
@@ -350,8 +368,8 @@ function moveHerds(dt) {
 function spawnHerdAt(x, z) {
   const W = BF.world, gy = W.heightAt(x, z);
   if (W.getBlock(x, gy, z) !== BF.B.grass) return null;
-  const r = BF.rand.at("herd spawn", x, z, null, nextHerd);   // (the herd number too: tests make several on one spot in a tick)
-  const h = { id: nextHerd++, cx: x + 0.5, cz: z + 0.5, dir: r.next() * Math.PI * 2 };
+  const id = newHerdId(), r = BF.rand.at("herd spawn", x, z, null, id);   // (the herd number too: tests make several on one spot in a tick)
+  const h = { id, cx: x + 0.5, cz: z + 0.5, dir: r.next() * Math.PI * 2 };
   herds.set(h.id, h);
   const n = irnd(r, 2, 6);
   let made = 0;
@@ -377,11 +395,53 @@ function leads() {
 }
 
 // ---------------------------------------------------------------- tick (mobs.update, world simulation time)
+// ---------------------------------------------------------------- clusters (spec r15-39b item C4, js/ctick.js)
+// With the cluster tick on, each group ticks its own records and herds:
+//  - a record goes with its horse while it is out (the horse's cluster, m.cl, kept on the record as r.cl), stays with the cluster it was
+//    last in when the horse goes (chunk unloaded, left behind), and a record never seen out goes with where it waits;
+//  - a herd goes with the cluster its centre was in when the interval started (worked out by the first group to look at it in the interval,
+//    before any group moved it: the same in every order).
+const groupNow = (C, b) => { const k = BF.clusters.groupOf(b); return C.groups().some(g => g.key === k) ? k : null; };
+function recGroup(C, r) {
+  const m = r.mobId != null ? BF.ids.live(r.mobId) : undefined;
+  const k = m && m.cl !== undefined ? groupNow(C, m.cl) : r.cl !== undefined ? groupNow(C, r.cl) : null;
+  return k != null ? k : BF.clusters.groupOf(BF.clusters.ofRegion(BF.regions.keyOf(r.x, 0, r.z)));
+}
+function herdMine(C, h) {
+  const at = Math.floor((BF.rand.tick - 1) / C.MEET);
+  if (h.clAt !== at) { h.clAt = at; h.cl = BF.clusters.ofRegion(BF.regions.keyOf(h.cx, 0, h.cz)); }
+  return BF.clusters.groupOf(h.cl) === C.cur.key;
+}
+// (the multi-worker runtime, js/cworkers.js: each group's records and herds at meetings)
+let tabled = false;
+function tables() {
+  if (tabled || !BF.ctick || !BF.ctick.owned) return;
+  tabled = true;
+  const K = BF.ctick, plain = o => JSON.parse(JSON.stringify(o));
+  K.owned("horses.records", {
+    snap: gk => { const out = []; for (const r of recs.values()) if (recGroup(K, r) === gk) { const c = plain(Object.assign({}, r, { mobId: r.mobId })); c.cl = r.cl; out.push(c); } return out; },
+    apply(gk, a) {
+      for (const r of [...recs.values()]) if (recGroup(K, r) === gk) recs.delete(r.hid);
+      for (const e of a || []) { const r = recs.get(e.hid) || BF.ids.mobRef({ hid: e.hid, mobId: null }); Object.assign(r, e); recs.set(r.hid, r); if (r.hid >= nextId) nextId = r.hid + 1; }
+    },
+  });
+  K.owned("horses.herds", {
+    snap: gk => [...herds.values()].filter(h => h.cl !== undefined && BF.clusters.groupOf(h.cl) === gk).map(h => Object.assign({}, h)),
+    apply(gk, a) {
+      for (const h of [...herds.values()]) if (h.cl !== undefined && BF.clusters.groupOf(h.cl) === gk) herds.delete(h.id);
+      for (const h of a || []) { herds.set(h.id, h); if (h.id >= nextHerd) nextHerd = h.id + 1; }
+    },
+  });
+}
+
 let backT = 0;
 function tick(dt) {
   if (!BF.mobs) return;
+  tables();
+  const C = BF.herd.cluster();
   const t = now(), P = BF.player, pp = P && P.position;
   for (const r of recs.values()) {
+    if (C) { if (recGroup(C, r) !== C.cur.key) continue; const lm = r.mobId != null ? BF.ids.live(r.mobId) : undefined; if (lm && lm.cl !== undefined) r.cl = lm.cl; }   // (clusters: another group's)
     const m = r.mob;
     if (m && m.dead) { recs.delete(r.hid); continue; }   // died: gone for good
     if (m && m.removed) { store(r); r.t = now(); r.mob = null; if (r.rider) r.rider = false; continue; }   // chunk unloaded or left behind: it waits there
@@ -391,10 +451,12 @@ function tick(dt) {
       if (r.post) { const [x, y, z] = r.post; if (!BF.world.getBlock || !BF.blocks[BF.world.getBlock(x, y, z)] || !/fence/.test(BF.blocks[BF.world.getBlock(x, y, z)].name || "")) { r.post = null; if (r.lead && r.lead.kind === "post") { r.lead = null; if (BF.drops && BF.I.lead != null) BF.drops.spawn(BF.I.lead, 1, x + 0.5, y + 0.5, z + 0.5); } } }
     }
   }
-  backT -= dt;
-  if (backT <= 0 && pp) {   // horses waiting where they were come back as soon as their chunk is loaded, wherever the player is (idea-037)
-    backT = 1;
+  let back;
+  if (C) back = pp && BF.herd.every(20);   // (clusters: by the tick counter)
+  else { backT -= dt; back = backT <= 0 && pp; if (back) backT = 1; }
+  if (back) {   // horses waiting where they were come back as soon as their chunk is loaded, wherever the player is (idea-037)
     for (const r of recs.values()) {
+      if (C && recGroup(C, r) !== C.cur.key) continue;
       if (r.mob || !BF.world.isLoaded(r.x, r.z)) continue;
       const m = embody(r);
       if (m && r.rider && P && !P.vehicle && P.mount) P.mount(m, true);
@@ -402,7 +464,7 @@ function tick(dt) {
   }
   moveHerds(dt);
   // herds left with no horses at all are forgotten
-  for (const h of herds.values()) { let any = false; for (const r of recs.values()) if (r.herd === h.id) { any = true; break; } if (!any) herds.delete(h.id); }
+  for (const h of herds.values()) { if (C && !herdMine(C, h)) continue; let any = false; for (const r of recs.values()) if (r.herd === h.id) { any = true; break; } if (!any) herds.delete(h.id); }
 }
 
 // ---------------------------------------------------------------- riding (the player's vehicle interface, js/player.js)
@@ -615,7 +677,7 @@ function deserialize(o) {
       temper: +e.temper || 0, growAt: e.growAt != null ? +e.growAt : null, cd: +e.cd || 0, fed: e.fed != null ? +e.fed : null, herd: e.herd || null, t: e.t != null ? +e.t : null,
       lead: Array.isArray(e.post) ? { kind: "post", x: e.post[0], y: e.post[1], z: e.post[2] } : e.led ? { kind: "player" } : null, post: Array.isArray(e.post) ? e.post : null,
       pen: e.pen && typeof e.pen === "object" ? e.pen : null, rider: !!e.rider, mob: null,
-      avoid: e.avoid && typeof e.avoid === "object" ? e.avoid : null, mate: null });   // (every field a live record has, so a reload doesn't change the record, bug-084)
+      avoid: e.avoid && typeof e.avoid === "object" ? e.avoid : null, mate: null, cl: undefined });   // (every field a live record has, so a reload doesn't change the record, bug-084)
     recs.set(r.hid, r);
     nextId = Math.max(nextId, r.hid + 1);
   }

@@ -243,7 +243,7 @@ const coopDist = (p, x, z) => Math.hypot(Math.max(p.fx0 - x, 0, x - p.fx1), Math
 const inRoom = (p, pos) => pos.x > p.x0 && pos.x < p.x1 && pos.z > p.z0 && pos.z < p.z1 && Math.abs(pos.y - (p.y + 1)) < 3;
 
 let pending = new Map();      // village key -> [{i, h: [packed], e: eggs}] from a save, taken as each coop is first seen
-const activeCoops = [];       // coops that are loaded and near the player (rebuilt by tickCoops)
+let activeCoops = [];         // coops that are loaded and near the player (rebuilt by tickCoops; with clusters the running group's)
 let hooked = false;
 
 function seeded(str) {
@@ -292,7 +292,7 @@ function tickCoops() {
   if (!pp || !BF.mobs || !BF.mobs.spawn) return;
   const W = BF.world;
   for (const rec of BF.mobs.villages.values()) {
-    if (!rec.wg) continue;
+    if (!rec.wg || !BF.herd.ownsVillage(rec.key)) continue;   // (clusters: another group's village)
     if (BF.planet.distance(rec, pp) > 80 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
     for (const coop of coopsOf(rec)) {
       if (!W.isLoaded(coop.fx0, coop.fz0) || !W.isLoaded(coop.fx1, coop.fz1) || !W.isLoaded(coop.fx0, coop.fz1) || !W.isLoaded(coop.fx1, coop.fz0)) continue;
@@ -351,13 +351,24 @@ function hook() {
   if (hooked || !BF.on) return;
   hooked = true;
   BF.on("mobKilled", m => { if (m && m.type === "chicken" && m.coop) leaveCoop(m); });
+  BF.herd.villageTable("poultry.pending", () => pending);   // (clusters: save data waiting for its coops, by village)
+  BF.herd.penTable("poultry.coops", { field: "_coops", list: "hens", mob: "hen", pen: "coop", of: coopsOf });   // (and the flocks)
+  BF.herd.gateTable("poultry.toShut", toShut);             // (and the gates keepers held open, by keeper)
 }
 function tick(dt) {
   hook();
-  acc += dt; coopT -= dt;
-  if (coopT <= 0 && BF.world) { coopT = 1; try { tickCoops(); } catch (e) { console.error(e); } }
-  if (acc < 0.5 || !BF.mobs) return;
-  acc = 0;
+  const C = BF.herd.cluster();
+  if (C) {   // (clusters, js/ctick.js: the running group's coops, filled in its first pass after each meeting; timers by the tick counter)
+    const L = C.local("poultry", () => ({ coops: [], fresh: true }));
+    activeCoops = L.coops;
+    if (L.fresh && BF.world) { L.fresh = false; try { tickCoops(); } catch (e) { console.error(e); } }
+    if (!BF.herd.every(10) || !BF.mobs) return;
+  } else {
+    acc += dt; coopT -= dt;
+    if (coopT <= 0 && BF.world) { coopT = 1; try { tickCoops(); } catch (e) { console.error(e); } }
+    if (acc < 0.5 || !BF.mobs) return;
+    acc = 0;
+  }
   if (toShut.length) shutGates();
   const t = now();
   for (const m of BF.mobs.ofType("chicken")) {   // (spec r15-31: the chicken only)
@@ -485,6 +496,7 @@ function endTask(m, ok) {
 const toShut = [];
 function shutGates() {
   for (let i = toShut.length - 1; i >= 0; i--) {
+    if (!BF.herd.ownsMob(toShut[i].m)) continue;   // (clusters: another group's keeper's gate)
     const g = toShut[i], [x, y, z] = g.at, bk = BF.world.isLoaded(x, z) ? BF.blocks[BF.world.getBlock(x, y, z)] : null;
     if (!bk || !bk.gate || !bk.gate.open || BF.simNow() - g.t > 120) { toShut.splice(i, 1); continue; }
     if ((BF.mobs.isOccupied && BF.mobs.isOccupied(x, y, z)) || (live(g.m) && Math.hypot(x + 0.5 - g.m.position.x, z + 0.5 - g.m.position.z) < 1.5)) continue;

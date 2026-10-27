@@ -63,13 +63,13 @@ const SYSTEMS = {
   vstats: false,        // C3 (village stats and economy, js/villagelog.js)
   forester: false,      // C3
   signs: false,         // C3
-  shepherd: false,      // C4: animals
-  horses: false,        // C4
-  stables: false,       // C4
-  poultry: false,       // C4
-  cowherd: false,       // C4
-  pigFarmer: false,     // C4
-  bees: false,          // C4
+  shepherd: true,       // C4: animals
+  horses: true,         // C4
+  stables: true,        // C4
+  poultry: true,        // C4
+  cowherd: true,        // C4
+  pigFarmer: true,      // C4
+  bees: true,           // C4
   merchant: false,      // C5: merchants and caravans
   villageSim: false,    // C5 (which villages are simulated, trip pins: js/villagesim.js)
   fluids: false,        // C6: world

@@ -234,7 +234,7 @@ function pensOf(rec) {
 const penDist = (p, x, z) => Math.hypot(Math.max(p.fx0 - x, 0, x - p.fx1), Math.max(p.fz0 - z, 0, z - p.fz1));   // 0 inside the fence
 
 let pending = new Map();      // village key -> [{i, s: [packed sheep]}] from a save, taken as each pen is first seen
-const activePens = [];        // pens that are loaded and near the player (rebuilt by tickPens)
+let activePens = [];          // pens that are loaded and near the player (rebuilt by tickPens; with clusters the running group's)
 let hooked = false;
 
 function seeded(str) {
@@ -293,6 +293,7 @@ function tickPens() {
   if (!pp || !BF.mobs || !BF.mobs.spawn) return;
   const W = BF.world;
   for (const rec of BF.mobs.villages.values()) {
+    if (!BF.herd.ownsVillage(rec.key)) continue;   // (clusters: another group's village)
     if (!(rec.wg && rec.wg.buildings) && !(rec.built && rec.built.some(e => e.type === "pen"))) continue;
     if (BF.planet.distance(rec, pp) > 80 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
     for (const pen of pensOf(rec)) {
@@ -347,13 +348,23 @@ function hook() {
   if (hooked || !BF.on) return;
   hooked = true;
   BF.on("mobKilled", m => { if (m && m.type === "sheep" && m.pen) leavePen(m); });
+  BF.herd.villageTable("shepherd.pending", () => pending);   // (clusters: save data waiting for its pens, by village)
+  BF.herd.penTable("shepherd.pens", { field: "_pens", list: "sheep", mob: "sheep", pen: "pen", of: pensOf });   // (and the flocks)
 }
 function tick(dt) {
   hook();
-  acc += dt; penT -= dt;
-  if (penT <= 0 && BF.world) { penT = 1; try { tickPens(); } catch (e) { console.error(e); } }
-  if (acc < 0.5 || !BF.mobs) return;
-  acc = 0;
+  const C = BF.herd.cluster();
+  if (C) {   // (clusters, js/ctick.js: the running group's pens, filled in its first pass after each meeting; timers by the tick counter)
+    const L = C.local("shepherd", () => ({ pens: [], fresh: true }));
+    activePens = L.pens;
+    if (L.fresh && BF.world) { L.fresh = false; try { tickPens(); } catch (e) { console.error(e); } }
+    if (!BF.herd.every(10) || !BF.mobs) return;
+  } else {
+    acc += dt; penT -= dt;
+    if (penT <= 0 && BF.world) { penT = 1; try { tickPens(); } catch (e) { console.error(e); } }
+    if (acc < 0.5 || !BF.mobs) return;
+    acc = 0;
+  }
   const t = now();
   for (const m of BF.mobs.ofType("sheep")) {   // (spec r15-31: the sheep only)
     if (!live(m)) continue;
