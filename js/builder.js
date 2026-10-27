@@ -29,6 +29,12 @@ const W = () => BF.world;
 const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 const rnd = (r, a, b) => r.range(a, b);
 const pending = new Map();         // village key -> built list (same array as rec.built)
+// several workers (clusters, js/cworkers.js): a village's list is its cluster's; a loaded village's is its record's (sent with the record)
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.ownedMap) return;
+  C.ownedMap("builder.built", pending, k => C.ofVillage(k), list => JSON.parse(JSON.stringify(list)), (j, k) => { const R = BF.mobs.villages.get(k); return R && R.built ? R.built : j; });
+});
 const log = [];
 
 function hash32(str) {

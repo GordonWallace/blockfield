@@ -33,9 +33,8 @@ const S = {
   log: [],
   timer: 0,
 };
-let ids = 0;
-const idOf = new WeakMap();
-const mid = m => { let i = idOf.get(m); if (!i) idOf.set(m, i = ++ids); return i; };
+// a pair's key is its ids (r15-13), the same on every worker (clusters, js/cworkers.js)
+const mid = m => m.id;
 
 // ---------- time / food helpers ----------
 const now = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
@@ -192,6 +191,7 @@ function eligible(m) {
   return breadEq(m.inv) >= NEED;
 }
 function pairKey(a, b) { const i = mid(a), j = mid(b); return i < j ? i + ":" + j : j + ":" + i; }
+const pairGroup = k => { const m = BF.ids.live(k.slice(0, k.indexOf(":"))); return m && m.cl !== undefined ? BF.clusters.groupOf(m.cl) : null; };
 function encounters(rec) {
   const vs = (rec.members || []).filter(m => m.type === "villager" && !m.dead && !m.removed && !m.child);
   if (vs.length < 2) return;
@@ -228,9 +228,10 @@ function startLove(a, b, rec) {
 }
 function endLove(L) { if (BF.villageSim && BF.villageSim.done) { BF.villageSim.done(L.a); BF.villageSim.done(L.b); } if (L.a.love === L.b) L.a.love = null; if (L.b.love === L.a) L.b.love = null; }
 function bad(m) { return !m || m.dead || m.removed || m.sleeping || m.tradingWith || (m.ai && m.ai.fleeT > 0); }
-function updateLoves(dt) {
+function updateLoves(dt, C) {
   for (let i = S.loves.length - 1; i >= 0; i--) {
     const L = S.loves[i];
+    if (C && !C.mineVillage(L.rec.key)) continue;
     if (bad(L.a) || bad(L.b) || bedtime()) { endLove(L); S.loves.splice(i, 1); continue; }
     L.t += dt; L.heartT -= dt;
     if (L.heartT <= 0) {
@@ -374,9 +375,10 @@ function finishGrow(m) {
   BF.glog.job("breeding", { kind: "grew-up", village: villageKeyOf(m), who: BF.vlog ? BF.vlog.nameOf(m) : null, profession: m.profession, prefer: m.jobPrefer.join("/") });
   if (BF.emit) BF.emit("villagerGrewUp", m);
 }
-function updateGrow(dt) {
+function updateGrow(dt, C) {
   for (let i = S.grow.length - 1; i >= 0; i--) {
     const g = S.grow[i];
+    if (C && !C.mine(g.m)) continue;
     if (g.m.removed || g.m.dead) { g.m.growing = false; S.grow.splice(i, 1); if (!g.m.dead && g.m.bredEntry) g.m.bredEntry.growNow = true; continue; }
     g.t += dt;
     const k = Math.min(1, g.t / GROW_T);
@@ -437,13 +439,14 @@ function spawnMissing(rec) {
 function tick(dt) {
   if (!BF.mobs || !BF.trades) return;
   hookEvents();
-  updateLoves(dt);
-  updateGrow(dt);
-  S.timer -= dt;
-  if (S.timer > 0) return;
-  S.timer = 1;
+  // clusters (spec r15-39b, js/ctick.js): the running cluster's loves, children and villages, once a game second on the tick counter
+  const C = BF.ctick && BF.ctick.filter ? BF.ctick : null;
+  updateLoves(dt, C);
+  updateGrow(dt, C);
+  if (C) { if (BF.rand.tick % 20 !== 2) return; }
+  else { S.timer -= dt; if (S.timer > 0) return; S.timer = 1; }
   for (const rec of BF.mobs.villages.values()) {
-    if (!rec.members) continue;
+    if (!rec.members || (C && !C.mineVillage(rec.key))) continue;
     try {
       bredList(rec);
       spawnMissing(rec);
@@ -554,6 +557,37 @@ function info(rec) {
   return { key: rec.key, beds: bedCount(rec), villagers: villagerCount(rec), ok: bedsOK(rec),
     newborns: bredList(rec).map(e => ({ k: e.k, child: e.child, eaten: e.eaten, prof: e.prof, dead: !!e.dead, live: !!(e.mob && !e.mob.removed) })) };
 }
+
+// Several workers (clusters, js/cworkers.js): each cluster's part of the tables above, as plain JSON (mobs by id, villages by key)
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.owned) return;
+  const mobG = m => (m && m.cl !== undefined ? BF.clusters.groupOf(m.cl) : null), slotG = k => C.ofVillage(k.slice(0, k.lastIndexOf("#")));
+  C.owned("breeding.loves", {
+    snap: g => S.loves.filter(L => C.ofVillage(L.rec.key) === g).map(L => ({ a: L.a.id, b: L.b.id, rec: L.rec.key, t: L.t, heartT: L.heartT, force: !!L.force })),
+    apply(g, list) {
+      S.loves = S.loves.filter(L => C.ofVillage(L.rec.key) !== g);
+      for (const o of list) {
+        const a = BF.ids.live(o.a), b = BF.ids.live(o.b), rec = BF.mobs.villages.get(o.rec);
+        if (a && b && rec) S.loves.push(Object.assign({ a, b, rec, t: o.t, heartT: o.heartT }, o.force ? { force: true } : {}));
+      }
+    },
+  });
+  C.owned("breeding.grow", {
+    snap: g => S.grow.filter(e => mobG(e.m) === g).map(e => [e.m.id, e.t]),
+    apply(g, list) {
+      S.grow = S.grow.filter(e => mobG(e.m) !== g);
+      for (const [id, t] of list) { const m = BF.ids.live(id); if (m) S.grow.push({ m, t }); }
+    },
+  });
+  C.ownedSet("breeding.near", S.near, pairGroup);
+  C.ownedMap("breeding.cd", S.cd, slotG);
+  C.ownedSet("breeding.deadKeys", S.deadKeys, slotG);
+  C.owned("breeding.pending", {   // (a save's newborns of a village not loaded yet only go: to the record, when it loads)
+    snap: g => [...S.pending.keys()].filter(k => C.ofVillage(k) === g),
+    apply: (g, keep) => { const ks = new Set(keep); for (const k of [...S.pending.keys()]) if (C.ofVillage(k) === g && !ks.has(k)) S.pending.delete(k); },
+  });
+});
 
 // main.js defines BF.on after this file loads: hook up as soon as the page has loaded (or on the first tick)
 BF.onLoad(hookEvents);

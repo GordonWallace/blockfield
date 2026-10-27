@@ -43,6 +43,8 @@ Region workers never pay off much, because every worker has to keep its whole co
 
 The groundwork is in the game but off: with it off, the world plays exactly as before. The game's systems (mobs, village life, animals, caravans, blocks) are being moved over one by one. When the clusters are turned on, the [[page:game-log]] notes it, and an ERROR names any cluster whose tick fails.
 
+Village life has moved over: builders, jobs, breeding, storage, bakers, explorers, restocking, the day timeline, village stats, foresters and signs each run per cluster, and a village's records belong to its own cluster. A new village is set up at a meeting, which the [[page:game-log]] notes.
+
 ## What it costs
 
 Each worker holds a full copy of the world, so each one takes about as much memory as the simulation does on its own. On a machine with little memory, `--workers 1` or a small number is the better choice.
