@@ -42,14 +42,14 @@ const HOUR = 1200 / 24;
 // each change their own lines). Names are those given at the call sites (js/mobs.js update, js/boot.js, js/world.js hooks, js/bees.js).
 const SYSTEMS = {
   mobloop: true,        // C1: the think loop, A* grants, separation grid, positions kept for drawing (js/mobs.js update)
-  arrows: false,        // C2: mobs core and wild
-  spawn: false,         // C2
-  wildlife: false,      // C2
-  despawn: false,       // C2
-  aiTick: false,        // C2
-  mobSave: false,       // C2
-  drops: false,         // C2
-  boats: false,         // C2
+  arrows: true,         // C2: mobs core and wild
+  spawn: true,          // C2
+  wildlife: true,       // C2
+  despawn: true,        // C2
+  aiTick: true,         // C2
+  mobSave: true,        // C2
+  drops: true,          // C2
+  boats: true,          // C2
   builder: false,       // C3: village systems
   villageLife: false,   // C3
   jobs: false,          // C3
