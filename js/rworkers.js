@@ -537,8 +537,14 @@ function unitOf(m, k) {
     if (typeof r.owner === "string" && r.owner.startsWith("stable:")) v = r.owner.slice(7);
     else if (r.lead && r.lead.kind === "mob" && r.lead.mob && r.lead.mob.villageId != null) v = r.lead.mob.villageId;
   }
+  if (v != null && SPLIT && m.type === "villager") return "v:" + v + "|" + (SPLIT_BY === "region" ? k : SPLIT_BY === "kind" ? "villagers" : idNum(m) % SPLIT);   // (r15-65 prototype: one village's villagers in several units)
   return v != null ? "v:" + v : k;
 }
+// r15-65 prototype (never merged): R65_SPLIT=n splits each village's villagers into n units by id (R65_BY=id) or one unit per region
+// (R65_BY=region) or all its villagers in one unit apart from its animals and golems (R65_BY=kind, "pipelining"); the village record stays with the unit "v:" + key (its pen animals and golems).
+const SPLIT = typeof process !== "undefined" && process.env && +process.env.R65_SPLIT || 0, SPLIT_BY = typeof process !== "undefined" && process.env && process.env.R65_BY || "id";
+const idNum = m => +String(m.id).slice(1) | 0;
+const recKey = u => { const i = u.indexOf("|"); return i < 0 ? u.slice(2) : u.slice(2, i); };
 function strHash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
 // The owner of a unit: its planned worker, else spread by key (the same on every worker).
 const ownerOf = u => {
@@ -712,7 +718,7 @@ function beforeDeliver() {
     cbMobs.add(m);
     const s = shadows.get(m);
     if (!s) shadows.set(m, snap(m)); else diff(m, s);   // (up to date with the apply phase, as at beginThink)
-    const u = unitOf(m, -1), rec = typeof u === "string" ? BF.mobs.villages.get(u.slice(2)) : null;   // (and its village's record, which it may change)
+    const u = unitOf(m, -1), rec = typeof u === "string" ? BF.mobs.villages.get(recKey(u)) : null;   // (and its village's record, which it may change)
     if (rec && recShadows.has(rec) && !recDirty.has(rec)) { recDirty.add(rec); diff(rec, recShadows.get(rec)); }
   };
   capture(true);
@@ -965,7 +971,7 @@ function hourly() {
 }
 
 Object.assign(RW, { journal: null, clock: null, onTick: null, onTouch: null, chan: name => channels.get(name), rec, stamp, realNow, tick, pause, channel, touch, writes, dynItem, setup, stop, beginThink, thinking, afterThink, beforeDeliver, afterDeliver, stats, text, hourly, replan,
-  enc, dec, Shadow, snap, diff, patch, makeShared, attach, SKIP, REBALANCE, SOLO_MS,
+  enc, dec, Shadow, snap, diff, patch, makeShared, attach, SKIP, REBALANCE, SOLO_MS, refsOn,
   ownerOf, unitOf,   // (read only: the debug screen's Regions map colours each region by the worker its mobs think on, js/debugfeed.js)
   refs: refsOn, encData });
 BF.rworkers = RW;

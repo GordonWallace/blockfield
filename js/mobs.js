@@ -2150,7 +2150,8 @@ function waitFor(v2, m, d) {
   if (!v2 || v2 === m || v2.type !== "villager" || !(d <= HOLD_R)) return;
   m.buyFrom = v2; m.buyFromAt = m.age;
 }
-const calling = (b, m) => b.buyFrom === m && !b.dead && !b.removed && b.age - b.buyFromAt < 0.25;
+// (r15-65 prototype: read from the buyer's start-of-tick copy, so the answer doesn't depend on which of the two thought first)
+const calling = (b, m) => { const q = b.prev; return !!q && q.bfId === m.id && !b.dead && !b.removed && q.age - q.bfAt < 0.25; };
 function holdForBuyer(m, dt, out) {
   const ai = m.ai, R = m.village;
   let b = null, bd = Infinity;
@@ -2371,6 +2372,25 @@ function updateMob(m, dt) {
 // started the tick until every mob has thought, so the others read start-of-tick positions (separation, targets, looks) whatever order
 // mobs think in. A mob moved by another (a mount carrying its rider) after its own update keeps that move.
 const moved = [];
+// r15-65 prototype: a thinking mob's write to another mob (a keeper feeding, milking or shearing an animal) waits for the end of the mob
+// loop, so the animal reads the same start-of-tick state whichever of the two thinks first. later(m, check, body): check() is the answer
+// now, from start-of-tick state; body() makes the change after the loop, in (writer id, sequence) order.
+const laters = [];
+let laterSeq = 0;
+function later(m, check, body) {
+  const by = curMob;
+  if (!by || by === m) return body();
+  const r = check();
+  if (r) laters.push([idNum(by), laterSeq++, body]);
+  return r;
+}
+function runLaters() {
+  if (!laters.length) return;
+  laters.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const L = laters.splice(0);
+  for (const e of L) { try { e[2](); } catch (err) { console.error(err); } }
+  laterSeq = 0;
+}
 function hold(m) {
   const q = m.prev, p = m.position;
   if (m.removed || !q) return;
@@ -2389,6 +2409,7 @@ function keepPrev(m) {
   const q = m.prev || (m.prev = { x: 0, y: 0, z: 0, yaw: 0, headYaw: 0, headPitch: 0, walkPhase: 0, walkAmt: 0, age: 0 });
   q.x = m.position.x; q.y = m.position.y; q.z = m.position.z;
   q.yaw = m.yaw; q.headYaw = m.headYaw; q.headPitch = m.headPitch; q.walkPhase = m.walkPhase; q.walkAmt = m.walkAmt; q.age = m.age;
+  q.bfId = m.buyFromId; q.bfAt = m.buyFromAt;   // (r15-65 prototype: what others read of its buying)
 }
 
 // Held tools: a profession module registers toolHolders[profession] = m => item id (or null); the villager's `held` is set from it each
@@ -3300,6 +3321,7 @@ BF.mobs = {
       if (pon) PF.mobLap(m, st);
     }
     commitMoves();
+    runLaters();
     if (RW && RW.active) RW.afterThink();   // the other workers' mobs and requests (js/rworkers.js)
     // the systems after the loop, each by name (clusters, js/ctick.js: per cluster once converted, else once a tick)
     const C = BF.ctick, sys = C && C.on ? C.sys : (n, f) => f();
@@ -3373,6 +3395,7 @@ BF.mobs = {
   findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },
   skyOpen(x, y, z) { return !!skyAt(x, y, z).open; }, skyDark(x, y, z) { return skyAt(x, y, z).level <= CAVE_SKY; }, typeDef: type => TYPES[type] || null, passiveTypes: PASSIVE_TYPES,
   villages,
+  later,
   // A mob's links, read from its ids (js/ids.js): work on a plain copy of a mob too (a save, a worker), where m.village is not there.
   villageOf: m => m ? BF.ids.get(m.villageId) : undefined,
   homeOf: m => m ? BF.ids.get(m.homeKey) : undefined,

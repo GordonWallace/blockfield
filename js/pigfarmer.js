@@ -80,7 +80,9 @@ function fx(m, color, n) { const V = BF.villageLife; if (V && V.particles && m.p
 function snd(name, m, vol) { const V = BF.villageLife; if (V && V.sound && m.position) V.sound(name, m.position.x, m.position.y + 0.5, m.position.z, vol); }
 
 // Feed eaten by pig `m` (from the player or a pig farmer). Returns false for pigs that are not hungry; piglets grow 10% faster.
-function feed(m, by) {
+// (r15-65 prototype: another mob's write waits for the end of the mob loop, js/mobs.js later)
+function feed(m, by) { return BF.mobs.later ? BF.mobs.later(m, () => live(m) && m.type === "pig" && (stOf(m).growAt != null || hungry(m, now())), () => feed0(m, by)) : feed0(m, by); }
+function feed0(m, by) {
   if (BF.rworkers) BF.rworkers.writes(m);   // (a villager of another unit may be the one feeding it: js/rworkers.js)
   if (!live(m) || m.type !== "pig") return false;
   const s = stOf(m), t = now();

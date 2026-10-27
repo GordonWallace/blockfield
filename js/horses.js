@@ -151,7 +151,13 @@ function tame(m, owner) {
 }
 // Food eaten by a horse (from the player or a villager): heals, calms an untamed one, speeds a foal up, makes a tamed adult willing to breed
 // (wheat or hay). Returns false when it has no use for it.
+// (r15-65 prototype: another mob's write waits for the end of the mob loop, js/mobs.js later)
 function feed(m, itemName, by) {
+  const check = () => { const r = m && m.horse, f = FEED[itemName], t = now(); if (!r || !f || !live(m)) return false;
+    return m.hp < m.maxHp || (!r.tamed && r.temper < 100) || isFoal(r) || (r.tamed && BREEDS.has(itemName) && t >= r.cd && (r.fed == null || t - r.fed >= FEED_DAYS)); };
+  return BF.mobs.later ? BF.mobs.later(m, check, () => feed0(m, itemName, by)) : feed0(m, itemName, by);
+}
+function feed0(m, itemName, by) {
   if (BF.rworkers) BF.rworkers.writes(m);   // (a villager of another unit may be the one feeding it: js/rworkers.js)
   const r = m && m.horse, f = FEED[itemName];
   if (!r || !f || !live(m)) return false;

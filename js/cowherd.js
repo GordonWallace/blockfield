@@ -86,7 +86,9 @@ function fx(m, color, n) { const V = BF.villageLife; if (V && V.particles && m.p
 function snd(name, m, vol) { const V = BF.villageLife; if (V && V.sound && m.position) V.sound(name, m.position.x, m.position.y + 0.5, m.position.z, vol); }
 
 // Wheat eaten by `m` (from the player or a cowherd). Returns false for cows that are not hungry; calves grow 10% faster.
-function feed(m, by) {
+// (r15-65 prototype: another mob's write waits for the end of the mob loop, js/mobs.js later)
+function feed(m, by) { return BF.mobs.later ? BF.mobs.later(m, () => live(m) && m.type === "cow" && (stOf(m).growAt != null || hungry(m, now())), () => feed0(m, by)) : feed0(m, by); }
+function feed0(m, by) {
   if (BF.rworkers) BF.rworkers.writes(m);   // (a villager of another unit may be the one feeding it: js/rworkers.js)
   if (!live(m) || m.type !== "cow") return false;
   const s = stOf(m), t = now();
@@ -98,7 +100,9 @@ function feed(m, by) {
   return true;
 }
 // Milks `m` (the caller swaps the bucket). Returns false for calves and cows already milked today.
-function milk(m, by) {
+// (r15-65 prototype: another mob's write waits for the end of the mob loop, js/mobs.js later)
+function milk(m, by) { return BF.mobs.later ? BF.mobs.later(m, () => milkable(m), () => milk0(m, by)) : milk0(m, by); }
+function milk0(m, by) {
   if (BF.rworkers) BF.rworkers.writes(m);   // (a villager of another unit may be the one feeding it: js/rworkers.js)
   if (!milkable(m)) return false;
   stOf(m).milkDay = today();
