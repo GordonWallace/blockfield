@@ -2543,6 +2543,29 @@ function updateMob(m, dt) {
 // started the tick until every mob has thought, so the others read start-of-tick positions (separation, targets, looks) whatever order
 // mobs think in. A mob moved by another (a mount carrying its rider) after its own update keeps that move.
 const moved = [];
+// A thinking mob's change to another mob (a keeper feeding, milking or shearing an animal) waits for the end of the mob loop (spec r15-71),
+// so the animal reads the same start-of-tick state whichever of the two thinks first. later(m, check, body): check() is the answer now,
+// from start-of-tick state; body() makes the change after the loop, in (writer id, sequence) order. Outside the mob loop (the player,
+// the village systems) or on the mob itself, body() runs at once. The queue is emptied every loop (each cluster's, js/ctick.js).
+const laters = [];
+let laterSeq = 0;
+function later(m, check, body) {
+  const by = curMob;
+  if (!by || by === m) return body();
+  const r = check();
+  if (r) laters.push([idNum(by), laterSeq++, body, by]);
+  return r;
+}
+function runLaters() {
+  if (!laters.length) return;
+  laters.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const L = laters.splice(0), RW = BF.rworkers;
+  for (const e of L) {
+    if (RW && RW.active) RW.thinking(e[3]);   // (several workers, js/rworkers.js: what the change sends counts as its writer's, in plan order)
+    try { e[2](); } catch (err) { console.error(err); }
+  }
+  laterSeq = 0;
+}
 function hold(m) {
   const q = m.prev, p = m.position;
   if (m.removed || !q) return;
@@ -3508,6 +3531,7 @@ BF.mobs = {
       if (pon) PF.mobLap(m, st);
     }
     commitMoves();
+    runLaters();
     if (RW && RW.active) RW.afterThink();   // the other workers' mobs and requests (js/rworkers.js)
     // the systems after the loop, each by name (clusters, js/ctick.js: per cluster once converted, else once a tick)
     const C = BF.ctick, sys = C && C.on ? C.sys : (n, f) => f();
@@ -3581,6 +3605,7 @@ BF.mobs = {
   findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },
   skyOpen(x, y, z) { return !!skyAt(x, y, z).open; }, skyDark(x, y, z) { return skyAt(x, y, z).level <= CAVE_SKY; }, typeDef: type => TYPES[type] || null, passiveTypes: PASSIVE_TYPES,
   villages,
+  later,
   // A mob's links, read from its ids (js/ids.js): work on a plain copy of a mob too (a save, a worker), where m.village is not there.
   villageOf: m => m ? BF.ids.get(m.villageId) : undefined,
   homeOf: m => m ? BF.ids.get(m.homeKey) : undefined,

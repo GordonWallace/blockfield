@@ -36,6 +36,8 @@ Positions are rounded to 1/1024 of a block, and anything that is only drawing or
 
 Each tick, the mobs think one simulation region at a time (squares of 64 by 64 blocks, see [[page:the-planet]]), and the changes they ask for are applied region by region. This is how the simulation will later share its work between several threads. The order of the regions must not change anything, and `test/region-tick.js` checks that: it runs the same world for a game day with the regions in order, in reverse order, and as one list, and the hashes must match all day.
 
+The order of the mobs themselves must not matter either: `test/think-order.js` runs a big village with every tick's mobs shuffled into a random order, and the hash must match the usual order. For that, a mob reads the others as they stood at the start of the tick. When a villager does something to another mob while thinking, such as a keeper feeding, milking or shearing an animal, the villager gets its answer at once (the animal was hungry, how much wool it got), but the animal itself only changes once every mob has thought.
+
 ## Your actions, in tick order
 
 The simulation runs in ticks of 1/20 of a game second, and you play in real time between them. Everything you do to the world (breaking and placing blocks, doors, using items on blocks and animals, attacking, shooting, throwing, eating, sleeping, every click in the inventory, chest, furnace and trade screens, sign text and commands) is stamped with the tick it follows and applied straight away, at that point between two ticks. You see it at once, and it comes before anything a villager asks for in the next tick: if a villager and you go for the same block in the same tick, you get it.

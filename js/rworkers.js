@@ -625,7 +625,7 @@ function beginThink(order) {
   refsOn();
   const sp = BF.rtick ? BF.rtick.spans : [-1, 0];
   claims();
-  mine = []; idxOf = new Map(); own = [];
+  mine = []; idxOf = new Map(); own = []; kOf.clear();
   const units = new Set();
   for (let i = 0; i < sp.length; i += 2) {
     const k = sp[i], a = sp[i + 1], b = i + 3 < sp.length ? sp[i + 3] : order.length;
@@ -676,9 +676,13 @@ function auditCheck(by) {
     if (list.length < 200) list.push({ by: who(by), what: who(o), ops: JSON.stringify(ops).slice(0, 400), tick: BF.rand.tick });
   }
 }
+// A mob may think again after the loop (js/mobs.js later: a keeper's change to an animal, spec r15-71): its requests carry on numbering
+// from where its own think left off, so they sort as on one worker.
+const kOf = new Map();
 function thinking(m) {
   if (RW.audit) auditCheck(cur);
-  cur = m; curK = 0;
+  if (cur) kOf.set(cur, curK);
+  cur = m; curK = kOf.get(m) || 0;
   const k = unitOf(m, BF.regions ? BF.regions.regionOf(m) : -1), t = now();
   if (k !== curRegion) { if (curRegion != null) load.set(curRegion, (load.get(curRegion) || 0) + t - regionT0); curRegion = k; regionT0 = t; }
 }
