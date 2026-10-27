@@ -315,9 +315,10 @@ function taskStep(m, S, dt, out) {
     const f = food(m);
     if (!f) return endTask(m, S, true), false;          // out of feed: buys more, then comes back
     TR().inv.remove(m.inv, I(f), 1);
-    const used = H.feed(h, f, m);
+    const t0 = r.temper, used = H.feed(h, f, m);
     if (!used) TR().inv.add(m.inv, I(f), 1);            // it wanted nothing (calm and fed): it is as tame as it gets
-    if (!used || RS(m).next() * 100 < r.temper) {
+    const temper = r.temper === t0 && t0 < 100 && used ? Math.min(100, t0 + H.FEED[f].temper) : r.temper;   // (the meal itself lands after the mob loop, spec r15-71)
+    if (!used || RS(m).next() * 100 < temper) {
       H.tame(h, st.owner); H.leash(h, m);
       r.caught = 1;
       log("tamed", m, { hid: r.hid, temper: r.temper });
