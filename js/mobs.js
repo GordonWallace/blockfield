@@ -2836,11 +2836,16 @@ let villageT = 0;
 const villagerSaves = new Map();
 function villagerKey(m) { return m.villageId && m.slot ? m.villageId + "#" + m.slot.idx : null; }
 let restockT = 0;
+// With the cluster tick on (spec r15-39b, js/ctick.js) a module timer would count down once per cluster: every cluster runs its own on
+// the tick counter instead (the same ticks in every order and on every worker), every `s` game seconds at tick phase `at`.
+const everyTicks = (s, at) => BF.rand.tick % Math.round(s / BF.warp.TICK) === at;
+const recMine = (rec, C) => BF.clusters.groupOf("v:" + rec.key) === C.cur.key;   // (a village record of the running cluster)
 function restockVillagers(dt) { // once per in-game day, never while someone is trading with the villager
-  restockT -= dt;
-  if (restockT > 0 || !BF.trades || !BF.sky) return;
-  restockT = 2;
-  for (const m of list) if (m.type === "villager" && !m.dead && !m.removed && !m.tradingWith && !m.child) { BF.trades.restock(m, BF.sky.day); if (BF.prices) BF.prices.tick(m, BF.sky.day); if (BF.market) BF.market.sync(m); }
+  const f = BF.ctick && BF.ctick.filter;
+  if (f) { if (!everyTicks(2, 1)) return; }
+  else { restockT -= dt; if (restockT > 0) return; restockT = 2; }
+  if (!BF.trades || !BF.sky) return;
+  for (const m of list) if (m.type === "villager" && !m.dead && !m.removed && !m.tradingWith && !m.child && (!f || f(m))) { BF.trades.restock(m, BF.sky.day); if (BF.prices) BF.prices.tick(m, BF.sky.day); if (BF.market) BF.market.sync(m); }
 }
 const VILLAGERS_PER_VILLAGE = 24;   // roster cap of classic villages; villages of village generator 2 carry their own population (rec.pop, 2-100)
 const EXPLORER_CHANCE = 0.7;   // per cartographer in the roster
@@ -3192,8 +3197,9 @@ function newVillageRec(key, v) {
 }
 // INFO "coarse" when a village's villagers go coarse or back to full detail (spec r15-64), checked once a game second. The state is kept
 // on the village record (hidden from saves and the hash); a village never coarse never gets it.
-function noteCoarse() {
+function noteCoarse(mineR) {
   for (const rec of villages.values()) {
+    if (!mineR(rec)) continue;
     if (!rec.members || (!rec.members.length && rec._coarse === undefined)) continue;
     let n = 0;
     for (const m of rec.members) if (m._crsT !== undefined) n++;
@@ -3204,23 +3210,55 @@ function noteCoarse() {
     if (BF.glog) BF.glog.log("INFO", "coarse", c ? "Past the view distance: coarse (" + n + " of its " + rec.members.length + " villagers and golems)" : "Back to full detail", { village: rec });   // (the line names the village)
   }
 }
-function updateVillages(dt) {
-  for (const rec of villages.values()) rec.angryT = Math.max(0, rec.angryT - dt);
-  villageT -= dt;
-  if (villageT > 0) return;
-  villageT = 1;
-  noteCoarse();
+// The villages to keep records of: those near the player, and those js/villagesim.js simulates however far; null when there is no player.
+function villagesWanted() {
   const wg = BF.worldgen;
-  if (!wg || typeof wg.villagesNear !== "function" || !playerAlive()) return;
+  if (!wg || typeof wg.villagesNear !== "function" || !playerAlive()) return null;
   const pp = player().position;
   let vs;
-  try { vs = wg.villagesNear(pp.x, pp.z, BF.villageSim ? BF.villageSim.RADIUS + 16 + 150 : 96) || []; } catch (e) { return; }   // by centre: sized villages are measured from their edge (js/villagesim.js)
+  try { vs = wg.villagesNear(pp.x, pp.z, BF.villageSim ? BF.villageSim.RADIUS + 16 + 150 : 96) || []; } catch (e) { return null; }   // by centre: sized villages are measured from their edge (js/villagesim.js)
   if (BF.villageSim && BF.villageSim.simulated) { const ks = new Set(vs.map(v => v && Math.round(v.x) + "," + Math.round(v.z))); for (const v of BF.villageSim.simulated()) if (!ks.has(Math.round(v.x) + "," + Math.round(v.z))) { ks.add(Math.round(v.x) + "," + Math.round(v.z)); vs.push(v); } }   // villages a merchant's trip keeps loaded (js/merchant.js) and the budget's extras (js/active.js), however far
+  return vs;
+}
+// Clusters (js/ctick.js): village records come only at meetings, on every worker alike, before the clusters are worked out again, so a new
+// village is a cluster from its first tick (its villagers spawn in its own cluster's pass, below)
+function meetVillages() {
+  const vs = villagesWanted();
+  if (!vs) return;
+  for (const v of vs) {
+    if (!v || v.x == null) continue;
+    const key = Math.round(v.x) + "," + Math.round(v.z);
+    if (villages.has(key)) continue;
+    const rec = newVillageRec(key, v);
+    villages.set(key, rec); applyDead(rec);
+    if (BF.glog) BF.glog.log("INFO", "clusters", "Village record made at the meeting (tick " + BF.rand.tick + ")", { village: rec });
+  }
+}
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.onMeet) return;
+  C.onMeet(meetVillages, "villages");
+  // villagers' trading state while unloaded or dead, by "<village key>#<slot>": its village's cluster's (several workers, js/cworkers.js)
+  C.ownedMap("mobs.villagerSaves", villagerSaves, k => C.ofVillage(k.slice(0, k.lastIndexOf("#"))));
+});
+function updateVillages(dt) {
+  // clusters (js/ctick.js): each cluster its own records, once a game second at the first tick after the meeting, so the player's position
+  // read here is the meeting's in every order (new records come at the meeting: meetVillages)
+  const C = BF.ctick, f = C && C.filter, mineR = rec => !f || recMine(rec, C);
+  for (const rec of villages.values()) if (mineR(rec)) rec.angryT = Math.max(0, rec.angryT - dt);
+  if (f) { if (!everyTicks(1, 1)) return; }
+  else { villageT -= dt; if (villageT > 0) return; villageT = 1; }
+  noteCoarse(mineR);
+  const vs = villagesWanted();
+  if (!vs) return;
+  const pp = player().position;
   for (const v of vs) {
     if (!v || v.x == null) continue;
     const key = Math.round(v.x) + "," + Math.round(v.z);
     let rec = villages.get(key);
+    if (!rec && f) continue;   // (made at the next meeting, below)
     if (!rec) { rec = newVillageRec(key, v); villages.set(key, rec); applyDead(rec); }
+    if (!mineR(rec)) continue;
     const lp = BF.planet.local(v, pp, VQ);   // (the player seen from the village, across a face edge)
     const away = v.pop ? Math.hypot(Math.max(0, v.minX - lp.x, lp.x - v.maxX), Math.max(0, v.minZ - lp.z, lp.z - v.maxZ)) > 24   // sized villages: near any part of it
       : Math.hypot(v.x - lp.x, v.z - lp.z) > 80;
