@@ -319,6 +319,7 @@ function met(groups) {
     for (const rec of BF.mobs.villages.values()) if (ownsKey(BF.clusters.groupOf("v:" + rec.key))) recShadows.set(rec, R.snap(rec));
     lap("met.recsnap");
     T.snap += now() - t0;
+    afterMet();
     tRun = now();
     hourly();
     return;
@@ -334,8 +335,44 @@ function met(groups) {
     for (const rec of BF.mobs.villages.values()) if (ownsKey(BF.clusters.groupOf("v:" + rec.key))) recShadows.set(rec, R.snap(rec));
   }
   T.snap += now() - t0;
+  afterMet();
   tRun = now();
   hourly();
+}
+// ---------------------------------------------------------------- in play (js/rplay.js): at the end of a meeting, every worker alike
+// whenMet(fn): fn at the end of the next meeting, when everything every worker sent is in (a save: js/save.js saveNow, inside gathered);
+// queued at the same point of the leader's journal on every worker, so they all run it at the same meeting (fn(true); fn(false) if the
+// workers stop first). leave(): at the end of the
+// next meeting every worker takes every mob's current copy (partial copies) and goes on as one with a whole world (js/rplay.js back to
+// one). CW.verify n (tests): every n meetings the workers compare their gathered state hashes; a difference sets rworkers.mismatch.
+let atMet = [], leaving = false;
+function whenMet(fn) { atMet.push(fn); }
+function leave() { if (CW.active) leaving = true; }
+function afterMet() {
+  if (CW.verify && meetings % CW.verify === 0) check();
+  const fns = atMet;
+  atMet = [];
+  for (const fn of fns) fn(true);
+  if (!leaving) return;
+  leaving = false;
+  if (CW.partial) fetch(BF.mobs.list);
+  CW.active = false; CW.partial = false; mine = new Set(); holder = new Map();
+  shadows = new Map(); recShadows = new Map();
+  RW().onTouch = null; RW().SKIP.add("prev");
+  note("back to one with the whole world, after " + meetings + " meetings");
+}
+function check() {
+  const h = gathered(() => BF.stateHash.full());
+  const all = xchange("verify", JSON.stringify([h.hash, h.parts]));
+  const [h0, p0] = JSON.parse(all[0]);
+  RW().checks = (RW().checks || 0) + 1;
+  for (let w = 1; w < all.length; w++) {
+    const [hw, pw] = JSON.parse(all[w]);
+    if (hw === h0) continue;
+    const parts = Object.keys(p0).filter(k => p0[k] !== pw[k]);
+    if (!RW().mismatch) RW().mismatch = { tick: BF.rand.tick, worker: w, parts };
+    err("worker " + w + "'s world differs from the first worker's at the meeting at tick " + BF.rand.tick + " (" + parts.join(", ") + ")");
+  }
 }
 // Partial copies: the mobs whose current copy is on another worker than the one that runs them next, sent whole by their holder (every
 // worker works out the same list, so they all exchange, or none)
@@ -538,7 +575,7 @@ function setup(o) {
   shadows = new Map(); recShadows = new Map(); known = new Set(BF.mobs.list); journal = new Map(); regNew = []; groupMs = new Map(); lastGroups = new Map(); meetings = 0; warned = 0;
   for (const k in T) T[k] = 0;
   for (const k in X) delete X[k];
-  smooth = new Map(); handMs = 0.5; handOwn = null; lapT = now();
+  smooth = new Map(); handMs = 0.5; handOwn = null; lapT = now(); atMet = []; leaving = false;
   if (BF.ids && BF.ids.hooks) BF.ids.hooks.onNew = onNewPlace;
   RW().onTouch = CW.active ? onTouch : null;
   touched = new Map();
@@ -557,6 +594,9 @@ function stop(why) {
   if (BF.glog) BF.glog.log(why ? "ERROR" : "INFO", "workers", "Cluster workers stopped" + (why ? ": " + why : ""));
   shadows = new Map(); recShadows = new Map();
   RW().SKIP.add("prev");
+  const fns = atMet;
+  atMet = []; leaving = false;
+  for (const fn of fns) fn(false);
 }
 
 // The worker that runs group key: its owner, or in pull mode the one that ran it last interval; 0 when not split (the debug screen's
@@ -647,6 +687,6 @@ function fetch(ms, pred) {
 }
 // current(m): this worker's copy of m is current (partial copies: it runs m, or every copy is current)
 const current = m => !CW.partial || mine.has(m) || (atMeeting && !holder.has(m.id));
-Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, current, gathered, fetch, pull: false, partial: false });
+Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, current, gathered, fetch, whenMet, leave, pull: false, partial: false, verify: 0 });
 BF.cworkers = CW;
 })();

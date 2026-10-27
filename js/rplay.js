@@ -18,7 +18,12 @@
 // when they stop; ERROR when one crashes, boots a different world or no longer matches.
 // Each follower sends its thread's busy share (js/threadload.js) with a batch's answer about once a second: status().loads, for the
 // debug screen's Threads card.
-// API: BF.rplay = { setup({workers, cores, spawn, split}), begin(world), end(why), frame(raw), flush(), status(), text(), follower(post) }
+// Clusters (spec r15-39b, settings.kind "clusters": the page's ?clusters=1, the world server's --clusters): the split is the cluster tick on
+// every copy, each worker running its own clusters with partial copies (js/cworkers.js), meeting every 20 ticks; the journal still
+// brings every copy the client's packets and the chunks, and goes out every tick while they meet. Back to one: at the next meeting every
+// worker takes the whole world (cworkers.leave), then the cluster tick goes off. A save waits for the next meeting (js/save.js). With
+// ?verify=N the copies' gathered hashes are compared every N / 20 meetings; a difference goes back to one after the next meeting.
+// API: BF.rplay = { setup({workers, cores, spawn, split, kind}), begin(world), end(why), frame(raw), flush(), status(), text(), follower(post) }
 //   spawn(me, n) -> {post(msg), on(fn(msg)), terminate()}: a follower (js/regionworker.js in a browser, server/regionthread.js in Node)
 (() => {
 "use strict";
@@ -39,6 +44,15 @@ const L = {
   busySince: null, soloMs: null, splitMs: null, loopT0: null, loopTicks: 0, shared: null, why: "", lastText: "",
 };
 const log = (l, x) => { if (BF.glog) BF.glog.log(l, "workers", x); };
+const TRIAL_CLUSTERS = 400;   // ticks of a clusters' split trial (the first meetings hand over whole clusters)
+const clustered = () => !!(BF.cworkers && BF.cworkers.active);
+// The clusters split over n workers, at this point of the journal on every worker alike: the cluster tick on (every system, the tick
+// order), then this one joins as cluster worker me with partial copies. verify (ticks): the copies are compared every verify / 20 meetings.
+function clusterOn(sh, me, n, link, verify) {
+  BF.ctick.only = null; BF.ctick.on = true; BF.ctick.order = "tick";
+  BF.cworkers.verify = verify > 0 ? Math.max(1, Math.round(verify / BF.ctick.MEET)) : 0;
+  BF.cworkers.setup({ n, me, link, claims: sh.claims, partial: true });
+}
 function setup(o) {
   const cores = Math.max(1, o.cores | 0 || 2);
   L.want = o.workers > 0 ? Math.max(1, o.workers | 0) : 1;
@@ -46,6 +60,7 @@ function setup(o) {
   L.spawn = o.spawn || null;
   L.three = o.three || null;
   L.policy = o.split === "always" || o.split === "never" ? o.split : "auto";
+  L.kind = o.kind === "clusters" ? "clusters" : "regions";   // (what a split shares: the regions' thinking each tick, or the clusters, js/cworkers.js)
   L.verify = o.verify > 0 ? o.verify | 0 : VERIFY;   // (tests: ?verify=N compares the copies every N split ticks)
   if (L.want > 1 && typeof SharedArrayBuffer !== "function") { L.why = "no SharedArrayBuffer here (the page needs cross-origin isolation: ./run.sh)"; L.want = 1; }
   if (L.want > 1 && !L.spawn) { L.why = "no way to start workers here"; L.want = 1; }
@@ -71,7 +86,7 @@ function begin(world) {
   { const h = BF.stateHash.full(); L.hash = h.hash; L.bootParts = h.parts; L.bootText = L.verify ? texts() : null; }   // (the followers must boot the same world)
   RW.journal = []; RW.clock = null;
   RW.onTick = onTick;
-  L.shared = RW.makeShared(n);
+  L.shared = L.kind === "clusters" ? BF.cworkers.makeShared(n) : RW.makeShared(n);
   L.list = [];
   for (let me = 1; me < n; me++) {
     const f = { me, booted: false, ticks: 0, h: L.spawn(me, n) };
@@ -79,7 +94,7 @@ function begin(world) {
     f.h.post({ boot: { world, me, n, verify: L.verify, three: L.three } });
     L.list.push(f);
   }
-  log("INFO", "Region workers: " + n + " for this world (" + (n - 1) + " followers starting; the regions' thinking is split when it pays)");
+  log("INFO", "Region workers: " + n + " for this world (" + (n - 1) + " followers starting; " + (L.kind === "clusters" ? "the clusters are" : "the regions' thinking is") + " split when it pays)");
 }
 function onFollower(f, epoch, m) {
   if (epoch !== L.epoch) return;
@@ -130,9 +145,9 @@ function onTick() {
   L.ticks++; L.loopTicks++;
   // (tests, ?verify=: while one thinks, the followers' copies are compared too, at the start of every verify-th tick: the journal
   // brought them everything that happened since the last)
-  if (L.verify && !L.split && L.ticks % L.verify === 0 && !L.diff) L.solo.set(L.ticks, { parts: BF.stateHash.full().parts, text: texts() });
+  if (L.verify && !L.split && !clustered() && L.ticks % L.verify === 0 && !L.diff) L.solo.set(L.ticks, { parts: BF.stateHash.full().parts, text: texts() });
   if (L.loopT0 == null) L.loopT0 = now();
-  if (L.split) flush();   // (lockstep: the followers need this tick now)
+  if (L.split || clustered()) flush();   // (lockstep, or clusters that meet: the followers need this tick now)
 }
 // The journal so far to every follower.
 function flush() {
@@ -156,10 +171,21 @@ function frame() {
   L.busySince = dropped ? (L.busySince == null ? t : L.busySince) : null;
   L.loopT0 = null; L.loopTicks = 0;
   if (RW.mismatch && L.diff && !L.diff.told && t - L.diff.at < 5000) return;   // (its text of the parts that differ first: soloText)
+  if (L.endAfter && !clustered()) { L.endAfter = false; end("the copies differ"); return; }
+  if (RW.mismatch && L.kind === "clusters" && clustered()) {   // (each worker's own clusters are current only on it: back to one whole world at the next meeting first)
+    if (!L.endAfter) { log("ERROR", "Region workers: the copies no longer match (" + RW.mismatch.parts.join(", ") + " at tick " + RW.mismatch.tick + "); going on with one after the next meeting"); toSolo("the copies differ"); L.endAfter = true; }
+    flush();
+    return;
+  }
   if (RW.mismatch) { log("ERROR", "Region workers: the copies no longer match (" + RW.mismatch.parts.join(", ") + " at tick " + RW.mismatch.tick + "); going on with one"); end("the copies differ"); return; }
+  if (L.ctickOff && !clustered()) {   // (clusters: back to one with the whole world at the last meeting; the cluster tick off now, alike)
+    L.ctickOff = false;
+    RW.rec(["ctoff"]);
+    BF.ctick.on = false;
+  }
   if (!L.split) {
     const behind = Math.max(0, ...L.list.map(f => L.ticks - f.ticks));
-    const ready = L.ready === L.list.length && behind <= LAG;
+    const ready = L.ready === L.list.length && behind <= LAG && !clustered() && !L.ctickOff;
     const want = L.policy === "always" || (L.policy === "auto" && L.busySince != null && t - L.busySince >= BUSY_MS && L.ticks >= L.retryAt);
     if (ready && want && L.policy !== "never") startSplit();
   } else if (L.trial && L.ticks >= L.trial.end) {
@@ -175,6 +201,15 @@ function frame() {
 }
 function startSplit() {
   const n = L.list.length + 1;
+  if (L.kind === "clusters") {
+    RW.rec(["csplit", L.shared, n]);
+    flush();
+    clusterOn(L.shared, 0, n, L.link || (L.link = RW.attach(L.shared, 0, n)), L.verify);
+    L.split = true; L.splitMs = null;
+    L.trial = { end: L.ticks + TRIAL_CLUSTERS, solo: L.soloMs };
+    log("INFO", "Region workers: the clusters are split over " + n + " workers (ticks took " + (L.soloMs != null ? L.soloMs.toFixed(1) + " ms" : "?") + " on one)");
+    return;
+  }
   RW.rec(["split", L.shared, n]);
   flush();
   RW.verify = L.verify;
@@ -184,6 +219,14 @@ function startSplit() {
   log("INFO", "Region workers: the regions' thinking is split over " + n + " workers (ticks took " + (L.soloMs != null ? L.soloMs.toFixed(1) + " ms" : "?") + " on one)");
 }
 function toSolo(why) {
+  if (L.kind === "clusters") {
+    RW.rec(["csolo"]);
+    flush();
+    BF.cworkers.leave();   // (at the next meeting: every worker takes the whole world, then the cluster tick goes off: frame)
+    L.split = false; L.soloMs = null; L.ctickOff = true;
+    log("INFO", "Region workers: back to one running the clusters (" + why + ")");
+    return;
+  }
   RW.rec(["solo"]);
   flush();
   RW.pause();
@@ -194,6 +237,9 @@ function toSolo(why) {
 function end(why) {
   L.epoch++;   // (anything the old followers still say is ignored)
   if (RW.active) RW.pause();
+  if (clustered()) BF.cworkers.stop(why ? "the followers go: " + why : "");
+  if ((L.kind === "clusters" && L.split || L.ctickOff) && BF.ctick && BF.ctick.on) BF.ctick.on = false;
+  L.ctickOff = false; L.endAfter = false;
   RW.journal = null; RW.clock = null; RW.onTick = null; RW.verify = 0; RW.mismatch = null;
   if (L.list.length) {
     for (const f of L.list) { try { f.h.post({ end: true }); } catch (e) { /* gone */ } try { f.h.terminate(); } catch (e) { /* gone */ } }
@@ -202,7 +248,7 @@ function end(why) {
   L.list = []; L.split = false; L.link = null; L.shared = null; L.world = null; L.crashed = null;
 }
 function status() {
-  const s = RW.active ? RW.stats() : null;
+  const s = RW.active ? RW.stats() : clustered() ? BF.cworkers.stats() : null;
   return { want: L.want, followers: L.list.length, ready: L.ready, split: L.split, policy: L.policy, ticks: L.ticks,
     behind: L.list.map(f => L.ticks - f.ticks), loads: L.list.map(f => f.load || null), soloMs: L.soloMs, splitMs: L.splitMs, why: L.why || null, stats: s };
 }
@@ -210,7 +256,7 @@ function status() {
 function text() {
   if (L.want <= 1) return "Workers 1" + (L.why ? " (" + L.why + ")" : "");
   if (!L.list.length) return "Workers " + L.want + " (none for this world)";
-  if (L.split) return RW.text();
+  if (L.split) return L.kind === "clusters" ? BF.cworkers.text() : RW.text();
   const f1 = v => (v == null ? "?" : v.toFixed(1));
   return "Workers " + (L.list.length + 1) + ": one thinks (" + L.ready + "/" + L.list.length + " followers ready, " + Math.max(0, ...L.list.map(f => L.ticks - f.ticks)) + " ticks behind; " +
     f1(L.soloMs) + " ms a tick" + (L.policy === "auto" ? (L.retryAt > L.ticks ? ", split again in " + (L.retryAt - L.ticks) + " ticks" : ", splits when ticks drop") : L.policy === "never" ? ", never splits" : "") + ")";
@@ -242,7 +288,7 @@ function follower(post) {
   const op = o => {
     switch (o[0]) {
       case "t":
-        if (verify && !RW.active && (ticks + 1) % verify === 0) {   // (tests: the leader compares, js/rplay.js soloCheck)
+        if (verify && !RW.active && !clustered() && (ticks + 1) % verify === 0) {   // (tests: the leader compares, js/rplay.js soloCheck)
           kept.set(ticks + 1, texts()); if (kept.size > Math.max(32, Math.ceil(400 / verify))) kept.delete(kept.keys().next().value);
           post({ hashAt: ticks + 1, parts: BF.stateHash.full().parts });
         }
@@ -259,6 +305,10 @@ function follower(post) {
       case "feed": if (BF.debugFeed && BF.debugFeed.simPart) BF.debugFeed.simPart(o[1]); break;   // (the world server's debug screen: reading it works out things lazily, as F3 does)
       case "split": RW.verify = verify; RW.setup({ n: o[2], me, link: link || (link = RW.attach(o[1], me, o[2])) }); break;
       case "solo": RW.pause(); break;
+      case "csplit": clusterOn(o[1], me, o[2], link || (link = RW.attach(o[1], me, o[2])), verify); break;
+      case "csolo": BF.cworkers.leave(); break;
+      case "ctoff": BF.ctick.on = false; break;
+      case "sm": BF.cworkers.whenMet(ok => { if (ok) BF.cworkers.gathered(() => BF.save.snapshot({ quiet: true })); }); break;   // (a save at the next meeting, js/save.js)
       case "crash": if (o[1] === me) throw new Error("a test crash (test/multi-worker-play.js)"); break;
       default: throw new Error("region worker: unknown journal op " + o[0]);
     }
@@ -292,7 +342,7 @@ function follower(post) {
           if (t - loadT >= TL.SAMPLE) { loadT = t; post({ ticks, load: TL.report() }); }
           else post({ ticks });
         } else if (d.textAt != null) { const t = kept.get(d.textAt); if (t) { const o = {}; for (const k of d.parts) o[k] = t[k]; post({ textOf: d.textAt, texts: o }); } }
-        else if (d.end) { if (RW.active) RW.pause(); queue.length = 0; }
+        else if (d.end) { if (RW.active) RW.pause(); if (clustered()) BF.cworkers.stop(); queue.length = 0; }
       }
     } catch (e) { queue.length = 0; fail(e); }
     TL.end();
@@ -327,6 +377,8 @@ function follower(post) {
 
 // (tests) follower me throws at this point of the journal: the crash path
 const testCrash = me => { RW.rec(["crash", me | 0]); flush(); };
+// (tests) back to one now (split=always splits again once the followers are ready)
+const testSolo = () => { if (L.split) toSolo("a test"); };
 
-BF.rplay = { setup, begin, end, frame, flush, status, text, follower, player, testCrash, MAX, TRIAL, VERIFY };
+BF.rplay = { setup, begin, end, frame, flush, status, text, follower, player, testCrash, testSolo, MAX, TRIAL, VERIFY };
 })();

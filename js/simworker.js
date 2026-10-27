@@ -45,7 +45,7 @@ function boot(o) {
     const w = new Worker("regionworker.js" + Q);
     return { post: m => w.postMessage(m), on: fn => { w.onmessage = e => fn(e.data); w.onerror = e => { e.preventDefault(); fn({ error: e.message || "the worker failed" }); }; }, terminate: () => w.terminate() };
   } : null);
-  const nw = BF.rplay.setup({ workers: o.workers || self.BF_WORKERS, split: o.split || self.BF_SPLIT, verify: o.verify, cores: self.BF_CORES || (self.navigator && navigator.hardwareConcurrency), spawn, three: o.three });
+  const nw = BF.rplay.setup({ workers: o.workers || self.BF_WORKERS, split: o.split || self.BF_SPLIT, kind: o.kind, verify: o.verify, cores: self.BF_CORES || (self.navigator && navigator.hardwareConcurrency), spawn, three: o.three });
   BF.on("worldRestored", (data, meta) => { if (loadingWorld) BF.rplay.begin({ op: "load", data, meta, rivers: riverSt }); });   // (a saved world: right as it is restored)
   BF.glog.log("INFO", "worker", "Simulation worker loaded: " + BF.SIM_FILES.length + " files in " + Math.round(performance.now() - t0) + " ms" + (nw > 1 ? "; " + nw + " region workers per world" : ""));
   for (const p of early.splice(0)) sim.receive(p);
