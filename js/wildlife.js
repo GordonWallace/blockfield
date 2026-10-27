@@ -379,18 +379,18 @@ function ownTables() {
   const C = BF.ctick;
   if (!C || ownTables.done) return;
   ownTables.done = true;
-  const G = (k, g) => CL().groupFor(chunkBase(k)) === g, GV = (k, g) => CL().groupFor("v:" + k) === g;
+  const G = k => CL().groupFor(chunkBase(k)), GV = k => CL().groupFor("v:" + k);   // (each key's group: C.keysOf lists a group's keys in order)
   C.owned("wildlife.rolled", {
-    snap: g => { const a = []; for (const k of rolled) if (G(k, g)) a.push(k); return a; },
-    apply: (g, a) => { for (const k of [...rolled]) if (G(k, g)) rolled.delete(k); for (const k of a || []) rolled.add(k); },
+    snap: g => C.keysOf(rolled, g, G).slice(),
+    apply: (g, a) => { for (const k of C.keysOf(rolled, g, G)) rolled.delete(k); for (const k of a || []) rolled.add(k); C.applied(rolled, g); },
   });
   C.owned("wildlife.stored", {
-    snap: g => { const a = []; for (const [k, v] of stored) if (G(k, g)) a.push([k, v]); return a; },
-    apply: (g, a) => { for (const k of [...stored.keys()]) if (G(k, g)) stored.delete(k); for (const [k, v] of a || []) stored.set(k, v); },
+    snap: g => C.keysOf(stored, g, G).map(k => [k, stored.get(k)]),
+    apply: (g, a) => { for (const k of C.keysOf(stored, g, G)) stored.delete(k); for (const [k, v] of a || []) stored.set(k, v); C.applied(stored, g); },
   });
   C.owned("wildlife.nights", {
-    snap: g => { const a = []; for (const [k, v] of nights) if (GV(k, g)) a.push([k, [...v]]); return a; },
-    apply: (g, a) => { for (const k of [...nights.keys()]) if (GV(k, g)) nights.delete(k); for (const [k, v] of a || []) nights.set(k, new Map(v)); },
+    snap: g => C.keysOf(nights, g, GV).map(k => [k, [...nights.get(k)]]),
+    apply: (g, a) => { for (const k of C.keysOf(nights, g, GV)) nights.delete(k); for (const [k, v] of a || []) nights.set(k, new Map(v)); C.applied(nights, g); },
   });
 }
 function serialize() {

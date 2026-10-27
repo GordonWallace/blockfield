@@ -164,7 +164,7 @@ async function main(argv) {
         const p = st.perMeeting, f = v => v.toFixed(2);
         say(`  worker ${i}: ms a meeting: run ${f(p.run)}, collect ${f(p.collect)}, exchange (waiting) ${f(p.exchange)}, adopt ${f(p.adopt)}, shadows ${f(p.snap)}; ${f(st.kbPerMeeting)} KB sent`);
       }
-      say('  worker 0 collect, ms a meeting: ' + Object.entries(BF.cworkers.prof).map(([k, v]) => k + ' ' + (v / Math.max(1, BF.cworkers.stats().meetings)).toFixed(2)).join(', '));
+      say('  worker 0 swap parts, ms a meeting: ' + Object.entries(BF.cworkers.prof).map(([k, v]) => k + ' ' + (v / Math.max(1, BF.cworkers.stats().meetings)).toFixed(2)).join(', '));
       workers.stats = BF.cworkers.stats(); BF.cworkers.stop();
     }
     else { say(BF.rworkers.text()); BF.rworkers.stop(); }

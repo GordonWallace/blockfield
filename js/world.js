@@ -1317,13 +1317,14 @@ function ownCellsNow(name, coll, enc, dec) {
   C.owned(name, {
     snap(gk) {
       const out = [];
-      for (const e of coll) { const k = isMap ? e[0] : e; if (of(k) === gk) out.push(isMap ? [k, enc ? enc(e[1]) : e[1]] : k); }
+      for (const k of C.keysOf(coll, gk, of)) out.push(isMap ? [k, enc ? enc(coll.get(k)) : coll.get(k)] : k);
       return out;
     },
     apply(gk, list) {
       const old = new Map();
-      for (const e of [...coll]) { const k = isMap ? e[0] : e; if (of(k) === gk) { if (isMap) old.set(k, e[1]); coll.delete(k); } }
+      for (const k of C.keysOf(coll, gk, of)) { if (isMap) old.set(k, coll.get(k)); coll.delete(k); }
       for (const it of list) { if (isMap) coll.set(it[0], dec ? dec(it[1], old.get(it[0])) : it[1]); else coll.add(it); }
+      C.applied(coll, gk);
     },
   });
 }

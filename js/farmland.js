@@ -257,13 +257,15 @@ BF.farmland = farmland;
     // several workers (C7): a group's stamps, tracked blocks and blocks due go with it; the last rain with every group
     CC.ownCells("farmland.stamps", stamps);
     CC.ownCells("farmland.due", due);
+    const cellOf = (k, p) => CC.cellGroup(p[0], p[2]);
     const own = () => {
       if (!BF.ctick || !BF.ctick.owned) return;
       BF.ctick.owned("farmland.tracked", {
-        snap: gk => { const out = []; for (const p of tracked.values()) if (CC.cellGroup(p[0], p[2]) === gk) out.push(p); return { blocks: out, rain: lastRain }; },
+        snap: gk => { const out = []; for (const k of BF.ctick.keysOf(tracked, gk, cellOf)) out.push(tracked.get(k)); return { blocks: out, rain: lastRain }; },
         apply: (gk, o) => {
-          for (const [k, p] of [...tracked]) if (CC.cellGroup(p[0], p[2]) === gk) { tracked.delete(k); bucketDel(k, p); }
+          for (const k of BF.ctick.keysOf(tracked, gk, cellOf)) { const p = tracked.get(k); tracked.delete(k); bucketDel(k, p); }
           for (const p of o.blocks) { const k = pk(p[0], p[1], p[2]); tracked.set(k, [p[0], p[1], p[2]]); bucketAdd(k, tracked.get(k)); orderDirty = true; }
+          BF.ctick.applied(tracked, gk);
           if (o.rain > lastRain) lastRain = o.rain;
         },
       });
