@@ -457,7 +457,7 @@ function setup(o) {
   if (o.n > 1 && off.length) throw new Error("cluster workers need every running system converted (js/ctick.js SYSTEMS); not yet: " + off.join(", "));
   if (o.n > 1 && !K.on) throw new Error("cluster workers need the cluster tick on (BF.ctick.on)");
   CW.n = o.n; CW.me = o.me; CW.link = o.link; CW.active = o.n > 1;
-  if (CW.active && K.warmUp) K.warmUp();   // (every system set up here, as a worker that runs it would at its first tick: js/ctick.js warm)
+  if (CW.active && K.warmed) K.warmed();   // (started after the cluster tick's first meeting: every system set up here now, js/ctick.js warm)
   // o.claims (a SharedArrayBuffer of two Int32, the same for every worker: makeShared): the workers pull groups (the cluster order)
   // (only on request, o.pull: with partial copies a group that changes worker is sent whole, so groups stay on their planned owners)
   CW.pull = !!(CW.active && o.pull && o.claims && K.order === "cluster" && !CW.shuffle);

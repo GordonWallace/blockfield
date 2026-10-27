@@ -316,7 +316,7 @@ function endInterval() {
   if (W()) W().sync();
 }
 const due = () => needMeet || BF.rand.tick % MEET === 0 && S.metAt !== BF.rand.tick;
-function meetNow() { meet(); S.metAt = BF.rand.tick; }
+function meetNow() { meet(); S.metAt = BF.rand.tick; if (warming && groups.length) { warming = false; for (const fn of warmers) fn(); } }
 // One tick, every group in turn (the "tick" order; BF.simStep with the cluster tick on).
 let ahead = 0;
 function step(h) {
@@ -382,11 +382,14 @@ function local(name, init) {
 // stamps): each registers how to take the part a group owns and put it back, so the multi-worker runtime (C7) can send it at meetings.
 // owned(name, {snap(groupKey, all?) -> plain JSON, apply(groupKey, plain)}); tables() -> the registered names. Unused on one worker.
 const tables = new Map();
-// warm(fn): a system's set-up (its owned tables, listeners, chunk scans) that it otherwise does at its first tick; js/cworkers.js runs
-// them all on every worker at setup (warmUp), so a worker that hasn't run the system yet still takes the others' parts and events.
+// warm(fn): a system's set-up (its owned tables, listeners, chunk scans) that it otherwise does at its first tick. With the cluster tick
+// on, every system sets up at the first meeting with groups, on one worker as on several (js/cworkers.js), so a worker that hasn't run
+// a system yet still takes the others' parts and events, and finds what it scans at the same moment as the others.
 const warmers = [];
+let warming = false;
 const warm = fn => { warmers.push(fn); };
-const warmUp = () => { for (const fn of warmers) fn(); };
+// (js/cworkers.js setup: workers that start after that first meeting set up at once, alike; each set-up runs once per worker)
+const warmed = () => { if (!warming) for (const fn of warmers) fn(); };
 function owned(name, t) {
   if (!t || typeof t.snap !== "function" || typeof t.apply !== "function") throw new Error("BF.ctick.owned(name, {snap, apply})");
   tables.set(name, t);
@@ -506,7 +509,7 @@ function setOn(v) {
   if (v === on) return;
   if (v && BF.rworkers && BF.rworkers.active) throw new Error("the cluster tick can't run with region workers (js/rworkers.js)");
   if (v) {
-    on = true; needMeet = true; groups = []; byKey = new Map(); deferred = [];
+    on = true; needMeet = true; warming = true; groups = []; byKey = new Map(); deferred = [];
     startRanges();
     between = slot("between", 0); between.req = BF.req.ctx();
     BF.req.away = away;
@@ -586,7 +589,7 @@ BF.ctick = {
   get filter() { return cur && !legacy ? mine : null; },
   mobs, added, stale, get epoch() { return epoch; },   // the running group's mobs (removed ones included), or null when every mob is seen; a new
   // mob; the lists out of date; how many times they were (a module's own lists by group are made again when it changes)
-  owned, tables: () => [...tables.keys()], table: name => tables.get(name), onMeet, warm, warmUp,
+  owned, tables: () => [...tables.keys()], table: name => tables.get(name), onMeet, warm, warmed,
   ownedMap, ownedSet, ofVillage, ofCell, ofMob, mineVillage, mineCell,
   tickOf: b => clocks.get(b), clocks: () => new Map(clocks),   // each cluster's own tick (one clock for now)
   mine, hidden, sys, local, step, interval, meet: meetNow, groups: () => groups, converted, stats, text, hourly, reset,
