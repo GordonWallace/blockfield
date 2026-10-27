@@ -475,7 +475,12 @@ world.setBlock = function (x, y, z, id) {
 // without any of its consequences (drops, popping plants, fluids): the simulation makes those and sends them as edits too. A chunk that
 // is only a far mesh is marked stale and loaded again, so it is remeshed; a loaded chunk that loses edits (full) is generated again.
 const staleFar = new Set();
-function applyCell(key, i, id) {
+// Indexes kept from the blocks (block entities, flowers): with clusters on several workers (js/cworkers.js) the other workers' cells come
+// in through applyEdits(chunks, false, true) at each meeting, without setBlock, so the modules that index blocks as setBlock tells them
+// (js/regions.js, js/bees.js) see those cells too: fn(x, y, z, old id, id) for a cell of a loaded chunk.
+const replL = [];
+world.onReplayedSet = fn => replL.push(fn);
+function applyCell(key, i, id, replayed) {
   let e = world.edits.get(key);
   if (!e) world.edits.set(key, (e = new Map()));
   e.set(i, id);
@@ -492,9 +497,10 @@ function applyCell(key, i, id) {
   const x = c.cx * CS + lx, z = c.cz * CS + lz;
   if (BF.light) BF.light.onSet(x, y, z, oldId, id);
   if (BF.skyLight) BF.skyLight.onSet(x, y, z, oldId, id);
+  if (replayed) for (let k = 0; k < replL.length; k++) replL[k](x, y, z, oldId, id);
   if (lx === 0 || lz === 0 || lx === CS - 1 || lz === CS - 1) markNeighboursDirty(c);
 }
-world.applyEdits = function (chunks, full) {
+world.applyEdits = function (chunks, full, replayed) {
   let gone = null;
   if (full) {
     const before = new Map(world.edits);
@@ -507,7 +513,7 @@ world.applyEdits = function (chunks, full) {
       for (const [i, id] of m) if (!nm || nm.get(i) !== id) { (gone || (gone = [])).push(k); break; }
     }
   }
-  for (const [k, cells] of chunks) for (const [i, id] of cells) applyCell(k, i, id);
+  for (const [k, cells] of chunks) for (const [i, id] of cells) applyCell(k, i, id, replayed);
   if (gone) { for (const k of gone) unload(k); lastCenter = null; }   // (generated again with the edits it has now)
 };
 
@@ -1311,13 +1317,14 @@ function ownCellsNow(name, coll, enc, dec) {
   C.owned(name, {
     snap(gk) {
       const out = [];
-      for (const e of coll) { const k = isMap ? e[0] : e; if (of(k) === gk) out.push(isMap ? [k, enc ? enc(e[1]) : e[1]] : k); }
+      for (const k of C.keysOf(coll, gk, of)) out.push(isMap ? [k, enc ? enc(coll.get(k)) : coll.get(k)] : k);
       return out;
     },
     apply(gk, list) {
       const old = new Map();
-      for (const e of [...coll]) { const k = isMap ? e[0] : e; if (of(k) === gk) { if (isMap) old.set(k, e[1]); coll.delete(k); } }
+      for (const k of C.keysOf(coll, gk, of)) { if (isMap) old.set(k, coll.get(k)); coll.delete(k); }
       for (const it of list) { if (isMap) coll.set(it[0], dec ? dec(it[1], old.get(it[0])) : it[1]); else coll.add(it); }
+      C.applied(coll, gk);
     },
   });
 }

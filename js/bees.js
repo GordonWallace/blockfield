@@ -158,9 +158,11 @@ function spawnBee(h, at, mode) {
   const b = { id: ++seq, home: h, x: at.x, y: at.y, z: at.z, vx: 0, vy: 0, vz: 0, mode: mode || "start", t: 0, nectar: false, land: null, tgt: null,
     phase: 0, yaw: 0, follow: null, angry: 0, stung: false, stuck: 0, lastD: Infinity, trips: 0, homeT: 0, rng: undefined, px: undefined, py: undefined,
     pz: undefined, pyaw: undefined, followT: undefined, front: undefined, restedOut: undefined, restedBack: undefined, hurry: undefined,
-    landYaw: undefined, gone: undefined, hm0: null, hm1: null };   // hm0 / hm1: the columns under it and ahead (world.heightAtMemo)
+    landYaw: undefined, gone: undefined, hm0: null, hm1: null, cl: undefined };   // hm0 / hm1: the columns under it and ahead (world.heightAtMemo)
+  if (cluster()) b.cl = homeBase(h);   // (clusters: the bee stays its home's cluster's while it is out)
   b.phase = rs(b).next() * 6.28; b.yaw = rs(b).next() * 6.28;
   bees.push(b); h.out++;
+  if (byGroup) addTo(b);
   return b;
 }
 function removeBee(b) {
@@ -269,11 +271,12 @@ function flyTo(b, tx, ty, tz, v, dt, low) {
 const playerPos = () => { const p = BF.player && BF.player.position; return p ? { x: p.x, y: p.y, z: p.z } : null; };
 const holdsFlower = () => { try { const s = BF.inventory && BF.inventory.selected && BF.inventory.selected(); return !!(s && isFlower(s.id)); } catch (e) { return false; } };
 // Everyone holding a flower now: [{who, x, y, z}] (the head height a bee hovers at).
-function lurePoints() {
+function lurePoints(C) {
   const out = [];
   const pp = playerPos();
-  if (pp && holdsFlower() && !(BF.player && BF.player.dead)) out.push({ who: "player", x: pp.x, y: pp.y + 1.3, z: pp.z });
+  if (pp && holdsFlower() && !(BF.player && BF.player.dead) && (!C || C.cur.player)) out.push({ who: "player", x: pp.x, y: pp.y + 1.3, z: pp.z });   // (clusters: the player's group's bees)
   for (const m of lures) {
+    if (C && m && !C.mine(m)) continue;   // (clusters: another group's beekeeper)
     if (!m || m.dead || m.removed || !m.position) { lures.delete(m); continue; }
     out.push({ who: m, x: m.position.x, y: m.position.y + 1.4, z: m.position.z });
   }
@@ -379,8 +382,8 @@ const moveL = [];
 // ---------------------------------------------------------------- the world clock
 // Once a second: colony growth, how many bees each loaded home may have out (CAP, nearest the player first), bees sent home, the crop grid.
 function housekeeping() {
-  const now = simNow(), pp = playerPos() || { x: 0, y: 0, z: 0 }, day = today();
-  const list = [...loaded.values()];
+  const now = simNow(), pp = playerPos() || { x: 0, y: 0, z: 0 }, day = today(), C = cluster();
+  const list = C ? [...loaded.values()].filter(h => homeMine(C, h)) : [...loaded.values()];   // (clusters: the group's homes; CAP is per group)
   for (const h of list) {
     if (h.day < day) { if (h.bees > 0 && h.bees < MAX && flowersNear(h, true).length >= GROW_FLOWERS) h.bees++; h.day = day; }   // one bee a game day it is loaded
     h.rest = h.rest.filter(t => t > now);
@@ -395,13 +398,16 @@ function housekeeping() {
   const dusk = !dayOut();
   for (let i = bees.length - 1; i >= 0; i--) {
     const b = bees[i], h = b.home;
+    if (C && !beeMine(C, b)) continue;
     if (!h) { if (dusk && b.angry <= now) removeBee(b); continue; }   // a bee whose home was broken vanishes at dusk
     if (!loaded.has(pk(h.x, h.y, h.z))) continue;
     const n = over.get(h) || 0;
     if (n > 0 && b.mode !== "home" && !(b.angry > now)) { b.mode = "home"; b.follow = null; b.hurry = h.hurry; b.stuck = 0; b.lastD = Infinity; b.homeT = 0; over.set(h, n - 1); }
     else if (b.mode === "home") b.hurry = h.hurry;
   }
-  cropGrid = new Map();
+  if (C) {   // (clusters: only this group's homes are taken out and put back)
+    for (const [k, hs] of cropGrid) { const keep = hs.filter(h => !homeMine(C, h)); if (keep.length) cropGrid.set(k, keep); else cropGrid.delete(k); }
+  } else cropGrid = new Map();
   for (const h of list) {
     if (h.bees <= 0) continue;
     for (let gz = Math.floor((h.z - CROP_R) / 16); gz <= Math.floor((h.z + CROP_R) / 16); gz++) for (let gx = Math.floor((h.x - CROP_R) / 16); gx <= Math.floor((h.x + CROP_R) / 16); gx++) {
@@ -414,9 +420,9 @@ function housekeeping() {
 }
 // Bees scattered around a home whose chunk just loaded by day in dry weather (preferring flowers), and bees coming out of their homes.
 function release(dt) {
-  const now = simNow();
+  const now = simNow(), C = cluster();
   for (const h of loaded.values()) {
-    if (h.allow == null) continue;
+    if (h.allow == null || (C && !homeMine(C, h))) continue;
     if (h.scatter) {
       h.scatter = false;
       if (h.allow > 0 && h.out === 0) {
@@ -441,22 +447,46 @@ function release(dt) {
 }
 
 let acc = 0, lureT = 0, lp = [];
+// ---------------------------------------------------------------- clusters (spec r15-39b item C4, js/ctick.js)
+// With the cluster tick on, each group runs its own homes (by the cluster of the home's region) and the bees out of them (a bee keeps its
+// home's cluster, b.cl, while it is out, even when its home is broken), at most CAP bees out per group. Only the player's group's bees
+// follow the player's flower. Housekeeping runs in the group's first pass after each meeting (once a second), the lure scan by the tick counter.
+const cluster = () => BF.herd && BF.herd.cluster();
+const homeBase = h => BF.clusters.ofRegion(BF.regions.keyOf(h.x, 0, h.z));
+const homeMine = (C, h) => BF.clusters.groupOf(homeBase(h)) === C.cur.key;
+const beeGroup = b => BF.clusters.groupOf(b.cl !== undefined ? b.cl : b.home ? homeBase(b.home) : "w:none");
+const beeMine = (C, b) => beeGroup(b) === C.cur.key;
+// Each group's bees out: a bee's group changes only at meetings (it keeps its home's cluster while out), so they are listed at the first
+// use after one (BF.ctick.epoch), in bees order; a new bee goes at the end of its group's, as it does in bees; a gone one stays in until
+// the next meeting (skip it). (Testing every bee with beeMine cost every group a pass over all the bees, five times a tick.)
+let byGroup = null, byGroupAt = -1;
+const NO_BEES = [];
+function addTo(b) { const k = beeGroup(b), a = byGroup.get(k); if (a) a.push(b); else byGroup.set(k, [b]); }
+function groupBees(C) {
+  if (!byGroup || byGroupAt !== C.epoch) { byGroup = new Map(); byGroupAt = C.epoch; for (const b of bees) addTo(b); }
+  return byGroup.get(C.cur.key) || NO_BEES;
+}
 function update(dt) {
   if (!(dt > 0) || !W() || NEST == null && (ids(), NEST == null)) return;
   hook();
-  for (const b of bees) { b.px = b.x; b.py = b.y; b.pz = b.z; b.pyaw = b.yaw; }   // where each was before this tick: drawn between (js/entityview.js)
-  acc += dt;
-  if (acc >= 1) { acc = 0; housekeeping(); }
+  const C = cluster(), L = C ? C.local("bees", () => ({ lp: [], fresh: true })) : null, mb = C ? groupBees(C) : bees;   // (clusters: the group's bees)
+  for (const b of mb) { if (b.gone) continue; b.px = b.x; b.py = b.y; b.pz = b.z; b.pyaw = b.yaw; }   // where each was before this tick: drawn between (js/entityview.js)
+  if (L) { if (L.fresh) housekeeping(); }
+  else { acc += dt; if (acc >= 1) { acc = 0; housekeeping(); } }
   release(dt);
   const now = simNow();
-  if ((lureT -= dt) <= 0) {   // who holds a flower: free bees within reach start following (up to FOLLOW_MAX each)
-    lureT = 0.3;
-    lp = lurePoints();
+  let scan;
+  if (L) { scan = L.fresh || BF.herd.every(6); L.fresh = false; }
+  else { lureT -= dt; scan = lureT <= 0; if (scan) lureT = 0.3; }
+  if (L) lp = L.lp;
+  if (scan) {   // who holds a flower: free bees within reach start following (up to FOLLOW_MAX each)
+    lp = lurePoints(C);
+    if (L) L.lp = lp;
     if (lp.length) {
       const cnt = new Map();
-      for (const b of bees) if (b.follow) cnt.set(b.follow.who, (cnt.get(b.follow.who) || 0) + 1);
-      for (const b of bees) {
-        if (b.follow || b.angry > now || b.mode === "home" && b.hurry) continue;
+      for (const b of mb) if (b.follow && !b.gone) cnt.set(b.follow.who, (cnt.get(b.follow.who) || 0) + 1);
+      for (const b of mb) {
+        if (b.gone || b.follow || b.angry > now || b.mode === "home" && b.hurry) continue;
         for (const f of lp) {
           if ((cnt.get(f.who) || 0) >= FOLLOW_MAX) continue;
           const q = seen(b, f);
@@ -465,9 +495,9 @@ function update(dt) {
           break;
         }
       }
-    } else for (const b of bees) if (b.follow) { b.follow = null; nextErrand(b); }
+    } else for (const b of mb) if (b.follow && !b.gone) { b.follow = null; nextErrand(b); }
   }
-  for (let i = bees.length - 1; i >= 0; i--) { const b = bees[i]; if (b && !b.gone) stepBee(b, dt, lp, now); }
+  for (let i = mb.length - 1; i >= 0; i--) { const b = mb[i]; if (b && !b.gone) stepBee(b, dt, lp, now); }
 }
 
 // ---------------------------------------------------------------- the world: chunks, blocks, crops
@@ -581,11 +611,41 @@ if (BF.rworkers) {
   BF.rworkers.channel("lure", { key: m => m.id, get: id => BF.ids.get(id), state: m => lures.has(m), set: (m, on) => { if (!m) return; if (on) lures.add(m); else lures.delete(m); } });
 }
 
+// (the multi-worker runtime, js/cworkers.js: each group's homes and the bees out of them at meetings)
+function tables() {
+  const K = BF.ctick;
+  if (!K || !K.owned) return;
+  const plain = o => JSON.parse(JSON.stringify(o));
+  const homeOf = gk => h => BF.clusters.groupOf(homeBase(h)) === gk;
+  const beeOf = gk => b => BF.clusters.groupOf(b.cl !== undefined ? b.cl : b.home ? homeBase(b.home) : "w:none") === gk;
+  K.owned("bees", {
+    snap(gk) {
+      const homes = [...recs.values()].filter(homeOf(gk)).map(h => plain(h));
+      const out = bees.filter(beeOf(gk)).map(b => plain(Object.assign({}, b, { home: b.home ? pk(b.home.x, b.home.y, b.home.z) : null,
+        follow: b.follow ? Object.assign({}, b.follow, { who: b.follow.who === "player" ? "player" : b.follow.who.id }) : null, rng: b.rng, hm0: null, hm1: null, lastD: b.lastD === Infinity ? "inf" : b.lastD })));   // (hm0 / hm1: caches of world columns; JSON has no Infinity)
+      return { homes, out };
+    },
+    apply(gk, o) {
+      if (!o) return;
+      for (const h of o.homes || []) { const k = pk(h.x, h.y, h.z), was = recs.get(k); if (was) Object.assign(was, h); else recs.set(k, h); }
+      for (let i = bees.length - 1; i >= 0; i--) if (beeOf(gk)(bees[i])) { bees[i].gone = true; bees.splice(i, 1); }
+      byGroup = null;
+      for (const e of o.out || []) {
+        const b = Object.assign({}, e, { home: e.home ? recs.get(e.home) || null : null, lastD: e.lastD === "inf" ? Infinity : e.lastD });
+        if (e.home && !b.home && BF.herd) BF.herd.lost("bees", "the home at " + e.home);
+        if (e.follow) b.follow = Object.assign({}, e.follow, { who: e.follow.who === "player" ? "player" : BF.ids.live(e.follow.who) || "player" });
+        bees.push(b);
+      }
+    },
+  });
+}
 function hook() {
   if (hooked || !W() || !W().onChunkLoad) return;
   hooked = true;
+  tables();
   W().onChunkLoad(scanChunk);
   W().onChunkUnload(unloadChunk);
+  if (W().onReplayedSet) W().onReplayedSet((x, y, z, old, id) => { if (isFlower(old)) delFlower(x, y, z); if (isFlower(id)) addFlower(x, y, z); });   // (another worker's cells, at a meeting: js/cworkers.js)
   for (const c of W().chunks.values()) scanChunk(c.cx, c.cz, c);
   if (BF.on) BF.on("blockBroken", (x, y, z, id) => {   // the player broke a home: its bees that were out sting
     if (!isHome(id) || !lastBroken || ckey(x, y, z) !== pk(lastBroken.x, lastBroken.y, lastBroken.z)) return;
@@ -595,6 +655,7 @@ function hook() {
 }
 function reset() {
   for (const b of bees) b.gone = true;
+  byGroup = null;
   bees.length = 0; recs.clear(); loaded.clear(); flowers.clear(); lures.clear(); cropGrid = new Map(); lastBroken = null; acc = 0; lureT = 0;
 }
 
@@ -607,6 +668,7 @@ function serialize() {
 }
 function deserialize(a) {
   for (const b of bees) b.gone = true;
+  byGroup = null;
   bees.length = 0; recs.clear();
   if (Array.isArray(a)) for (let i = 0; i + 6 < a.length; i += 7) {
     const h = { x: a[i], y: a[i + 1], z: a[i + 2], kind: a[i + 3] ? "hive" : "nest", bees: Math.max(0, Math.min(MAX, a[i + 4] | 0)), honey: Math.max(0, Math.min(FULL, a[i + 5] | 0)), day: a[i + 6] | 0,

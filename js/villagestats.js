@@ -73,7 +73,7 @@ function thin(h, t) {
   while (out.length > CAP) { const half = out.length >> 1; out.splice(0, half, ...out.slice(0, half).filter((x, i) => i % 2 === 0)); }
   if (out.length !== s.length) { h.s = out; h.gen = (h.gen || 0) + 1; }
 }
-function record(loadedRecs) {
+function record(loadedRecs, C) {
   const t = now(), live = new Set();
   let chestsOf = null;
   for (const rec of loadedRecs) {
@@ -93,7 +93,7 @@ function record(loadedRecs) {
     h.s.push(numbers(rec, t, chestsOf));
     if (h.s.length % 24 === 0) thin(h, t);
   }
-  for (const [k, h] of hist) if (h.open && !live.has(k)) h.open = false;   // unloaded: its span ends where it was last seen
+  for (const [k, h] of hist) if (h.open && !live.has(k) && (!C || C.mineVillage(k))) h.open = false;   // unloaded: its span ends where it was last seen
 }
 function latest(key) {
   const h = hist.get(key), x = h && h.s[h.s.length - 1];
@@ -110,16 +110,30 @@ function series(key, field, from = -Infinity) {
   return h.s.filter(x => x[0] >= from).map(x => [x[0], field === "unemployment" ? (x[6] > 0 ? x[5] / x[6] * 100 : null) : x[i]]);
 }
 
+// several workers (clusters, js/cworkers.js): a village's numbers are its cluster's; a history goes only when it grew or its span moved
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.ownedMap) return;
+  const byKey = k => C.ofVillage(k);
+  C.ownedMap("vstats.pops", pops, byKey);
+  C.ownedMap("vstats.hist", hist, byKey, null, null, (k, h) => { const p = h.spans[h.spans.length - 1]; return h.s.length + "|" + h.gen + "|" + h.spans.length + "|" + (p ? p[1] : "") + "|" + h.open; });
+});
 let tickT = 0, hooked = false;
 function update() {
   if (!hooked && typeof BF.on === "function") { hooked = true; BF.on("newWorld", reset); }
-  const t = BF.simNow();   // every 2 game seconds, from the game step (js/villagelog.js init; spec r15-16)
-  if ((t - tickT < 2 && t >= tickT) || !BF.mobs || !BF.mobs.villages) return;
-  tickT = t;
+  // clusters (spec r15-39b, js/ctick.js): each cluster its own villages, every 2 game seconds on the tick counter
+  const C = BF.ctick && BF.ctick.filter ? BF.ctick : null;
+  if (C) { if (BF.rand.tick % 40 !== 5) return; }
+  else {
+    const t = BF.simNow();   // every 2 game seconds, from the game step (js/villagelog.js init; spec r15-16)
+    if (t - tickT < 2 && t >= tickT) return;
+    tickT = t;
+  }
+  if (!BF.mobs || !BF.mobs.villages) return;
   const loaded = [];
   for (const rec of BF.mobs.villages.values())
-    if ((rec.members || []).some(m => m.type === "villager" && !m.dead && !m.removed && m.position)) { sample(rec); loaded.push(rec); }   // loaded villages only
-  record(loaded);
+    if ((!C || C.mineVillage(rec.key)) && (rec.members || []).some(m => m.type === "villager" && !m.dead && !m.removed && m.position)) { sample(rec); loaded.push(rec); }   // loaded villages only
+  record(loaded, C);
 }
 function reset() { pops.clear(); hist.clear(); tickT = 0; ver++; }
 

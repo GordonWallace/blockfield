@@ -51,6 +51,33 @@ function hook() {
   BF.on("blockBroken", (x, y, z) => furnaces.delete(pk(x, y, z)));
   BF.on("newWorld", () => { furnaces.clear(); inUse.clear(); });
 }
+// Several workers (clusters, js/cworkers.js): the registry (block events reach only the worker that set the block), who is at each furnace
+// (its villager's cluster's) and the requests in flight, each cluster's part
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.ownedMap) return;
+  const cellG = k => { const i = k.indexOf(","), j = k.lastIndexOf(","); return C.ofCell(+k.slice(0, i), +k.slice(j + 1)); };
+  C.ownedMap("furnaceuse.furnaces", furnaces, cellG);
+  C.ownedMap("furnaceuse.inUse", inUse, (k, m) => C.ofMob(m) || cellG(k), m => m.id, id => BF.ids.live(id) || null);
+  C.owned("furnaceuse.pend", {
+    snap(g) {
+      const out = [];
+      for (const [job, p] of [...pendBy]) {
+        const path = !p.m.removed && pathOf(p.m, job);
+        if (!path) { pendBy.delete(job); continue; }
+        if (C.ofMob(p.m) === g) out.push([p.m.id, path, p.op, p.req.result === undefined ? null : p.req.result, p.req.tick]);
+      }
+      return out;
+    },
+    apply(g, list) {
+      for (const [job, p] of [...pendBy]) if (C.ofMob(p.m) === g) dropPend(job);
+      for (const [id, path, op, result, tick] of list) {
+        const m = BF.ids.live(id), job = m && path.reduce((o, k) => (o ? o[k] : undefined), m);
+        if (job && typeof job === "object") setPend(m, job, { op, req: { result: result === null ? undefined : result, tick } });
+      }
+    },
+  });
+});
 const reachOf = R => Math.max(48, (R && R.wg && R.wg.reach) || 0);
 // Can m use the furnace at f for input inId (product outId) now? (still a furnace, input / output free or holding the same, nobody else at it)
 function usable(m, f, inId, outId) {
@@ -127,6 +154,19 @@ function fuelIn(f) { const st = INV().furnaceState(f.x, f.y, f.z); return st ? (
 // fuels: the fuel ids it may burn (job.fuelOk, worked out at the send). Each is checked again when applied: the furnace still stands and
 // is usable by it, it still holds what it puts in, and has room for what it takes out. Results reach the job before the next think.
 const pend = new WeakMap();   // job -> {op, req}: a request in flight
+// With the cluster tick on, also by job (strongly, with its villager in p.m), so several workers (js/cworkers.js) can send a request that
+// was delivered at the end of an interval to the worker its villager thinks on next: its job is found there by its path in the villager
+const pendBy = new Map();
+const setPend = (m, job, p) => { pend.set(job, p); if (BF.ctick && BF.ctick.on) { p.m = m; pendBy.set(job, p); } };
+const dropPend = job => { pend.delete(job); pendBy.delete(job); };
+function pathOf(m, job) {
+  for (const k of Object.keys(m)) {
+    const v = m[k];
+    if (v === job) return [k];
+    if (v && typeof v === "object" && !Array.isArray(v) && !v.isVector3) for (const k2 of Object.keys(v)) if (v[k2] === job) return [k, k2];
+  }
+  return null;
+}
 const fuelsOf = (m, job) => [...new Set(m.inv.filter(s => s && isFuel(s.id) && (!job.fuelOk || job.fuelOk(s.id))).map(s => s.id))];
 const inFlight = (job, op) => { const p = pend.get(job); return p && p.op === op && p.req.result === undefined && (BF.rand ? BF.rand.tick - p.req.tick < 4 : true) ? p : null; };
 // Sends the load; returns null while it is in flight, then the number put in (0 when the furnace could not be used).
@@ -134,13 +174,13 @@ function load(m, job, max) {
   const f = job.furnace, p = pend.get(job);
   if (p && p.op === "load") {
     if (inFlight(job, "load")) return null;
-    pend.delete(job);
+    dropPend(job);
     return p.req.result ? p.req.result.n || 0 : 0;
   }
   if (!usable(m, f, job.rawId, job.outId)) return 0;
   const req = BF.req.send("furnace", pk(f.x, f.y, f.z), { op: "load", raw: job.rawId, out: job.outId, max: max == null ? null : max, fuels: fuelsOf(m, job) }, m);
   req.then(r => { if (r.ok) job.loaded = (job.loaded || 0) + r.n; if (r.fuel) job.ownFuel = (job.ownFuel || 0) + r.fuel.n; });
-  pend.set(job, { op: "load", req });
+  setPend(m, job, { op: "load", req });
   return null;
 }
 // Asks to add its own fuel when the furnace st has run dry (nothing burning, no fuel, input waiting). Returns true while such a
@@ -152,7 +192,7 @@ function topUp(m, job, st) {
   if (!fuels.length) return false;
   const f = job.furnace, req = BF.req.send("furnace", pk(f.x, f.y, f.z), { op: "fuel", raw: job.rawId, fuels }, m);
   req.then(r => { if (r.fuel) job.ownFuel = (job.ownFuel || 0) + r.fuel.n; });
-  pend.set(job, { op: "fuel", req });
+  setPend(m, job, { op: "fuel", req });
   return true;
 }
 // Lets go of the furnace and takes the product out, and all the fuel left in it; also the input it put in when `all` (it gives up).
@@ -161,7 +201,7 @@ function topUp(m, job, st) {
 let now = 0;
 function empty(m, job, all, done) {
   const f = job.furnace, data = { op: "empty", raw: job.rawId, all: !!all };
-  pend.delete(job);
+  dropPend(job);
   if (now) { const r = applyFurnace(m, pk(f.x, f.y, f.z), data); if (r.ok && done) done(r.got); return; }
   const req = BF.req.send("furnace", pk(f.x, f.y, f.z), data, m);
   if (done) req.then(r => { if (r.ok) done(r.got); });
@@ -293,7 +333,10 @@ function offersScan(m, f, loose, skip, rec) {
 // (trading.js PRODUCE, replaced by tests) changes (offers are only ever added by replacing or pushing onto the list, js/market.js sync,
 // trading.js addXp; prices change amounts, which are read live).
 const tables = new WeakMap();   // village record -> table
+// (clusters: a table lasts one interval, js/ctick.js local, as several workers send changed members and offers at meetings)
+const tablesNow = () => { const C = BF.ctick; return C && C.on && C.cur ? C.local("furnaceuse.tables", () => new WeakMap()) : tables; };
 function offerTable(R) {
+  const tables = tablesNow();
   const ms = R.members || [], t = tables.get(R), P = TR().PRODUCE;
   if (t && t.ms === ms && t.n === ms.length) {
     const k = t.keys;

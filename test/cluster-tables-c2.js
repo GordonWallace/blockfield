@@ -34,9 +34,9 @@ function world(roundTrip) {
     const before = BF.stateHash.full().hash;
     const names = C.tables(), parts = [];
     for (const name of names) for (const g of C.groups()) {
-      const t = C.table(name), a = JSON.stringify(t.snap(g.key));
+      const t = C.table(name), a = JSON.stringify(t.snap(g.key, true));   // (true: every entry, also of the tables that send only changes)
       t.apply(g.key, JSON.parse(a));
-      parts.push([name, g.key, a, JSON.stringify(t.snap(g.key))]);
+      parts.push([name, g.key, a, JSON.stringify(t.snap(g.key, true))]);
     }
     res.names = names; res.parts = parts;
     res.same = before === BF.stateHash.full().hash;
@@ -48,7 +48,7 @@ function world(roundTrip) {
 }
 
 const a = world(true);
-for (const n of ['mobs.spawnAcc', 'mobs.aiBy', 'mobs.arrows', 'drops', 'boats', 'wildlife.rolled', 'wildlife.stored', 'wildlife.nights', 'mobSave.villagers', 'mobSave.golems', 'mobSave.wild'])
+for (const n of ['mobs.spawnAcc', 'mobs.aiBy', 'mobs.arrows', 'drops', 'boats', 'wildlife.rolled', 'wildlife.stored', 'wildlife.nights', 'mobSave.villagers', 'mobSave.golems', 'mobSave.wild', 'mobs.darkStamps'])
   check(a.names.includes(n), `table ${n} is registered`);
 check(a.made.drop > 0 && a.made.boat && a.made.skeleton, `a drop, a boat and a skeleton put in the far cluster ${a.far}`);
 const nonEmpty = a.parts.filter(p => p[2] !== '[]' && p[2] !== 'null').map(p => p[0]);

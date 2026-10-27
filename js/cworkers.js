@@ -139,7 +139,9 @@ function sync() {
   journal = new Map();
   const tables = [];
   const gs = K.groups().filter(owns);
+  I.tablesStep(true);   // (each table's keys by group made once for all the snaps)
   for (const name of K.tables()) { const t = K.table(name); for (const g of gs) tables.push([name, g.key, t.snap(g.key)]); }
+  I.tablesStep(false);
   const chans = [];
   for (const [name, key] of touched.values()) { const ch = R.chan(name), o = ch.get(key); chans.push([name, key, o == null ? null : ch.state(o)]); }
   touched = new Map();
@@ -168,7 +170,9 @@ function sync() {
   const t2 = now();
   T.exchange += t2 - t1;
   T.bytes += msg.length;
+  lap(null);
   const ps = all.map((x, w) => (w === CW.me ? null : JSON.parse(x)));
+  lap("in.parse");
   peers = all.map((x, w) => ({ bytes: x.length }));
   // everything every worker measured (its own groups'), for the plan
   groupMs = new Map(); ranBy = new Map();
@@ -194,11 +198,14 @@ function sync() {
     if (!p) continue;
     for (const [id, , e] of p.born) { const m = BF.ids.live(id); if (m) BF.mobs.filled(m, R.dec(e, m), !fresh.has(id)); }
   }
+  lap("in.born");
   const cells = new Map();
   for (const [k, list] of edits) for (const [i] of list) cells.set(k + "|" + i, CW.me);
-  for (let w = 0; w < ps.length; w++) {
+  I.tablesStep(true);   // (and once for all the applies)
+  try { R.atLater(() => { for (let w = 0; w < ps.length; w++) {   // (objects sent as where they are: looked up once every worker's changes are in)
     const p = ps[w];
     if (!p) continue;
+    lap(null);
     for (const [key, ops] of p.recs) { const rec = BF.mobs.villages.get(key); if (rec) R.patch(rec, ops); else err("worker " + w + " changed village " + key + ", which this worker doesn't have"); }
     for (const [id, ops, removed] of p.mobs) {
       const m = BF.ids.live(id);
@@ -206,12 +213,16 @@ function sync() {
       if (ops) R.patch(m, ops);
       if (removed && !m.removed) BF.mobs.discard(m);
     }
+    lap("in.mobs");
     for (const [k, list] of p.edits) for (const [i] of list) { const at = k + "|" + i; if (cells.has(at) && cells.get(at) !== w) err("workers " + cells.get(at) + " and " + w + " both set cell " + i + " of chunk " + k); cells.set(at, w); }
     replaying = true;
-    try { if (p.edits.length) BF.world.applyEdits(p.edits); } finally { replaying = false; }
+    try { if (p.edits.length) BF.world.applyEdits(p.edits, false, true); } finally { replaying = false; }
+    lap("in.edits");
     for (const [name, gk, data] of p.tables) { const t = K.table(name); if (t) t.apply(gk, data); }
+    lap("in.tables");
     for (const [name, key, data] of p.chans) { const ch = R.chan(name); if (ch) ch.set(ch.get(key), data, key); }
-  }
+  } }); } finally { I.tablesStep(false); }
+  lap("in.atLater");
   // requests: the crossing ones join the meeting's list (it sorts them by due tick, sending group and order); the queued ones go back
   // into their groups' queues, in their order there, for the meeting to file again
   const byKey = new Map(K.groups().map(g => [g.key, g]));
@@ -225,7 +236,9 @@ function sync() {
   const queuedKeys = new Set();
   for (let w = 0; w < all.length; w++) for (const [gk] of (w === CW.me ? queued : ps[w].queued)) queuedKeys.add(gk);
   for (const g of K.groups()) if (!owns(g) && !queuedKeys.has(g.key)) I.setPending(g, []);
+  lap("in.requests");
   if (BF.regions) BF.regions.tick();   // (the region index, for the mobs that moved on other workers)
+  lap("in.regions");
   T.adopt += now() - t2;
   T.meetings++;
 }

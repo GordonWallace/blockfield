@@ -4,6 +4,8 @@
 //    own objects change places, so a link into one (a buyer's deal.offer) still points at an object in the list (r15-39b C7)
 //  - a moved object changed inside, a new object, a dropped one and a shorter list all come out like the owner's
 //  - a baker's oven (a module table it changes while it thinks) goes whole through the "oven" channel
+//  - an object a mob holds under two of its fields (a baker's slot in its asks and its bkr.job.offer: the same offer, no longer in the
+//    seller's list) stays one object on the other workers, whether both are new or one was there already
 const { load } = require('../tools/headless.js');
 for (const k of ['log', 'info', 'debug']) console[k] = () => {};
 const { BF } = load();
@@ -32,6 +34,29 @@ const ops2 = RW.diff(seller, s);
 RW.patch(replica, ops2);
 ok(JSON.stringify(RW.enc(seller)) === JSON.stringify(RW.enc(replica)) && replica.trades[1] === deal.offer, "a second rebuild, shorter: the same, and the deal's offer moved with it");
 ok(!RW.diff(seller, s), "nothing changed: no ops");
+// one object under two fields of a mob (js/trading.js buy: a baker's asks slot and its bkr.job.offer), in neither key order nor list
+{
+  const o1 = offer(5, 1), m1 = { id: "x2", asks: [], bkr: { job: { offer: null } } };
+  const r1 = RW.dec(RW.enc(m1)), s1 = RW.snap(m1);
+  m1.asks.push({ o: o1, n: 1 }); m1.bkr.job.offer = o1;   // both new in one diff
+  RW.patch(r1, RW.diff(m1, s1));
+  ok(r1.asks[0].o === r1.bkr.job.offer && JSON.stringify(RW.enc(r1)) === JSON.stringify(RW.enc(m1)), "an offer new under two fields: one object on the replica");
+  const o2 = offer(6, 1), m2 = { id: "x3", bkr: { job: { offer: o2 } }, asks: [] };
+  const r2 = RW.dec(RW.enc(m2)), s2 = RW.snap(m2);
+  m2.asks.push({ o: o2, n: 1 });   // the job's offer was there already; the slot is new
+  RW.patch(r2, RW.diff(m2, s2));
+  ok(r2.asks[0].o === r2.bkr.job.offer && JSON.stringify(RW.enc(r2)) === JSON.stringify(RW.enc(m2)), "an offer already held, now also under another field: the replica's own object");
+  o2.times = 3;
+  RW.patch(r2, RW.diff(m2, s2));
+  ok(r2.bkr.job.offer.times === 3 && r2.asks[0].o === r2.bkr.job.offer, "changed inside afterwards: still one object, changed");
+  // the other way round: the new place comes first in key order, the replica's own object is under a later field, in a list rebuilt
+  const A = offer(7, 1), B = offer(8, 1), m3 = { id: "x4", deal: null, list: [A, B] };
+  const r3 = RW.dec(RW.enc(m3)), s3 = RW.snap(m3), B3 = r3.list[1];
+  m3.list = [B, A]; m3.deal = B; B.times = 2;
+  const ops3 = RW.diff(m3, s3);
+  RW.atLater(() => RW.patch(r3, ops3));
+  ok(r3.deal === B3 && r3.list[0] === B3 && B3.times === 2 && JSON.stringify(RW.enc(r3)) === JSON.stringify(RW.enc(m3)), "a new place before the old one, the list rebuilt: the replica's own offer in both");
+}
 // a baker's oven (js/baker.js, a module table a baker changes while it thinks): the "oven" channel carries all of it
 {
   const K = BF.baker, ch = RW.chan("oven"), I = BF.I, m = BF.mobs.list.find(x => x.type === "villager");

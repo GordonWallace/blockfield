@@ -27,9 +27,11 @@
 // F3 and the debug screen: groups, mobs per group, ms per group, requests that waited for a meeting. Game log: INFO when it is turned on
 // or off, INFO "clusters" once a game hour while the debug overlay or debug screen is on, ERROR when a group's pass throws.
 // API: BF.ctick = { MEET, on (get / set), order (get / set: "tick" | "cluster"), cur (the running group), filter (the running group's
-//                   mob test, or null when every mob is seen), mine(m), hidden(o), sys(name, fn), local(name, init), step(h), interval(h),
+//                   mob test, or null when every mob is seen), mobs() (the running group's mobs, removed ones included, or null as filter),
+//                   added(m), stale(), epoch, mine(m), hidden(o), sys(name, fn), local(name, init), step(h), interval(h),
 //                   meet(), groups(), SYSTEMS, converted() -> [names], only (a Set of system names, or null: all), system (the running one),
-//                   trace, traced() -> [["system file:line", count]], owned(name, {snap, apply}), tables(), table(name), tickOf(base), clocks() -> Map base -> tick, stats(), text(), hourly(),
+//                   trace, traced() -> [["system file:line", count]], owned(name, {snap, apply}), ownedMap(name, map, groupOfKey, enc, dec, ver), ownedSet(name, set, groupOfKey),
+//                   ofVillage(key), ofCell(x, z), ofMob(m), mineVillage(key), mineCell(x, z), tables(), table(name), onMeet(fn, name, when), tickOf(base), clocks() -> Map base -> tick, stats(), text(), hourly(),
 //                   reset() }
 (() => {
 "use strict";
@@ -51,28 +53,28 @@ const SYSTEMS = {
   mobSave: true,        // C2
   drops: true,          // C2
   boats: true,          // C2
-  builder: false,       // C3: village systems
-  villageLife: false,   // C3
-  jobs: false,          // C3
-  breeding: false,      // C3
-  storage: false,       // C3
-  baker: false,         // C3
-  explorer: false,      // C3 (explorers' tents left camping, js/explorer.js)
-  restock: false,       // C3
-  villages: false,      // C3 (js/mobs.js updateVillages: village records come and go)
-  dayTimeline: false,   // C3
-  vstats: false,        // C3 (village stats and economy, js/villagelog.js)
-  forester: false,      // C3
-  signs: false,         // C3
-  shepherd: false,      // C4: animals
-  horses: false,        // C4
-  stables: false,       // C4
-  poultry: false,       // C4
-  cowherd: false,       // C4
-  pigFarmer: false,     // C4
-  bees: false,          // C4
-  merchant: false,      // C5: merchants and caravans
-  villageSim: false,    // C5 (which villages are simulated, trip pins: js/villagesim.js)
+  builder: true,        // C3: village systems
+  villageLife: true,    // C3
+  jobs: true,           // C3
+  breeding: true,       // C3
+  storage: true,        // C3
+  baker: true,          // C3
+  explorer: true,       // C3 (explorers' tents left camping, js/explorer.js)
+  restock: true,        // C3
+  villages: true,       // C3 (js/mobs.js updateVillages: village records come and go)
+  dayTimeline: true,    // C3
+  vstats: true,         // C3 (village stats and economy, js/villagelog.js)
+  forester: true,       // C3
+  signs: true,          // C3
+  shepherd: true,       // C4: animals
+  horses: true,         // C4
+  stables: true,        // C4
+  poultry: true,        // C4
+  cowherd: true,        // C4
+  pigFarmer: true,      // C4
+  bees: true,           // C4
+  merchant: true,       // C5: merchants and caravans
+  villageSim: true,     // C5 (which villages are simulated, trip pins: js/villagesim.js)
   fluids: true,         // C6: world
   growth: true,         // C6
   farmland: true,       // C6
@@ -101,6 +103,23 @@ const groupOfBase = b => byKey.get(CL().groupOf(b)) || NOWHERE;
 function mine(m) { return m.cl === undefined ? cur === groups[0] : CL().groupOf(m.cl) === cur.key; }
 // o belongs to another group than the running one (BF.ids.hidden while a converted system runs)
 function hidden(o) { return o.cl !== undefined && cur !== null && !legacy && CL().groupOf(o.cl) !== cur.key; }
+// Each group's mobs, so a converted system's loops over mobs read only the running group's (BF.ctick.mobs) instead of testing every mob
+// in the world with mine (that cost every group a pass over all mobs, several times a tick). A mob's cluster changes only at meetings
+// and when it is made (js/clusters.js place), so the lists are made at the first use after a meeting, in BF.mobs.list order, and a new
+// mob goes at the end of its group's (BF.mobs.added), as it does in BF.mobs.list. Removed mobs stay in until the next meeting: skip them.
+let lists = null, epoch = 0;   // (epoch: counts the times the lists went out of date: other modules key their own lists by group on it, js/bees.js)
+const NONE = [];
+const groupKeyOf = m => (m.cl === undefined ? (groups[0] ? groups[0].key : null) : CL().groupOf(m.cl));
+function mobLists() {
+  if (lists) return lists;
+  lists = new Map();
+  for (const m of BF.mobs.list) { const k = groupKeyOf(m); const a = lists.get(k); if (a) a.push(m); else lists.set(k, [m]); }
+  return lists;
+}
+// the running group's mobs (removed ones included), or null when every mob is seen (as filter)
+function mobs() { return cur && !legacy ? mobLists().get(cur.key) || NONE : null; }
+function added(m) { if (!lists) return; const k = groupKeyOf(m), a = lists.get(k); if (a) a.push(m); else lists.set(k, [m]); }
+const stale = () => { lists = null; epoch++; };
 
 // ---------------------------------------------------------------- id and creation-number ranges
 // At a meeting, range j of slot i (the groups, then the between-ticks slot) is [h + (j * n + i) * RANGE, + RANGE), n = groups + 1; the
@@ -198,10 +217,12 @@ function meet() {
   let behind = 0, eg = null;
   for (const g of groups) if (g.bases && g.tick !== undefined && g.tick !== BF.rand.tick) { behind++; eg = eg || g.key + " at tick " + g.tick; }
   if (behind && BF.glog) BF.glog.log("ERROR", "clusters", behind + " cluster group(s) reached the meeting at tick " + BF.rand.tick + " on another clock (" + eg + ")");
+  meetHooksRun("start");   // (before the queued requests are gathered: what a hook sends is filed into the new groups with them)
   const pending = [];
   for (const g of groups) { useSlot(g); for (const r of BF.req.pending()) pending.push(r); }
   if (between) { useSlot(between); for (const r of BF.req.pending()) pending.push(r); }
   CL().rebuild();
+  stale();
   const list = CL().groups();
   BF.dynRange.settle();   // (the map items the groups made: one id under each name)
   newRanges(list.length + 1);
@@ -225,6 +246,7 @@ function meet() {
     finally { const left = BF.req.pending(); BF.req.useCtx(keep); between.req = keep; for (const r of left) refile(r); }
     i = j;
   }
+  meetHooksRun("end");
   needMeet = false;
   if (W()) W().met(groups);   // (which worker runs each group, and what each worker sends at the next meeting)
   S.meetings++; H.meetings++; S.since = 0;
@@ -338,11 +360,105 @@ function local(name, init) {
 
 // Module tables that last longer than an interval and aren't on a mob or village record (claims, records keyed by village, a cell's
 // stamps): each registers how to take the part a group owns and put it back, so the multi-worker runtime (C7) can send it at meetings.
-// owned(name, {snap(groupKey) -> plain JSON, apply(groupKey, plain)}); tables() -> the registered names. Unused on one worker.
+// owned(name, {snap(groupKey, all?) -> plain JSON, apply(groupKey, plain)}); tables() -> the registered names. Unused on one worker.
 const tables = new Map();
 function owned(name, t) {
   if (!t || typeof t.snap !== "function" || typeof t.apply !== "function") throw new Error("BF.ctick.owned(name, {snap, apply})");
   tables.set(name, t);
+}
+
+// The common shapes of owned tables, and what a converted system's loops filter by:
+//   ownedMap(name, map, groupOfKey, enc?, dec?)  a Map whose every entry belongs to one group (groupOfKey(key, value) -> group key): a group's part
+//                                                is its keys' entries, values as plain JSON (enc(v, k) -> JSON, dec(j, k) -> value);
+//                                                applying it updates the group's keys in place (the map's order stays), adds its new
+//                                                ones at the end in the owner's order and drops its gone ones
+//                                                ver(k, v) too: only the entries whose ver changed since they were last swapped go
+//   ownedSet(name, set, groupOfKey)              the same for a Set of keys
+//   ofVillage(key), ofCell(x, z), ofMob(m)       the group a village key, a block cell or a mob belongs to (a mob with no cluster: null)
+//   mineVillage(key), mineCell(x, z)             true when the running group's (always, outside groups or in a system not converted)
+const ofVillage = k => CL().groupOf("v:" + k);
+const ofCell = (x, z) => CL().groupOf(CL().ofRegion(BF.regions.keyOf(x, 0, z)));
+const ofMob = m => (m && m.cl !== undefined ? CL().groupOf(m.cl) : null);
+const mineVillage = k => !cur || legacy || ofVillage(k) === cur.key;
+const mineCell = (x, z) => !cur || legacy || ofCell(x, z) === cur.key;
+// A table's keys by group, in the table's order, for the owned tables' snap and apply (keysOf(coll, g, groupOf(k, v)): a Map's or a
+// Set's): made once per swap step (tablesStep: js/cworkers.js, around its snaps and around its applies) instead of every group's snap
+// and apply testing every key. Within a step a key doesn't change group and an apply changes only its own group's keys (applied(coll, g)
+// after it); made again when the table's size changed some other way. Outside a step (one worker, tests) made at each call.
+let tstep = 0, inStep = false;
+const parts = new WeakMap();   // coll -> {at, size, m: group -> [keys]}
+const NO_KEYS = [];
+function keysOf(coll, g, groupOf) {
+  let c = inStep ? parts.get(coll) : undefined;
+  if (!c || c.at !== tstep || c.size !== coll.size || c.m.get(g) === null) {
+    c = { at: tstep, size: coll.size, m: new Map() };
+    const isMap = coll instanceof Map;
+    for (const e of coll) { const k = isMap ? e[0] : e, gk = isMap ? groupOf(k, e[1]) : groupOf(k), a = c.m.get(gk); if (a) a.push(k); else c.m.set(gk, [k]); }
+    if (inStep) parts.set(coll, c);
+  }
+  return c.m.get(g) || NO_KEYS;
+}
+function applied(coll, g) { const c = parts.get(coll); if (c && c.at === tstep) { c.size = coll.size; c.m.set(g, null); } }
+function tablesStep(on) { inStep = !!on; tstep++; }
+
+function ownedMap(name, map, groupOfKey, enc, dec, ver) {
+  if (ver) return ownedLog(name, map, groupOfKey, enc, dec, ver);
+  owned(name, {
+    snap(g) { const o = []; for (const k of keysOf(map, g, groupOfKey)) o.push([k, enc ? enc(map.get(k), k) : map.get(k)]); return o; },
+    apply(g, list) {
+      const got = new Set();
+      for (const [k] of list) got.add(k);
+      for (const k of keysOf(map, g, groupOfKey)) if (!got.has(k)) map.delete(k);
+      for (const [k, v] of list) map.set(k, dec ? dec(v, k) : v);
+      applied(map, g);
+    },
+  });
+}
+// ver(k, v) given (big tables that change a little at a time: logs, histories): only the entries whose ver changed since this worker last
+// sent or got them go, with the group's key list (for the gone ones); snap(g, true) puts them all (tests: a part sent and snapped again)
+function ownedLog(name, map, groupOfKey, enc, dec, ver) {
+  const had = new Map();   // key -> the ver every worker has
+  owned(name, {
+    snap(g, all) {
+      const keys = [], put = [];
+      for (const k of keysOf(map, g, groupOfKey)) {
+        const v = map.get(k);
+        keys.push(k);
+        const n = ver(k, v);
+        if (all || had.get(k) !== n) { had.set(k, n); put.push([k, enc ? enc(v, k) : v]); }
+      }
+      return { keys, put };
+    },
+    apply(g, o) {
+      const got = new Set(o.keys);
+      for (const k of keysOf(map, g, groupOfKey)) if (!got.has(k)) { map.delete(k); had.delete(k); }
+      for (const [k, j] of o.put) { const v = dec ? dec(j, k) : j; map.set(k, v); had.set(k, ver(k, v)); }
+      applied(map, g);
+    },
+  });
+}
+function ownedSet(name, set, groupOfKey) {
+  owned(name, {
+    snap(g) { return keysOf(set, g, groupOfKey).slice(); },
+    apply(g, list) { const got = new Set(list); for (const k of keysOf(set, g, groupOfKey)) if (!got.has(k)) set.delete(k); for (const k of list) set.add(k); applied(set, g); },
+  });
+}
+
+// What must change only at meetings: onMeet(fn, name, when) runs fn at each meeting, on every worker alike, outside every group (between
+// ticks), in registration order. when "start" (the default): first, before the queued requests are gathered (so what it sends is
+// filed into the new groups) and the clusters are worked out again (village records first met,
+// js/mobs.js; the simulated set); "end": after the requests that waited are applied and delivered (the shared table). A hook decides
+// only from what every worker has alike (the player, mobs, village records, owned tables); mobs it makes take the between-ticks ids.
+const meetHooks = { start: [], end: [] };
+function onMeet(fn, name, when) {
+  const L = meetHooks[when || "start"];
+  if (!L) throw new Error('BF.ctick.onMeet(fn, name, "start" | "end")');
+  L.push([fn, name || fn.name || "meet"]);
+}
+function meetHooksRun(when) {
+  for (const [fn, name] of meetHooks[when]) {
+    try { fn(); } catch (e) { S.err++; if (S.err <= 20 && BF.glog) BF.glog.log("ERROR", "clusters", "Meeting hook " + name + " (" + when + ") failed: " + (e && e.message || e)); console.error(e); }
+  }
 }
 
 // Tracing (tests): the reads of another group's objects that BF.ids.get and the region queries hid, by system and calling code.
@@ -370,6 +486,7 @@ function setOn(v) {
     between = slot("between", 0); between.req = BF.req.ctx();
     BF.req.away = away;
     for (const m of BF.mobs.list) if (!m.removed) CL().place(m);
+    stale();
   } else {
     leave();
     // everything still queued goes back to the one context
@@ -429,6 +546,7 @@ function reset() {
   H.ticks = H.deferred = H.meetings = 0;
   if (CL()) CL().reset();
   clocks.clear();
+  stale();
   if (on) {
     startRanges();
     between = slot("between", 0); between.req = BF.req.ctx();
@@ -441,7 +559,10 @@ BF.ctick = {
   get order() { return order; }, set order(o) { setOrder(o); },
   get cur() { return cur; },
   get filter() { return cur && !legacy ? mine : null; },
-  owned, tables: () => [...tables.keys()], table: name => tables.get(name),
+  mobs, added, stale, get epoch() { return epoch; },   // the running group's mobs (removed ones included), or null when every mob is seen; a new
+  // mob; the lists out of date; how many times they were (a module's own lists by group are made again when it changes)
+  owned, tables: () => [...tables.keys()], table: name => tables.get(name), onMeet,
+  ownedMap, ownedSet, ofVillage, ofCell, ofMob, mineVillage, mineCell,
   tickOf: b => clocks.get(b), clocks: () => new Map(clocks),   // each cluster's own tick (one clock for now)
   mine, hidden, sys, local, step, interval, meet: meetNow, groups: () => groups, converted, stats, text, hourly, reset,
   get only() { return only; }, set only(v) { only = v ? new Set(v) : null; },
@@ -452,7 +573,9 @@ BF.ctick = {
     get deferred() { return deferred; }, set deferred(v) { deferred = v; },
     pendingOf(g) { keepSlot(between); useSlot(g); try { return BF.req.pending(); } finally { useSlot(between); } },
     setPending(g, list) { g.req = BF.req.newCtx(); for (const r of list) BF.req.fileIn(g.req, r); },
+    tablesStep,
   },
+  keysOf, applied,   // an owned table's keys of one group, in its order (see keysOf); after applying a group's part
   // trace: true starts counting hidden reads ("system file:line" -> count), traced() reads them, trace = false stops
   get trace() { return !!trace; }, set trace(v) { trace = v ? new Map() : null; },
   traced: () => (trace ? [...trace].sort((a, b) => b[1] - a[1]) : []),

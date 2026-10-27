@@ -42,6 +42,10 @@ In a page, `BF.perf.ask(true)` turns it on, `BF.perf.stats()` reads the last 5 s
   think changes on its own mob), `split` (mob loop against the rest of the tick, the best split over n cores, a shared-memory mirror's
   cost), `barrier` (an Atomics meeting between worker_threads) and `shuffle` (mobs think in a random order: the hash should not move).
   Findings: /mnt/project-files/reports/r15-65.md.
+- `moves.js [--seed 3] [--extra 8] [--days 2] [--warm 60] [--out file.json]` (r15-70): headless, no browser. Counts the game log's
+  `move` ERRORs (a villager or golem stuck, or fallen into a well) per 100 villager/golem game-days, and for each stuck one keeps a
+  snapshot of what it was doing (its AI state and route, the blocks round its feet, its last hits against blocks, a builder's state) in
+  `lines` of the JSON. r15-70 took seed 3 with `--extra 8` from 36 to under 2 per 100; seeds 1 and 7 are near 0.3.
 - `lib.js`: the shared harness (boot, go to the village, run steps with the meter on, averages). `test/perf-soak.js` uses it too.
 
 Example, comparing two checkouts on one machine (seed 3 is the big village):

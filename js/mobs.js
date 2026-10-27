@@ -186,6 +186,16 @@ function ownTables() {
   const part = (map, g) => { const o = []; for (const [k, v] of map) if (groupFor(k) === g) o.push([k, v]); return o; };
   const put = (map, g, a) => { for (const k of [...map.keys()]) if (groupFor(k) === g) map.delete(k); for (const [k, v] of a || []) map.set(k, v); };
   C.owned("mobs.spawnAcc", { snap: g => part(spawnAcc, g), apply: (g, a) => put(spawnAcc, g, a) });
+  // the darkening stamps, by the group of their cell's centre (a stamp on another group's cell came at a meeting, on every copy alike)
+  const CC = BF.world && BF.world.clusterCells;
+  if (CC) {
+    CC.onMeeting("darkStamp", d => { stampCell(Math.floor(d.x / CELL) + "," + Math.floor(d.z / CELL), d.t); });
+    const darkOf = k => { const i = k.indexOf(","); return CC.cellGroup(+k.slice(0, i) * CELL + CELL / 2, +k.slice(i + 1) * CELL + CELL / 2); };
+    C.owned("mobs.darkStamps", {
+      snap: g => { const o = []; for (const [k, v] of darkStamps) if (darkOf(k) === g) o.push([k, v]); return o; },
+      apply: (g, a) => { for (const k of [...darkStamps.keys()]) if (darkOf(k) === g) darkStamps.delete(k); for (const [k, v] of a || []) darkStamps.set(k, v); },
+    });
+  }
   C.owned("mobs.aiBy", { snap: g => aiBy.get(g) || null, apply: (g, v) => { if (v) aiBy.set(g, v); else aiBy.delete(g); } });
   const enc = a => ({ pos: v3(a.pos), prev: v3(a.prev), vel: v3(a.vel), look: v3(a.look), dir: v3(a.dir), life: a.life, stuck: a.stuck, owner: a.owner ? a.owner.id : null,
     victim: a.victim ? a.victim.id : null, byPlayer: !!a.byPlayer, damage: a.damage, crit: a.crit, pickup: a.pickup, cell: a.cell, rng: a.rng, cl: clOf(a) });
@@ -241,10 +251,20 @@ function darkLongEnough(x, z, factor) {
   const st = darkStamps.get(cx + "," + cz);
   return st == null || gameNow() - st >= wait || st > gameNow();   // a stamp in the future: time was set back
 }
+// With the cluster tick on (spec r15-39b) a stamp on another group's cell waits for the next meeting (js/world.js clusterCells.toMeeting),
+// so a group sees the same stamps in every order and on every worker. Old stamps go only once no cell's wait can reach them (twice
+// DARK_WAIT), so which ones a copy has dropped never matters.
 function stampDark(x, z, r) {
-  const now = gameNow(), cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
-  for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) darkStamps.set((cx + dx) + "," + (cz + dz), now);
-  if (darkStamps.size > 4096) for (const [k, v] of darkStamps) if (now - v >= DARK_WAIT || v > now) darkStamps.delete(k);
+  const now = gameNow(), cx = Math.floor(x / CELL), cz = Math.floor(z / CELL), CC = BF.world && BF.world.clusterCells;
+  for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+    const bx = (cx + dx) * CELL + CELL / 2, bz = (cz + dz) * CELL + CELL / 2;
+    if (CC && CC.cur() && !CC.mineCell(bx, bz)) CC.toMeeting("darkStamp", bx, bz, { x: bx, y: 0, z: bz, t: now });
+    else stampCell((cx + dx) + "," + (cz + dz), now);
+  }
+}
+function stampCell(k, t) {
+  darkStamps.set(k, t);
+  if (darkStamps.size > 4096) for (const [j, w] of darkStamps) if (t - w >= 2 * DARK_WAIT || w > t) darkStamps.delete(j);
 }
 
 // (The mob models, their geometry and everything else about how a mob looks are in js/mobview.js, spec r15-11.)
@@ -385,7 +405,7 @@ const MOB_FIELDS = [
   "asks", "cart", "mateT", "furnWork", "mateSeek", "eatenTotal", "lastMealFx", "loveId", "breedDay", "bred", "bredKey", "child", "growing", "parents", "_swT",
   "wob", "lastHurt", "homeBedKey", "sleeping", "restored", "attackerId", "attackedAt", "boatCd", "jobPrefer", "cowKit", "cwk", "cwc", "gls", "crumb",
   "penIn", "atOut", "fall", "jobMem", "seek", "exploded", "vdenied", "vanon", "local", "otherId", "sellerId", "goalSellerId", "ledById", "ridingId",
-  "pastureKey", "exitKey", "buyFromId", "buyFromAt", "holdForId", "holdT",
+  "pastureKey", "exitKey", "buyFromId", "buyFromAt", "buyPrevId", "buyPrevAt", "holdForId", "holdT",
   "cl",   // the mob's cluster (js/clusters.js, spec r15-39b): set when made, moved only at a meeting
   // caches, never saved, sent or hashed (r15-61): the hottest links' last answers (js/ids.js CACHE_FIELDS), the id as a number (js/regiontick.js)
   "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN"];
@@ -437,7 +457,7 @@ function createMob(type, x, y, z, variant, style) {
   keepPrev(mob);
   list.push(mob);
   if (BF.regions) BF.regions.mobAdded(mob);   // the region index (js/regions.js)
-  if (BF.ctick && BF.ctick.on) BF.clusters.place(mob);   // its cluster, by where it is made (js/clusters.js)
+  if (BF.ctick && BF.ctick.on) { BF.clusters.place(mob); BF.ctick.added(mob); }   // its cluster, by where it is made (js/clusters.js), and its group's list
   return mob;
 }
 
@@ -451,6 +471,7 @@ function blankMob(type, id) {
   mob.type = type; mob.def = T; mob.ai = new AiShape(); mob.position = new THREE.Vector3(); mob.vel = new THREE.Vector3(); mob.removed = false;
   BF.ids.put(mob, id);
   list.push(mob);
+  if (BF.ctick && BF.ctick.on) BF.ctick.stale();   // (its cluster comes with its fields)
   return mob;
 }
 // (had: the mob was here already, made between ticks on every worker alike: only its fields are taken)
@@ -1019,41 +1040,108 @@ function swimOutOfPit(m, dt, out) {
   return true;
 }
 function pickWander(m, r) {
-  if (m.pen && BF.shepherd && BF.shepherd.pickPenTarget(m)) return;   // penned sheep wander inside their pen (js/shepherd.js)
-  if (m.coop && BF.poultry && BF.poultry.pickCoopTarget(m)) return;   // coop chickens wander inside their run (js/poultry.js)
-  if (m.pasture && BF.cowherd && BF.cowherd.pickPastureTarget(m)) return;   // pasture cows graze inside the pasture (js/cowherd.js)
-  if (m.sty && BF.pigFarmer && BF.pigFarmer.pickStyTarget(m)) return;   // sty pigs root about inside the sty (js/pigfarmer.js)
-  if (m.horse && m.horse.pen && BF.stables && BF.stables.pickPenTarget(m)) return;   // paddock horses wander inside the paddock (js/stables.js)
-  for (let k = 0; k < (m.def.golem ? 16 : 1); k++) {   // a golem keeps to spots it fits (golemFits; by a wall half the spots round it can be inside)
-    const a = R(m).next() * Math.PI * 2, d = rnd(R(m), 3, r);
+  if (m.pen && BF.shepherd && BF.shepherd.pickPenTarget(m)) return true;   // penned sheep wander inside their pen (js/shepherd.js)
+  if (m.coop && BF.poultry && BF.poultry.pickCoopTarget(m)) return true;   // coop chickens wander inside their run (js/poultry.js)
+  if (m.pasture && BF.cowherd && BF.cowherd.pickPastureTarget(m)) return true;   // pasture cows graze inside the pasture (js/cowherd.js)
+  if (m.sty && BF.pigFarmer && BF.pigFarmer.pickStyTarget(m)) return true;   // sty pigs root about inside the sty (js/pigfarmer.js)
+  if (m.horse && m.horse.pen && BF.stables && BF.stables.pickPenTarget(m)) return true;   // paddock horses wander inside the paddock (js/stables.js)
+  // a golem keeps to spots it fits (golemFits; by a wall half the spots round it can be inside); a village mob to spots it can walk
+  // straight to (clearWalk), shorter walks after the first tries (a room). False when a village mob found none: it is hemmed in.
+  const V = m.def.village;
+  for (let k = 0, n = V ? 16 : 1; k < n; k++) {
+    const a = R(m).next() * Math.PI * 2, d = k < 8 ? rnd(R(m), 3, r) : rnd(R(m), 1.5, 3);
     m.ai.tx = m.position.x + Math.cos(a) * d;
     m.ai.tz = m.position.z + Math.sin(a) * d;
-    if (!m.def.golem || golemFits(m, m.ai.tx, m.ai.tz)) break;
+    if ((!m.def.golem || golemFits(m, m.ai.tx, m.ai.tz)) && (!V || clearWalk(m, m.ai.tx, m.ai.tz))) { if (m.ai.held) m.ai.held.hem = false; return true; }
   }
+  return !V;
+}
+// A village mob with nowhere to wander (pickWander false) stands still a moment; for the stuck log (blockedMove) that counts as pushing,
+// so one boxed in is still logged after STUCK_LOG s.
+function hemmedIn(m) {
+  const ai = m.ai, g = ai.held;
+  ai.mode = "idle"; ai.t = rnd(R(m), 1, 3);
+  if (g && !roomy(m)) g.hem = true;
+}
+// Whether a mob has somewhere to go from where it stands: ROOMY standing cells joined to its own (through doors and gates, a block up or
+// down at a time). A villager in a small room has the rest of the house and the village through the door; one boxed in has a few cells.
+const ROOMY = 24;
+function roomy(m) {
+  const [x0, y0, z0] = feetCell(m), tall = m.height > 2, seen = new Set([x0 + "," + y0 + "," + z0]), q = [[x0, y0, z0]];
+  const swim = (x, y, z) => BF.world.isLoaded(x, z) && blockAt(x, y, z).render === "liquid" && !blockAt(x, y + 1, z).solid;   // (it can swim across water)
+  const fits = (x, y, z) => (walkCell(x, y, z) || swim(x, y, z) || (!tall && ladderCell(x, y, z))) && (!tall || !blockAt(x, y + 2, z).solid);
+  const add = (x, y, z) => { const k = x + "," + y + "," + z; if (seen.has(k) || !fits(x, y, z)) return false; seen.add(k); q.push([x, y, z]); return true; };
+  for (let i = 0; i < q.length && q.length < ROOMY; i++) {
+    const [x, y, z] = q[i];
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (const dy of [0, 1, -1]) if (add(x + dx, y + dy, z + dz)) break;   // (one level per column)
+    if (ladderCell(x, y, z) || ladderCell(x, y - 1, z)) { add(x, y + 1, z); add(x, y - 1, z); }   // up and down a ladder (a miner's shaft)
+  }
+  return q.length >= ROOMY;
+}
+// Whether a village mob can walk straight from where it is to x, z without bumping into anything (r15-70): its body, as wide and as tall
+// as it is, fits all along the line, the floor goes up or down at most a block at a time (a step up with headroom for the jump), and it
+// keeps out of doors, gates, water and onto-roof steps. Idle walks pick their spots by it, so a villager pottering about a room or a yard
+// stops walking into the walls, beds and fences round it (which went in the game log as stuck after 30 s of it).
+function clearWalk(m, x1, z1) {
+  const p = m.position, hw = m.halfWidth - 0.05, top = Math.ceil(m.height) - 1, roofs = keepsOffRoofs(m);
+  const roofNow = roofs && roofLedge(p.x, p.y, p.z, m.halfWidth);
+  const dx = x1 - p.x, dz = z1 - p.z, n = Math.ceil(Math.hypot(dx, dz) / 0.3);
+  const open = (x, y, z) => { const b = blockAt(x, y, z); return !b.solid && !b.door && !b.gate && b.render !== "liquid"; };
+  const body = (x, y, z, h) => {   // the box's four corner columns clear from the feet up to h
+    for (const cx of [x - hw, x + hw]) for (const cz of [z - hw, z + hw]) for (let yy = y; yy <= y + h; yy++) if (!open(Math.floor(cx), yy, Math.floor(cz))) return false;
+    return true;
+  };
+  let y = feetCell(m)[1];
+  for (let i = 1; i <= n; i++) {
+    const x = p.x + dx * i / n, z = p.z + dz * i / n, fx = Math.floor(x), fz = Math.floor(z);
+    if (!BF.world.isLoaded(fx, fz)) return false;
+    let ny = null;
+    for (const yy of [y, y + 1, y - 1]) {
+      const fl = blockAt(fx, yy - 1, fz);
+      if (!fl.solid || fl.door || fl.bed || fl.model === "fence" || !body(x, yy, z, top)) continue;
+      const ox = p.x + dx * (i - 1) / n, oz = p.z + dz * (i - 1) / n;
+      if (yy > y && (!body(ox, y, oz, top + 1) || !riseOK(Math.floor(ox), y, Math.floor(oz), fx, yy, fz))) continue;   // a step up: room to jump it, and not too high
+      ny = yy; break;
+    }
+    if (ny == null || (roofs && !roofNow && roofLedge(x, ny, z, m.halfWidth))) return false;
+    y = ny;
+  }
+  return true;
 }
 
 // Getting past what blocks a walk (village mobs: villagers and golems). Walks to a point (wanderAI: heading home from far off, a golem's
 // patrol) go straight at it, so a tree, a wall or a ledge too low to jump under would hold them there for good. Blocked for a moment,
 // it finds a route round it (A*, up to DETOUR_HOP blocks towards the point; three blocks high for a golem), and with none it steps
-// aside for a few seconds. Being held in one place for STUCK_LOG seconds of pushing goes in the game log; a pause of up to HELD_GAP s
-// between pushes (a villager stops to look about, then sets off the same way again) counts too, or a boxed-in one is never logged.
-const DETOUR_AFTER = 1.2, DETOUR_HOP = 16, STUCK_LOG = 30, HELD_GAP = 8;
+// aside for a few seconds. STUCK_LOG seconds of pushing against blocks without getting 3 blocks from one spot, or of being hemmed in
+// there (hemmedIn: nowhere to wander to), goes in the game log; between pushes it may stop for up to HELD_GAP s (to look about, to step
+// aside) and still count as held, and a longer pause starts the count again (r15-70: a builder at work, or a villager pottering about its
+// room, brushed something every few seconds all day, and the time in between used to count, so they were logged as stuck).
+const DETOUR_AFTER = 1.2, DETOUR_HOP = 16, DETOUR_GAIN = 4, STUCK_LOG = 30, HELD_GAP = 8, FREED = 8;
 function moveLog(m, level, text) {
   if (!BF.glog) return;
   const who = BF.vlog && m.type === "villager" ? BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession || "villager") + ")" : "An " + m.type.replace(/_/g, " ");   // "Name (Job)" as in the village log
   BF.glog.log(level, "move", who + " " + text, { village: m.village, at: m });
 }
-// Called every physics step: `blocked` = it wanted to move and a block stopped it.
-function blockedMove(m, dt, blocked) {
-  const ai = m.ai, p = m.position, g = ai.held || (ai.held = { x: p.x, z: p.z, t: 0, gap: 0, logged: false });
+// Called every physics step: `blocked` = it wanted to move and a block stopped it; `slowed` = a block kept it from getting on its way
+// (blocked, or sliding sideways along it), which starts a detour (ai.blockedT).
+function blockedMove(m, dt, blocked, slowed) {
+  const ai = m.ai, p = m.position, g = ai.held || (ai.held = { x: p.x, z: p.z, t: 0, gap: 0, logged: false, hem: false, since: 0, lx: 0, lz: 0 });
   if (Math.hypot(p.x - g.x, p.z - g.z) > 3) {   // got somewhere
-    if (g.logged) moveLog(m, "INFO", "got moving again at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z));
-    g.x = p.x; g.z = p.z; g.t = 0; g.logged = false;
-  } else if ((g.gap = blocked ? 0 : (g.gap || 0) + dt) <= HELD_GAP && (blocked || g.t > 0) && (g.t += dt) >= STUCK_LOG && !g.logged) {
-    g.logged = true;
-    moveLog(m, "ERROR", "stuck at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z) + " for " + STUCK_LOG + " s" + (ai.mode === "walk" ? " walking towards " + Math.floor(ai.tx) + ", " + Math.floor(ai.tz) : ""));
-  }
-  ai.blockedT = blocked ? (ai.blockedT || 0) + dt : 0;
+    // once logged, it has got moving again only FREED blocks from where it was stuck: one shut in a pen or a yard goes in the log once,
+    // not each time it crosses it (r15-70)
+    const freed = !g.logged || Math.hypot(p.x - g.lx, p.z - g.lz) > FREED;
+    if (g.logged && freed) moveLog(m, "INFO", "got moving again at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z));
+    g.x = p.x; g.z = p.z; g.t = 0; g.gap = 0; g.hem = false;
+    if (freed) g.logged = false;
+  } else if (blocked || g.hem) {
+    if (!g.t) g.since = m.age;
+    g.gap = 0;
+    if ((g.t += dt) >= STUCK_LOG && !g.logged) {
+      g.logged = true; g.lx = p.x; g.lz = p.z;
+      moveLog(m, "ERROR", "stuck at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z) + " for " + Math.round(m.age - g.since) + " s" + (g.hem ? " with nowhere to go" : ai.mode === "walk" ? " walking towards " + Math.floor(ai.tx) + ", " + Math.floor(ai.tz) : ""));
+    }
+  } else if (g.t > 0 && (g.gap += dt) > HELD_GAP && !g.logged) g.t = 0;   // a long pause: not held after all
+  ai.blockedT = slowed ? (ai.blockedT || 0) + dt : 0;
 }
 // False when this frame's A* searches are used up (busy villages): it tries again next frame instead of stepping aside at random.
 function startDetour(m) {
@@ -1061,7 +1149,9 @@ function startDetour(m) {
   if (!takePlan()) return false;
   ai.blockedT = 0;
   const k = Math.min(1, DETOUR_HOP / d), hx = Math.floor(px + dx * k), hz = Math.floor(pz + dz * k), [fx, fy, fz] = feetCell(m);
-  const route = findPath(fx, fy, fz, { x: hx, z: hz, at: (x, y, z) => Math.abs(x - hx) + Math.abs(z - hz) <= 2 }, 1500, m.height > 2);
+  // the hop's spot, or anywhere at least DETOUR_GAIN blocks nearer the point than it is now (a hop's spot can be inside a house)
+  const tx = ai.tx, tz = ai.tz, near = d - DETOUR_GAIN;
+  const route = findPath(fx, fy, fz, { x: hx, z: hz, at: (x, y, z) => Math.abs(x - hx) + Math.abs(z - hz) <= 2 || Math.hypot(x + 0.5 - tx, z + 0.5 - tz) <= near }, 1500, m.height > 2);
   if (route && route.length) ai.detour = { route, ri: 0, stuckT: 0 };
   else aside(m);
   return true;
@@ -1091,7 +1181,7 @@ function wanderAI(m, dt, out) {
   ai.wanderAt = m.age;
   ai.t -= dt;
   if (ai.t <= 0) {
-    if (ai.mode === "idle" && R(m).next() < 0.6) { ai.mode = "walk"; pickWander(m, 8); ai.t = rnd(R(m), 3, 7); }
+    if (ai.mode === "idle" && R(m).next() < 0.6) { ai.mode = "walk"; ai.t = rnd(R(m), 3, 7); if (!pickWander(m, 8)) hemmedIn(m); }
     else { ai.mode = "idle"; ai.t = rnd(R(m), 2, 6); }
   }
   ai.lookT -= dt;
@@ -1383,6 +1473,17 @@ function zombieBreakDoor(m, dt, out) {
 // ---------- villager nights: walk home along a grid path, open doors on the way, sleep in their bed ----------
 const bedtime = () => { const t = BF.sky && typeof BF.sky.time === "number" ? BF.sky.time : 0.3; return t > 0.5 && t < 0.985; };   // villagers head in at sunset, well before monsters can spawn (js/mobs.js)
 const blockAt = (x, y, z) => BF.blocks[BF.world.getBlock(x, y, z)] || BF.blocks[0];
+// The height of the top of the floor block at (x, y, z) above y: 1 for a full block, less for a low one (a slab, a stonecutter, a bed,
+// a path). A step up from one floor to the next block's floor one higher rises 1 + its top - this top, and a mob can climb at most
+// STEP_RISE (a jump, 7.6 m/s against GRAVITY, lifts it about 1.1, just enough for a full block). r15-70: routes went up from a stonecutter
+// in a trench onto a path 1.4 higher, and from farmland onto a block 1.06 higher, and the villager pushed at the bank for minutes.
+const STEP_RISE = 1.0;
+function floorTop(x, y, z) {
+  const id = BF.world.getBlock(x, y, z), bs = BF.CBOXES[id], b = BF.CBOX[id];
+  if (bs) { let t = 0; for (const c of bs) t = Math.max(t, c[4]); return t; }
+  return b ? Math.min(1, b[4]) : 1;
+}
+const riseOK = (x, y, z, nx, ny, nz) => ny - y + floorTop(nx, ny - 1, nz) - floorTop(x, y - 1, z) <= STEP_RISE + 1e-6;
 function bedOK(bed) {
   if (!bed) return false;   // no bed (a sleeper's bed taken away): not usable, rather than a throw that removes the villager
   const k = blockAt(bed.x, bed.y, bed.z);
@@ -1407,7 +1508,8 @@ function ladderCell(x, y, z) {
 const navCell = (x, y, z) => walkCell(x, y, z) || ladderCell(x, y, z);
 // A* over walkable cells (4-way, step up 1, drop up to 3, straight up/down ladders). goal(x, y, z) -> bool. Returns cells after start, or null.
 // tall: for a mob three blocks high (iron golems' detours), every cell also needs the block above its head clear, and, as it is wider than
-// its cell and overhangs all eight around it, those clear above knee height too (or it would walk its head into a ledge beside the route).
+// its cell and overhangs all eight around it, those clear above knee height too (or it would walk its head into a ledge beside the route),
+// and no fence gates: it can't open one, and through one left open it walked into a pen that was then shut on it (r15-70).
 let planBudget = 0;
 // A* searches (spec r15-33). In the mob loop a mob may search only with a grant: PLANS grants are handed out at the start of each tick
 // to the mobs that have been waiting longest (then by id), so who gets a search never depends on the order mobs think in (regions,
@@ -1423,14 +1525,16 @@ let curMob = null, planTick = 0;   // (counts mob updates, not BF.rand.tick: tes
 // With clusters (spec r15-39b, js/ctick.js) the mob loop's parts run once per cluster: own(m) -> the mob is the running cluster's
 // (null: every mob is)
 const own = () => { const C = BF.ctick; return C && C.on ? C.filter : null; };
+// the running cluster group's mobs (removed ones included: skip them), or null when every mob is seen (js/ctick.js mobs)
+const ownMobs = () => { const C = BF.ctick; return C && C.on ? C.mobs() : null; };
 let coarseStep = false, walked = false, coarseN = 0;   // this update is a coarse one; its route walk moved the mob (cellWalk); coarse mobs this tick
 let mobUpdates = 0;   // every mob update run (BF.mobs.updates: test/perf-activity.js checks BF.perf.byState counts each once)
 const idNum = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15; };
 const lapsed = (v, t) => v > t || v < t - KEEP;
 function grantPlans() {
-  const C = BF.ctick, t = C && C.on ? (planTick = BF.rand.tick) : ++planTick, w = [], mine = own();
-  for (const m of list) {
-    if (mine && !mine(m)) continue;
+  const C = BF.ctick, t = C && C.on ? (planTick = BF.rand.tick) : ++planTick, w = [], mm = ownMobs();
+  for (const m of mm || list) {
+    if (mm && m.removed) continue;
     const a = m.ai;
     if (!a) continue;
     if (a.planG != null && (m.removed || lapsed(a.planG, t))) a.planG = undefined;
@@ -1456,7 +1560,7 @@ const AROUND = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1
 // The A* as it was before spec r15-05 (string keys, a linear scan of the open list): kept for BF.debug.pathCompare.
 function findPathOld(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
   const air = (x, y, z) => !tall || !blockAt(x, y, z).solid;
-  const nav = tall ? (x, y, z) => navCell(x, y, z) && air(x, y + 2, z) && AROUND.every(([ex, ez]) => air(x + ex, y + 1, z + ez) && air(x + ex, y + 2, z + ez)) : navCell;
+  const nav = tall ? (x, y, z) => navCell(x, y, z) && !blockAt(x, y, z).gate && air(x, y + 2, z) && AROUND.every(([ex, ez]) => air(x + ex, y + 1, z + ez) && air(x + ex, y + 2, z + ez)) : navCell;
   const key = (x, y, z) => x + "," + y + "," + z;
   const gx = goal.x, gz = goal.z, hh = (x, z) => Math.abs(x - gx) + Math.abs(z - gz);
   const open = [[sx, sy, sz, 0, hh(sx, sz)]], from = new Map([[key(sx, sy, sz), null]]), cost = new Map([[key(sx, sy, sz), 0]]);
@@ -1483,6 +1587,7 @@ function findPathOld(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
       const nx = x + dx, ny = y + dy, nz = z + dz;
       if (!nav(nx, ny, nz)) continue;
       if (dy > 0 && (blockAt(x, y + 2, z).solid || !air(x, y + 3, z) || (tall && BF.DIRS.some(([ex, ez]) => !air(x + ex, y + 3, z + ez))))) break;   // no room to jump (a golem is wider than its cell)
+      if (dy > 0 && !riseOK(x, y, z, nx, ny, nz)) break;   // too high a step from a low floor (floorTop)
       if (dy < 0 && (blockAt(nx, y + 1, nz).solid || !air(nx, y + 2, nz))) break;        // wall: cannot step off
       const k = key(nx, ny, nz), ng = g + 1 + (dy ? 0.5 : 0) + (blockAt(nx, ny, nz).door || blockAt(nx, ny, nz).gate ? 1 : 0);
       if (cost.has(k) && cost.get(k) <= ng) break;
@@ -1533,7 +1638,7 @@ function fpSlot(k) {   // the table slot of key k in this search, made if new
 }
 function findPathFast(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
   const air = (x, y, z) => !tall || !blockAt(x, y, z).solid;
-  const navRead = tall ? (x, y, z) => navCell(x, y, z) && air(x, y + 2, z) && AROUND.every(([ex, ez]) => air(x + ex, y + 1, z + ez) && air(x + ex, y + 2, z + ez)) : navCell;
+  const navRead = tall ? (x, y, z) => navCell(x, y, z) && !blockAt(x, y, z).gate && air(x, y + 2, z) && AROUND.every(([ex, ez]) => air(x + ex, y + 1, z + ez) && air(x + ex, y + 2, z + ez)) : navCell;
   const Y0 = BF.MIN_Y, key = (x, y, z) => ((x - sx + 32768) * 65536 + (z - sz + 32768)) * 4096 + (y - Y0);
   const gx = goal.x, gz = goal.z, hh = (x, z) => Math.abs(x - gx) + Math.abs(z - gz);
   const S = FP;
@@ -1618,6 +1723,7 @@ function findPathFast(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
       const nx = x + dx, ny = y + dy, nz = z + dz;
       if (!nav(nx, ny, nz)) continue;
       if (dy > 0 && (blockAt(x, y + 2, z).solid || !air(x, y + 3, z) || (tall && BF.DIRS.some(([ex, ez]) => !air(x + ex, y + 3, z + ez))))) break;   // no room to jump (a golem is wider than its cell)
+      if (dy > 0 && !riseOK(x, y, z, nx, ny, nz)) break;   // too high a step from a low floor (floorTop)
       if (dy < 0 && (blockAt(nx, y + 1, nz).solid || !air(nx, y + 2, nz))) break;        // wall: cannot step off
       const b = blockAt(nx, ny, nz);
       reach(nx, ny, nz, g + 1 + (dy ? 0.5 : 0) + (b.door || b.gate ? 1 : 0), cur);
@@ -1676,7 +1782,11 @@ function findPath(sx, sy, sz, goal, maxNodes = 3000, tall = false) {
   }
   return a;
 }
-const feetCell = m => [Math.floor(m.position.x), Math.floor(m.position.y + 0.01), Math.floor(m.position.z)];
+// (standing on a low block, a slab or a stonecutter, its feet are in that block's cell: the cell it stands in is the one above, r15-70)
+const feetCell = m => {
+  const x = Math.floor(m.position.x), y = Math.floor(m.position.y + 0.01), z = Math.floor(m.position.z), b = blockAt(x, y, z);
+  return [x, b.solid && !b.door && !b.gate && !b.ladder ? y + 1 : y, z];
+};
 // Route to a cell beside the bed (same floor).
 function pathToBed(m) {
   const b = m.bed, [fx, fz] = BF.DIRS[b.f], hx = b.x + fx, hz = b.z + fz;
@@ -2037,12 +2147,35 @@ function villagerAI(m, dt, out) {
   }
   if (ai.outT > 0) ai.outT -= dt;
   if (away && ai.mode === "walk" && Math.hypot(ai.tx - m.position.x, ai.tz - m.position.z) > 12) { ai.mode = "idle"; ai.t = rnd(R(m), 1, 3); }
+  // Too far out (below), it walks back along a planned route to within 30 blocks of the centre (r15-70: walking straight back, it could
+  // push at a bank or a wall in the way for minutes). With none, or once that route gets stuck, it walks straight as before for a while
+  // (ai.stuckT below zero, with no route: the wait before planning again).
+  if (ai.route && ai.routeKind === "back") {
+    const st = followRoute(m, dt, out, T.speed);
+    if (st === "going") return;
+    ai.route = null; ai.mode = "idle"; ai.t = rnd(R(m), 1, 3);
+    if (st === "stuck") ai.stuckT = -10;
+  }
   if (V && !away && !(ai.outT > 0 && ai.mode === "walk")) {   // (not while walking away from the door it came out of this morning: morningAI)
     const dx = ax - m.position.x, dz = az - m.position.z, d = Math.hypot(dx, dz);
     if (d > 40) { // wandered too far: head back toward the centre (or home)
+      if (ai.stuckT < 0) ai.stuckT += dt;
+      else if (takePlan()) {
+        const [fx, fy, fz] = feetCell(m), gx = Math.floor(ax), gz = Math.floor(az);
+        const route = findPath(fx, fy, fz, { x: gx, z: gz, at: (x, y, z) => Math.hypot(x + 0.5 - ax, z + 0.5 - az) <= 30 }, 3000);
+        if (route && route.length) { ai.route = route; ai.ri = 0; ai.stuckT = 0; ai.routeKind = "back"; ai.detour = null; ai.mode = "idle"; return; }
+        ai.stuckT = -10;
+      }
       ai.mode = "walk"; ai.tx = ax + rnd(R(m), -6, 6); ai.tz = az + rnd(R(m), -6, 6); ai.t = rnd(R(m), 5, 8);
-    } else if (ai.mode === "walk" && Math.hypot(ai.tx - ax, ai.tz - az) > 36) {
-      ai.tx = ax + rnd(R(m), -20, 20); ai.tz = az + rnd(R(m), -20, 20);
+    } else if (ai.mode === "walk" && !ai.detour && Math.hypot(ai.tx - ax, ai.tz - az) > 36) {
+      // a wander heading out past 36 turns for a spot nearer the centre, one it can walk straight to (r15-70: any spot, and from inside a
+      // house it walked into the walls with detours for the rest of the walk); with none it stops
+      let ok = false;
+      for (let k = 0; k < 6 && !ok; k++) {
+        const a = R(m).next() * Math.PI * 2, d = rnd(R(m), 2, 8), tx = m.position.x + Math.cos(a) * d, tz = m.position.z + Math.sin(a) * d;
+        if (Math.hypot(tx - ax, tz - az) <= 36 && clearWalk(m, tx, tz)) { ai.tx = tx; ai.tz = tz; ok = true; }
+      }
+      if (!ok) { ai.mode = "idle"; ai.t = rnd(R(m), 1, 3); }
     }
   }
   // coarse (spec r15-64): no idle wandering, unless it is heading back from too far out
@@ -2103,7 +2236,7 @@ function golemAI(m, dt, out) {
     if (!rv) ai.revenge = null;
     ai.foe = ai.rescue || rv || nearestMob(m, 16, o => o.hostile && o !== gu, "h");
   }
-  if (ai.foe && golemChase(m, dt, out)) return;
+  if (ai.foe && golemChase(m, dt, out)) { if (ai.routeKind === "patrol") ai.route = null; return; }
   ai.foe = null; ai.rescue = null; ai.chase = null;
   if (creative()) ai.provoked = 0;
   if (ai.provoked > 0 && playerLives()) {
@@ -2129,9 +2262,30 @@ function golemAI(m, dt, out) {
     if (!m.patrol || R(m).next() < dt / 90) { const h = V.houses[irnd(R(m), 0, V.houses.length - 1)]; m.patrol = R(m).next() < 0.3 || !h ? [V.x, V.z] : [h.x + (h.w || 1) / 2, h.z + (h.d || 1) / 2]; }
     px = m.patrol[0]; pz = m.patrol[1];
   }
-  if (V && Math.hypot(px - m.position.x, pz - m.position.z) > 14 && !(ai.mode === "walk" && Math.hypot(px - ai.tx, pz - ai.tz) < 8)) {
-    ai.mode = "walk"; ai.t = rnd(R(m), 5, 8);
-    for (let k = 0; k < 16; k++) { ai.tx = px + rnd(R(m), -6, 6); ai.tz = pz + rnd(R(m), -6, 6); if (golemFits(m, ai.tx, ai.tz)) break; }
+  // A patrol spot more than 14 blocks off is walked to along a planned route three blocks high (r15-70: walking straight at it, and taking
+  // short detours round what was in the way, a golem spent minutes pushing under eaves, at fences and at roof edges between houses, and
+  // went in the game log as stuck). With no route there it walks straight at it as before, and once a route gets stuck it heads for
+  // another spot; ai.stuckT below zero, with no route, is the wait before it plans again.
+  if (ai.route && ai.routeKind === "patrol") {
+    const st = followRoute(m, dt, out, T.speed * 0.6);
+    if (st === "going") return;
+    ai.route = null; ai.mode = "idle"; ai.t = rnd(R(m), 2, 4);
+    if (st === "stuck") { m.patrol = null; ai.stuckT = -15; }
+  }
+  if (V && Math.hypot(px - m.position.x, pz - m.position.z) > 14) {
+    if (ai.stuckT < 0) ai.stuckT += dt;
+    else if (takePlan()) {
+      let gx = null, gz = null;
+      for (let k = 0; k < 16 && gx == null; k++) { const x = px + rnd(R(m), -6, 6), z = pz + rnd(R(m), -6, 6); if (golemFits(m, x, z)) { gx = Math.floor(x); gz = Math.floor(z); } }
+      const [fx, fy, fz] = feetCell(m);
+      const route = gx != null && findPath(fx, fy, fz, { x: gx, z: gz, at: (x, y, z) => Math.abs(x - gx) + Math.abs(z - gz) <= 3 }, 3000, true);
+      if (route && route.length) { ai.route = route; ai.ri = 0; ai.stuckT = 0; ai.routeKind = "patrol"; ai.detour = null; return; }
+      ai.stuckT = -15;
+    }
+    if (!(ai.mode === "walk" && Math.hypot(px - ai.tx, pz - ai.tz) < 8)) {
+      ai.mode = "walk"; ai.t = rnd(R(m), 5, 8);
+      for (let k = 0; k < 16; k++) { ai.tx = px + rnd(R(m), -6, 6); ai.tz = pz + rnd(R(m), -6, 6); if (golemFits(m, ai.tx, ai.tz)) break; }
+    }
   }
   wanderAI(m, dt, out);
   out.x *= 0.6; out.z *= 0.6;
@@ -2145,25 +2299,36 @@ function golemAI(m, dt, out) {
 // seller, seeing a buyer of its village calling it, stops and faces it, for up to HOLD_MAX seconds at a time, then carries on. A seller that
 // is itself on its way to buy keeps going (its buyers catch it up when it stops to trade): a whole line stopping for each other would stand
 // still for HOLD_MAX seconds, and two villagers buying from each other walk to meet.
+// The seller reads its buyers as they stood at the start of the tick (their call and where they were), whether or not they have thought
+// yet this tick, so the tick order of regions can't change what it does (test/region-tick.js): a call is stamped with the buyer's age at
+// the start of the tick it was made in (m.prev.age, keepPrev), and the first call of a tick keeps the one before it in buyPrev.
 const HOLD_R = 10, HOLD_MAX = 8;
+const tickAge = m => (m.prev ? m.prev.age : m.age);
 function waitFor(v2, m, d) {
   if (!v2 || v2 === m || v2.type !== "villager" || !(d <= HOLD_R)) return;
-  m.buyFrom = v2; m.buyFromAt = m.age;
+  const t = tickAge(m);
+  if (m.buyFromAt !== t) { m.buyPrev = m.buyFrom; m.buyPrevAt = m.buyFromAt; }
+  m.buyFrom = v2; m.buyFromAt = t;
 }
-const calling = (b, m) => b.buyFrom === m && !b.dead && !b.removed && b.age - b.buyFromAt < 0.25;
+// Is b calling m? Its call as it stood at the start of this tick (the one before, if b has already called this tick).
+function calling(b, m) {
+  if (b.dead || b.removed) return false;
+  const t = tickAge(b), late = b.buyFromAt === t && b !== curMob;   // called again this tick, before m thought (a mob reads its own call as it is)
+  return (late ? b.buyPrev : b.buyFrom) === m && t - (late ? b.buyPrevAt : b.buyFromAt) < 0.25;
+}
 function holdForBuyer(m, dt, out) {
   const ai = m.ai, R = m.village;
   let b = null, bd = Infinity;
   if (R && R.members && !(m.buyFrom && calling(m, m.buyFrom))) for (const o of R.members) {
     if (o === m || !calling(o, m)) continue;
-    const d = mdist(m, o);
+    const q = seen(m.position, o.prev || o.position, _sB), d = Math.hypot(q.x - m.position.x, q.y - m.position.y, q.z - m.position.z);   // (where it was at the tick's start)
     if (d < bd) { bd = d; b = o; }
   }
   if (!b) { if (m.holdT) { m.holdT = 0; m.holdFor = null; } return; }
   m.holdFor = b;
   if ((m.holdT || 0) <= HOLD_MAX && (m.holdT = (m.holdT || 0) + dt) > HOLD_MAX) moveLog(m, "INFO", "waited " + HOLD_MAX + " s for " + (BF.vlog ? BF.vlog.nameOf(b) : "a buyer") + " to come and trade, and carries on");
   if (m.holdT > HOLD_MAX || ai.fleeT > 0) return;   // waited long enough: gets on with its own errand
-  const bp = seen(m.position, b.position, _sB);
+  const bp = seen(m.position, b.prev || b.position, _sB);
   out.x = 0; out.z = 0; out.faceX = bp.x; out.faceZ = bp.z; m.lookAt = b;
   ai.stuckT = 0; if (ai.detour && ai.detour.route) ai.detour.stuckT = 0;   // standing still on purpose is not being stuck on its route
 }
@@ -2290,9 +2455,16 @@ function updateMob(m, dt) {
       && !(offRoofs && roofLedge(m.position.x + Math.sign(_desired.x) * (res.hitX ? 0.6 : 0), m.position.y + 1, m.position.z + Math.sign(_desired.z) * (res.hitZ ? 0.6 : 0), m.halfWidth)) && (!T.village || stepAhead(m, _desired))) m.vel.y = 7.6;   // jump obstacles, only with headroom to clear one: under a ledge or leaves a jump just bounces off them
     else if (m.inWater && T.village && ai.pitOut) { m.vel.y = 6.5; ai.climbT = 0.3; }   // a well's rim, a block above the water: jump out like the player can
     else if (m.inWater) m.vel.y = 4;
-    if (!T.hostile && ai.mode === "walk" && !ai.detour && R(m).next() < 0.3) pickWander(m, 8);
+    if (!T.hostile && ai.mode === "walk" && !ai.detour && R(m).next() < 0.3 && !pickWander(m, 8)) hemmedIn(m);
   }
-  if (T.village) blockedMove(m, dt, (res.hitX || res.hitZ) && wants);
+  // blocked: it hit something and got almost nowhere. Sliding along a wall it brushes is getting somewhere (r15-70: a villager pottering
+  // about a room brushed its walls every few seconds, and that went in the game log as stuck). For starting a detour (ai.blockedT), under
+  // half its way on where it means to go is blocked: sliding sideways along a step it means to cross, it goes round as before.
+  if (T.village) {
+    const hit = (res.hitX || res.hitZ) && wants, dd = Math.hypot(_desired.x, _desired.z);
+    blockedMove(m, dt, hit && Math.hypot(m.position.x - px, m.position.z - pz) < 0.25 * dd * dt,
+      hit && ((m.position.x - px) * _desired.x + (m.position.z - pz) * _desired.z) / dd < 0.5 * dd * dt);
+  }
   // fall damage
   const climbing = (T.climbs && (res.hitX || res.hitZ)) || m.onLadder;
   if (m.onGround || m.inWater || climbing) {
@@ -2450,9 +2622,8 @@ function buildSepGrid() {
   GRID_N.z = GRID_N.h = GRID_N.g = 0;
   if (!gridFast) return buildSepGridRef();
   SEP.clear(); CHUNK.clear();
-  const mine = own();
-  for (const o of list) {
-    if (o.dead || o.removed || (mine && !mine(o))) continue;
+  for (const o of ownMobs() || list) {
+    if (o.dead || o.removed) continue;
     const x = o.position.x, z = o.position.z, gx = Math.floor(x / 2), gz = Math.floor(z / 2), hx = Math.floor(x / 16), hz = Math.floor(z / 16);
     if (inSquare(x, z, GRID_EDGE)) { SEP.add(sepKey(gx, gz), o); countIn(CHUNK.add(sepKey(hx, hz), o), o); }
     else { SEP.add(gridKey(gx, gz, 2), o); countIn(CHUNK.add(gridKey(hx, hz, 16), o), o); }
@@ -2698,11 +2869,16 @@ let villageT = 0;
 const villagerSaves = new Map();
 function villagerKey(m) { return m.villageId && m.slot ? m.villageId + "#" + m.slot.idx : null; }
 let restockT = 0;
+// With the cluster tick on (spec r15-39b, js/ctick.js) a module timer would count down once per cluster: every cluster runs its own on
+// the tick counter instead (the same ticks in every order and on every worker), every `s` game seconds at tick phase `at`.
+const everyTicks = (s, at) => BF.rand.tick % Math.round(s / BF.warp.TICK) === at;
+const recMine = (rec, C) => BF.clusters.groupOf("v:" + rec.key) === C.cur.key;   // (a village record of the running cluster)
 function restockVillagers(dt) { // once per in-game day, never while someone is trading with the villager
-  restockT -= dt;
-  if (restockT > 0 || !BF.trades || !BF.sky) return;
-  restockT = 2;
-  for (const m of list) if (m.type === "villager" && !m.dead && !m.removed && !m.tradingWith && !m.child) { BF.trades.restock(m, BF.sky.day); if (BF.prices) BF.prices.tick(m, BF.sky.day); if (BF.market) BF.market.sync(m); }
+  const f = BF.ctick && BF.ctick.filter;
+  if (f) { if (!everyTicks(2, 1)) return; }
+  else { restockT -= dt; if (restockT > 0) return; restockT = 2; }
+  if (!BF.trades || !BF.sky) return;
+  for (const m of list) if (m.type === "villager" && !m.dead && !m.removed && !m.tradingWith && !m.child && (!f || f(m))) { BF.trades.restock(m, BF.sky.day); if (BF.prices) BF.prices.tick(m, BF.sky.day); if (BF.market) BF.market.sync(m); }
 }
 const VILLAGERS_PER_VILLAGE = 24;   // roster cap of classic villages; villages of village generator 2 carry their own population (rec.pop, 2-100)
 const EXPLORER_CHANCE = 0.7;   // per cartographer in the roster
@@ -3054,8 +3230,9 @@ function newVillageRec(key, v) {
 }
 // INFO "coarse" when a village's villagers go coarse or back to full detail (spec r15-64), checked once a game second. The state is kept
 // on the village record (hidden from saves and the hash); a village never coarse never gets it.
-function noteCoarse() {
+function noteCoarse(mineR) {
   for (const rec of villages.values()) {
+    if (!mineR(rec)) continue;
     if (!rec.members || (!rec.members.length && rec._coarse === undefined)) continue;
     let n = 0;
     for (const m of rec.members) if (m._crsT !== undefined) n++;
@@ -3066,23 +3243,55 @@ function noteCoarse() {
     if (BF.glog) BF.glog.log("INFO", "coarse", c ? "Past the view distance: coarse (" + n + " of its " + rec.members.length + " villagers and golems)" : "Back to full detail", { village: rec });   // (the line names the village)
   }
 }
-function updateVillages(dt) {
-  for (const rec of villages.values()) rec.angryT = Math.max(0, rec.angryT - dt);
-  villageT -= dt;
-  if (villageT > 0) return;
-  villageT = 1;
-  noteCoarse();
+// The villages to keep records of: those near the player, and those js/villagesim.js simulates however far; null when there is no player.
+function villagesWanted() {
   const wg = BF.worldgen;
-  if (!wg || typeof wg.villagesNear !== "function" || !playerAlive()) return;
+  if (!wg || typeof wg.villagesNear !== "function" || !playerAlive()) return null;
   const pp = player().position;
   let vs;
-  try { vs = wg.villagesNear(pp.x, pp.z, BF.villageSim ? BF.villageSim.RADIUS + 16 + 150 : 96) || []; } catch (e) { return; }   // by centre: sized villages are measured from their edge (js/villagesim.js)
+  try { vs = wg.villagesNear(pp.x, pp.z, BF.villageSim ? BF.villageSim.RADIUS + 16 + 150 : 96) || []; } catch (e) { return null; }   // by centre: sized villages are measured from their edge (js/villagesim.js)
   if (BF.villageSim && BF.villageSim.simulated) { const ks = new Set(vs.map(v => v && Math.round(v.x) + "," + Math.round(v.z))); for (const v of BF.villageSim.simulated()) if (!ks.has(Math.round(v.x) + "," + Math.round(v.z))) { ks.add(Math.round(v.x) + "," + Math.round(v.z)); vs.push(v); } }   // villages a merchant's trip keeps loaded (js/merchant.js) and the budget's extras (js/active.js), however far
+  return vs;
+}
+// Clusters (js/ctick.js): village records come only at meetings, on every worker alike, before the clusters are worked out again, so a new
+// village is a cluster from its first tick (its villagers spawn in its own cluster's pass, below)
+function meetVillages() {
+  const vs = villagesWanted();
+  if (!vs) return;
+  for (const v of vs) {
+    if (!v || v.x == null) continue;
+    const key = Math.round(v.x) + "," + Math.round(v.z);
+    if (villages.has(key)) continue;
+    const rec = newVillageRec(key, v);
+    villages.set(key, rec); applyDead(rec);
+    if (BF.glog) BF.glog.log("INFO", "clusters", "Village record made at the meeting (tick " + BF.rand.tick + ")", { village: rec });
+  }
+}
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.onMeet) return;
+  C.onMeet(meetVillages, "villages");
+  // villagers' trading state while unloaded or dead, by "<village key>#<slot>": its village's cluster's (several workers, js/cworkers.js)
+  C.ownedMap("mobs.villagerSaves", villagerSaves, k => C.ofVillage(k.slice(0, k.lastIndexOf("#"))));
+});
+function updateVillages(dt) {
+  // clusters (js/ctick.js): each cluster its own records, once a game second at the first tick after the meeting, so the player's position
+  // read here is the meeting's in every order (new records come at the meeting: meetVillages)
+  const C = BF.ctick, f = C && C.filter, mineR = rec => !f || recMine(rec, C);
+  for (const rec of villages.values()) if (mineR(rec)) rec.angryT = Math.max(0, rec.angryT - dt);
+  if (f) { if (!everyTicks(1, 1)) return; }
+  else { villageT -= dt; if (villageT > 0) return; villageT = 1; }
+  noteCoarse(mineR);
+  const vs = villagesWanted();
+  if (!vs) return;
+  const pp = player().position;
   for (const v of vs) {
     if (!v || v.x == null) continue;
     const key = Math.round(v.x) + "," + Math.round(v.z);
     let rec = villages.get(key);
+    if (!rec && f) continue;   // (made at the next meeting, below)
     if (!rec) { rec = newVillageRec(key, v); villages.set(key, rec); applyDead(rec); }
+    if (!mineR(rec)) continue;
     const lp = BF.planet.local(v, pp, VQ);   // (the player seen from the village, across a face edge)
     const away = v.pop ? Math.hypot(Math.max(0, v.minX - lp.x, lp.x - v.maxX), Math.max(0, v.minZ - lp.z, lp.z - v.maxZ)) > 24   // sized villages: near any part of it
       : Math.hypot(v.x - lp.x, v.z - lp.z) > 80;
@@ -3154,10 +3363,10 @@ const waitNoted = new WeakSet();   // (mobs whose wait for the meeting is in the
 function despawn(dt) {
   const pp = playerPos();
   if (!pp) return;
-  const mine = own();
-  for (let i = list.length - 1; i >= 0; i--) {
-    const m = list[i];
-    if (mine && !mine(m)) continue;   // (clusters, C2: the running cluster's mobs)
+  const mine = own(), L = ownMobs() || list;   // (clusters, C2: the running cluster's mobs)
+  for (let i = L.length - 1; i >= 0; i--) {
+    const m = L[i];
+    if (m.removed) continue;
     if (m.riding && BF.world.isLoaded(m.position.x, m.position.z)) continue;   // a mob in a boat stays with it (js/boats.js stows it when its chunk unloads)
     const wild = isWild(m);
     if (!BF.world.isLoaded(m.position.x, m.position.z)) {   // a wild mob that walked off the loaded land waits with its chunk
@@ -3254,14 +3463,13 @@ BF.mobs = {
     // far villages coarse (spec r15-64): past the view distance, from the option in force at this tick's start
     const coarseOn = !!(pp && BF.gameOpts && BF.gameOpts.coarse()), view2 = (BF.world.viewDist * BF.CS) ** 2;
     coarseN = 0;
-    const mine = own();
-    for (const m of list) if (!mine || mine(m)) keepPrev(m);   // where each mob was before this tick, for drawing between ticks (js/mobview.js)
+    const mm = ownMobs();
+    for (const m of mm || list) if (!m.removed) keepPrev(m);   // where each mob was before this tick, for drawing between ticks (js/mobview.js)
     // region by region from the shared queue, each region's mobs in id order (spec r15-33, js/regiontick.js); "list" order on request
     // with several workers (spec r15-39, js/rworkers.js) this worker thinks only the regions it owns; the others' changes come after the loop
     // with clusters (spec r15-39b, js/ctick.js) only the running cluster's mobs
     const RW = BF.rworkers;
-    let order = BF.rtick ? BF.rtick.plan(list) : list.slice();
-    if (mine) order = order.filter(mine);
+    const order = BF.rtick ? BF.rtick.plan(list, mm) : mm ? mm.filter(m => !m.removed) : list.slice();
     for (const m of RW && RW.active ? RW.beginThink(order) : order) {
       if (RW && RW.active) RW.thinking(m);
       if (m.removed) continue;

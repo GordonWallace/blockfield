@@ -35,7 +35,8 @@ let anon = 0;
 function nameOf(m) {
   if (!m) return "Someone";
   if (m.vname) return m.vname;
-  const k = m.village && m.slot && m.slot.idx != null ? m.village.key + "#" + m.slot.idx : "anon" + (m.vanon || (m.vanon = ++anon));
+  // (with the cluster tick on, by its id: a counter shared by every cluster would number them in the order clusters run, js/ctick.js)
+  const k = m.village && m.slot && m.slot.idx != null ? m.village.key + "#" + m.slot.idx : "anon" + (m.vanon || (m.vanon = BF.ctick && BF.ctick.on && m.id ? +m.id.slice(1) : ++anon));
   const h = hash((BF.state ? BF.state.seed : 0) + ":" + k);
   return (m.vname = FIRST[h % FIRST.length] + " " + LAST[(h >>> 8) % LAST.length]);
 }
@@ -49,6 +50,12 @@ function posOf(where, text) {
   const m = / at (-?\d+), ?(-?\d+), ?(-?\d+)/.exec(text || "");
   return m ? [+m[1], +m[2], +m[3]] : null;
 }
+// several workers (clusters, js/cworkers.js): a village's log is its cluster's; only the logs that grew since the last meeting go
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.ownedMap) return;
+  C.ownedMap("villagelog.logs", logs, k => C.ofVillage(k), null, null, (k, a) => a.length + "|" + (a.length ? a[a.length - 1][0] + "|" + a[a.length - 1][2] : ""));
+});
 function log(rec, kind, text, where) {
   if (!rec || !rec.key) return;
   let a = logs.get(rec.key);

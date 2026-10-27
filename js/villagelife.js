@@ -1691,7 +1691,7 @@ function ageStep(m, now) {
   if (m._agePass === pass - 1 && now > m._ageT) L.lived = (L.lived || 0) + (now - m._ageT);
   m._agePass = pass; m._ageT = now;
   const k = m.village && m.village.key;
-  if (!k) return;
+  if (!k || (BF.ctick && !BF.ctick.mineVillage(k))) return;   // (clusters: a merchant away in another village's cluster doesn't age its own village)
   const A = villageAges.get(k) || (villageAges.set(k, { lived: 0, pass: -9, t: now }), villageAges.get(k));
   if (A.pass === pass) return;   // already counted this pass (another of its villagers)
   if (A.pass === pass - 1 && now > A.t) A.lived += now - A.t;
@@ -1699,12 +1699,17 @@ function ageStep(m, now) {
 }
 const isWorking = m => !!((m.farm && (m.farm.task || (m.farm.idleWork && m.farm.thinkT > 0))) || m.tradingWith);
 function tick(dt) {
-  acc += dt;
-  if (acc < 0.5 || !BF.mobs || !BF.food) return;
-  const step = acc; acc = 0;
+  // clusters (spec r15-39b, js/ctick.js): every cluster on the tick counter (a module timer would count down once per cluster), the pass
+  // numbered by it too, the same in every cluster
+  const C = BF.ctick, f = C && C.filter;
+  let step;
+  if (f) { if (BF.rand.tick % 10 !== 0) return; step = 10 * BF.warp.TICK; }
+  else { acc += dt; if (acc < 0.5) return; step = acc; }
+  if (!BF.mobs || !BF.food) return;
+  if (!f) acc = 0;
   const now = dayNow(), t = skyT(), day = BF.sky ? BF.sky.day || 0 : 0;
   if (!agesHooked && BF.on) { agesHooked = true; BF.on("newWorld", () => villageAges.clear()); }
-  pass++;
+  if (f) pass = BF.rand.tick / 10; else pass++;
   const scanned = new Set();
   for (const m of BF.regions.ofType("villager")) {   // (the villagers only, r15-32)
     if (m.type !== "villager" || m.dead || m.removed || !Array.isArray(m.inv)) continue;
@@ -1720,6 +1725,7 @@ function tick(dt) {
   }
   const nowS = BF.simNow();
   for (const R of wantVillages) {                       // builders asking for water: keep their village's water ring scanned a while
+    if (f && !C.mineVillage(R.key)) continue;
     const D = R._life;
     if (!D || nowS - D.want > 120) { wantVillages.delete(R); continue; }
     if (!scanned.has(R)) scanStep(R, D, SCAN_COLS);
@@ -1771,6 +1777,30 @@ function stats(m) {
   return { today: s && s.total ? s.farm / s.total : 0, yesterday: p && p.total ? p.farm / p.total : null, farm: s.farm, total: s.total, counts: fs.counts,
     harvested: fs.harvested || 0, tilled: fs.tilled || 0, bordered: fs.bordered || 0, watered: fs.watered || 0, task: fs.task && fs.task.kind };
 }
+// Several workers (clusters, js/cworkers.js): the tables a village's villagers write while they think, its cluster's part
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.ownedMap) return;
+  const byKey = k => C.ofVillage(k);
+  C.ownedMap("villagelife.ages", villageAges, byKey);
+  C.owned("villagelife.want", {
+    snap: g => [...wantVillages].filter(R => byKey(R.key) === g).map(R => R.key),
+    apply(g, keys) {
+      for (const R of [...wantVillages]) if (byKey(R.key) === g) wantVillages.delete(R);
+      for (const k of keys) { const R = BF.mobs.villages.get(k); if (R) wantVillages.add(R); }
+    },
+  });
+  // a live village's project list and dig record are its record's (R._life, sent with the record): the table points at those
+  const lifeOf = k => { const R = BF.mobs.villages.get(k); return R && R._life; };
+  C.ownedMap("villagelife.projects", liveProjects, byKey, v => JSON.parse(JSON.stringify(v)), (v, k) => { const D = lifeOf(k); return D && D.projects ? D.projects : v; });
+  C.ownedMap("villagelife.dig", liveDig, byKey, G => ({ dug: [...G.dug], pit: G.pit ? Object.assign({}, G.pit) : null }),
+    (j, k) => { const D = lifeOf(k); return D && D.dig ? D.dig : { dug: new Set(j.dug), pit: j.pit }; });
+  // what a save left for villages not loaded yet only goes (to the village's record, when it loads): the keys still waiting
+  C.owned("villagelife.saved", {
+    snap: g => [savedProjects, savedDig].map(M => [...M.keys()].filter(k => byKey(k) === g)),
+    apply: (g, ks) => [savedProjects, savedDig].forEach((M, i) => { const keep = new Set(ks[i]); for (const k of [...M.keys()]) if (byKey(k) === g && !keep.has(k)) M.delete(k); }),
+  });
+});
 function reset() { wantVillages.clear(); claims.clear(); liveProjects.clear(); savedProjects.clear(); LOG.length = 0; acc = 0; pass = 0; }
 
 // ---------------------------------------------------------------- the player's buckets (hooked from player.js right-click)
