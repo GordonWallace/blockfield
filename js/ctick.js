@@ -36,6 +36,7 @@
 const BF = (globalThis.BF = globalThis.BF || {});
 const MEET = 20;       // ticks between meetings (js/clusters.js MEET)
 const RANGE = 256;     // ids (and creation numbers) in one range
+const DYN_RANGE = 4;   // dynamic item ids (map items, js/blocks.js) in one range: rare, and the item list skips the unused ones
 const HOUR = 1200 / 24;
 
 // The scoped part's systems: the item that converts each, and whether it runs per group yet (one per line: the threads converting them
@@ -94,6 +95,7 @@ const H = { ticks: 0, deferred: 0, meetings: 0 };
 let hourAt = null;
 
 const CL = () => BF.clusters;
+const W = () => (BF.cworkers && BF.cworkers.active ? BF.cworkers : null);   // several workers (C7, js/cworkers.js)
 const groupOfBase = b => byKey.get(CL().groupOf(b)) || NOWHERE;
 // m is the running group's (a mob with no cluster yet goes with the first group)
 function mine(m) { return m.cl === undefined ? cur === groups[0] : CL().groupOf(m.cl) === cur.key; }
@@ -103,13 +105,14 @@ function hidden(o) { return o.cl !== undefined && cur !== null && !legacy && CL(
 // ---------------------------------------------------------------- id and creation-number ranges
 // At a meeting, range j of slot i (the groups, then the between-ticks slot) is [h + (j * n + i) * RANGE, + RANGE), n = groups + 1; the
 // next meeting starts past the last range any slot took (and past any id seen meanwhile).
-const R2 = { ids: { h: 0, j: 0, n: 1 }, made: { h: 0, j: 0, n: 1 } };
+// Dynamic items (dyn) move on only past a meeting where one was made, so the item ids stay close together.
+const R2 = { ids: { h: 0, j: 0, n: 1 }, made: { h: 0, j: 0, n: 1 }, dyn: { h: 0, j: 0, n: 1 } };
 function rangeOf(kind, i) {
-  const k = R2[kind];
+  const k = R2[kind], size = kind === "dyn" ? DYN_RANGE : RANGE;
   let j = 0;
-  const at = jj => k.h + (jj * k.n + i) * RANGE;
-  const more = () => { j++; if (j > k.j) k.j = j; const a = at(j); return [a, a + RANGE]; };
-  return { next: at(0), lim: at(0) + RANGE, more };
+  const at = jj => k.h + (jj * k.n + i) * size;
+  const more = () => { j++; if (j > k.j) k.j = j; const a = at(j); return [a, a + size]; };
+  return { next: at(0), lim: at(0) + size, more };
 }
 function newRanges(n) {
   for (const kind of ["ids", "made"]) {
@@ -117,14 +120,21 @@ function newRanges(n) {
     k.h = Math.max(k.h + (k.j + 1) * k.n * RANGE, top);
     k.j = 0; k.n = n;
   }
+  const d = R2.dyn, top = BF.dynRange.top;
+  if (top > d.h) d.h = Math.max(d.h + (d.j + 1) * d.n * DYN_RANGE, top);
+  d.j = 0; d.n = n;
+}
+function startRanges() {
+  R2.ids.h = BF.ids.range.top; R2.made.h = BF.rand.made + 1; R2.dyn.h = BF.dynRange.top;
+  for (const k of [R2.ids, R2.made, R2.dyn]) { k.j = 0; k.n = 1; }
 }
 
 // ---------------------------------------------------------------- contexts
 function slot(key, i, g) {
-  return Object.assign(g || { key }, { i, req: BF.req.newCtx(), ids: rangeOf("ids", i), made: rangeOf("made", i), reps: { tick: -1, map: new Map() }, ms: 0, sent: 0, locals: new Map() });
+  return Object.assign(g || { key }, { i, req: BF.req.newCtx(), ids: rangeOf("ids", i), made: rangeOf("made", i), dyn: Object.assign(rangeOf("dyn", i), { i }), reps: { tick: -1, map: new Map() }, ms: 0, sent: 0, locals: new Map() });
 }
-function useSlot(s) { BF.req.useCtx(s.req); BF.ids.range.set(s.ids); BF.rand.range.set(s.made); BF.rand.reps.set(s.reps); }
-function keepSlot(s) { s.req = BF.req.ctx(); s.ids = BF.ids.range.get(); s.made = BF.rand.range.get(); s.reps = BF.rand.reps.get(); }
+function useSlot(s) { BF.req.useCtx(s.req); BF.ids.range.set(s.ids); BF.rand.range.set(s.made); BF.dynRange.set(s.dyn); BF.rand.reps.set(s.reps); }
+function keepSlot(s) { s.req = BF.req.ctx(); s.ids = BF.ids.range.get(); s.made = BF.rand.range.get(); s.dyn = BF.dynRange.get(); s.reps = BF.rand.reps.get(); }
 function enter(g) { keepSlot(between); cur = g; useSlot(g); BF.ids.hidden = hider(); }
 function leave() { if (!cur) return; keepSlot(cur); cur = null; BF.ids.hidden = null; useSlot(between); }
 
@@ -193,6 +203,7 @@ function meet() {
   if (between) { useSlot(between); for (const r of BF.req.pending()) pending.push(r); }
   CL().rebuild();
   const list = CL().groups();
+  BF.dynRange.settle();   // (the map items the groups made: one id under each name)
   newRanges(list.length + 1);
   groups = list.map((g, i) => slot(g.key, i, { key: g.key, bases: g.bases, player: g.player }));
   if (!groups.length) groups = [slot("w:none", 0)];   // (nothing anywhere: the block ticks still run, in a group of their own)
@@ -215,6 +226,7 @@ function meet() {
     i = j;
   }
   needMeet = false;
+  if (W()) W().met(groups);   // (which worker runs each group, and what each worker sends at the next meeting)
   S.meetings++; H.meetings++; S.since = 0;
   S.meetMs = performance.now() - t0;
 }
@@ -250,6 +262,7 @@ function scoped(h) {
   if (BF.regions) BF.regions.tick();
 }
 function pass(g, h) {
+  if (W() && !W().pull && !W().owns(g)) { g.tick = BF.rand.tick; if (g.bases) for (const b of g.bases) clocks.set(b, g.tick); return; }   // (another worker runs it)
   const t0 = performance.now();
   enter(g);
   try { scoped(h); }
@@ -263,13 +276,19 @@ function pass(g, h) {
 const due = () => needMeet || BF.rand.tick % MEET === 0 && S.metAt !== BF.rand.tick;
 function meetNow() { meet(); S.metAt = BF.rand.tick; }
 // One tick, every group in turn (the "tick" order; BF.simStep with the cluster tick on).
+let ahead = 0;
 function step(h) {
+  if (W() && W().pull) {   // (the cluster order on several workers: the interval runs at its first step, the next MEET - 1 steps are done)
+    if (ahead > 0) { ahead--; return; }
+    if (BF.rand.tick % MEET === 0) { interval(h); ahead = MEET - 1; return; }
+  }
   if (due()) meetNow();
   global(h);
   for (const g of groups) pass(g, h);
   BF.req.endTick();
   S.ticks++; H.ticks++; S.since++;
   hourly();
+  if (W() && BF.rand.tick % MEET === 0) W().sync();   // (the interval's last tick: the workers swap what their clusters changed)
 }
 // MEET ticks, from the next meeting: in the "tick" order MEET steps; in the "cluster" order the global part first, then each group's
 // whole interval on the clock views. Returns the ticks run.
@@ -280,15 +299,12 @@ function interval(h) {
   if (due()) meetNow();
   const views = [];
   for (let t = 0; t < MEET; t++) { global(h); views.push(view()); }
-  for (let i = 0; i < groups.length; i++) {
-    const g = groups[i], last = i === groups.length - 1;
-    for (let t = 0; t < MEET; t++) {
-      setView(views[t]);
-      pass(g, h);
-      if (last) { BF.req.endTick(); S.ticks++; H.ticks++; S.since++; hourly(); }
-    }
-  }
-  setView(views[MEET - 1]);
+  // every group in turn; on several workers each takes the next group from the shared queue when it is free (js/cworkers.js claim)
+  const pull = W() && W().pull;
+  for (let i = 0, g; (g = pull ? W().claim() : groups[i]); i++) for (let t = 0; t < MEET; t++) { setView(views[t]); pass(g, h); }
+  if (pull) for (const g of groups) if (g.tick !== views[MEET - 1][1]) { g.tick = views[MEET - 1][1]; if (g.bases) for (const b of g.bases) clocks.set(b, g.tick); }   // (another worker ran it)
+  for (let t = 0; t < MEET; t++) { setView(views[t]); BF.req.endTick(); S.ticks++; H.ticks++; S.since++; hourly(); }
+  if (W()) W().sync();
   return n + MEET;
 }
 
@@ -350,7 +366,7 @@ function setOn(v) {
   if (v && BF.rworkers && BF.rworkers.active) throw new Error("the cluster tick can't run with region workers (js/rworkers.js)");
   if (v) {
     on = true; needMeet = true; groups = []; byKey = new Map(); deferred = [];
-    R2.ids.h = BF.ids.range.top; R2.made.h = BF.rand.made + 1; R2.ids.j = R2.made.j = 0; R2.ids.n = R2.made.n = 1;
+    startRanges();
     between = slot("between", 0); between.req = BF.req.ctx();
     BF.req.away = away;
     for (const m of BF.mobs.list) if (!m.removed) CL().place(m);
@@ -362,7 +378,7 @@ function setOn(v) {
     useSlot(between);
     for (const r of deferred) pending.push(r);
     BF.req.away = null;
-    BF.ids.range.set(null); BF.rand.range.set(null);
+    BF.ids.range.set(null); BF.rand.range.set(null); BF.dynRange.set(null); BF.dynRange.settle();
     for (const r of pending) BF.req.fileIn(BF.req.ctx(), r);
     groups = []; byKey = new Map(); deferred = []; on = false;
   }
@@ -414,7 +430,7 @@ function reset() {
   if (CL()) CL().reset();
   clocks.clear();
   if (on) {
-    R2.ids.h = BF.ids.range.top; R2.made.h = BF.rand.made + 1; R2.ids.j = R2.made.j = 0; R2.ids.n = R2.made.n = 1;
+    startRanges();
     between = slot("between", 0); between.req = BF.req.ctx();
   }
 }
@@ -430,6 +446,13 @@ BF.ctick = {
   mine, hidden, sys, local, step, interval, meet: meetNow, groups: () => groups, converted, stats, text, hourly, reset,
   get only() { return only; }, set only(v) { only = v ? new Set(v) : null; },
   get system() { return running; },
+  // for several workers (js/cworkers.js): the ranges' counters, the requests waiting for the meeting, a group's queued requests
+  inner: {
+    R2, RANGE,
+    get deferred() { return deferred; }, set deferred(v) { deferred = v; },
+    pendingOf(g) { keepSlot(between); useSlot(g); try { return BF.req.pending(); } finally { useSlot(between); } },
+    setPending(g, list) { g.req = BF.req.newCtx(); for (const r of list) BF.req.fileIn(g.req, r); },
+  },
   // trace: true starts counting hidden reads ("system file:line" -> count), traced() reads them, trace = false stops
   get trace() { return !!trace; }, set trace(v) { trace = v ? new Map() : null; },
   traced: () => (trace ? [...trace].sort((a, b) => b[1] - a[1]) : []),

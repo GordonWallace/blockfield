@@ -5,6 +5,7 @@
 //   {boot: {seed, save, settings, rivers}}   the same world as the leader's (rivers: the leader's solved river network, not solved again);
 //                                             answers {booted: hash}
 //   {start: {shared, me, n}}                  joins the leader's mailboxes and barrier (BF.rworkers.setup) at this tick
+//   {cstart: {shared, me, n, only, order, shuffle}}  the cluster tick on with those systems, and joins as a cluster worker (js/cworkers.js)
 //   {ticks: k}                                k headless ticks in lockstep with the leader's (chunks stream with no budget, as the leader's)
 //   {hash: true}                              answers {hash: full state hash} (tests)
 //   {stop: true}                              leaves
@@ -60,10 +61,16 @@ if (!isMainThread && workerData && workerData.me != null && !workerData.saves &&
         BF.rworkers.shuffle = s.shuffle || 0;
         BF.rworkers.setup({ n: s.n, me: s.me, link: BF.rworkers.attach(s.shared, s.me, s.n) });
         parentPort.postMessage({ started: true });
+      } else if (d.cstart) {
+        const s = d.cstart;
+        BF.ctick.only = s.only; BF.ctick.on = true; BF.ctick.order = s.order || "tick";
+        BF.cworkers.shuffle = s.shuffle || 0;
+        BF.cworkers.setup({ n: s.n, me: s.me, link: BF.rworkers.attach(s.shared, s.me, s.n), claims: s.shared.claims });
+        parentPort.postMessage({ started: true });
       } else if (d.ticks) {
         h.tick(d.ticks);
         parentPort.postMessage({ ticked: h.ticks });
-      } else if (d.hash) parentPort.postMessage({ hash: BF.stateHash.full(), mismatch: BF.rworkers.mismatch || null, mismatchText: d.text ? BF.rworkers.mismatchText || null : null, audits: BF.rworkers.audits || null, stats: BF.rworkers.stats() });
+      } else if (d.hash) parentPort.postMessage({ hash: BF.stateHash.full(), mismatch: BF.rworkers.mismatch || null, mismatchText: d.text ? BF.rworkers.mismatchText || null : null, audits: BF.rworkers.audits || null, stats: BF.cworkers.active ? BF.cworkers.stats() : BF.rworkers.stats() });
       else if (d.stop) process.exit(0);
     } catch (e) { fail(e); }
   });

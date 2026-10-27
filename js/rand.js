@@ -110,6 +110,7 @@ const R = BF.rand = {
   range: {
     get: () => ({ next: mnext, lim: mlim, more: mmore }),
     set(r) { if (r) { mnext = r.next; mlim = r.lim; mmore = r.more; } else { mlim = 0; mmore = null; } },
+    lift(n) { if (n > made) made = n; },   // (several workers, js/cworkers.js: past the numbers the others took)
   },
   reps: {
     get: () => ({ tick: repTick, map: reps }),
