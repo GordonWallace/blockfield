@@ -37,6 +37,11 @@ In a page, `BF.perf.ask(true)` turns it on, `BF.perf.stats()` reads the last 5 s
   A spec that makes villagers cheaper shows `byState` and `villages` going down while `activity` stays the same. `test/perf-activity.js`
   runs it in CI (seed 3, `--extra 8`, 600 s) and writes ci-out/activity.json. In a page: `BF.perf.byState()`, `.activity()`,
   `.villageSpeed()`, all since `BF.perf.reset()`.
+- `onevillage.js` (spec r15-65): whether one village could be split over cores. `--mode collide` (requests from two mobs at one target
+  in one tick, over a game day), `access` (fields thinking reads and writes on other mobs and village records), `changes` (what each
+  think changes on its own mob), `split` (mob loop against the rest of the tick, the best split over n cores, a shared-memory mirror's
+  cost), `barrier` (an Atomics meeting between worker_threads) and `shuffle` (mobs think in a random order: the hash should not move).
+  Findings: /mnt/project-files/reports/r15-65.md.
 - `moves.js [--seed 3] [--extra 8] [--days 2] [--warm 60] [--out file.json]` (r15-70): headless, no browser. Counts the game log's
   `move` ERRORs (a villager or golem stuck, or fallen into a well) per 100 villager/golem game-days, and for each stuck one keeps a
   snapshot of what it was doing (its AI state and route, the blocks round its feet, its last hits against blocks, a builder's state) in

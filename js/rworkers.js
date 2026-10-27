@@ -24,7 +24,8 @@
 // worker crashes or the replicas no longer match (BF.rworkers.verify, tests).
 // API: BF.rworkers = { active, n, me, setup({n, me, link, journal}), stop(why), beginThink(order, spans), thinking(m), afterThink(),
 //   afterDeliver(), owners, stats(), text(), verify (ticks between hash checks; 0 off), enc(v, self), dec(e), Shadow, snap(m), diff(m, s),
-//   patch(m, ops), atLater(fn) (patches whose objects sent as where they are are looked up after fn), makeShared(n, bytes), attach(sh, me, n), writes(m) (thinking is about to change another unit's mob) }
+//   patch(m, ops), atLater(fn) (patches whose objects sent as where they are are looked up after fn), makeShared(n, bytes), attach(sh, me, n), writes(m) (thinking is about to change another unit's mob),
+//   refsOn() (the codec's entity sets taken afresh: tools/perf/onevillage.js diffs mobs outside a split) }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -1023,7 +1024,7 @@ function hourly() {
 }
 
 Object.assign(RW, { journal: null, clock: null, onTick: null, onTouch: null, chan: name => channels.get(name), rec, stamp, realNow, tick, pause, channel, touch, writes, dynItem, setup, stop, beginThink, thinking, afterThink, beforeDeliver, afterDeliver, stats, text, hourly, replan,
-  enc, dec, Shadow, snap, diff, patch, makeShared, attach, SKIP, REBALANCE, SOLO_MS,
+  enc, dec, Shadow, snap, diff, patch, makeShared, attach, SKIP, REBALANCE, SOLO_MS, refsOn,
   ownerOf, unitOf,   // (read only: the debug screen's Regions map colours each region by the worker its mobs think on, js/debugfeed.js)
   refs: refsOn, encData, atLater });
 BF.rworkers = RW;
