@@ -20,7 +20,17 @@
 const BF = (globalThis.BF = globalThis.BF || {});
 
 const SPEEDS = [1, 3, 5, 10, 100, 1000];
-const TICK = 0.05, MAX_STEPS = 1000, MAX_FRAME = 0.25;   // one tick is 0.05 s of game time; never more than 1000 ticks in a frame; a frame counts at most 0.25 real s
+// Tick length (idea-049 prototype): 0.05 s unless asked otherwise, by ?tick= in the address, BF_TICK in Node's environment or
+// globalThis.BF_TICK before this file loads (0.01 to 1 s). Read once at load: the sim modules size their tick counts from it.
+const TICK = (() => {
+  const g = globalThis;
+  let v = g.BF_TICK;
+  if (v == null && g.process && g.process.env) v = g.process.env.BF_TICK;
+  if (v == null && g.location && g.location.search) try { v = new URLSearchParams(g.location.search).get("tick"); } catch (_) { /* none */ }
+  const t = +v;
+  return v != null && t >= 0.01 && t <= 1 ? t : 0.05;
+})();
+const MAX_STEPS = 1000, MAX_FRAME = 0.25;   // never more than 1000 ticks in a frame; a frame counts at most 0.25 real s
 let idx = 0, clock = 0, eff = 1, last = 1, shown = null, frozen = false;
 let acc = 0, acc0 = 0, planned = 0;   // game seconds collected but not yet ticked (and before the latest plan()); ticks that plan() asked for
 

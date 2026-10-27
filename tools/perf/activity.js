@@ -53,8 +53,8 @@ function measure({ seed = 3, seconds = 600, extra = 0, warm = 30, coarse, reroll
   look(true);
   for (let i = 1; i <= ticks; i++) {
     h.tick(1);
-    if (i % 20 === 0) BF.perf.frame();   // the meter's window moves on about once a game second
-    if (i % 10 === 0) look(false);
+    if (i % Math.max(1, Math.round(1 / TICK)) === 0) BF.perf.frame();   // the meter's window moves on about once a game second
+    if (i % Math.max(1, Math.round(0.5 / TICK)) === 0) look(false);
     doors();
   }
   for (const [k, n] of Object.entries(BF.perf.count.deaths)) {
@@ -69,7 +69,7 @@ function measure({ seed = 3, seconds = 600, extra = 0, warm = 30, coarse, reroll
   BF.perf.ask(false);
   const villagers = BF.mobs.list.filter(m => m.type === 'villager' && !m.dead && !m.removed).length;
   return {
-    seed, extra, seconds, ticks, real: +T.real.toFixed(2), vss: Math.round(T.vs / T.real), msPerTick: +(T.stepMs / Math.max(1, T.steps)).toFixed(3),
+    seed, extra, seconds, ticks, real: +T.real.toFixed(2), vss: Math.round(T.vs / T.real), msPerTick: +(T.stepMs / Math.max(1, T.steps)).toFixed(3), tick: TICK, msPerGameS: +(T.stepMs / Math.max(1e-9, T.game)).toFixed(3),
     speed: +(T.game / T.real).toFixed(2), villagers, mobs: BF.mobs.list.length, byState, activity, villages, life, check: { updates, requests },
     hash: h.stateHash().hash,
   };

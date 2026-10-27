@@ -123,7 +123,7 @@ function check(x, y, z) {
 // whose look reaches another group's cells (water within WET_R) is looked at on the next meeting instead. The last rain is kept per
 // interval: every group starts the interval from the same value (rain0) and the meeting takes the newest (rain1), so the order the
 // groups run in doesn't matter.
-const PHASES = Math.round(EVAL_EVERY / 0.05);   // ticks between looks at a block (js/timewarp.js TICK)
+const PHASES = Math.max(1, Math.round(EVAL_EVERY / BF.warp.TICK));   // ticks between looks at a block (js/timewarp.js TICK)
 let buckets = null;                             // phase -> Set of keys (made the first time the cluster tick needs them)
 const phaseOf = (x, y, z) => Math.floor(u01(x, y, z, 0, 3) * PHASES);
 function bucketAdd(k, p) { if (buckets) buckets[phaseOf(p[0], p[1], p[2])].add(k); }

@@ -2382,7 +2382,8 @@ function updateMob(m, dt) {
   if (m.dead) {
     m.deathT += dt;   // (js/mobview.js tips it over and flushes it red)
     m.tint = "red";
-    m.vel.x *= 0.8; m.vel.z *= 0.8; m.vel.y -= GRAVITY * dt;
+    const drag = Math.pow(0.8, dt / 0.05);   // 0.8 a 0.05 s tick, whatever the tick length (idea-049)
+    m.vel.x *= drag; m.vel.z *= drag; m.vel.y -= GRAVITY * dt;
     BF.world.moveBox(m.position, m.vel, m.halfWidth, Math.min(m.height, 0.5), dt, { stepUp: 0 });
     keepFrame(m);
     if (m.deathT > 1.0) {
@@ -3499,7 +3500,7 @@ BF.mobs = {
   },
   update(dt) {
     if (!ready) return;
-    dt = Math.min(dt, 0.05);
+    dt = Math.min(dt, BF.warp ? BF.warp.TICK : 0.05);   // (one tick at most: a longer tick, idea-049, moves mobs its whole length)
     planBudget = 2; // A* searches per frame outside the mob loop
     grantPlans();   // and the mob loop's (spec r15-33)
     // the region index (r15-30) up to date before the mobs query it (spec r15-31): main.js syncs it after each step, but tests and tools
