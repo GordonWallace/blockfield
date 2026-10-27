@@ -70,8 +70,17 @@ module.exports = async (pg) => {
     setTimeout(tick, 20);
   }, info.key);
   ok("the village unloads when the player leaves", await leave());
-  await lib.sim(pg, () => { globalThis.__rpw.back = true; });
+  // the clock is held from the unload until everyone is back: an absence is short (js/mobsave.js SHORT, a game hour: 50 s at 1x) up to when
+  // each villager loads again, and a busy machine took longer than that to load the village, so the later ones came back as after a long
+  // absence (locally under load: 10 of 59 in place)
+  await lib.sim(pg, () => {
+    globalThis.__rpw.back = true;
+    const h = globalThis.__hold = { d: BF.sky.day, t: BF.sky.time, on: true };
+    const f = () => { if (!h.on) return; BF.sky.day = h.d; BF.sky.time = h.t; setTimeout(f, 20); };
+    f();
+  });
   await back();
+  await lib.sim(pg, () => { globalThis.__hold.on = false; });
   const after1 = await snapshot();
   const seen = await lib.sim(pg, () => { const w = globalThis.__rpw; w.stop = true; return { last: w.last, first: w.first }; });
   const same = Object.keys(seen.last).filter(k => seen.first[k] && dist(seen.last[k], seen.first[k]) < 4).length;
@@ -106,8 +115,19 @@ module.exports = async (pg) => {
   // 3. back at bedtime: in bed
   ok("the village unloads again before night", await leave());
   await lib.sim(pg, () => { BF.sky.time = 0.75; BF.sky.day += 1; });
+  // how far each one is from its bed the first time it is back: the placement is what is checked. The ones that load first don't wait in bed
+  // for the rest (a hungry one gets up to eat, others walk about it), and a busy machine loads the village over a minute (CI on #655: 30 of 40)
+  await lib.sim(pg, k => {
+    const w = globalThis.__rpb = { first: {}, stop: false };
+    const tick = () => {
+      if (w.stop) return;
+      for (const m of BF.mobs.list) if (m.type === "villager" && m.village && m.village.key === k && m.slot && m.slot.bed && !m.dead && w.first[m.slot.idx] == null) w.first[m.slot.idx] = Math.hypot(m.position.x - m.slot.bed.x, m.position.z - m.slot.bed.z);
+      setTimeout(tick, 20);
+    };
+    setTimeout(tick, 20);
+  }, info.key);
   await back();
-  const bed = await lib.sim(pg, k => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k && m.slot && m.slot.bed && !m.dead).map(m => Math.hypot(m.position.x - m.slot.bed.x, m.position.z - m.slot.bed.z)), info.key);
+  const bed = Object.values(await lib.sim(pg, () => { const w = globalThis.__rpb; w.stop = true; return w.first; }));
   ok("at bedtime villagers with a bed are in it", bed.length >= 3 && bed.filter(d => d < 4).length >= Math.floor(bed.length * 0.8), bed.map(d => Math.round(d)));
   // 4. a villager without a bed goes indoors at night
   const night = await lib.sim(pg, k => {
