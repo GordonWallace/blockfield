@@ -162,6 +162,7 @@ function spawnBee(h, at, mode) {
   if (cluster()) b.cl = homeBase(h);   // (clusters: the bee stays its home's cluster's while it is out)
   b.phase = rs(b).next() * 6.28; b.yaw = rs(b).next() * 6.28;
   bees.push(b); h.out++;
+  if (byGroup) addTo(b);
   return b;
 }
 function removeBee(b) {
@@ -453,12 +454,23 @@ let acc = 0, lureT = 0, lp = [];
 const cluster = () => BF.herd && BF.herd.cluster();
 const homeBase = h => BF.clusters.ofRegion(BF.regions.keyOf(h.x, 0, h.z));
 const homeMine = (C, h) => BF.clusters.groupOf(homeBase(h)) === C.cur.key;
-const beeMine = (C, b) => BF.clusters.groupOf(b.cl !== undefined ? b.cl : b.home ? homeBase(b.home) : "w:none") === C.cur.key;
+const beeGroup = b => BF.clusters.groupOf(b.cl !== undefined ? b.cl : b.home ? homeBase(b.home) : "w:none");
+const beeMine = (C, b) => beeGroup(b) === C.cur.key;
+// Each group's bees out: a bee's group changes only at meetings (it keeps its home's cluster while out), so they are listed at the first
+// use after one (BF.ctick.epoch), in bees order; a new bee goes at the end of its group's, as it does in bees; a gone one stays in until
+// the next meeting (skip it). (Testing every bee with beeMine cost every group a pass over all the bees, five times a tick.)
+let byGroup = null, byGroupAt = -1;
+const NO_BEES = [];
+function addTo(b) { const k = beeGroup(b), a = byGroup.get(k); if (a) a.push(b); else byGroup.set(k, [b]); }
+function groupBees(C) {
+  if (!byGroup || byGroupAt !== C.epoch) { byGroup = new Map(); byGroupAt = C.epoch; for (const b of bees) addTo(b); }
+  return byGroup.get(C.cur.key) || NO_BEES;
+}
 function update(dt) {
   if (!(dt > 0) || !W() || NEST == null && (ids(), NEST == null)) return;
   hook();
-  const C = cluster(), L = C ? C.local("bees", () => ({ lp: [], fresh: true })) : null;
-  for (const b of bees) { if (C && !beeMine(C, b)) continue; b.px = b.x; b.py = b.y; b.pz = b.z; b.pyaw = b.yaw; }   // where each was before this tick: drawn between (js/entityview.js)
+  const C = cluster(), L = C ? C.local("bees", () => ({ lp: [], fresh: true })) : null, mb = C ? groupBees(C) : bees;   // (clusters: the group's bees)
+  for (const b of mb) { if (b.gone) continue; b.px = b.x; b.py = b.y; b.pz = b.z; b.pyaw = b.yaw; }   // where each was before this tick: drawn between (js/entityview.js)
   if (L) { if (L.fresh) housekeeping(); }
   else { acc += dt; if (acc >= 1) { acc = 0; housekeeping(); } }
   release(dt);
@@ -472,9 +484,9 @@ function update(dt) {
     if (L) L.lp = lp;
     if (lp.length) {
       const cnt = new Map();
-      for (const b of bees) if (b.follow && (!C || beeMine(C, b))) cnt.set(b.follow.who, (cnt.get(b.follow.who) || 0) + 1);
-      for (const b of bees) {
-        if (b.follow || b.angry > now || b.mode === "home" && b.hurry || (C && !beeMine(C, b))) continue;
+      for (const b of mb) if (b.follow && !b.gone) cnt.set(b.follow.who, (cnt.get(b.follow.who) || 0) + 1);
+      for (const b of mb) {
+        if (b.gone || b.follow || b.angry > now || b.mode === "home" && b.hurry) continue;
         for (const f of lp) {
           if ((cnt.get(f.who) || 0) >= FOLLOW_MAX) continue;
           const q = seen(b, f);
@@ -483,9 +495,9 @@ function update(dt) {
           break;
         }
       }
-    } else for (const b of bees) if (b.follow && (!C || beeMine(C, b))) { b.follow = null; nextErrand(b); }
+    } else for (const b of mb) if (b.follow && !b.gone) { b.follow = null; nextErrand(b); }
   }
-  for (let i = bees.length - 1; i >= 0; i--) { const b = bees[i]; if (b && !b.gone && (!C || beeMine(C, b))) stepBee(b, dt, lp, now); }
+  for (let i = mb.length - 1; i >= 0; i--) { const b = mb[i]; if (b && !b.gone) stepBee(b, dt, lp, now); }
 }
 
 // ---------------------------------------------------------------- the world: chunks, blocks, crops
@@ -617,6 +629,7 @@ function tables() {
       if (!o) return;
       for (const h of o.homes || []) { const k = pk(h.x, h.y, h.z), was = recs.get(k); if (was) Object.assign(was, h); else recs.set(k, h); }
       for (let i = bees.length - 1; i >= 0; i--) if (beeOf(gk)(bees[i])) { bees[i].gone = true; bees.splice(i, 1); }
+      byGroup = null;
       for (const e of o.out || []) {
         const b = Object.assign({}, e, { home: e.home ? recs.get(e.home) || null : null, lastD: e.lastD === "inf" ? Infinity : e.lastD });
         if (e.home && !b.home && BF.herd) BF.herd.lost("bees", "the home at " + e.home);
@@ -642,6 +655,7 @@ function hook() {
 }
 function reset() {
   for (const b of bees) b.gone = true;
+  byGroup = null;
   bees.length = 0; recs.clear(); loaded.clear(); flowers.clear(); lures.clear(); cropGrid = new Map(); lastBroken = null; acc = 0; lureT = 0;
 }
 
@@ -654,6 +668,7 @@ function serialize() {
 }
 function deserialize(a) {
   for (const b of bees) b.gone = true;
+  byGroup = null;
   bees.length = 0; recs.clear();
   if (Array.isArray(a)) for (let i = 0; i + 6 < a.length; i += 7) {
     const h = { x: a[i], y: a[i + 1], z: a[i + 2], kind: a[i + 3] ? "hive" : "nest", bees: Math.max(0, Math.min(MAX, a[i + 4] | 0)), honey: Math.max(0, Math.min(FULL, a[i + 5] | 0)), day: a[i + 6] | 0,

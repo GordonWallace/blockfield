@@ -61,12 +61,21 @@ function take() { return next < queue.length ? queue[next++] : undefined; }
 // The mobs of this tick in the order they think: list order for "list"; else region by region from the queue, each region's mobs by id.
 // Mobs the index doesn't hold (none, normally) think last, in list order. The region index keeps the regions' keys in order and each
 // region's mobs sorted from tick to tick, sorting again only a region whose mobs changed (r15-61; the same order as sorting every tick).
-function plan(list) {
+// sub (clusters, js/ctick.js mobs): only these mobs (a part of list, in list order, removed ones skipped), in the order they have in the
+// whole plan, read from their own regions only
+function plan(list, sub) {
   S.ticks++; H.ticks++;
   roll();
   const G = BF.regions;
-  if (order === "list" || !G || !G.regionOf) { S.last = { regions: 0, mobs: list.length, rest: 0 }; spans = [-1, 0]; return list.slice(); }
-  const I = G.mobIndex(), keys = I.keys(), rev = order === "reverse";
+  if (order === "list" || !G || !G.regionOf) { S.last = { regions: 0, mobs: list.length, rest: 0 }; spans = [-1, 0]; return sub ? sub.filter(m => !m.removed) : list.slice(); }
+  const I = G.mobIndex(), rev = order === "reverse";
+  let keys = I.keys(), member = null;
+  if (sub) {
+    member = new Set();
+    const ks = new Set();
+    for (const m of sub) if (!m.removed) { member.add(m); const k = G.regionOf(m); if (k !== undefined && k >= 0) ks.add(k); }
+    keys = [...ks].sort((a, b) => a - b);
+  }
   queue = [];
   for (let i = 0; i < keys.length; i++) { const k = keys[rev ? keys.length - 1 - i : i]; if (!rt.active || rt.active(k)) queue.push(k); }
   next = 0;
@@ -76,11 +85,12 @@ function plan(list) {
   while ((k = take()) !== undefined) {
     spans.push(k, out.length);
     const a = I.ordered(k, idNum);
-    for (let i = 0; i < a.length; i++) out.push(a[i]);
+    if (member) { for (let i = 0; i < a.length; i++) if (member.has(a[i])) out.push(a[i]); }
+    else for (let i = 0; i < a.length; i++) out.push(a[i]);
   }
   const n = out.length;
   spans.push(-1, n);   // (the mobs the index doesn't hold, if any)
-  for (const m of list) { const k = G.regionOf(m); if ((k === undefined || k < 0) && !m.removed) out.push(m); }
+  for (const m of sub || list) { const k = G.regionOf(m); if ((k === undefined || k < 0) && !m.removed) out.push(m); }
   S.regions = queue.length; S.mobs = n;
   H.regions += queue.length;
   S.last = { regions: queue.length, mobs: n, rest: out.length - n };
