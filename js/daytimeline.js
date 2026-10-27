@@ -110,6 +110,7 @@ const itemsText = ids => {
   return [...n].map(([id, c]) => (c > 1 ? c + " " : "") + (BF.itemName ? BF.itemName(id) : "Item " + id)).join(", ");
 };
 let hooked = false;
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(hook); });   // (cluster workers: set up on every worker, js/ctick.js warm)
 function hook() {
   if (hooked) return;
   if (typeof BF.on === "function") BF.on("newWorld", reset);

@@ -300,6 +300,7 @@ function contain(m, d) {
 
 // ---------------------------------------------------------------- the global tick: piglets growing up, sty stock
 let acc = 0, styT = 0;
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(hook); });   // (cluster workers: set up on every worker, js/ctick.js warm)
 function hook() {
   if (hooked || !BF.on) return;
   hooked = true;

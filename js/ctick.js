@@ -196,6 +196,19 @@ function closures(req) {
   req.then = fn => { if (req._due !== undefined && !req.delivered) { req.then = then; note(); } return then(fn); };
 }
 
+// The mobs a request that waited for the meeting may read or change: its requester, its target mob, the mobs its data names, and the
+// mobs in its target region (a blast's part there, js/mobs.js explode)
+function involved(list) {
+  const out = [], regs = new Set(), isMob = x => x && typeof x === "object" && x.id !== undefined && BF.ids.live(x.id) === x && BF.mobs.list.includes(x);
+  for (const r of list) {
+    for (const id of [r.from, r.target]) if (typeof id === "string" && /^e\d+$/.test(id)) { const m = BF.ids.live(id); if (m) out.push(m); }
+    const d = r.data;
+    if (d && typeof d === "object") for (const k of Object.keys(d)) if (isMob(d[k])) out.push(d[k]);
+    if (r.region != null && r.region >= 0) regs.add(r.region);
+  }
+  if (regs.size && BF.regions) for (const m of BF.mobs.list) if (!m.removed && regs.has(BF.regions.keyOf(m.position.x, 0, m.position.z))) out.push(m);
+  return out;
+}
 // a request still queued at a meeting, into its new group (no place: its requester's group; neither: between ticks)
 function refile(req) {
   let g = targetOf(req, req.region != null ? req.region : -1);
@@ -238,6 +251,7 @@ function meet() {
   const waited = deferred.filter(r => r._due <= T).sort(by);
   deferred = deferred.filter(r => r._due > T);   // (none while every cluster keeps one clock)
   S.lastDeferred = waited.length;
+  if (waited.length && W() && W().fetch) W().fetch(involved(waited));   // (partial copies: what they read and change, current here)
   for (let i = 0; i < waited.length;) {
     let j = i; while (j < waited.length && waited[j]._due === waited[i]._due) j++;
     const keep = BF.req.ctx();
@@ -295,6 +309,12 @@ function pass(g, h) {
     if (g.bases) for (const b of g.bases) clocks.set(b, g.tick);
   }
 }
+// The interval's end: the shared table's rows worked out (js/sharedtable.js collect: on several workers each its own villages', in
+// js/cworkers.js sync), then the workers swap
+function endInterval() {
+  if (BF.sharedTable && BF.sharedTable.collect && !(W() && W().active)) BF.sharedTable.collect();
+  if (W()) W().sync();
+}
 const due = () => needMeet || BF.rand.tick % MEET === 0 && S.metAt !== BF.rand.tick;
 function meetNow() { meet(); S.metAt = BF.rand.tick; }
 // One tick, every group in turn (the "tick" order; BF.simStep with the cluster tick on).
@@ -310,7 +330,7 @@ function step(h) {
   BF.req.endTick();
   S.ticks++; H.ticks++; S.since++;
   hourly();
-  if (W() && BF.rand.tick % MEET === 0) W().sync();   // (the interval's last tick: the workers swap what their clusters changed)
+  if (BF.rand.tick % MEET === 0) endInterval();   // (the interval's last tick: the workers swap what their clusters changed)
 }
 // MEET ticks, from the next meeting: in the "tick" order MEET steps; in the "cluster" order the global part first, then each group's
 // whole interval on the clock views. Returns the ticks run.
@@ -326,7 +346,7 @@ function interval(h) {
   for (let i = 0, g; (g = pull ? W().claim() : groups[i]); i++) for (let t = 0; t < MEET; t++) { setView(views[t]); pass(g, h); }
   if (pull) for (const g of groups) if (g.tick !== views[MEET - 1][1]) { g.tick = views[MEET - 1][1]; if (g.bases) for (const b of g.bases) clocks.set(b, g.tick); }   // (another worker ran it)
   for (let t = 0; t < MEET; t++) { setView(views[t]); BF.req.endTick(); S.ticks++; H.ticks++; S.since++; hourly(); }
-  if (W()) W().sync();
+  endInterval();
   return n + MEET;
 }
 
@@ -362,6 +382,11 @@ function local(name, init) {
 // stamps): each registers how to take the part a group owns and put it back, so the multi-worker runtime (C7) can send it at meetings.
 // owned(name, {snap(groupKey, all?) -> plain JSON, apply(groupKey, plain)}); tables() -> the registered names. Unused on one worker.
 const tables = new Map();
+// warm(fn): a system's set-up (its owned tables, listeners, chunk scans) that it otherwise does at its first tick; js/cworkers.js runs
+// them all on every worker at setup (warmUp), so a worker that hasn't run the system yet still takes the others' parts and events.
+const warmers = [];
+const warm = fn => { warmers.push(fn); };
+const warmUp = () => { for (const fn of warmers) fn(); };
 function owned(name, t) {
   if (!t || typeof t.snap !== "function" || typeof t.apply !== "function") throw new Error("BF.ctick.owned(name, {snap, apply})");
   tables.set(name, t);
@@ -447,7 +472,7 @@ function ownedSet(name, set, groupOfKey) {
 // What must change only at meetings: onMeet(fn, name, when) runs fn at each meeting, on every worker alike, outside every group (between
 // ticks), in registration order. when "start" (the default): first, before the queued requests are gathered (so what it sends is
 // filed into the new groups) and the clusters are worked out again (village records first met,
-// js/mobs.js; the simulated set); "end": after the requests that waited are applied and delivered (the shared table). A hook decides
+// js/mobs.js; the simulated set); "end": after the requests that waited are applied and delivered (the explorer camps). A hook decides
 // only from what every worker has alike (the player, mobs, village records, owned tables); mobs it makes take the between-ticks ids.
 const meetHooks = { start: [], end: [] };
 function onMeet(fn, name, when) {
@@ -561,7 +586,7 @@ BF.ctick = {
   get filter() { return cur && !legacy ? mine : null; },
   mobs, added, stale, get epoch() { return epoch; },   // the running group's mobs (removed ones included), or null when every mob is seen; a new
   // mob; the lists out of date; how many times they were (a module's own lists by group are made again when it changes)
-  owned, tables: () => [...tables.keys()], table: name => tables.get(name), onMeet,
+  owned, tables: () => [...tables.keys()], table: name => tables.get(name), onMeet, warm, warmUp,
   ownedMap, ownedSet, ofVillage, ofCell, ofMob, mineVillage, mineCell,
   tickOf: b => clocks.get(b), clocks: () => new Map(clocks),   // each cluster's own tick (one clock for now)
   mine, hidden, sys, local, step, interval, meet: meetNow, groups: () => groups, converted, stats, text, hourly, reset,

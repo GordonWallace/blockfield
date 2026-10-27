@@ -39,6 +39,7 @@ const busy = [];                                 // tests "is this villager stil
 const busyWhen = f => { if (typeof f === "function") busy.push(f); };
 const atFurnace = u => busy.some(f => f(u));
 let hooked = false, FLAG = null;
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(hook); });   // (cluster workers: set up on every worker, js/ctick.js warm)
 function hook() {
   if (hooked || !BF.world || !BF.on || BF.B.furnace == null) return;
   hooked = true;

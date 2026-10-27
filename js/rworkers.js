@@ -91,6 +91,8 @@ function encV(v, seen) {
 const NUMS = { "-0": -0, NaN: NaN, Inf: Infinity, "-Inf": -Infinity };
 let decSelf = null;
 function dec(e, me) { const prev = decSelf; if (me !== undefined) decSelf = me; try { return decV(e, []); } finally { decSelf = prev; } }
+// decAll(e) -> [value, the objects it made] (clusters, js/cworkers.js: a handed-over mob's fresh objects are merged into the old ones)
+function decAll(e) { const objs = [], prev = decSelf; decSelf = null; try { return [decV(e, objs), objs]; } finally { decSelf = prev; } }
 function decV(e, objs) {
   if (e === null || typeof e !== "object") return e;
   if (Array.isArray(e)) { const a = new Array(e.length); objs.push(a); for (let i = 0; i < e.length; i++) { const x = a[i] = decV(e[i], objs); if (pend && pend.has(x)) placed(a, i, x); } return a; }
@@ -259,6 +261,15 @@ function encData(req) {
   if (d && typeof d === "object") for (const k of Object.keys(d)) { const x = d[k]; if (x && typeof x === "object" && (mobSet.has(x) || recSet.has(x))) roots.push(x); }
   const prev = self; self = null;
   try { return withPaths(roots, () => encV(d, new Map())); } finally { self = prev; }
+}
+
+// encMany(list): several entities' own fields (plain copies) in one call, for another worker to take whole (clusters with partial
+// copies, js/cworkers.js handovers): an object two of them share stays one object, and one that lives inside a village record (every
+// worker's records are current) is sent as where it is there, so it stays the record's object too. Decode with dec inside atLater.
+function encMany(list) {
+  const prev = self, ps = RW.indexScope;
+  self = null; RW.indexScope = { mobs: new Set(), recs: recSet }; shared = null;
+  try { return withPaths([], () => encV(list, new Map())); } finally { self = prev; RW.indexScope = ps; shared = null; }
 }
 
 // ---------------------------------------------------------------- shadows: what the other workers have of a mob, to send only changes
@@ -1026,6 +1037,6 @@ function hourly() {
 Object.assign(RW, { journal: null, clock: null, onTick: null, onTouch: null, chan: name => channels.get(name), rec, stamp, realNow, tick, pause, channel, touch, writes, dynItem, setup, stop, beginThink, thinking, afterThink, beforeDeliver, afterDeliver, stats, text, hourly, replan,
   enc, dec, Shadow, snap, diff, patch, makeShared, attach, SKIP, REBALANCE, SOLO_MS, refsOn,
   ownerOf, unitOf,   // (read only: the debug screen's Regions map colours each region by the worker its mobs think on, js/debugfeed.js)
-  refs: refsOn, encData, atLater });
+  refs: refsOn, encData, encMany, decAll, atLater });
 BF.rworkers = RW;
 })();

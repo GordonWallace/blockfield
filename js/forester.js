@@ -92,6 +92,7 @@ function addSap(x, y, z, id) {
   const c = BF.world.canonXZ ? BF.world.canonXZ(x, z) : [x, z];   // kept by canonical cell (a sapling placed across a face edge)
   if (c) saps.set(pk(c[0], y, c[1]), { x: c[0], y, z: c[1] });
 }
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(hook); });   // (cluster workers: set up on every worker, js/ctick.js warm)
 function hook() {
   if (hooked || !BF.world || !BF.on) return;
   hooked = true;

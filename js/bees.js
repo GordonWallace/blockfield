@@ -611,7 +611,9 @@ if (BF.rworkers) {
   BF.rworkers.channel("lure", { key: m => m.id, get: id => BF.ids.get(id), state: m => lures.has(m), set: (m, on) => { if (!m) return; if (on) lures.add(m); else lures.delete(m); } });
 }
 
-// (the multi-worker runtime, js/cworkers.js: each group's homes and the bees out of them at meetings)
+// (the multi-worker runtime, js/cworkers.js: each group's homes and the bees out of them at meetings; registered on every worker at
+// setup, js/ctick.js warm: the homes are found at the first step, as on one worker, and in the same order)
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(tables); });
 function tables() {
   const K = BF.ctick;
   if (!K || !K.owned) return;

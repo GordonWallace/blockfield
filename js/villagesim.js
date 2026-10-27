@@ -359,8 +359,13 @@ function step() {
   if (check(focusX, focusZ, simClock, BF.simNow())) stepChanged = true;
 }
 // A meeting of the cluster tick: the trips' pin asks first (js/merchant.js), then the set (the clock check as step() does it).
+// With partial copies (js/cworkers.js) the merchants come current first (merchant.meet reads and clears what they noted), and a
+// village's mobs before the set reads their tasks or stops them (fetchVillage).
+// (which mobs is asked of each one's current copy: a stale copy may not show yet that it joined the village or became a merchant)
+const fetch = pred => { if (BF.cworkers && BF.cworkers.partial) BF.cworkers.fetch(BF.mobs.list, pred); };
+const fetchVillage = key => fetch(m => m.villageId === key || m.penVillageId === key || (m.ledBy && m.ledBy.villageId === key));
 function meet() {
-  if (BF.merchant && BF.merchant.meet) BF.merchant.meet();
+  if (BF.merchant && BF.merchant.meet) { fetch(m => m.mc); BF.merchant.meet(); }
   if (focusX == null) return;
   if (check(focusX, focusZ, simClock, BF.simNow())) stepChanged = true;
 }
@@ -406,6 +411,7 @@ function check(px, pz, clk, now) {
     if (next.has(k)) continue;
     let en = ending.get(k);
     if (!en) {
+      fetchVillage(k);
       const est = estimates(k);
       if (!(est.max > 0)) continue;                                  // nothing out on a task: it unloads now
       en = { t0: nd, until: nd + est.max / DAY_S, est: est.list, max: est.max };
@@ -415,6 +421,7 @@ function check(px, pz, clk, now) {
     }
     if (nd < en.until || nd < en.t0) { next.set(k, e); if (e.extra) extra.add(k); continue; }   // still counting down
     const rec = BF.mobs.villages.get(k);
+    fetchVillage(k);
     for (const x of estimates(k).list) if (x.errand) logError("task-running", { village: rec ? rec.key : k, who: x.who, task: x.task, estimate: x.est != null ? x.est : x.secs, ran: x.ran != null ? x.ran : Math.round((nd - en.t0) * DAY_S), why: "the unload timer ended" });
     ending.delete(k);
   }
@@ -426,6 +433,7 @@ function check(px, pz, clk, now) {
     if (k == null) break;
     const rec = BF.mobs && BF.mobs.villages && BF.mobs.villages.get(k);
     if (why === "AI time") aiCoolUntil = BF.simNow() + 5;
+    fetchVillage(k);
     if (rec) forceStop(rec, why);
     forceTrips(k, why);
     ending.delete(k);
@@ -441,6 +449,7 @@ function check(px, pz, clk, now) {
   active.clear();
   for (const [k, e] of next) active.set(k, e);
   for (const [k, e] of fresh) startCatchUp(k, e);
+  for (const k of dropped) fetchVillage(k);
   for (const k of dropped) if (BF.merchant && BF.merchant.remember) BF.merchant.remember(k, true);   // its prices are written down for merchants elsewhere
   for (const k of dropped) endLeisure(k);
   for (const k of dropped) if (BF.mobs && BF.mobs.unloadVillage) BF.mobs.unloadVillage(k);   // the village and all its villagers go together
@@ -528,10 +537,10 @@ BF.villageSim = {
     BF.world.onChunkLoad(onChunkLoad);
     BF.world.onThink(step, "villageSim");   // re-checks on the game clock (update), in the think phase (js/world.js tickSim)
     if (BF.world.onBlockTick) BF.world.onBlockTick(catchUpTick, "catchUp");   // crop catch-up, a block tick (spec r15-19)
-    if (BF.ctick && !hooked) {   // the set at meetings, and the shared table published at their end (spec r15-39b)
+    if (BF.ctick && !hooked) {   // the shared table published at meetings, first, then the set (spec r15-39b)
       hooked = true;
+      if (BF.sharedTable) BF.ctick.onMeet(BF.sharedTable.publish, "shared", "start");
       BF.ctick.onMeet(meet, "villageSim", "start");
-      if (BF.sharedTable) BF.ctick.onMeet(BF.sharedTable.publish, "shared", "end");
     }
   },
 };

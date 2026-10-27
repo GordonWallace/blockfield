@@ -65,12 +65,12 @@ if (!isMainThread && workerData && workerData.me != null && !workerData.saves &&
         const s = d.cstart;
         BF.ctick.only = s.only; BF.ctick.on = true; BF.ctick.order = s.order || "tick";
         BF.cworkers.shuffle = s.shuffle || 0;
-        BF.cworkers.setup({ n: s.n, me: s.me, link: BF.rworkers.attach(s.shared, s.me, s.n), claims: s.shared.claims });
+        BF.cworkers.setup({ n: s.n, me: s.me, link: BF.rworkers.attach(s.shared, s.me, s.n), claims: s.shared.claims, pull: !!s.pull, partial: !!s.partial });
         parentPort.postMessage({ started: true });
       } else if (d.ticks) {
         h.tick(d.ticks);
         parentPort.postMessage({ ticked: h.ticks });
-      } else if (d.hash) parentPort.postMessage({ hash: BF.stateHash.full(), mismatch: BF.rworkers.mismatch || null, mismatchText: d.text ? BF.rworkers.mismatchText || null : null, audits: BF.rworkers.audits || null, stats: BF.cworkers.active ? BF.cworkers.stats() : BF.rworkers.stats() });
+      } else if (d.hash) parentPort.postMessage({ hash: BF.cworkers.partial ? BF.cworkers.gathered(() => BF.stateHash.full()) : BF.stateHash.full(), mismatch: BF.rworkers.mismatch || null, mismatchText: d.text ? BF.rworkers.mismatchText || null : null, audits: BF.rworkers.audits || null, stats: BF.cworkers.active ? BF.cworkers.stats() : BF.rworkers.stats() });
       else if (d.stop) process.exit(0);
     } catch (e) { fail(e); }
   });

@@ -421,6 +421,7 @@ function herdMine(C, h) {
 }
 // (the multi-worker runtime, js/cworkers.js: each group's records and herds at meetings)
 let tabled = false;
+BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(tables); });   // (cluster workers: set up on every worker, js/ctick.js warm)
 function tables() {
   if (tabled || !BF.ctick || !BF.ctick.owned) return;
   tabled = true;
