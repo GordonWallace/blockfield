@@ -3,6 +3,7 @@
 //  - an array's objects that moved (a seller's offers rebuilt in a new order, js/market.js sync) reach the other workers as moves: their
 //    own objects change places, so a link into one (a buyer's deal.offer) still points at an object in the list (r15-39b C7)
 //  - a moved object changed inside, a new object, a dropped one and a shorter list all come out like the owner's
+//  - a baker's oven (a module table it changes while it thinks) goes whole through the "oven" channel
 const { load } = require('../tools/headless.js');
 for (const k of ['log', 'info', 'debug']) console[k] = () => {};
 const { BF } = load();
@@ -31,5 +32,17 @@ const ops2 = RW.diff(seller, s);
 RW.patch(replica, ops2);
 ok(JSON.stringify(RW.enc(seller)) === JSON.stringify(RW.enc(replica)) && replica.trades[1] === deal.offer, "a second rebuild, shorter: the same, and the deal's offer moved with it");
 ok(!RW.diff(seller, s), "nothing changed: no ops");
+// a baker's oven (js/baker.js, a module table a baker changes while it thinks): the "oven" channel carries all of it
+{
+  const K = BF.baker, ch = RW.chan("oven"), I = BF.I, m = BF.mobs.list.find(x => x.type === "villager");
+  const a = K.ovenAt(1, 2, 3);
+  Object.assign(a, { kind: "pie", n: 4, tray: [{ id: I.pumpkin, count: 4 }, { id: I.sugar, count: 4 }], fuel: { id: I.coal, count: 2 }, out: [{ id: I.pumpkin_pie, count: 1 }], burn: 3.5, burnMax: 80, cook: 0.6, lit: true, baked: 1, by: m || null });
+  ok(ch.get([1, 2, 3]) === a && JSON.stringify(ch.key(a)) === "[1,2,3]", "the oven channel finds an oven by its cell");
+  const d = JSON.parse(JSON.stringify(ch.state(a))), c = K.ovenAt(4, 5, 6);
+  ch.set(c, d);
+  const plain = o => JSON.stringify([o.kind, o.n, o.tray, o.fuel, o.out, o.burn, o.burnMax, o.cook, o.lit, o.baked, o.by && o.by.id]);
+  ok(plain(c) === plain(a) && c.tray !== a.tray && (!m || c.by === m), "an oven's state set on another copy is the same, its own lists, the same baker");
+  K.ovens.delete("1,2,3"); K.ovens.delete("4,5,6");
+}
 out(fails ? "FAIL rworkers-codec (" + fails + ")" : "PASS rworkers-codec");
 process.exit(fails ? 1 : 0);
