@@ -164,17 +164,38 @@ function growTick() {
 }
 // Block tick: saplings grow into trees (spec r15-18: a block tick like crop growth, not a request).
 let sapLast = 0;
+// With the cluster tick on (spec r15-39b, item C6: js/ctick.js) once per cluster group, once a second on the tick counter, over the
+// group's own saplings; a tree that would reach another group's cells (TREE_R blocks round its trunk) grows at the next meeting.
+const TREE_R = 3;
 function sapTick() {
   hook();
-  const now = nowS();
-  if (now - sapLast < 1) return;
-  const dt = Math.min(5, now - sapLast);
-  sapLast = now;
+  const CC = W().clusterCells, g = CC && CC.cur();
+  let dt;
+  if (g) { if (BF.rand.tick % 20 !== 0) return; dt = 1; }
+  else {
+    const now = nowS();
+    if (now - sapLast < 1) return;
+    dt = Math.min(5, now - sapLast);
+    sapLast = now;
+  }
   for (const [k, s] of saps) {
+    if (g && CC.cellGroup(s.x, s.z) !== g.key) continue;
     if (!W().isLoaded(s.x, s.z)) continue;
     if (!isSap(get(s.x, s.y, s.z))) { saps.delete(k); continue; }
-    if (BF.rand.at("sapling", s.x, s.z, null, s.y).next() < GROW_PER_S * dt * (BF.weather && BF.weather.raining ? 1.3 : 1)) { if (growTree(s.x, s.y, s.z)) saps.delete(k); }
+    if (BF.rand.at("sapling", s.x, s.z, null, s.y).next() < GROW_PER_S * dt * (BF.weather && BF.weather.raining ? 1.3 : 1)) {
+      const far = g && CC.foreignNear(s.x, s.z, TREE_R);
+      if (far) CC.toMeeting("sapling", far[0], far[1], { x: s.x, y: s.y, z: s.z });
+      else if (growTree(s.x, s.y, s.z)) saps.delete(k);
+    }
   }
+}
+if (BF.world && BF.world.clusterCells) {
+  const CC = BF.world.clusterCells;
+  CC.onMeeting("sapling", d => {
+    if (!W().isLoaded(d.x, d.z) || !isSap(get(d.x, d.y, d.z))) return { ok: false, why: "changed" };
+    if (growTree(d.x, d.y, d.z)) saps.delete(pk(d.x, d.y, d.z));
+  });
+  CC.ownCells("saplings", saps, v => [v.x, v.y, v.z], a => ({ x: a[0], y: a[1], z: a[2] }));   // (several workers, C7)
 }
 {
   const world = BF.world;

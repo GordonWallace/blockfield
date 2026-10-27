@@ -43,6 +43,8 @@ Region workers never pay off much, because every worker has to keep its whole co
 
 The groundwork is in the game but off: with it off, the world plays exactly as before. The game's systems (mobs, village life, animals, caravans, blocks) are being moved over one by one. When the clusters are turned on, the [[page:game-log]] notes it, and an ERROR names any cluster whose tick fails.
 
+The world's own ticks already run by cluster: flowing water, crops and sugar cane, saplings, farmland drying out, grass spreading, crops catching up in reloaded chunks, and furnaces and bakers' ovens. Each cluster ticks only its own blocks. A block right at a border, whose tick would look at or change the other cluster's blocks (water flowing over the border, a tree growing across it), waits for the next meeting and is done there, so water still crosses from one cluster to the next, a second at a time. With the clusters on, chunks also arrive and leave only at meetings: a chunk generated in between waits, at most a second, before it appears.
+
 The animals have moved over: sheep pens, chicken coops, cow pastures, pig sties, horses and their herds, stables and bees each run with the cluster they belong to (a pen with its village, a horse with where it is or was last seen, a herd with where it was at the last meeting, bees with their home). With the clusters on, two things play a little differently: at most 600 bees are out at once in each cluster rather than in the whole world, and only bees in the player's own cluster follow a flower the player holds (the others are too far away to see it anyway).
 
 ## What it costs
