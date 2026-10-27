@@ -1298,7 +1298,9 @@ function onBlockTickReq(req) {
 }
 // A table of cells ("x,y,z" keys: a Set, or a Map with plain values) as BF.ctick.owned wants it: a group's part and putting it back.
 // enc / dec (Maps): a value to plain JSON and back onto the entry already there (dec(plain, old) -> the entry to keep).
-// (js/requests.js and js/ctick.js load after this file: the handler and the tables are registered once every file is in, BF.onLoad)
+// Only what changed since this worker last sent or got it goes: the entries whose JSON changed (a Set's new keys), and the keys gone
+// from the table (a key's cell names its group, so the group's owner finds them among the keys every worker has); snap(g, true) puts
+// the whole part (tests: a part sent and snapped again).
 const ownQ = [];
 let ownDone = false;
 function clusterSetup() {
@@ -1314,16 +1316,40 @@ function ownCellsNow(name, coll, enc, dec) {
   const C = BF.ctick;
   const isMap = coll instanceof Map;
   const of = k => { const i = k.indexOf(","), j = k.lastIndexOf(","); return cellGroup(+k.slice(0, i), +k.slice(j + 1)); };
+  const had = new Map();   // key -> its JSON (a Set's: 1) as every worker has it
+  let goneAt = -1, gone = null;   // (the keys gone from the table, by group: worked out once a swap)
+  const goneOf = gk => {
+    if (goneAt !== BF.rand.tick || !gone) {
+      goneAt = BF.rand.tick; gone = new Map();
+      for (const k of had.keys()) if (!coll.has(k)) { const g = of(k); let a = gone.get(g); if (!a) gone.set(g, (a = [])); a.push(k); }
+    }
+    return gone.get(gk) || [];
+  };
+  const put1 = (k, j) => {
+    if (!isMap) { coll.add(k); had.set(k, 1); return; }
+    coll.set(k, dec ? dec(j, coll.get(k)) : j); had.set(k, JSON.stringify(j));
+  };
   C.owned(name, {
-    snap(gk) {
-      const out = [];
-      for (const k of C.keysOf(coll, gk, of)) out.push(isMap ? [k, enc ? enc(coll.get(k)) : coll.get(k)] : k);
-      return out;
+    reset() { had.clear(); gone = null; },
+    snap(gk, all) {
+      const put = [];
+      for (const k of C.keysOf(coll, gk, of)) {
+        if (!isMap) { if (all || !had.has(k)) { had.set(k, 1); put.push(k); } continue; }
+        const j = enc ? enc(coll.get(k)) : coll.get(k), t = JSON.stringify(j);
+        if (all || had.get(k) !== t) { had.set(k, t); put.push([k, j]); }
+      }
+      if (all) return { all: true, put, gone: [] };
+      const g = goneOf(gk);
+      for (const k of g) had.delete(k);
+      return { put, gone: g };
     },
-    apply(gk, list) {
-      const old = new Map();
-      for (const k of C.keysOf(coll, gk, of)) { if (isMap) old.set(k, coll.get(k)); coll.delete(k); }
-      for (const it of list) { if (isMap) coll.set(it[0], dec ? dec(it[1], old.get(it[0])) : it[1]); else coll.add(it); }
+    apply(gk, o) {
+      if (o.all) {
+        const keep = new Set(isMap ? o.put.map(it => it[0]) : o.put);
+        for (const k of C.keysOf(coll, gk, of)) if (!keep.has(k)) { coll.delete(k); had.delete(k); }
+      }
+      for (const k of o.gone) { coll.delete(k); had.delete(k); }
+      for (const it of o.put) if (isMap) put1(it[0], it[1]); else put1(it);
       C.applied(coll, gk);
     },
   });
