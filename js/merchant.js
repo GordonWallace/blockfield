@@ -20,6 +20,15 @@
 //   at WEAR_N crossings it becomes a dirt path. The counts are saved.
 // - Routes (debug screen): each pair of villages that traded, trips and goods moved in the last 7 days, and whether a merchant is on the road.
 // - Death on the road: its goods drop where it fell (mobKilled).
+// - Clusters (spec r15-39b, js/ctick.js; only with the cluster tick on): a merchant walking or dealing away (stages go, sell, shop, back)
+//   belongs to the cluster of the ground it stands on (roaming, js/clusters.js baseOf), so it is handed over to the other village's cluster
+//   at the meeting after it gets there and trades there locally; it waits at the edge of a village until it belongs to that village's
+//   cluster, and goes back to its home's at the meeting after it comes home. Its plans read the other village from the shared table
+//   (js/sharedtable.js: prices as of the last meeting), never the other village's live villagers. What it changes outside its cluster waits for
+//   the meeting and goes on the merchant itself until then (meet, a "start" hook via js/villagesim.js): the pin of a new trip is asked for
+//   (stage "pin": granted in merchant id order, at most MAX_PINS on the road), pins whose trip is over are dropped, the routes' trips, roads
+//   given up and path wear are written down, and the path blocks are requested; its home village's log lines written while away wait on
+//   it until it is home. Game log: INFO "merchant" when a pin is asked, granted or refused at a meeting.
 // API: BF.merchant = { away(m), remember, forceHome, PROF, RANGE, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, mayHire, ai, plan, statusText, reserve, pack, unpack, routes, tick, exportAll, importAll, reset, wear, LOG }
 (() => {
 "use strict";
@@ -67,6 +76,24 @@ const pdist = (a, b) => PL().distance(a, b);
 const LQ = {};
 const seenFrom = (a, x, z) => { LQ.x = x; LQ.z = z; return PL().local(a, LQ, LQ); };
 const state = m => m.mc || (m.mc = { stage: null, trip: null, last: -1e9, cd: 3 + RS(m).next() * 5, nav: {} });
+// Clusters (spec r15-39b): the cluster tick is on; a cluster's pass is running (what the merchant changes outside its cluster then waits
+// for the meeting, on the merchant: note); the merchant belongs to village key's cluster now (as of the last meeting); it is roaming
+// (walking or dealing away: its cluster is the ground's, js/clusters.js baseOf).
+const clustered = () => !!(BF.ctick && BF.ctick.on);
+const inPass = () => clustered() && !!BF.ctick.cur;
+const note = (m, e) => { const st = state(m); (st.notes || (st.notes = [])).push(e); };
+const ROAM = new Set(["go", "sell", "shop", "back"]);
+const roaming = m => !!(m && m.mc && m.mc.trip && ROAM.has(m.mc.stage));
+function inCluster(m, key) {
+  if (!clustered()) return true;
+  const C = BF.clusters;
+  return m.cl !== undefined && C.groupOf(m.cl) === C.groupOf("v:" + key);
+}
+// Home's prices as the other village's cluster may read them: the shared table's row (the last meeting's), else the last-known prices.
+function homeSummary(home) {
+  const row = BF.sharedTable && BF.sharedTable.row(home.key), sum = row && row.sum ? row.sum : market.get(home.key);
+  return { key: home.key, x: home.x, z: home.z, sum: sum || { sells: {}, buys: {} } };
+}
 
 // ---------------------------------------------------------------- who may work the counter (js/jobs.js)
 const capOf = R => Math.max(1, Math.floor((R.members || []).filter(live).length / 20));
@@ -155,6 +182,8 @@ function bookOf(sum) {
   return { sells, buys };
 }
 const roadKey = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
+// A road given up (lost, or a trip over TRIP_MAX_DAYS): no trip on it until `until` (clusters: written down at the meeting)
+function giveUpRoad(m, a, b, until) { if (inPass()) note(m, ["noroad", roadKey(a, b), until]); else noRoad.set(roadKey(a, b), until); }
 const blocked = (a, b) => (noRoad.get(roadKey(a, b)) || 0) > dayNow();
 // Game days a trip over straight-line distance d should take: walking days (the tent between) plus the dealing.
 function tripDays(m, d) {
@@ -166,6 +195,7 @@ function tripDays(m, d) {
 function candidates(m) {
   const home = m.village, out = [], seenK = new Set();
   if (!home || !BF.mobs.villages) return out;
+  if (clustered()) return candidatesShared(m, home);
   for (const rec of BF.mobs.villages.values()) {
     if (rec === home || !rec.wg || !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
     if (!BF.world.isLoaded(rec.x, rec.z) || !traders(rec, m).length) continue;
@@ -183,6 +213,21 @@ function candidates(m) {
     if (d <= RANGE && tripDays(m, d) <= MAX_PLAN_DAYS) out.push({ rec: { key, x: v.x, z: v.z, wg: v, sum }, d });
   }
   return out.sort((a, b) => a.d - b.d);
+}
+// With the cluster tick on: every village within RANGE read from the shared table (as of the last meeting, js/sharedtable.js), or its
+// last-known prices when it isn't simulated; never another village's live records.
+function candidatesShared(m, home) {
+  const out = [];
+  let near = [];
+  try { near = BF.worldgen.villagesNear(home.x, home.z, RANGE) || []; } catch (e) { near = []; }
+  for (const v of near) {
+    if (!v || v.x == null) continue;
+    const key = vKey(v), row = BF.sharedTable && BF.sharedTable.row(key), sum = row && row.trade ? row.sum : market.get(key);
+    if (key === home.key || !sum || blocked(home.key, key)) continue;
+    const d = pdist(home, v);
+    if (d <= RANGE && tripDays(m, d) <= MAX_PLAN_DAYS) out.push({ rec: { key, x: v.x, z: v.z, wg: v, sum, tick: row ? row.tick : null }, d });
+  }
+  return out.sort((a, b) => a.d - b.d || (a.rec.key < b.rec.key ? -1 : 1));
 }
 // The best trip from home now: {rec, d, list, profit} or null.
 function plan(m) {
@@ -297,25 +342,38 @@ function step(m, st) {
   const k = x + "," + y + "," + z;
   if (st.cell === k) return;
   st.cell = k;
-  if (!m.onGround || !BF.world.isLoaded(x, z) || inVillage(x, z)) return;
+  if (!m.onGround) return;
+  if (inPass()) { (st.walk || (st.walk = [])).push(x, y, z); return; }   // (clusters: counted at the meeting, wearCell)
+  wearCell(m, st, x, y, z, k);
+}
+// One step on the canonical ground cell x, y, z: counted, and a dirt path requested at WEAR_N.
+function wearCell(m, st, x, y, z, k) {
+  if (!BF.world.isLoaded(x, z) || inVillage(x, z)) return;
   const W = BF.world, id = W.getBlock(x, y, z);
   if (!wearable(id) || W.getBlock(x, y + 1, z) !== 0) return;
   const n = (wear.get(k) || 0) + 1;
   wear.delete(k);
   if (n < WEAR_N) { wear.set(k, n); if (wear.size > WEAR_MAX) wear.delete(wear.keys().next().value); return; }
-  if (BF.B.dirt_path != null) BF.blockReq.cells(m, [{ x, y, z, id: BF.B.dirt_path, expect: id }]).then(r => { if (r.ok) st.worn = (st.worn || 0) + 1; });   // a request (spec r15-19)
+  if (BF.B.dirt_path == null) return;
+  const req = BF.blockReq.cells(m, [{ x, y, z, id: BF.B.dirt_path, expect: id }]);   // a request (spec r15-19)
+  if (clustered()) st.worn = (st.worn || 0) + 1;   // (clusters: sent at the meeting, to the cell's cluster: counted as asked, no callback)
+  else req.then(r => { if (r.ok) st.worn = (st.worn || 0) + 1; });
 }
 
 // ---------------------------------------------------------------- routes
 const routes = new Map();        // "a|b" (sorted keys) -> {a, b, trips: [[day, items, emeralds]], total}
 const routeKey = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
-function noteTrip(home, dest, items, ems) {
+function noteTrip(home, dest, items, ems, m) {
+  if (m && inPass()) { note(m, ["trip", home, dest, items, ems, +dayNow().toFixed(3)]); return; }
+  addTrip(home, dest, items, ems, dayNow());
+}
+function addTrip(home, dest, items, ems, day) {
   const k = routeKey(home, dest);
   let r = routes.get(k);
   if (!r) routes.set(k, r = { a: k.split("|")[0], b: k.split("|")[1], trips: [], total: 0 });
-  r.trips.push([+dayNow().toFixed(3), items, ems]);
+  r.trips.push([+(+day).toFixed(3), items, ems]);
   r.total++;
-  const cut = dayNow() - 7;
+  const cut = day - 7;
   r.trips = r.trips.filter(t => t[0] >= cut);
 }
 function routesView() {
@@ -355,7 +413,7 @@ function pinTrip(m, st) {
 }
 function endTrip(m, st, why) {
   const tr = st.trip;
-  if (tr && BF.villageSim) BF.villageSim.unpin(tr.id);
+  if (tr && BF.villageSim && !inPass()) BF.villageSim.unpin(tr.id);   // (clusters: at the meeting, meet)
   if (tr) log("home", m, { dest: tr.dest, why, sold: tr.soldN, bought: tr.boughtN });
   st.trip = null; st.stage = null; st.errands = null; st.cargo = null; m.ai.route = null;
   st.last = dayNow();
@@ -375,11 +433,21 @@ function start(m, st) {
   if (!tr.id) return false;
   st.trip = tr;
   st.destWg = p.rec.wg;
+  if (clustered()) {   // the pin is asked for at the next meeting (meet): the trip waits for it in stage "pin"
+    tr.pin = "ask"; st.stage = "pin";
+    log("plan", m, { dest: tr.dest, goods: listText(tr.out), profit: +p.profit.toFixed(2), table: p.rec.tick != null ? p.rec.tick : undefined });
+    return true;
+  }
   if (!pinTrip(m, st)) { st.trip = null; st.cd = 30; return false; }   // two trips already on the road: wait
+  log("plan", m, { dest: tr.dest, goods: listText(tr.out), profit: +p.profit.toFixed(2) });
+  setOut(m, st);
+  return true;
+}
+// The trip has its pin: the buying round at home.
+function setOut(m, st) {
+  const tr = st.trip;
   st.stage = "buy"; st.errands = buyErrands(m.village, m, tr.out, g => g.sell / (1 + MIN_GAIN)); st.ei = 0; st.et = 0;
   st.want = new Map(tr.out.map(g => [g.id, g.n]));
-  log("plan", m, { dest: tr.dest, goods: listText(tr.out), profit: +p.profit.toFixed(2) });
-  return true;
 }
 // Works through st.errands: walks to each villager and deals. Returns true when the round is over.
 function errands(m, st, dt, out) {
@@ -411,7 +479,18 @@ function errands(m, st, dt, out) {
   }
   return true;
 }
-function vlogLine(m, text) { if (BF.vlog && m.village) BF.vlog.log(m.village, "caravan", who(m) + " " + text, m); }
+function vlogLine(m, text) {
+  if (!BF.vlog || !m.village) return;
+  if (inPass() && !inCluster(m, m.village.key)) { note(m, ["vlog", who(m) + " " + text]); return; }   // (clusters: home's log is written when it is home)
+  BF.vlog.log(m.village, "caravan", who(m) + " " + text, m);
+}
+// Home's log lines written while it was away (clusters), now that it is in home's cluster again.
+function flushLog(m, st) {
+  if (!st.notes || !st.notes.some(e => e[0] === "vlog") || !inCluster(m, m.village.key)) return;
+  for (const e of st.notes) if (e[0] === "vlog" && BF.vlog) BF.vlog.log(m.village, "caravan", e[1], m);
+  st.notes = st.notes.filter(e => e[0] !== "vlog");
+  if (!st.notes.length) st.notes = null;
+}
 function destName(key) { const r = recOf(key); return r ? "the village at " + Math.round(r.x) + ", " + Math.round(r.z) : "the village at " + key; }
 
 // The road of a trip as a line from the lower-keyed village to the other, so both ways use the same waypoints.
@@ -422,10 +501,15 @@ function roadLine(tr, home) {
 }
 function tripAI(m, st, dt, out) {
   const tr = st.trip, home = recOf(tr.home) || m.village, dest = recOf(tr.dest);
-  if (dayNow() - tr.day0 > TRIP_MAX_DAYS) { noRoad.set(roadKey(tr.home, tr.dest), dayNow() + 7); log("error", m, { why: "trip over " + TRIP_MAX_DAYS + " days", dest: tr.dest }); endTrip(m, st, "gave up"); return false; }
+  if (dayNow() - tr.day0 > TRIP_MAX_DAYS) { giveUpRoad(m, tr.home, tr.dest, dayNow() + 7); log("error", m, { why: "trip over " + TRIP_MAX_DAYS + " days", dest: tr.dest }); endTrip(m, st, "gave up"); return false; }
   if (!dest && (st.stage === "sell" || st.stage === "shop")) st.stage = "back";   // the other village is gone (not simulated any more): home
   if (st.stage === "go" || st.stage === "back") step(m, st);
   switch (st.stage) {
+    case "pin": {   // (clusters) waiting for the meeting to grant the trip's pin
+      if (tr.pin === "ok") { tr.pin = undefined; setOut(m, st); return tripAI(m, st, dt, out); }
+      if (tr.pin === "no") { st.trip = null; st.stage = null; st.cd = 30; return false; }   // two trips already on the road: wait
+      return false;
+    }
     case "buy": {
       if (!errands(m, st, dt, out)) return true;
       st.cargo = cargoOf(m, tr.out.map(g => g.id)).map(c => Object.assign(c, { cost: (tr.out.find(g => g.id === c.id) || {}).buy || 0 }));
@@ -437,8 +521,9 @@ function tripAI(m, st, dt, out) {
     }
     case "go": {
       const r = travel(m, st, dt, out, tr.dx, tr.dz, ARRIVE_R, roadLine(tr, home));
-      if (r === "failed") { log("lost", m, { dest: tr.dest }); noRoad.set(roadKey(tr.home, tr.dest), dayNow() + 7); st.stage = "back"; return true; }
+      if (r === "failed") { log("lost", m, { dest: tr.dest }); giveUpRoad(m, tr.home, tr.dest, dayNow() + 7); st.stage = "back"; return true; }
       if (r !== "arrived") return true;
+      if (dest && !inCluster(m, tr.dest)) return true;   // (clusters: handed over to the village's cluster at the next meeting)
       if (!dest || !traders(dest, m).length) { st.aw = (st.aw || 0) + dt; if (st.aw < 30) return true; st.aw = 0; if (!dest) { st.stage = "back"; return true; } }   // its villagers are still appearing
       st.aw = 0;
       vlogLine(m, "arrived at " + destName(tr.dest) + " with " + listText(st.cargo));
@@ -451,9 +536,9 @@ function tripAI(m, st, dt, out) {
       const sold = st.cargo.map(c => ({ id: c.id, n: c.n - cnt(m, c.id) })).filter(c => c.n > 0), got = cnt(m, em()) - st.e0;
       tr.soldE += got;
       if (sold.length && BF.vlog) BF.vlog.log(dest, "caravan", who(m) + " from " + destName(tr.home) + " sold " + listText(sold) + " here for " + got + " emerald" + (got === 1 ? "" : "s"), m);
-      noteTrip(tr.home, tr.dest, sold.reduce((s, c) => s + c.n, 0), got);
+      noteTrip(tr.home, tr.dest, sold.reduce((s, c) => s + c.n, 0), got, m);
       // what home lacks, bought with the takings
-      const g = goods(dest, home, m, Math.max(0, got));
+      const g = goods(dest, clustered() ? homeSummary(home) : home, m, Math.max(0, got));
       tr.back = g.list.map(x => ({ id: x.id, n: x.n, buy: x.buy, sell: x.sell }));
       st.want = new Map(tr.back.map(x => [x.id, x.n]));
       st.stage = "shop"; st.errands = buyErrands(dest, m, tr.back, x => x.sell / (1 + MIN_GAIN)); st.ei = 0; st.et = 0;
@@ -474,6 +559,7 @@ function tripAI(m, st, dt, out) {
       const r = travel(m, st, dt, out, home.x, home.z, ARRIVE_R, roadLine(tr, home));
       if (r === "failed") { st.nav.giveUp = (st.nav.giveUp || 0) + 1; if (st.nav.giveUp > 20) { endTrip(m, st, "lost"); return false; } return true; }
       if (r !== "arrived") return true;
+      if (!inCluster(m, tr.home)) return true;   // (clusters: back in home's cluster at the next meeting)
       st.stage = "unload"; st.errands = sellErrands(home, m, st.cargo.filter(c => tr.back.some(g => g.id === c.id))); st.ei = 0; st.et = 0; st.e0 = cnt(m, em());
       return true;
     }
@@ -482,7 +568,7 @@ function tripAI(m, st, dt, out) {
       const got = cnt(m, em()) - st.e0;
       tr.soldE += got;
       const sold = tr.back.map(g => ({ id: g.id, n: Math.max(0, (st.cargo.find(c => c.id === g.id) || { n: 0 }).n - cnt(m, g.id)) })).filter(c => c.n > 0);
-      if (sold.length || tr.back.length) noteTrip(tr.dest, tr.home, sold.reduce((s, c) => s + c.n, 0), got);
+      if (sold.length || tr.back.length) noteTrip(tr.dest, tr.home, sold.reduce((s, c) => s + c.n, 0), got, m);
       vlogLine(m, "came home from " + destName(tr.dest) + (sold.length ? " and sold " + listText(sold) + " for " + got + " emerald" + (got === 1 ? "" : "s") : ""));
       endTrip(m, st, "done");
       return false;
@@ -523,6 +609,7 @@ function ai(m, dt, out) {
   const st = state(m), t = skyT();
   if (campAI(m, st, t)) return true;
   if (t < WORK_START || t >= DUSK || m.tradingWith) { if (st.trip && st.stage !== "go" && st.stage !== "back") m.ai.route = null; return false; }
+  if (st.notes) flushLog(m, st);
   if (st.trip) return tripAI(m, st, dt, out);
   st.cd -= dt;
   if (st.cd > 0) return false;
@@ -544,7 +631,7 @@ function reserve(m) {
   return out;
 }
 
-const STATUS = { buy: "Buying goods for a trip", go: "Carrying goods to another village", sell: "Selling goods in another village", shop: "Buying goods to take home", back: "Walking home with goods", unload: "Selling goods brought home" };
+const STATUS = { pin: "Getting ready for a trip", buy: "Buying goods for a trip", go: "Carrying goods to another village", sell: "Selling goods in another village", shop: "Buying goods to take home", back: "Walking home with goods", unload: "Selling goods brought home" };
 function statusText(m) {
   if (!m || m.profession !== PROF) return "";
   const st = m.mc;
@@ -561,7 +648,7 @@ function onKilled(m) {
   if (st && st.trip) {
     if (BF.drops && Array.isArray(m.inv)) for (let i = 0; i < m.inv.length; i++) { const s = m.inv[i]; if (s) { BF.drops.spawn(s.id, s.count, m.position.x, m.position.y + 0.5, m.position.z); m.inv[i] = null; } }
     log("died", m, { dest: st.trip.dest });
-    if (BF.villageSim) BF.villageSim.unpin(st.trip.id);
+    if (BF.villageSim && !inPass()) BF.villageSim.unpin(st.trip.id);   // (clusters: at the meeting, meet)
     st.trip = null; st.stage = null;
   }
 }
@@ -574,6 +661,7 @@ function remember(rec, going) {
 let tickT = 0, summT = 0;
 const lastSeen = new Map();
 function tick(dt) {
+  if (clustered()) return;   // (clusters: the prices are the shared table's, pins are kept at meetings: meet)
   tickT -= dt;
   if (tickT > 0 || !BF.villageSim) return;
   tickT = 5;
@@ -588,11 +676,62 @@ function tick(dt) {
   }
 }
 
+// ---------------------------------------------------------------- clusters: the meeting (spec r15-39b, js/villagesim.js meet)
+// Between ticks, every cluster seen, alike on every worker. In merchant id order: what each noted while away is written down (routes'
+// trips, roads given up, path wear and its path blocks); then the pins: one whose merchant is here without that trip is dropped,
+// one nobody has carried for a game day too (the merchant unloaded or died), and the asks are granted while fewer than
+// MAX_PINS are on the road.
+const idNum = m => +String(m.id).slice(1) || 0;
+function meet() {
+  const VS = BF.villageSim;
+  if (!VS) return;
+  const ms = BF.regions.ofType("villager").filter(m => m.profession === PROF && !m.removed && m.mc).sort((a, b) => idNum(a) - idNum(b));
+  for (const m of ms) {
+    const st = m.mc;
+    if (st.notes) {
+      for (const e of st.notes) {
+        if (e[0] === "trip") addTrip(e[1], e[2], e[3], e[4], e[5]);
+        else if (e[0] === "noroad") noRoad.set(e[1], e[2]);
+      }
+      st.notes = st.notes.filter(e => e[0] === "vlog");
+      if (!st.notes.length) st.notes = null;
+    }
+    if (st.walk) {
+      const w = st.walk;
+      st.walk = null;
+      for (let i = 0; i < w.length; i += 3) wearCell(m, st, w[i], w[i + 1], w[i + 2], w[i] + "," + w[i + 1] + "," + w[i + 2]);
+    }
+  }
+  const now = dayNow(), carried = new Set(), here = new Set();
+  for (const m of ms) {
+    const tr = m.mc.trip, k = keyOf(m);
+    if (k) here.add(k);   // (a dead one too: its trip ended with it, js/merchant.js onKilled)
+    if (!m.dead && tr && tr.pin !== "ask" && tr.pin !== "no") carried.add(tr.id);
+  }
+  for (const id of [...VS.pins().keys()]) {
+    if (carried.has(id)) { lastSeen.set(id, now); continue; }
+    if (here.has(id)) { VS.unpin(id); lastSeen.delete(id); continue; }   // its merchant is here, not on this trip
+    if (!lastSeen.has(id)) lastSeen.set(id, now);
+    if (now - lastSeen.get(id) > 1) { VS.unpin(id); lastSeen.delete(id); }
+  }
+  for (const m of ms) {
+    const st = m.mc, tr = st.trip;
+    if (!tr || tr.pin !== "ask") continue;
+    if (m.dead) { st.trip = null; st.stage = null; continue; }
+    const ok = pinTrip(m, st);
+    tr.pin = ok ? "ok" : "no";
+    if (ok) lastSeen.set(tr.id, now);
+    if (BF.glog) BF.glog.log("INFO", "merchant", who(m) + (ok ? " may set out for the village at " + tr.dest + " (pinned at the meeting)" : " waits: " + VS.MAX_PINS + " trips are already on the road"), { village: m.village || undefined, at: m });
+  }
+}
+
 // ---------------------------------------------------------------- persistence
 function pack(m) {
   const st = m.mc;
   if (!st) return undefined;
   const o = { last: +st.last.toFixed(3), camp: m.ex && m.ex.camp ? m.ex.camp : undefined };   // its tent on the road (struck next morning)
+  if (st.notes) o.notes = st.notes;   // (clusters: what it noted since the last meeting, js/merchant.js meet)
+  if (st.walk) o.walk = st.walk;
   if (st.trip) o.trip = { id: st.trip.id, home: st.trip.home, dest: st.trip.dest, dx: Math.round(st.trip.dx), dz: Math.round(st.trip.dz), day0: +st.trip.day0.toFixed(3), stage: st.stage, out: st.trip.out, back: st.trip.back, soldN: st.trip.soldN, soldE: st.trip.soldE, cargo: st.cargo || null, want: st.want ? [...st.want] : null };
   return o;
 }
@@ -600,6 +739,8 @@ function unpack(m, o) {
   if (!o || typeof o !== "object") return;
   const st = state(m);
   if (Number.isFinite(+o.last)) st.last = +o.last;
+  if (Array.isArray(o.notes) && o.notes.length) st.notes = o.notes.filter(e => Array.isArray(e) && typeof e[0] === "string");
+  if (Array.isArray(o.walk) && o.walk.length % 3 === 0 && o.walk.every(Number.isFinite)) st.walk = o.walk.slice();
   if (o.camp && BF.explorer && Number.isFinite(+o.camp.x) && Number.isFinite(+o.camp.f)) BF.explorer.unpack(m, { camp: o.camp });
   const tr = o.trip;
   if (tr && typeof tr.home === "string" && typeof tr.dest === "string" && Array.isArray(tr.out) && Array.isArray(tr.back)) {
@@ -607,6 +748,7 @@ function unpack(m, o) {
     const [kx, kz] = tr.dest.split(",").map(Number);
     st.trip = { id: tr.id, home: tr.home, dest: tr.dest, dx: Number.isFinite(+tr.dx) ? +tr.dx : kx, dz: Number.isFinite(+tr.dz) ? +tr.dz : kz, day0: +tr.day0 || dayNow(), out: tr.out.filter(ok), back: tr.back.filter(ok), soldN: +tr.soldN || 0, soldE: +tr.soldE || 0, boughtN: 0 };
     st.stage = ["buy", "go", "sell", "shop", "back", "unload"].includes(tr.stage) ? tr.stage : "back";
+    if (tr.stage === "pin") { st.trip = null; st.stage = null; return; }   // (clusters: saved before its pin was granted: it plans again)
     st.cargo = Array.isArray(tr.cargo) ? tr.cargo.filter(ok) : [];
     st.want = new Map(Array.isArray(tr.want) ? tr.want : []);
     // an errand round restarts from what is on hand: buying rounds are cut short, selling rounds look again
@@ -625,10 +767,12 @@ function exportAll(out) {
   const nr = {};
   for (const [k, d] of noRoad) if (d > dayNow()) nr[k] = +d.toFixed(3);
   out["caravans"] = { routes: r, wear: w, market: Object.fromEntries(market), noroad: nr };
+  if (clustered() && BF.sharedTable) out["caravans"].shared = BF.sharedTable.serialize();   // the shared table (spec r15-39b): only with the cluster tick on
 }
 function importAll(o) {
   routes.clear(); wear.clear(); market.clear(); noRoad.clear();
   const c = o && o.caravans;
+  if (BF.sharedTable) BF.sharedTable.restore(c && c.shared);
   if (!c || typeof c !== "object") return;
   for (const k in c.routes || {}) {
     const v = c.routes[k], [a, b] = k.split("|");
@@ -638,7 +782,7 @@ function importAll(o) {
   for (const k in c.noroad || {}) if (Number.isFinite(+c.noroad[k])) noRoad.set(k, +c.noroad[k]);
   for (const s of Array.isArray(c.wear) ? c.wear : []) { const p = String(s).split(",").map(Number); if (p.length === 4 && p.every(Number.isFinite)) wear.set(p.slice(0, 3).join(","), p[3]); }
 }
-function reset() { routes.clear(); wear.clear(); market.clear(); noRoad.clear(); lastSeen.clear(); LOG.length = 0; tickT = summT = 0; }
+function reset() { routes.clear(); wear.clear(); market.clear(); noRoad.clear(); lastSeen.clear(); LOG.length = 0; tickT = summT = 0; if (BF.sharedTable) BF.sharedTable.reset(); }
 
 let hooked = false;
 function hook() { if (!hooked && BF.on) { hooked = true; BF.on("mobKilled", onKilled); } }
@@ -646,5 +790,5 @@ setTimeout(hook, 0);
 
 // On a trip (until dusk, when it camps or is home) or camped: mobs.js villagerAI does not walk it back to its village between errands or before the day starts.
 const away = m => !!(m.ex && m.ex.camp) || (!!(m.mc && m.mc.trip) && skyT() < DUSK);
-BF.merchant = { away, remember, forceHome, PROF, RANGE, leftSecs, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, CARGO_STACKS, TRIP_EVERY, WEAR_N, MIN_GAIN, mayHire, ai, plan, goods, book, statusText, reserve, pack, unpack, routes: routesView, tick, exportAll, importAll, reset, wear, step, LOG, _state: state, hook };
+BF.merchant = { away, roaming, meet, traders, remember, forceHome, PROF, RANGE, leftSecs, MAX_PLAN_DAYS, TRIP_MAX_DAYS, tripDays, candidates, summarize, bookOf, market, noRoad, roadKey, CARGO_STACKS, TRIP_EVERY, WEAR_N, MIN_GAIN, mayHire, ai, plan, goods, book, statusText, reserve, pack, unpack, routes: routesView, tick, exportAll, importAll, reset, wear, step, LOG, _state: state, hook };
 })();

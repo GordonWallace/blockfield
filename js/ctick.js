@@ -72,8 +72,8 @@ const SYSTEMS = {
   cowherd: false,       // C4
   pigFarmer: false,     // C4
   bees: false,          // C4
-  merchant: false,      // C5: merchants and caravans
-  villageSim: false,    // C5 (which villages are simulated, trip pins: js/villagesim.js)
+  merchant: true,       // C5: merchants and caravans
+  villageSim: true,     // C5 (which villages are simulated, trip pins: js/villagesim.js)
   fluids: true,         // C6: world
   growth: true,         // C6
   farmland: true,       // C6

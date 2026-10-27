@@ -1691,7 +1691,7 @@ function ageStep(m, now) {
   if (m._agePass === pass - 1 && now > m._ageT) L.lived = (L.lived || 0) + (now - m._ageT);
   m._agePass = pass; m._ageT = now;
   const k = m.village && m.village.key;
-  if (!k) return;
+  if (!k || (BF.ctick && !BF.ctick.mineVillage(k))) return;   // (clusters: a merchant away in another village's cluster doesn't age its own village)
   const A = villageAges.get(k) || (villageAges.set(k, { lived: 0, pass: -9, t: now }), villageAges.get(k));
   if (A.pass === pass) return;   // already counted this pass (another of its villagers)
   if (A.pass === pass - 1 && now > A.t) A.lived += now - A.t;
