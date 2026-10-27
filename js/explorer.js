@@ -404,7 +404,20 @@ const CAMPERS = new Set(["explorer", "merchant"]);
 // Changed while the explorer thinks or in its requests' callbacks, which run only on the region worker that thinks it (spec r15-39): each
 // change goes to the other workers (js/rworkers.js channel "camp"), or a worker that missed the explorer striking its tent would take the
 // tent down a second time when the night ends (tick), and the copies' blocks would differ.
-const campSet = (k, e) => { camps.set(k, e); if (BF.rworkers) BF.rworkers.touch("camp", k); };
+const campSet = (k, e) => { camps.set(k, e); if (BF.rworkers) BF.rworkers.touch("camp", k); const C = BF.ctick; if (C && C.filter) campOwner.set(k, C.cur.key); };
+// Clusters (spec r15-39b, js/ctick.js): the cluster that looks after each camp in tick (below) this interval, worked out at each meeting on
+// every worker alike: its camper's cluster when it is loaded (a merchant on the road is in the cluster it walks through), else its
+// village's; a camp made since, the cluster that made it.
+const campOwner = new Map();
+function campOwners() {
+  const C = BF.ctick;
+  campOwner.clear();
+  if (!camps.size) return;
+  const here = new Map();
+  for (const m of BF.mobs.list) if (CAMPERS.has(m.profession) && !m.dead && !m.removed) { const k = keyOf(m); if (k) here.set(k, m); }
+  for (const k of camps.keys()) { const m = here.get(k); campOwner.set(k, (m && C.ofMob(m)) || C.ofVillage(k.slice(0, k.lastIndexOf("#")))); }
+}
+BF.onLoad(() => { if (BF.ctick && BF.ctick.onMeet) BF.ctick.onMeet(campOwners, "explorer camps", "end"); });
 const campDrop = k => { camps.delete(k); if (BF.rworkers) BF.rworkers.touch("camp", k); };
 if (BF.rworkers) BF.rworkers.channel("camp", {
   key: k => k, get: k => k, state: k => { const e = camps.get(k); return e ? Object.assign({}, e) : null; },
@@ -417,12 +430,14 @@ function nightEnd() { const d = BF.sky ? BF.sky.day || 0 : 0, t = skyT(); return
 const tentAt = c => BF.world.isLoaded(c.x, c.z) && BF.world.getBlock(c.x, c.y, c.z) === BF.tentId(c.f, 0, 1);
 let tickT = 0;
 function tick(dt) {
-  if (!camps.size || (tickT -= dt) > 0) return;
-  tickT = 2;
+  const C = BF.ctick && BF.ctick.filter ? BF.ctick : null;   // (clusters: every 2 game seconds on the tick counter, each cluster its camps)
+  if (C) { if (!camps.size || BF.rand.tick % 40 !== 8) return; }
+  else { if (!camps.size || (tickT -= dt) > 0) return; tickT = 2; }
   const here = new Set();
-  for (const m of BF.mobs.list) if (CAMPERS.has(m.profession) && !m.dead && !m.removed) { const k = keyOf(m); if (k) here.add(k); }
+  for (const m of BF.mobs.list) if (CAMPERS.has(m.profession) && !m.dead && !m.removed && (!C || C.filter(m))) { const k = keyOf(m); if (k) here.add(k); }
   const now = dayNow();
   for (const [k, e] of camps) {
+    if (C && (campOwner.get(k) || C.ofVillage(k.slice(0, k.lastIndexOf("#")))) !== C.cur.key) continue;
     if (here.has(k) && !e.returned) continue;   // its own AI strikes it in the morning
     if (!e.returned && now >= e.until) {
       e.returned = true;

@@ -510,9 +510,10 @@ function forget(m) {
 // Global tick (mobs.update): validates the claimed jobsites. Villagers without a job look for one in ai() below (seekAI).
 function tick(dt) {
   hook();
-  tickT -= dt;
-  if (tickT > 0 || !BF.mobs || !BF.world) return;
-  tickT = 1;
+  // clusters (spec r15-39b, js/ctick.js): every cluster once a game second on the tick counter (its villagers only: the region query)
+  if (BF.ctick && BF.ctick.filter) { if (BF.rand.tick % 20 !== 3) return; }
+  else { tickT -= dt; if (tickT > 0) return; tickT = 1; }
+  if (!BF.mobs || !BF.world) return;
   const W = BF.world;
   for (const m of BF.regions.ofType("villager")) {
     if (m.dead || m.removed) continue;
@@ -667,6 +668,17 @@ function importAll(o) {
     if (Array.isArray(e.job) && e.job.length === 3) claims.set(pk(...e.job.map(Number)), { key: k, mob: null });
   }
 }
+// Several workers (clusters, js/cworkers.js): the tables villagers change while they think (and block events, which only the worker that
+// set the block sees), each cluster's part: cells by their region's cluster, villager keys by their village's
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.ownedMap) return;
+  const cellG = k => { const i = k.indexOf(","), j = k.lastIndexOf(","); return C.ofCell(+k.slice(0, i), +k.slice(j + 1)); };
+  C.ownedMap("jobs.sites", sites, cellG);
+  C.ownedMap("jobs.claims", claims, (k, o) => (o.mob && C.ofMob(o.mob)) || cellG(k), o => ({ key: o.key, mob: o.mob ? o.mob.id : null }), o => ({ key: o.key, mob: o.mob != null ? BF.ids.live(o.mob) || null : null }));
+  C.ownedMap("jobs.plan", planIndex, cellG);
+  C.ownedSet("jobs.spawned", spawned, k => C.ofVillage(k.slice(0, k.lastIndexOf("#"))));
+});
 function reset() { sites.clear(); claims.clear(); planIndex.clear(); spawned.clear(); savedKeys.clear(); tickT = 0; }
 
 BF.jobs = {

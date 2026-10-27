@@ -29,6 +29,12 @@ const W = () => BF.world;
 const RS = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 const rnd = (r, a, b) => r.range(a, b);
 const pending = new Map();         // village key -> built list (same array as rec.built)
+// several workers (clusters, js/cworkers.js): a village's list is its cluster's; a loaded village's is its record's (sent with the record)
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.ownedMap) return;
+  C.ownedMap("builder.built", pending, k => C.ofVillage(k), list => JSON.parse(JSON.stringify(list)), (j, k) => { const R = BF.mobs.villages.get(k); return R && R.built ? R.built : j; });
+});
 const log = [];
 
 function hash32(str) {
@@ -709,8 +715,11 @@ function travel(m, bs, dt, out, g, tol, speed) {
   if (d <= tol && dy < 1.6) { ai.route = null; bs.navFail = 0; return "arrived"; }
   if (!ai.route || ai.routeKind !== "build") {
     ai.route = null;
-    if (bs.navWait > 0) { bs.navWait -= dt; steer(m, g.x + 0.5, g.z + 0.5, speed, out); return "going"; }
-    if (!N.takePlan()) { steer(m, g.x + 0.5, g.z + 0.5, speed * 0.6, out); return "going"; }
+    // after a search found no way it waits for the next, as the other jobs do; waiting for a search it heads straight for the goal unless
+    // that has it pushing against a wall (r15-70: it pushed straight at a goal behind a wall of its own house through every wait, and
+    // went in the game log as stuck)
+    if (bs.navWait > 0) { bs.navWait -= dt; return "going"; }
+    if (!N.takePlan()) { if (!(ai.blockedT > 0.3)) steer(m, g.x + 0.5, g.z + 0.5, speed * 0.6, out); return "going"; }
     const hop = d > 22 ? [Math.round(px + (g.x + 0.5 - px) * 20 / d), Math.round(pz + (g.z + 0.5 - pz) * 20 / d)] : null;
     const hx = hop ? Math.floor(hop[0]) : g.x, hz = hop ? Math.floor(hop[1]) : g.z;
     const [fx, fy, fz] = N.feetCell(m);

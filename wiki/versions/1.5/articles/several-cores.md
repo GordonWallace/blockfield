@@ -49,6 +49,8 @@ Moved over so far: the mobs' thinking, and the mobs and wild life around them. W
 
 The world's own ticks already run by cluster: flowing water, crops and sugar cane, saplings, farmland drying out, grass spreading, crops catching up in reloaded chunks, and furnaces and bakers' ovens. Each cluster ticks only its own blocks. A block right at a border, whose tick would look at or change the other cluster's blocks (water flowing over the border, a tree growing across it), waits for the next meeting and is done there, so water still crosses from one cluster to the next, a second at a time. With the clusters on, chunks also arrive and leave only at meetings: a chunk generated in between waits, at most a second, before it appears.
 
+Village life has moved over: builders, jobs, breeding, storage, bakers, explorers, restocking, the day timeline, village stats, foresters and signs each run per cluster, and a village's records belong to its own cluster. A new village is set up at a meeting, which the [[page:game-log]] notes.
+
 ## What it costs
 
 Each worker holds a full copy of the world, so each one takes about as much memory as the simulation does on its own. On a machine with little memory, `--workers 1` or a small number is the better choice.

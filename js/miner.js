@@ -147,6 +147,8 @@ function area(m) {
 // ---------------------------------------------------------------- surface stone
 const claims = new Map();   // "x,y,z" -> miner, so two miners do not dig the same block
 const pk = (x, y, z) => x + "," + y + "," + z;
+// several workers (clusters, js/cworkers.js): a claim is its miner's cluster's, sent at meetings by the miner's id
+BF.onLoad(() => { const C = BF.ctick; if (C && C.ownedMap) C.ownedMap("miner.claims", claims, (k, m) => C.ofMob(m), m => m.id, id => BF.ids.live(id) || null); });
 // Can (x, y, z) be quarried: the column's top block, stone (or coal / iron ore), sticking up above one of its four neighbours?
 function quarryable(x, y, z, floor, gravel) {
   const id = get(x, y, z);

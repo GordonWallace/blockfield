@@ -142,14 +142,31 @@ function scan(rec) {
   scanned.set(rec.key, d);
   bump(rec.key);
 }
+// several workers (clusters, js/cworkers.js): each village's tallies, its villagers' held items and waits, by its cluster; a village's
+// tallies only when they changed (its change counter goes with them)
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.ownedMap) return;
+  const byKey = k => C.ofVillage(k), bySlot = k => { const i = k.lastIndexOf("#"); return i > 0 ? C.ofVillage(k.slice(0, i)) : null; };
+  C.ownedMap("econ.tallies", tallies, byKey, (t, k) => ({ v: vers.get(k) || 0, d: [...t] }), (j, k) => { vers.set(k, j.v); return new Map(j.d); }, k => vers.get(k) || 0);
+  C.ownedMap("econ.held", held, bySlot);
+  C.ownedMap("econ.lastWant", lastWant, k => bySlot(k.slice(0, k.lastIndexOf("|"))));
+  C.ownedMap("econ.scanned", scanned, byKey);
+});
 let tickT = 0;
 function update() {
-  const t = BF.simNow();   // every game second, from the game step (js/villagelog.js init; spec r15-16)
-  if ((t - tickT < 1 && t >= tickT) || !BF.mobs || !BF.mobs.villages) return;
-  tickT = t;
+  // clusters (spec r15-39b, js/ctick.js): each cluster its own villages, every game second on the tick counter
+  const C = BF.ctick && BF.ctick.filter ? BF.ctick : null;
+  if (C) { if (BF.rand.tick % 20 !== 6) return; }
+  else {
+    const t = BF.simNow();   // every game second, from the game step (js/villagelog.js init; spec r15-16)
+    if (t - tickT < 1 && t >= tickT) return;
+    tickT = t;
+  }
+  if (!BF.mobs || !BF.mobs.villages) return;
   const d = today();
   for (const rec of BF.mobs.villages.values()) {
-    if (scanned.get(rec.key) === d) continue;
+    if (scanned.get(rec.key) === d || (C && !C.mineVillage(rec.key))) continue;
     if (!(rec.members || []).some(m => m.type === "villager" && !m.dead && !m.removed && m.position)) continue;   // not loaded
     scan(rec);
   }
