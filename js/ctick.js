@@ -29,7 +29,7 @@
 // API: BF.ctick = { MEET, on (get / set), order (get / set: "tick" | "cluster"), cur (the running group), filter (the running group's
 //                   mob test, or null when every mob is seen), mine(m), hidden(o), sys(name, fn), local(name, init), step(h), interval(h),
 //                   meet(), groups(), SYSTEMS, converted() -> [names], only (a Set of system names, or null: all), system (the running one),
-//                   trace, traced() -> [["system file:line", count]], owned(name, {snap, apply}), tables(), table(name), tickOf(base), clocks() -> Map base -> tick, stats(), text(), hourly(),
+//                   trace, traced() -> [["system file:line", count]], onMeet(fn, name, "start" | "end"), owned(name, {snap, apply}), tables(), table(name), tickOf(base), clocks() -> Map base -> tick, stats(), text(), hourly(),
 //                   reset() }
 (() => {
 "use strict";
@@ -70,8 +70,8 @@ const SYSTEMS = {
   cowherd: false,       // C4
   pigFarmer: false,     // C4
   bees: false,          // C4
-  merchant: false,      // C5: merchants and caravans
-  villageSim: false,    // C5 (which villages are simulated, trip pins: js/villagesim.js)
+  merchant: true,       // C5: merchants and caravans
+  villageSim: true,     // C5 (which villages are simulated, trip pins: js/villagesim.js)
   fluids: false,        // C6: world
   growth: false,        // C6
   farmland: false,      // C6
@@ -188,6 +188,7 @@ function meet() {
   let behind = 0, eg = null;
   for (const g of groups) if (g.bases && g.tick !== undefined && g.tick !== BF.rand.tick) { behind++; eg = eg || g.key + " at tick " + g.tick; }
   if (behind && BF.glog) BF.glog.log("ERROR", "clusters", behind + " cluster group(s) reached the meeting at tick " + BF.rand.tick + " on another clock (" + eg + ")");
+  runMeet("start");
   const pending = [];
   for (const g of groups) { useSlot(g); for (const r of BF.req.pending()) pending.push(r); }
   if (between) { useSlot(between); for (const r of BF.req.pending()) pending.push(r); }
@@ -214,9 +215,23 @@ function meet() {
     finally { const left = BF.req.pending(); BF.req.useCtx(keep); between.req = keep; for (const r of left) refile(r); }
     i = j;
   }
+  runMeet("end");
   needMeet = false;
   S.meetings++; H.meetings++; S.since = 0;
   S.meetMs = performance.now() - t0;
+}
+
+// The meeting's own work (onMeet(fn, name, when)): "start" hooks run before the clusters are worked out again (records, pins and the
+// simulated set come and go there), "end" hooks after the waited requests are applied and delivered (the shared table, js/shared.js).
+// Both in registration order, between ticks with every group seen, alike on every worker. Requests sent from either are filed into
+// the new groups (a "start" hook's with the queued ones, an "end" hook's to their target's group).
+const meetHooks = { start: [], end: [] };
+function onMeet(fn, name, when) { (meetHooks[when || "start"] || meetHooks.start).push([fn, name || fn.name || "meet"]); }
+function runMeet(when) {
+  for (const [fn, name] of meetHooks[when]) {
+    try { fn(); }
+    catch (e) { S.err++; if (BF.glog) BF.glog.log("ERROR", "clusters", "Meeting hook " + name + " failed: " + (e && e.message || e)); console.error(e); }
+  }
 }
 
 // ---------------------------------------------------------------- the tick
@@ -425,7 +440,7 @@ BF.ctick = {
   get order() { return order; }, set order(o) { setOrder(o); },
   get cur() { return cur; },
   get filter() { return cur && !legacy ? mine : null; },
-  owned, tables: () => [...tables.keys()], table: name => tables.get(name),
+  onMeet, owned, tables: () => [...tables.keys()], table: name => tables.get(name),
   tickOf: b => clocks.get(b), clocks: () => new Map(clocks),   // each cluster's own tick (one clock for now)
   mine, hidden, sys, local, step, interval, meet: meetNow, groups: () => groups, converted, stats, text, hourly, reset,
   get only() { return only; }, set only(v) { only = v ? new Set(v) : null; },

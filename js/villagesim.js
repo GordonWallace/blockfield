@@ -5,6 +5,10 @@
 // MAX and the chunk budget, until the trip ends (unpin). At most MAX_PINS trips at a time; pins are saved with the game ("pin:<id>").
 // The rule above is the minimum (spec r15-34): js/active.js adds "extra" villages on top of it while the simulation has time to spare in
 // each real second, and takes them off again (through the countdown below) when it hasn't. Extras don't count toward the force-unload limits.
+// With the cluster tick on (spec r15-39b, js/ctick.js): the set is decided only at meetings (meet, a "start" hook: before the clusters are
+// worked out again), so villages, their records and the trips' pins come and go only there, never between two clusters' passes; the
+// countdowns that tasks read (mayStart, timeLeft) then hold for the whole interval in every cluster. Trips ask for their pin at the
+// meeting too (js/merchant.js meet, run first): pin and unpin are called only between ticks then.
 // API: BF.villageSim = { RADIUS, MAX, MAX_PINS, keepKeys, update(px, pz) -> changed, isActive(key), status(), pin(id, a, b, keys) -> ok, unpin(id),
 //                        pins(), pinned() -> [worldgen villages], simulated() -> [worldgen villages], corridor(a, b) -> chunk keys, exportSeen(out), importSeen(o), reset() }
 (() => {
@@ -29,7 +33,7 @@ const pending = new Map();       // village key -> { away, todo: Set(chunk keys)
 const keepKeys = new Set();
 const MAX_PINS = 2;              // trips on the road at once, world-wide
 const pins = new Map();          // trip id -> { a, b (worldgen villages), keys: [corridor chunk keys] }
-let t = 0, pinDirty = false;
+let t = 0, pinDirty = false, hooked = false;
 
 const vKey = v => Math.round(v.x) + "," + Math.round(v.z);
 // The planet (spec r14-15): villages are canonical records, and villagers are kept in their village's frame even past a face edge (js/mobs.js
@@ -315,17 +319,26 @@ function windows() {
 let focusX = null, focusZ = null, stepChanged = false;
 const simClock = { win: -1e9, last: -1e9 }, realClock = { win: -1e9, last: -1e9 };
 const stepping = () => !(BF.warp && BF.warp.frozen) && !(BF.state && BF.state.paused);
+const clustered = () => !!(BF.ctick && BF.ctick.on);
 // Called from world.update every frame. Returns true when the kept set changed (here, or in a step since the last call).
 function update(px, pz) {
   focusX = px; focusZ = pz;
   let changed = stepChanged;
   stepChanged = false;
-  // (a trip pinned or unpinned since the last step is taken at once: nothing has stepped since, so it is the same moment the next step would see)
-  if ((!stepping() || pinDirty) && check(px, pz, realClock, BF.rworkers.realNow() / 1000)) changed = true;
+  // (a trip pinned or unpinned since the last step is taken at once: nothing has stepped since, so it is the same moment the next step would see;
+  // with the cluster tick on, at the next meeting)
+  if ((!stepping() || (pinDirty && !clustered())) && check(px, pz, realClock, BF.rworkers.realNow() / 1000)) changed = true;
   return changed;
 }
-// Called every game step (world.tickSim); cheap (re-evaluates every 1.5 game seconds, the villager windows every 0.5).
+// Called every game step (world.tickSim); cheap (re-evaluates every 1.5 game seconds, the villager windows every 0.5). With the cluster
+// tick on, at meetings instead (meet).
 function step() {
+  if (focusX == null || clustered()) return;
+  if (check(focusX, focusZ, simClock, BF.simNow())) stepChanged = true;
+}
+// A meeting of the cluster tick: the trips' pin asks first (js/merchant.js), then the set (the clock check as step() does it).
+function meet() {
+  if (BF.merchant && BF.merchant.meet) BF.merchant.meet();
   if (focusX == null) return;
   if (check(focusX, focusZ, simClock, BF.simNow())) stepChanged = true;
 }
@@ -493,6 +506,11 @@ BF.villageSim = {
     BF.world.onChunkLoad(onChunkLoad);
     BF.world.onThink(step, "villageSim");   // re-checks on the game clock (update), in the think phase (js/world.js tickSim)
     if (BF.world.onBlockTick) BF.world.onBlockTick(catchUpTick, "catchUp");   // crop catch-up, a block tick (spec r15-19)
+    if (BF.ctick && !hooked) {   // the set at meetings, and the shared table published at their end (spec r15-39b)
+      hooked = true;
+      BF.ctick.onMeet(meet, "villageSim", "start");
+      if (BF.shared) BF.ctick.onMeet(BF.shared.publish, "shared", "end");
+    }
   },
 };
 })();
