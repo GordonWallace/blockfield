@@ -993,8 +993,9 @@ function moveLog(m, level, text) {
   const who = BF.vlog && m.type === "villager" ? BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession || "villager") + ")" : "An " + m.type.replace(/_/g, " ");   // "Name (Job)" as in the village log
   BF.glog.log(level, "move", who + " " + text, { village: m.village, at: m });
 }
-// Called every physics step: `blocked` = it wanted to move and a block stopped it.
-function blockedMove(m, dt, blocked) {
+// Called every physics step: `blocked` = it wanted to move and a block stopped it; `slowed` = a block kept it from getting on its way
+// (blocked, or sliding sideways along it), which starts a detour (ai.blockedT).
+function blockedMove(m, dt, blocked, slowed) {
   const ai = m.ai, p = m.position, g = ai.held || (ai.held = { x: p.x, z: p.z, t: 0, gap: 0, logged: false, hem: false, since: 0, lx: 0, lz: 0 });
   if (Math.hypot(p.x - g.x, p.z - g.z) > 3) {   // got somewhere
     // once logged, it has got moving again only FREED blocks from where it was stuck: one shut in a pen or a yard goes in the log once,
@@ -1011,7 +1012,7 @@ function blockedMove(m, dt, blocked) {
       moveLog(m, "ERROR", "stuck at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z) + " for " + Math.round(m.age - g.since) + " s" + (g.hem ? " with nowhere to go" : ai.mode === "walk" ? " walking towards " + Math.floor(ai.tx) + ", " + Math.floor(ai.tz) : ""));
     }
   } else if (g.t > 0 && (g.gap += dt) > HELD_GAP && !g.logged) g.t = 0;   // a long pause: not held after all
-  ai.blockedT = blocked ? (ai.blockedT || 0) + dt : 0;
+  ai.blockedT = slowed ? (ai.blockedT || 0) + dt : 0;
 }
 // False when this frame's A* searches are used up (busy villages): it tries again next frame instead of stepping aside at random.
 function startDetour(m) {
@@ -2314,8 +2315,13 @@ function updateMob(m, dt) {
     if (!T.hostile && ai.mode === "walk" && !ai.detour && R(m).next() < 0.3 && !pickWander(m, 8)) hemmedIn(m);
   }
   // blocked: it hit something and got almost nowhere. Sliding along a wall it brushes is getting somewhere (r15-70: a villager pottering
-  // about a room brushed its walls every few seconds, and that went in the game log as stuck)
-  if (T.village) blockedMove(m, dt, (res.hitX || res.hitZ) && wants && Math.hypot(m.position.x - px, m.position.z - pz) < 0.25 * Math.hypot(_desired.x, _desired.z) * dt);
+  // about a room brushed its walls every few seconds, and that went in the game log as stuck). For starting a detour (ai.blockedT), under
+  // half its way on where it means to go is blocked: sliding sideways along a step it means to cross, it goes round as before.
+  if (T.village) {
+    const hit = (res.hitX || res.hitZ) && wants, dd = Math.hypot(_desired.x, _desired.z);
+    blockedMove(m, dt, hit && Math.hypot(m.position.x - px, m.position.z - pz) < 0.25 * dd * dt,
+      hit && ((m.position.x - px) * _desired.x + (m.position.z - pz) * _desired.z) / dd < 0.5 * dd * dt);
+  }
   // fall damage
   const climbing = (T.climbs && (res.hitX || res.hitZ)) || m.onLadder;
   if (m.onGround || m.inWater || climbing) {
