@@ -43,6 +43,8 @@ Region workers never pay off much, because every worker has to keep its whole co
 
 The groundwork is in the game but off: with it off, the world plays exactly as before. The game's systems (mobs, village life, animals, caravans, blocks) are being moved over one by one. When the clusters are turned on, the [[page:game-log]] notes it, and an ERROR names any cluster whose tick fails.
 
+Moved over so far: the mobs' thinking, and the mobs and wild life around them. With clusters on, each cluster spawns its own monsters in its own chunks (each chunk with the same odds as before), rolls and stores the wild animals of its own chunks, and moves its own dropped items, arrows and boats (a boat goes with the cluster of the mob sitting in it). A cluster away from yours sees you where you were at the last meeting. A wild mob that wanders off the loaded land into a chunk of another cluster waits there until the next meeting, and then that cluster stores it with its chunk.
+
 ## What it costs
 
 Each worker holds a full copy of the world, so each one takes about as much memory as the simulation does on its own. On a machine with little memory, `--workers 1` or a small number is the better choice.

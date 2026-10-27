@@ -7,7 +7,7 @@
 //   that is not plain (meshes, other mobs, villages, registries) is left out, and the fields job modules restore from their own saves
 //   (inventory, profession, bed, jobsite, village) are never touched. Everything else is read back as saved.
 // - Mobs owned by another module's save (pen sheep, coop hens, pasture cows, sty pigs, horses, boat riders) are left to that module.
-// API: BF.mobSave = { SHORT, stash, fresh, EXACT, serialize(), deserialize(o), peek(key) -> snap | "wait" | null, golem(villageKey) -> snap | null,
+// API: BF.mobSave = { ownTables() (clusters: js/mobs.js init), SHORT, stash, fresh, EXACT, serialize(), deserialize(o), peek(key) -> snap | "wait" | null, golem(villageKey) -> snap | null,
 //                     apply(m, snap), done(key), update(dt), reset(), pending() }
 (() => {
 "use strict";
@@ -188,17 +188,22 @@ function golem(vkey) {
 }
 function done(key) { villagers.delete(key); }
 
-// Brings back wild and hostile mobs once the player is near their spot (called from the mobs update).
+// Brings back wild and hostile mobs once the player is near their spot (called from the mobs update). With clusters (spec r15-39b, C2:
+// js/ctick.js) once per cluster, each its own spots' (by region: BF.mobs.cl), every 10 ticks by the tick counter.
 function update(dt) {
   if (!wild.length) return;
   if (!exact()) { wild = []; return; }
-  wildT -= dt;
-  if (wildT > 0) return;
-  wildT = 0.5;
+  const CL = BF.mobs && BF.mobs.cl, c = !!(CL && CL.owned());
+  if (c) { if (BF.rand.tick % 10 !== 0) return; }
+  else {
+    wildT -= dt;
+    if (wildT > 0) return;
+    wildT = 0.5;
+  }
   const keep = [];
   for (const e of wild) {
     const s = e.snap;
-    if (!there(s)) { keep.push(e); continue; }
+    if (!there(s) || (c && !CL.ownsBase(CL.baseAt({ x: s.p[0], z: s.p[2] })))) { keep.push(e); continue; }
     const T = BF.mobs.typeDef && BF.mobs.typeDef(e.type);
     if (T && T.spawns === false) continue;   // a monster switched off in the world since the save (js/gameopts.js)
     const m = BF.mobs.spawn ? BF.mobs.spawn(e.type, s.p[0], s.p[1], s.p[2], e.variant, e.style) : null;
@@ -207,6 +212,22 @@ function update(dt) {
   wild = keep;
 }
 
+// The tables by group (BF.ctick.owned; js/cworkers.js sends each group's part at meetings): a villager's and a village's golems'
+// snapshots go with the village's cluster, a wild mob's with its spot's region's. Registered from js/mobs.js init.
+function ownTables() {
+  const C = BF.ctick, CL = BF.mobs && BF.mobs.cl;
+  if (!C || !CL || ownTables.done) return;
+  ownTables.done = true;
+  const GV = (k, g) => CL.groupFor("v:" + k) === g, VK = k => k.slice(0, k.lastIndexOf("#"));
+  const GW = (e, g) => CL.groupFor(CL.baseAt({ x: e.snap.p[0], z: e.snap.p[2] })) === g;
+  const byKey = (map, K) => ({
+    snap: g => { const a = []; for (const [k, v] of map()) if (GV(K(k), g)) a.push([k, v]); return a; },
+    apply: (g, a) => { const m = map(); for (const k of [...m.keys()]) if (GV(K(k), g)) m.delete(k); for (const [k, v] of a || []) m.set(k, v); },
+  });
+  C.owned("mobSave.villagers", byKey(() => villagers, VK));
+  C.owned("mobSave.golems", byKey(() => golems, k => k));
+  C.owned("mobSave.wild", { snap: g => wild.filter(e => GW(e, g)), apply: (g, a) => { wild = wild.filter(e => !GW(e, g)).concat(a || []); } });
+}
 if (typeof BF.on === "function") BF.on("newWorld", reset);
-BF.mobSave = { SHORT, stash, fresh, EXACT, serialize, deserialize, peek, golem, apply, done, update, reset, snapOf, packWild, applyState, pending: () => ({ villagers: villagers.size, golems: golems.size, wild: wild.length }) };
+BF.mobSave = { ownTables, SHORT, stash, fresh, EXACT, serialize, deserialize, peek, golem, apply, done, update, reset, snapOf, packWild, applyState, pending: () => ({ villagers: villagers.size, golems: golems.size, wild: wild.length }) };
 })();
