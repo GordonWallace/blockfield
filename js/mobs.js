@@ -1548,7 +1548,7 @@ function grantPlans() {
 }
 // A villager that plans route after route (two jobs taking its route from each other each tick, r15-73) goes in the game log, once a game
 // minute while it lasts: REPLAN_MAX searches in a minute is far more than any job needs.
-const REPLAN_MAX = 20;
+const REPLAN_MAX = 30;
 function replanCheck(m, a) {
   if (m.type !== "villager") return;
   const now = BF.simNow ? BF.simNow() : 0;
