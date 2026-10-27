@@ -102,6 +102,7 @@ function child() {
       process.send({ parts: BF.stateHash.parts(), tick: BF.rand.tick, stage: st.trip ? st.stage : null, cl: m.cl, inA: g === BF.clusters.groupOf('v:' + A.key), inB: g === BF.clusters.groupOf('v:' + B.key),
         dead: !!m.dead, pinned: BF.villageSim.pins().has(tripId), rows: rows.length, stamps: rows.every(r => r.tick === BF.sharedTable.tick), tableAt: BF.sharedTable.tick,
         sold: st.trip ? st.trip.soldN : null, errors: errors.splice(0) });
+    } else if (msg.do === 'text') { process.send({ text: BF.stateHash.text(msg.part) });
     } else if (msg.do === 'asks') {
       // three merchants of different villages plan a trip in the same interval (as js/merchant.js start does with the cluster tick on):
       // their pins are asked for and the meeting grants MAX_PINS of them, in merchant id order
@@ -162,7 +163,10 @@ async function parent() {
     const r = await Promise.all(kids.map((k, i) => ask(i, { do: 'interval' })));
     for (const x of r) for (const e of x.errors) console.log(`  game log ERROR: ${e}`);
     const parts = Object.keys(r[0].parts).filter(k => r[0].parts[k] !== r[1].parts[k]);
-    if (parts.length && !differ) { differ = `second ${n}: ${parts.join(', ')}`; console.log(`  the orders differ from ${differ}`); }
+    if (parts.length && !differ) { differ = `second ${n}: ${parts.join(', ')}`; console.log(`  the orders differ from ${differ}`);
+      const t = await Promise.all(kids.map((k, i) => ask(i, { do: 'text', part: parts[0] })));   // (where: the first character that differs)
+      let at = 0; while (at < t[0].text.length && t[0].text[at] === t[1].text[at]) at++;
+      ORDERS.forEach((o, i) => console.log(`    ${o} order: ...${t[i].text.slice(Math.max(0, at - 200), at + 120)}`)); }
     r.forEach((x, i) => {
       const s = seen[i];
       if (s.stages[s.stages.length - 1] !== x.stage) s.stages.push(x.stage);
