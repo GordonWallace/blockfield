@@ -107,7 +107,7 @@ function setAlerts(list) {
   try { fs.writeFileSync(ALERTS, JSON.stringify({ av, alerts }, null, 1)); } catch (e) { console.error("[debug] can't save alerts:", e.message); }
   broadcast("alerts", { av, alerts });
 }
-let latest = null, lastPush = 0, pushes = 0, seed = null;
+let latest = null, lastPush = 0, pushes = 0, seed = null, wid = null;   // seed, wid: the world the cached village data is from
 // The villager picked on the debug screen (its village key#slot, js/daytimeline.js): passed to the game in the answer to its next
 // snapshot, like the alerts; the game then adds that villager's day timeline to its snapshots. day: the last timeline it sent.
 let pick = null, pv = "0", day = null;
@@ -196,7 +196,11 @@ function hostLoad() {
 function take(s) {
   const fresh = !lastPush || Date.now() - lastPush > 5000;
   lastPush = Date.now();
-  if (s.info && typeof s.info === "object" && s.info.seed !== seed) { if (seed !== null) { layouts.clear(); details.clear(); history.clear(); econ.clear(); day = null; } seed = s.info.seed; }
+  // another world (a new seed, or another saved world: js/debugfeed.js wid): nothing cached from the last one may show
+  const newSeed = !!s.info && typeof s.info === "object" && s.info.seed !== seed, newWid = typeof s.wid === "string" && s.wid !== wid;
+  if ((newSeed && seed !== null) || (newWid && wid !== null)) { layouts.clear(); details.clear(); history.clear(); econ.clear(); day = null; console.log("[debug] another world: cleared the last one's village data"); }
+  if (newSeed) seed = s.info.seed;
+  if (newWid) wid = s.wid;
   const obj = o => (o && typeof o === "object" ? o : {});
   for (const k in obj(s.layouts)) layouts.set(k, s.layouts[k]);
   for (const k in obj(s.detail)) details.set(k, s.detail[k]);
@@ -248,7 +252,7 @@ const cached = () => {
   for (const [k, h] of history) logs[k] = { key: k, cap: 300, entries: h };
   for (const [k, l] of layouts) ls[k] = l;
   for (const [k, d] of details) ds[k] = d;
-  return { layouts: ls, logs, details: ds, icons: ic, econ: ec, day, glog };
+  return { seed, wid, layouts: ls, logs, details: ds, icons: ic, econ: ec, day, glog };
 };
 
 function serveDebug(req, res) {

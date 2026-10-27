@@ -57,13 +57,18 @@ const start = async () => { const s = await lib.serve({ world: onServer, game: G
   }
   ok('roster rows = loaded villagers ' + g.rows + '/' + want.loaded, g.rows === want.loaded);
   // emeralds and food (inventory plus owned chests) and starving, per villager
-  const gv = await lib.sim(game, () => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
-    const m = rec.members.find(x => x.type === 'villager' && !x.dead && !x.child && BF.trades.inv.count(x.inv, BF.I.emerald) > 0) || rec.members.find(x => x.type === 'villager' && !x.dead);
-    const k = BF.storage.keyOf(m), cs = [...BF.inventory.chests.values()].filter(c => c.owner === k);
-    const em = BF.trades.inv.count(m.inv, BF.I.emerald) + cs.reduce((n, c) => n + c.slots.reduce((a, st) => a + (st && st.id === BF.I.emerald ? st.count : 0), 0), 0);
-    return { name: BF.vlog.nameOf(m), em, starving: !!m.starving }; });
-  await dbg.waitForTimeout(600);
-  const rr = await dbg.evaluate(n => { const tr = [...document.querySelectorAll('#r-body tr')].find(t => t.dataset.n === n); return tr && [...tr.children].map(td => td.textContent); }, gv.name);
+  // (the villager may trade between reading the game and the screen: up to 5 s for the two to agree)
+  let gv, rr;
+  for (let i = 0; i < 20; i++) {
+    gv = await lib.sim(game, () => { const rec = BF.vlog.villageAt(BF.player.position.x, BF.player.position.z);
+      const m = rec.members.find(x => x.type === 'villager' && !x.dead && !x.child && BF.trades.inv.count(x.inv, BF.I.emerald) > 0) || rec.members.find(x => x.type === 'villager' && !x.dead);
+      const k = BF.storage.keyOf(m), cs = [...BF.inventory.chests.values()].filter(c => c.owner === k);
+      const em = BF.trades.inv.count(m.inv, BF.I.emerald) + cs.reduce((n, c) => n + c.slots.reduce((a, st) => a + (st && st.id === BF.I.emerald ? st.count : 0), 0), 0);
+      return { name: BF.vlog.nameOf(m), em, starving: !!m.starving }; });
+    await dbg.waitForTimeout(600);
+    rr = await dbg.evaluate(n => { const tr = [...document.querySelectorAll('#r-body tr')].find(t => t.dataset.n === n); return tr && [...tr.children].map(td => td.textContent); }, gv.name);
+    if (rr && parseInt(rr[5].replace(/,/g, '')) === gv.em && (rr[7] === 'starving') === gv.starving) break;
+  }
   ok('roster shows emeralds, food and starving ' + JSON.stringify(rr), rr && rr.length === 10 && /^[\d.,]+ days?$/.test(rr[8]) && parseInt(rr[5].replace(/,/g, '')) === gv.em && !isNaN(parseFloat(rr[6])) && (rr[7] === 'starving') === gv.starving);
   // villagers keep logging (farmers log harvests too), so the screen may be one snapshot behind the game: give it a moment
   await dbg.waitForFunction(n => document.querySelectorAll('#log .ent').length >= n, want.log, { timeout: 5000 }).catch(() => {});

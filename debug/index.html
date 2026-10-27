@@ -37,7 +37,9 @@
   .warp { color: #10140f; background: var(--warn); border-radius: 3px; padding: 1px 7px; font-weight: 600; }
 
   main { padding: 16px 20px 28px; display: grid; gap: 16px; }
+  /* at most 8 across, rows filled evenly (layoutCards); a card taller than 300px scrolls instead of stretching its row */
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 12px; }
+  .cards > .card { max-height: 300px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--edge2) transparent; }
   .card { background: linear-gradient(180deg, var(--card2), var(--card)); border: 1px solid var(--edge); border-radius: 8px; padding: 12px 14px; min-width: 0; }
   .card h3 { margin: 0 0 8px; font: 11px var(--display); letter-spacing: 0.5px; color: var(--muted); text-transform: uppercase; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   .big { font-size: 26px; font-weight: 600; line-height: 1.1; letter-spacing: -0.5px; }
@@ -497,7 +499,8 @@ function profColor(p) {
 // ---------------------------------------------------------------- connection
 function connect() {
   const es = new EventSource("events");
-  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); if (c.day !== undefined) dayData = c.day; Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); Object.assign(icons, c.icons || {}); Object.assign(econ, c.econ || {}); logDirty = true; } catch (err) { console.error(err); } });
+  // the server's cache replaces ours (it may hold another world than the one this page last saw, or have restarted)
+  es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); forgetWorld(); pageSeed = c.seed ?? null; pageWid = c.wid ?? null; if (c.day !== undefined) dayData = c.day; Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); Object.assign(icons, c.icons || {}); Object.assign(econ, c.econ || {}); logDirty = true; } catch (err) { console.error(err); } });
   es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); if (c.glog !== undefined) glogSet(c.glog); } catch (err) { console.error(err); } });
   es.addEventListener("snap", e => { try { onSnap(JSON.parse(e.data)); } catch (err) { console.error(err); } });
   es.addEventListener("alerts", e => { try { const o = JSON.parse(e.data); alerts = o.alerts || []; alertErr = null; renderAlerts(); } catch (err) { console.error(err); } });
@@ -506,6 +509,19 @@ function connect() {
   es.onopen = () => { serverUp = true; status(); };
 }
 let logDirty = false;   // a (re)connect brought the server's full logs: redraw the log with the next snapshot
+// The world the village data here is from (its seed, and js/debugfeed.js wid: the saved world, or the seed): when the game moves to
+// another, everything held from the last one goes, so a new world never shows another game's villages, logs or trades.
+let pageSeed = null, pageWid = null;
+function forgetWorld() {
+  for (const o of [layouts, logs, details, econ]) for (const k in o) delete o[k];
+  dayData = null; logDirty = true;
+}
+function sameWorld(s) {
+  const newSeed = !!s.info && s.info.seed !== pageSeed, newWid = typeof s.wid === "string" && s.wid !== pageWid;
+  if ((newSeed && pageSeed !== null) || (newWid && pageWid !== null)) forgetWorld();
+  if (newSeed) pageSeed = s.info.seed;
+  if (newWid) pageWid = s.wid;
+}
 let serverUp = false, gameErr = null, errAt = 0;   // gameErr: the game's feed failing to build a snapshot (it sends the error instead)
 function status() {
   const el = $("conn"), live = snap && Date.now() - lastAt < (snap.hidden ? 70000 : 2500);   // a background tab only sends about once a second, or less
@@ -527,6 +543,7 @@ setInterval(status, 1000);
 
 // ---------------------------------------------------------------- snapshots
 function onSnap(s) {
+  sameWorld(s);
   if (s.glog) glogIn(s.glog);
   Object.assign(layouts, s.layouts || {}); Object.assign(details, s.detail || {}); Object.assign(icons, s.icons || {});
   if (s.day !== undefined) dayData = s.day;   // the picked villager's day timeline, when it changed (js/daytimeline.js)
@@ -1595,7 +1612,8 @@ const emf = n => fmt(r2(n));
 let eBands = [];
 // The flows, waits and unsold stock of the chosen village (or every village) over the chosen range of game days.
 function econData() {
-  const keys = eopt.scope === "all" ? Object.keys(econ) : viewKey ? [viewKey] : [];
+  const known = snap && snap.villages ? new Set(snap.villages.map(v => v.key)) : null;   // only this world's villages
+  const keys = eopt.scope === "all" ? Object.keys(econ).filter(k => !known || known.has(k)) : viewKey ? [viewKey] : [];
   const today = Math.max(-Infinity, ...keys.map(k => econ[k] ? econ[k].today : -Infinity));
   const flows = {}, wanted = {}, held = [];
   let trades = 0, ems = 0;
@@ -1902,6 +1920,21 @@ document.addEventListener("click", e => { if (gMenu && e.target.isConnected && !
 $("raw").addEventListener("toggle", () => { if (snap) $("f3").textContent = snap.text; });
 addEventListener("resize", () => { if (snap) { renderTop(snap); if (curV) drawMap(snap); } });
 status();
+// ---------------------------------------------------------------- status cards layout
+// At most 8 cards across, spread evenly over the rows they need: rows = ceil(n / 8), then columns = ceil(n / rows), so 16 cards are
+// 8 x 2 and 17 are 6 x 3 (wider cards, a gap at the end). A narrow window fits fewer across (cards at least 160px wide).
+const CARDS_ACROSS = 8, CARD_MIN = 160;
+function layoutCards() {
+  const el = document.querySelector(".cards"); if (!el) return;
+  const n = [...el.children].filter(c => !c.hidden).length; if (!n) return;
+  const across = Math.max(1, Math.min(CARDS_ACROSS, Math.floor((el.clientWidth + 12) / (CARD_MIN + 12))));
+  const rows = Math.ceil(n / across), cols = Math.ceil(n / rows), v = `repeat(${cols}, minmax(0, 1fr))`;
+  if (el.style.gridTemplateColumns !== v) { el.style.gridTemplateColumns = v; el.dataset.cols = cols; el.dataset.rows = rows; }
+}
+new MutationObserver(layoutCards).observe(document.querySelector(".cards"), { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
+addEventListener("resize", layoutCards);
+layoutCards();
+window.BFWorld = { econ, logs, layouts, snap: () => snap, renderEcon };   // for tests (test/debug-layout.js)
 connect();
 })();
 </script>
