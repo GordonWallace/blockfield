@@ -195,7 +195,7 @@ const inRoom = (p, pos) => pos.x > p.x0 && pos.x < p.x1 && pos.z > p.z0 && pos.z
 const villageOK = R => !!R;
 
 let pending = new Map();      // village key -> [{i, p: [packed], k: culls}] from a save, taken as each sty is first seen
-const activeSties = [];       // sties that are loaded and near the player (rebuilt by tickSties)
+let activeSties = [];         // sties that are loaded and near the player (rebuilt by tickSties; with clusters the running group's)
 let hooked = false;
 
 function seeded(str) {
@@ -245,6 +245,7 @@ function tickSties() {
   if (!pp || !BF.mobs || !BF.mobs.spawn) return;
   const W = BF.world;
   for (const rec of BF.mobs.villages.values()) {
+    if (!BF.herd.ownsVillage(rec.key)) continue;   // (clusters: another group's village)
     if (!(rec.wg && (rec.wg.buildings || []).some(b => b.type === "sty")) && !(rec.built || []).some(e => e.type === "sty")) continue;
     if (BF.planet.distance(rec, pp) > 80 && !(BF.villageSim && BF.villageSim.isActive(rec.key))) continue;
     for (const p of stiesOf(rec)) {
@@ -301,13 +302,24 @@ function hook() {
   if (hooked || !BF.on) return;
   hooked = true;
   BF.on("mobKilled", m => { if (m && m.type === "pig" && m.sty) leaveSty(m); });
+  BF.herd.villageTable("pigFarmer.pending", () => pending);   // (clusters: save data waiting for its sties, by village)
+  BF.herd.penTable("pigFarmer.sties", { field: "_sties", list: "pigs", mob: "pig", pen: "sty", of: stiesOf });   // (and the herds)
+  H().tables();
 }
 function tick(dt) {
   hook();
-  acc += dt; styT -= dt;
-  if (styT <= 0 && BF.world) { styT = 1; try { tickSties(); } catch (e) { console.error(e); } }
-  if (acc < 0.5 || !BF.mobs) return;
-  acc = 0;
+  const C = H().cluster();
+  if (C) {   // (clusters, js/ctick.js: the running group's sties, filled in its first pass after each meeting; timers by the tick counter)
+    const L = C.local("pigFarmer", () => ({ sties: [], fresh: true }));
+    activeSties = L.sties;
+    if (L.fresh && BF.world) { L.fresh = false; try { tickSties(); } catch (e) { console.error(e); } }
+    if (!H().every(10) || !BF.mobs) return;
+  } else {
+    acc += dt; styT -= dt;
+    if (styT <= 0 && BF.world) { styT = 1; try { tickSties(); } catch (e) { console.error(e); } }
+    if (acc < 0.5 || !BF.mobs) return;
+    acc = 0;
+  }
   if (H().toShut.length) H().shutGates();
   const t = now();
   for (const m of BF.mobs.ofType("pig")) {   // (spec r15-31: the pig only)

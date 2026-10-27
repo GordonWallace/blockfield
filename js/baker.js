@@ -69,6 +69,14 @@ function ovenAt(x, y, z) {
   return o;
 }
 const ovenState = (x, y, z) => ovens.get(pk(x, y, z)) || null;
+// several workers (clusters, js/cworkers.js): an oven is its cell's cluster's (its baker loads it, js/playerinv.js simTick bakes), sent with
+// its baker as an id
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.ownedMap) return;
+  C.ownedMap("baker.ovens", ovens, (k, o) => C.ofCell(o.pos.x, o.pos.z), o => Object.assign({}, JSON.parse(JSON.stringify(Object.assign({}, o, { by: null }))), { by: o.by ? o.by.id : null }),
+    j => Object.assign(j, { by: j.by != null ? BF.ids.live(j.by) || null : null }));
+});
 const addTo = (arr, id, n) => { if (n <= 0) return; const s = arr.find(e => e.id === id); if (s) s.count += n; else arr.push({ id, count: n }); };
 const takeFrom = (arr, id, n) => { const s = arr.find(e => e.id === id); if (!s || s.count < n) return false; s.count -= n; if (!s.count) arr.splice(arr.indexOf(s), 1); return true; };
 const has = (arr, id, n) => { const s = arr.find(e => e.id === id); return !!s && s.count >= n; };

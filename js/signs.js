@@ -601,11 +601,12 @@ if (BF.page) addEventListener("keydown", e => {
 // ---------------------------------------------------------------- auto signs
 function registerAuto(kind, fn) { autos[kind] = fn; }
 // A sign coming into the world (direct) gets its text at once; the simulation's half-hourly updates are requests.
-function runAuto(onlyKey, direct) {
+function runAuto(onlyKey, direct, C) {
   if (follow) return;   // (a page following the simulation's store: the simulation writes auto signs)
   for (const [k, e] of data) {
     if (!e.auto || (onlyKey && k !== onlyKey)) continue;
     const [x, y, z] = pk(k);
+    if (C && !C.mineCell(x, z)) continue;
     if (!W().isLoaded(x, z)) continue;
     const fn = autos[e.auto], g = groupAt(x, y, z);
     if (!fn || !g || g.key !== k) continue;
@@ -630,14 +631,16 @@ BF.req.on("signText", req => {
 });
 let pendingAuto = true;
 // generated auto signs become text entries once all their blocks are loaded (and only once per auto key)
-function tryAutoPlans() {
-  pendingAuto = false;
+function tryAutoPlans(C) {
+  if (!C) pendingAuto = false;
   if (follow) return;
   for (const [k, p] of autoPlan) {
+    if (C && !C.mineCell(p.cells[0][0], p.cells[0][2])) continue;
     if (seen.has(p.ak)) { autoPlan.delete(k); continue; }
     if (!p.cells.every(c => W().isLoaded(c[0], c[2]))) continue;
     autoPlan.delete(k);
     seen.add(p.ak);
+    if (C && BF.cworkers && BF.cworkers.active) seenNew.push([C.cur.key, p.ak]);
     const g = groupAt(p.cells[0][0], p.cells[0][1], p.cells[0][2]);
     if (!p.cells.every(c => wget(c[0], c[1], c[2]) === p.id) || !g || g.key !== k || g.W * g.H !== p.cells.length || data.has(k)) continue;
     data.set(k, { t: "", auto: p.kind, ak: p.ak });
@@ -966,10 +969,44 @@ if (BF.page) requestAnimationFrame(tick);   // (drawing: headless has none)
 function autoTick() {
   const S = BF.sky;
   if (!S) return;
+  const C = BF.ctick && BF.ctick.filter ? BF.ctick : null;
+  if (C) {
+    // clusters (spec r15-39b, js/ctick.js): each cluster its own signs (by their anchor cell), the plans every half game second and the
+    // texts at the ticks that start a half hour, on the clock each cluster runs on
+    if (BF.rand.tick % 10 === 1 && autoPlan.size) tryAutoPlans(C);
+    const t = (S.day || 0) + (S.time || 0), d = BF.warp.TICK / (S.dayLength || 1200);
+    if (Math.floor(t * 48) !== Math.floor((t - d) * 48)) runAuto(null, false, C);
+    return;
+  }
   if (pendingAuto) tryAutoPlans();
   const hh = Math.floor(((S.day || 0) + (S.time || 0)) * 48);   // half an in-game hour = 1/48 day
   if (hh !== lastHH) { lastHH = hh; runAuto(); }
 }
+// Several workers (clusters, js/cworkers.js): the signs' texts by their anchor's cluster, and the auto keys turned into signs since the last
+// meeting (they are only ever added)
+const seenNew = [];   // [group key, auto key]
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.owned) return;
+  const g = k => { const a = pk(k); return C.ofCell(a[0], a[2]); };
+  C.owned("signs", {
+    snap(gk) {
+      const d = [];
+      for (const [k, e] of data) if (g(k) === gk) d.push([k, e]);
+      const sn = [];
+      for (let i = seenNew.length - 1; i >= 0; i--) if (seenNew[i][0] === gk) { sn.push(seenNew[i][1]); seenNew.splice(i, 1); }
+      return { d, sn };
+    },
+    apply(gk, o) {
+      const got = new Set(o.d.map(x => x[0]));   // (in place: the store's order is saved and hashed)
+      for (const k of [...data.keys()]) if (!got.has(k) && g(k) === gk) data.delete(k);
+      for (const [k, e] of o.d) data.set(k, e);
+      for (const ak of o.sn) seen.add(ak);
+      for (const [k, p] of autoPlan) if (seen.has(p.ak)) autoPlan.delete(k);
+      groupCache.clear(); touched();
+    },
+  });
+});
 if (BF.world && BF.world.onThink) BF.world.onThink(autoTick, "signs");
 BF.onLoad(() => {
   if (BF.on) BF.on("newWorld", reset);

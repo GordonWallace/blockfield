@@ -155,6 +155,10 @@ function growTree(x, y, z) {
 // Think hook: the saws (inventory only).
 function growTick() {
   hook();
+  if (BF.ctick && BF.ctick.filter) {   // clusters (spec r15-39b, js/ctick.js): every cluster its own foresters, every 5 game seconds on the tick counter
+    if (BF.rand.tick % 100 === 9 && BF.mobs) for (const m of BF.regions.ofType("villager")) if (m.profession === "forester" && !m.dead && !m.removed && Array.isArray(m.inv)) saw(m, state(m));
+    return;
+  }
   const now = nowS();
   if (now - growLast < 1) return;
   const dt = Math.min(5, now - growLast);
@@ -466,6 +470,14 @@ function logBases(x, z) {
 // Trees within 40 blocks (and 64 of the village centre; sized villages: anywhere within 40 of the village's box). Candidates are ranked by distance times a random factor of 0.5 to 2, so a near tree
 // usually wins but a farther one sometimes does (two foresters do not all go for the same trunk).
 const notTree = new Map();   // "x,y,z" of log bases that are not trees -> sim time until which they are skipped
+// several workers (clusters, js/cworkers.js): a claim is its forester's cluster's, a log base its cell's
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.ownedMap) return;
+  const cellG = k => { const i = k.indexOf(","), j = k.lastIndexOf(","); return C.ofCell(+k.slice(0, i), +k.slice(j + 1)); };
+  C.ownedMap("forester.claims", claims, (k, m) => C.ofMob(m) || cellG(k), m => m.id, id => BF.ids.live(id) || null);
+  C.ownedMap("forester.notTree", notTree, cellG);
+});
 function findTree(m) {
   const pos = m.position, px = Math.floor(pos.x), py = Math.floor(pos.y), pz = Math.floor(pos.z), cands = [], c = centre(m), box = boxOf(m);
   const x0 = box ? box.minX - SIZED_CUT : px - CUT_SEARCH, x1 = box ? box.maxX + SIZED_CUT : px + CUT_SEARCH;

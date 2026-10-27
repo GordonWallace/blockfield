@@ -39,6 +39,12 @@ const r5 = v => Math.round(v * 1e5) / 1e5, r1 = v => Math.round(v * 10) / 10;
 const keyOf = m => m && m.village && m.slot && m.slot.idx != null ? m.village.key + "#" + m.slot.idx : null;
 const statusOf = m => BF.villagerStatus ? BF.villagerStatus.text(m) : m.sleeping ? "Sleeping" : "Idle";
 
+// several workers (clusters, js/cworkers.js): a villager's timeline is its village's cluster's; only the ones that changed go at a meeting
+BF.onLoad(() => {
+  const C = BF.ctick;
+  if (!C || !C.ownedMap) return;
+  C.ownedMap("daytimeline.lines", lines, k => C.ofVillage(k.slice(0, k.lastIndexOf("#"))), null, null, (k, L) => L.v + "|" + (L.s.length ? L.s[L.s.length - 1][1] : ""));
+});
 function lineOf(key, make) {
   let L = lines.get(key);
   if (!L && make) lines.set(key, L = { s: [], e: [], v: 0 });
@@ -114,9 +120,15 @@ function hook() {
 function update() {
   hook();
   const now = dayNow();
-  if (now < last) last = -1;                    // the clock went backwards
-  if (last >= 0 && now - last < EVERY) return;
-  last = now;
+  if (BF.ctick && BF.ctick.filter) {
+    // clusters (spec r15-39b, js/ctick.js): every cluster its own villagers (the region query), at the ticks that start a game minute
+    const d = BF.warp.TICK / ((BF.sky && BF.sky.dayLength) || 1200);
+    if (Math.floor(now / EVERY) === Math.floor((now - d) / EVERY)) return;
+  } else {
+    if (now < last) last = -1;                    // the clock went backwards
+    if (last >= 0 && now - last < EVERY) return;
+    last = now;
+  }
   if (!BF.mobs || !BF.regions) return;
   for (const m of BF.regions.ofType("villager")) if (!m.dead && !m.removed && m.position) sample(m, now);
 }
