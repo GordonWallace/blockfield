@@ -423,7 +423,11 @@ function tables() {
     snap: gk => { const out = []; for (const r of recs.values()) if (recGroup(K, r) === gk) { const c = plain(Object.assign({}, r, { mobId: r.mobId })); c.cl = r.cl; out.push(c); } return out; },
     apply(gk, a) {
       for (const r of [...recs.values()]) if (recGroup(K, r) === gk) recs.delete(r.hid);
-      for (const e of a || []) { const r = recs.get(e.hid) || BF.ids.mobRef({ hid: e.hid, mobId: null }); Object.assign(r, e); recs.set(r.hid, r); if (r.hid >= nextId) nextId = r.hid + 1; }
+      for (const e of a || []) {
+        const r = recs.get(e.hid) || BF.ids.mobRef({ hid: e.hid, mobId: null });
+        Object.assign(r, e); recs.set(r.hid, r); if (r.hid >= nextId) nextId = r.hid + 1;
+        const m = r.mob; if (m && m.horse && m.horse !== r && m.horse.hid === r.hid) m.horse = r;   // a mob that came over carries a copy: the record is the one
+      }
     },
   });
   K.owned("horses.herds", {
@@ -664,7 +668,8 @@ function serialize() {
       post: r.lead && r.lead.kind === "post" ? [r.lead.x, r.lead.y, r.lead.z] : null, led: r.lead && r.lead.kind === "player" ? 1 : 0, pen: r.pen,
       rider: r.mob && r.mob.rider ? 1 : 0, avoid: r.avoid || null });
   }
-  return { recs: out, herds: [...herds.values()].map(h => [h.id, Math.round(h.cx), Math.round(h.cz), Math.round(h.dir * 100) / 100]), next: nextId, nextHerd };
+  if (BF.ctick && BF.ctick.on) out.sort((a, b) => a.hid - b.hid);   // cluster groups make records in either order
+  return { recs: out, herds: [...herds.values()].sort((a, b) => BF.ctick && BF.ctick.on ? a.id - b.id : 0).map(h => [h.id, Math.round(h.cx), Math.round(h.cz), Math.round(h.dir * 100) / 100]), next: nextId, nextHerd };
 }
 function deserialize(o) {
   reset();
