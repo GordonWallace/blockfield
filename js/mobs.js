@@ -441,6 +441,30 @@ function createMob(type, x, y, z, variant, style) {
   return mob;
 }
 
+// A mob another worker made (clusters on several workers, js/cworkers.js), in two steps so new mobs can point at each other: blankMob
+// puts an empty one of the type under its id in the list; filled(m, o) copies in its fields (o: the other worker's plain copy, links
+// already turned back into this world's objects) and indexes it.
+function blankMob(type, id) {
+  const T = TYPES[type];
+  if (!T) return null;
+  const mob = new MobShape();
+  mob.type = type; mob.def = T; mob.ai = new AiShape(); mob.position = new THREE.Vector3(); mob.vel = new THREE.Vector3(); mob.removed = false;
+  BF.ids.put(mob, id);
+  list.push(mob);
+  return mob;
+}
+// (had: the mob was here already, made between ticks on every worker alike: only its fields are taken)
+function filledMob(mob, o, had) {
+  for (const k of Object.keys(o)) if (k !== "def" && k !== "type") mob[k] = k === "ai" && o.ai ? fill(o.ai, AiShape) : o[k];
+  if (had) return;
+  if (!mob.prev) keepPrev(mob);   // (sent with it: where it started the tick)
+  if (BF.regions) BF.regions.mobAdded(mob);
+  // its village's members (not enumerable, so not in the record diff): the owner pushed it when it made it; born-list order keeps
+  // the owner's relative order. Without it, the group's next owner would make a second golem or villager in its place.
+  const rec = mob.villageId != null ? BF.ids.get(mob.villageId) : null;
+  if (rec && rec.members && !rec.members.includes(mob)) rec.members.push(mob);
+}
+
 function removeMob(m) {
   const i = list.indexOf(m);
   if (i >= 0) list.splice(i, 1);
@@ -3339,6 +3363,7 @@ BF.mobs = {
                 // still holds when it applies; returns the mob, or null when queued
   // Removes a mob quietly: no death, no drops (js/gameopts.js: monsters switched off in the world).
   discard(m) { if (m && !m.removed) removeMob(m); },
+  blank: blankMob, filled: filledMob,   // (several workers, js/cworkers.js)
   explode(m) { if (m && !m.removed && !m.dead) explode(m); },   // a creeper's blast now (tests): in the think phase, one request per region it reaches
   // The share of monster spawn weight whose type spawns (1 with all on): js/wildlife.js scales its area caps by it.
   spawnTypes: () => Object.keys(TYPES).filter(t => typeof TYPES[t].spawns === "boolean"),   // the switchable monsters (js/gameopts.js)

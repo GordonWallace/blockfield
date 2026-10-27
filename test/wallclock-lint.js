@@ -53,6 +53,7 @@ const FUNCS = [
 ];
 // Single lines in files that also hold simulation code: [file, text on the line, why it is allowed]
 const LINES = [
+  ["cworkers.js", "const now = () => performance.now();", "cluster workers' timing (r15-39b C7): stats, and the plan of which worker runs which group, never what happens in it"],
   ["main.js", "const t0 = performance.now();\n      let f = 0;", "boot: the river solve runs in slices until done, before the game starts"],
   ["main.js", "while (f < 1 && performance.now() - t0 < 60)", "boot: the river solve slices (above)"],
   ["main.js", "let last = performance.now();", "frame dt (the player and drawing)"],

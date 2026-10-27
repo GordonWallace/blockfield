@@ -4,6 +4,7 @@
 // world server (r15-41).
 // Usage: node tools/headless.js [--seed 3] [--seconds 600] [--at village|spawn] [--villages 10] [--view 8] [--log file.log]
 //                               [--save out.json] [--load save.json] [--json] [--every s] [--workers n] [--verify ticks] [--after s] [--shuffle k] [--dump file] [--extra n] [--coarse on|off]
+//                               [--ctick converted|full|a,b,c] [--cworkers n]
 //   --at village (default): the player moves to the village nearest the spawn first, so villagers are simulated; spawn: stays there.
 //   --extra n: the n nearest other villages are simulated too, however far (js/active.js fixed set; a heavier load to measure with).
 //   --coarse on|off: far villages coarse or full detail for this run, whatever the world's option (spec r15-64, js/gameopts.js).
@@ -12,6 +13,11 @@
 //   --workers n: the regions' thinking split over n workers (spec r15-39: n - 1 worker_threads, server/regionthread.js); the world must
 //   come out the same as with one. --verify t: the workers compare state hashes every t ticks (slow; tests). --shuffle k (tests): regions go to workers by a hash of k at every rebalance, whatever they cost, to try other splits. --after s: the
 //   split starts after s game seconds that every copy plays on its own (as in play, js/rplay.js).
+//   --ctick p: the cluster tick on (spec r15-39b, js/ctick.js) with the systems of profile p (BF.ctick.only: converted, the systems marked
+//   converted; full, every system; or a list). --cworkers n: and the clusters split over n workers (C7, js/cworkers.js: n - 1
+//   worker_threads, server/regionthread.js); the world must come out the same as with one. --order cluster (the default with
+//   --cworkers: each worker takes the next group when it is free) or tick (groups planned onto workers at each meeting); --shuffle k
+//   (with --order tick): the groups change workers at every meeting.
 //   --json: one JSON line at the end ({seed, seconds, ticks, vss, mobss, msPerTick, real, villagers, mobs, chunks, hash, parts, workers,
 //   census: every item in the world by name, and the emeralds}).
 // As a module: const { load } = require('./tools/headless.js'); const { BF, ctx } = load(); BF.boot.headless({seed: 3}).tick(20);
@@ -90,9 +96,29 @@ async function main(argv) {
   say(`hash at the start ${H0.hash}`);
   // --workers n (spec r15-39): n - 1 followers (server/regionthread.js) boot the same world from this one's river network, then every
   // tick runs on all n with the regions' thinking split between them (js/rworkers.js)
-  const nw = a.workers != null ? Math.max(1, +a.workers | 0) : 1;
+  const nw = a.workers != null ? Math.max(1, +a.workers | 0) : 1, ncw = a.cworkers != null ? Math.max(1, +a.cworkers | 0) : 1;
+  const only = a.ctick == null || a.ctick === 'full' ? null : a.ctick === 'converted' ? BF.ctick.converted() : String(a.ctick).split(',');
   let pool = null;
-  if (nw > 1) {
+  if (a.ctick != null || ncw > 1) {
+    BF.ctick.only = only; BF.ctick.on = true;
+    if (a.order) BF.ctick.order = a.order;
+    say(`cluster tick on (${only ? only.join(', ') : 'every system'})`);
+  }
+  if (ncw > 1) {   // C7: n - 1 followers with the same world and the cluster tick on, every worker running its own groups
+    const t1 = performance.now();
+    pool = require('../server/regionthread.js').spawn(ncw);
+    const rivers = BF.worldgen.riverState();
+    const boots = await Promise.all(pool.list.map(f => f.ask({ boot: { seed, rivers,
+      settings: { at: a.at || 'village', villages: a.villages != null ? +a.villages : undefined, viewDist: a.view != null ? +a.view : undefined, extra: a.extra != null ? +a.extra : undefined } } })));
+    for (const [i, b] of boots.entries()) if (b.booted !== H0.hash) throw new Error(`cluster worker ${i + 1} booted a different world (${b.booted}, not ${H0.hash})`);
+    const shared = BF.cworkers.makeShared(ncw), order = a.order || 'cluster';
+    await Promise.all(pool.list.map(f => f.ask({ cstart: { shared, me: f.me, n: ncw, only, order, shuffle: +a.shuffle || 0 } })));
+    BF.ctick.order = order;
+    BF.cworkers.shuffle = +a.shuffle || 0;
+    BF.cworkers.setup({ n: ncw, me: 0, link: BF.rworkers.attach(shared, 0, ncw), claims: shared.claims });
+    BF.cworkers.prof = {};
+    say(`${ncw} cluster workers: ${ncw - 1} followers booted the same world in ${((performance.now() - t1) / 1000).toFixed(1)} s`);
+  } else if (nw > 1) {
     const t1 = performance.now();
     pool = require('../server/regionthread.js').spawn(nw);
     const rivers = BF.worldgen.riverState();
@@ -129,11 +155,19 @@ async function main(argv) {
     await Promise.all(done);
     const hs = await Promise.all(pool.list.map(f => f.ask({ hash: true })));
     const same = hs.every(x => x.hash.hash === H.hash);
-    workers = { n: nw, same, hashes: [H.hash].concat(hs.map(x => x.hash.hash)), mismatch: BF.rworkers.mismatch || hs.map(x => x.mismatch).find(Boolean) || null, stats: BF.rworkers.stats() };
+    workers = { n: pool.list.length + 1, same, hashes: [H.hash].concat(hs.map(x => x.hash.hash)), mismatch: BF.rworkers.mismatch || hs.map(x => x.mismatch).find(Boolean) || null, stats: BF.rworkers.stats() };
     for (const [i, x] of hs.entries()) if (x.hash.hash !== H.hash) say(`worker ${i + 1}'s world differs from the leader's in ${Object.keys(H.parts).filter(k => H.parts[k] !== x.hash.parts[k]).join(', ')}`);
     if (a.audit) for (const [i, x] of [BF.rworkers.audits].concat(hs.map(x => x.audits)).entries()) for (const e of x || []) console.log(`audit worker ${i}: ${e.by} changed ${e.what} at tick ${e.tick}: ${e.ops}`);
-    say(BF.rworkers.text());
-    BF.rworkers.stop();
+    if (ncw > 1) {
+      say(BF.cworkers.text());
+      for (const [i, st] of [BF.cworkers.stats()].concat(hs.map(x => x.stats)).entries()) {
+        const p = st.perMeeting, f = v => v.toFixed(2);
+        say(`  worker ${i}: ms a meeting: run ${f(p.run)}, collect ${f(p.collect)}, exchange (waiting) ${f(p.exchange)}, adopt ${f(p.adopt)}, shadows ${f(p.snap)}; ${f(st.kbPerMeeting)} KB sent`);
+      }
+      say('  worker 0 collect, ms a meeting: ' + Object.entries(BF.cworkers.prof).map(([k, v]) => k + ' ' + (v / Math.max(1, BF.cworkers.stats().meetings)).toFixed(2)).join(', '));
+      workers.stats = BF.cworkers.stats(); BF.cworkers.stop();
+    }
+    else { say(BF.rworkers.text()); BF.rworkers.stop(); }
     pool.stop();
   }
   const villagers = BF.mobs.list.filter(m => m.type === 'villager' && !m.dead && !m.removed).length;
