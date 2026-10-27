@@ -696,10 +696,10 @@ function thinking(m) {
   const k = unitOf(m, BF.regions ? BF.regions.regionOf(m) : -1), t = now();
   if (k !== curRegion) { if (curRegion != null) load.set(curRegion, (load.get(curRegion) || 0) + t - regionT0); curRegion = k; regionT0 = t; }
 }
-const reqOut = (e, req) => [e[0], e[1], req.kind, enc(req.target, null), encData(req), req.from, req.tick, req.region == null ? -1 : req.region];
+const reqOut = (e, req) => [e[0], e[1], req.kind, enc(req.target, null), encData(req), req.from, req.tick, req.region == null ? -1 : req.region, req.by];
 function adoptAll(list, into) {
   for (const r of list) {
-    const req = BF.req.adopt({ kind: r[2], target: dec(r[3], null), data: dec(r[4], null), from: r[5], seq: 0, tick: r[6], region: r[7] });
+    const req = BF.req.adopt({ kind: r[2], target: dec(r[3], null), data: dec(r[4], null), from: r[5], seq: 0, tick: r[6], region: r[7], by: r[8] });
     into.push([r[0], r[1], req]);
   }
 }
@@ -807,7 +807,7 @@ function afterDeliver() {
   foreignOps(mobs);
   const mineSends = dSends.filter(e => e[1] === 1);   // (those from callbacks: only this worker made them; onResult's are made everywhere)
   const plan = T.ticks % REBALANCE === 0;
-  const out = { mobs, recs: recDirty.size ? recOps(recDirty) : [], touched: takeTouched(), dyn: takeDyn(), reg: takeReg(), reqs: mineSends.map(e => [e[0] * 2 + e[1], e[2], e[3].kind, enc(e[3].target, null), encData(e[3]), e[3].from, e[3].tick, e[3].region == null ? -1 : e[3].region]),
+  const out = { mobs, recs: recDirty.size ? recOps(recDirty) : [], touched: takeTouched(), dyn: takeDyn(), reg: takeReg(), reqs: mineSends.map(e => [e[0] * 2 + e[1], e[2], e[3].kind, enc(e[3].target, null), encData(e[3]), e[3].from, e[3].tick, e[3].region == null ? -1 : e[3].region, e[3].by]),
     logs, fx, load: plan ? [...load] : null };
   const msg = JSON.stringify(out);
   const all = RW.link.exchange(msg);
@@ -888,10 +888,17 @@ function checkHashes(hs) {
     for (const k of diff) mine[k] = BF.stateHash.text(k);
     const all = RW.link.exchange(JSON.stringify(mine)).map(x => JSON.parse(x));
     if (RW.me === 0) for (let w = 1; w < all.length; w++) for (const k of diff) {
+      if (hs[w] && a[k] === hs[w][k]) continue;   // (another worker's part that differs)
       const p = all[0][k] || "", q = all[w][k] || "";
       if (p === q) { out_of_step("worker " + w + ", " + k + ": the hashes differ but the texts match (a field the hash reads that the text leaves out)"); continue; }
       let i = 0; while (i < p.length && p[i] === q[i]) i++;
       out_of_step("worker " + w + ", " + k + " from character " + i + ": leader ..." + p.slice(Math.max(0, i - 300), i + 200) + " / worker " + w + " ..." + q.slice(Math.max(0, i - 300), i + 200));
+    }
+    // block edits: every worker says who last wrote each cell that differs (js/world.js trail, on with ?verify=), the leader logs them
+    if (diff.has("edits")) {
+      const cells = [...new Set([].concat(...all.slice(1).map(x => BF.stateHash.editsDiff(all[0].edits, x.edits))))].slice(0, 8);
+      const trails = RW.link.exchange(JSON.stringify(BF.world.trailOf(cells))).map(x => JSON.parse(x));
+      if (RW.me === 0) for (const c of cells) out_of_step("the last writes of cell " + c + " [tick, phase, by, id]: " + trails.map((t, w) => (w ? "worker " + w : "leader") + " " + JSON.stringify(t[c])).join(" / "));
     }
   }
   for (let w = 1; w < hs.length; w++) {

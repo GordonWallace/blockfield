@@ -209,7 +209,14 @@ function update() {
   BF.glog.log("INFO", "statehash", `State hash at the start of day ${day}: ${r.hash} (${r.ms} ms)`);
 }
 
+// The cells two edits texts disagree on (tests: region workers out of step): ["chunk key:edit index", ...], at most max.
+function editsDiff(p, q, max = 8) {
+  const cells = t => { const m = new Map(); for (const part of String(t || "").split("|")) { const at = part.lastIndexOf(":"); if (at < 0) continue; const k = part.slice(0, at); for (const c of part.slice(at + 1).split(",")) { const [i, id] = c.split("="); m.set(k + ":" + i, id); } } return m; };
+  const a = cells(p), b = cells(q), out = [];
+  for (const k of new Set([...a.keys(), ...b.keys()])) if (a.get(k) !== b.get(k)) { out.push(k); if (out.length >= max) break; }
+  return out;
+}
 const stateHash = () => full().hash;
-Object.assign(stateHash, { PARTS: Object.keys(PARTS), parts: () => full().parts, full, text: partText, canon: text, hashStr, update, last: null });
+Object.assign(stateHash, { PARTS: Object.keys(PARTS), parts: () => full().parts, full, text: partText, canon: text, hashStr, update, editsDiff, last: null });
 BF.stateHash = stateHash;
 })();

@@ -66,6 +66,7 @@ function begin(world) {
   world.beesHooked = !!(BF.bees && BF.bees.hooked && BF.bees.hooked());
   world.player = player();   // (the look and the rest the title world left: a new world keeps them)
   world.clock = BF.simNow();   // the simulation clock goes on from world to world (js/timewarp.js): a fresh follower starts where the leader is
+  BF.world.trail = L.verify ? new Map() : null;   // (tests: who wrote each cell, for a cell that differs: js/world.js)
   L.world = world; L.ticks = 0; L.solo = new Map(); L.diff = null; L.recent = []; L.ready = 0; L.split = false; L.trial = null; L.backoff = BACKOFF; L.retryAt = 0; L.busySince = null;
   L.soloMs = null; L.splitMs = null; L.loopT0 = null; L.loopTicks = 0;
   { const h = BF.stateHash.full(); L.hash = h.hash; L.bootParts = h.parts; L.bootText = L.verify ? texts() : null; }   // (the followers must boot the same world)
@@ -101,6 +102,7 @@ function onFollower(f, epoch, m) {
   if (m.load) f.load = m.load;   // its thread's busy share (js/threadload.js), about once a second
   if (m.hashAt != null) soloCheck(f, m);
   if (m.textOf != null) soloText(f, m);
+  if (m.trail) soloTrail(f, m);
 }
 const texts = () => { const t = {}; for (const k of BF.stateHash.PARTS) t[k] = BF.stateHash.text(k); return t; };
 function soloText(f, m, text) {
@@ -112,7 +114,13 @@ function soloText(f, m, text) {
     if (p === q) continue;
     let i = 0; while (i < p.length && p[i] === q[i]) i++;
     log("ERROR", "Region workers out of step: worker " + f.me + ", " + k + " from character " + i + ": leader ..." + p.slice(Math.max(0, i - 300), i + 200) + " / worker " + f.me + " ..." + q.slice(Math.max(0, i - 300), i + 200));
+    // block edits: who last wrote each cell that differs, here and on the follower (js/world.js trail, on with ?verify=): see onFollower
+    if (k === "edits") { const cells = BF.stateHash.editsDiff(p, q); f.trailMine = BF.world.trailOf(cells); f.h.post({ trailOf: cells }); }
   }
+}
+function soloTrail(f, m) {
+  const mine = f.trailMine || {};
+  for (const c of Object.keys(m.trail)) log("ERROR", "Region workers out of step: the last writes of cell " + c + " [tick, phase, by, id]: leader " + JSON.stringify(mine[c]) + " / worker " + f.me + " " + JSON.stringify(m.trail[c]));
 }
 function soloCheck(f, m) {
   const mine = L.solo.get(m.hashAt);
@@ -292,6 +300,7 @@ function follower(post) {
           if (t - loadT >= TL.SAMPLE) { loadT = t; post({ ticks, load: TL.report() }); }
           else post({ ticks });
         } else if (d.textAt != null) { const t = kept.get(d.textAt); if (t) { const o = {}; for (const k of d.parts) o[k] = t[k]; post({ textOf: d.textAt, texts: o }); } }
+        else if (d.trailOf) post({ trail: BF.world.trailOf(d.trailOf) });
         else if (d.end) { if (RW.active) RW.pause(); queue.length = 0; }
       }
     } catch (e) { queue.length = 0; fail(e); }
@@ -318,6 +327,7 @@ function follower(post) {
     if (w.op === "load") BF.save.restore(w.data, w.meta);
     else BF.newWorld(w.seed, w.opts || {});
     if (w.player) setPlayer(w.player);
+    BF.world.trail = verify ? new Map() : null;   // (tests: who wrote each cell, as on the leader)
     // a protocol host whose output goes nowhere: the client's packets do here what they did on the leader
     host = BF.proto.host(() => {}, { replica: true, world: () => new Promise(() => {}), onView: v => { if (v.dist > 0 && v.dist !== BF.world.viewDist) BF.world.setViewDist(v.dist); } });
     { const h = BF.stateHash.full(); post({ booted: h.hash, parts: h.parts, texts: verify ? texts() : null }); }
