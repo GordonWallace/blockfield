@@ -67,6 +67,18 @@ function builtOf(rec) {
   pending.set(rec.key, rec.built);
   return rec.built;
 }
+// A structure's state as another builder's think sees it (r15-73): a builder can start or finish one in its own update (shopping, building),
+// so a change made earlier in this tick by another builder is read as the state it had at the start of the tick, whatever order they
+// think in. setState records the change (e.was, e.chT, e.chBy).
+function setState(m, e, st) {
+  const tick = BF.rand ? BF.rand.tick : 0;
+  if (e.chT !== tick) e.was = e.state === undefined ? null : e.state;
+  e.state = st; e.chT = tick; e.chBy = m && m.slot ? m.slot.idx : 0;
+}
+function seenState(m, e) {
+  const tick = BF.rand ? BF.rand.tick : 0;
+  return e.chT === tick && e.chBy !== (m.slot ? m.slot.idx : 0) && BF.req && BF.req.phase === "think" ? e.was : e.state;
+}
 
 // ---------------------------------------------------------------- materials
 // Every structure is built from one wood species (entry.wood, see blueprints.js): its requirement names that species' planks, logs and fences
@@ -585,7 +597,8 @@ function beginPlan(m, bs, type, wood) {
   if (!site) { bs.fail[type] = dayNow() + 0.12; logEvent("nosite", m, { type }); return null; }
   applyCrafts(m, a.crafts);
   const e = { id: nextId(built), type, label: site.bp.label, rot: site.rot, style, wood, h: site.h, opts: opts || undefined, ox: site.ox, oy: site.oy, oz: site.oz,
-    w: site.bp.w, d: site.bp.d, prog: 0, skipped: 0, state: "building", owner: m.slot ? m.slot.idx : 0, fill: site.fill, start: +dayNow().toFixed(3) };
+    w: site.bp.w, d: site.bp.d, prog: 0, skipped: 0, state: null, owner: m.slot ? m.slot.idx : 0, fill: site.fill, start: +dayNow().toFixed(3), was: null, chT: -1, chBy: 0 };
+  setState(m, e, "building");
   if (site.span) e.span = site.span;   // a bridge: the water it crosses (js/bridges.js walks villagers over it)
   e.n = nfill(e) + site.bp.n;
   clearSaplings(m, e);
@@ -674,7 +687,7 @@ function myTurn(m, R) {
 }
 function think(m, bs) {
   const R = m.village, built = builtOf(R);
-  const active = built.find(e => e.state === "building");
+  const active = built.find(e => seenState(m, e) === "building");
   if (active) {
     // the owner keeps it only while it is alive and still a builder; otherwise this builder takes it over (with its own materials)
     const ownerBuilds = R.members.some(x => !x.removed && !x.dead && x.profession === "builder" && x.slot && x.slot.idx === active.owner);
@@ -862,25 +875,25 @@ function placeCell(m, bs, e) {
 function glaze(m, bs, built) {
   const P = PANE();
   if (P == null || !(have0(m.inv, P) > 0 || sellerStock(m.village)[P] > 0)) return false;
-  const e = built.filter(x => x.state === "done" && x.gaps && x.gaps.length).sort((a, b) => Math.hypot(a.ox - m.position.x, a.oz - m.position.z) - Math.hypot(b.ox - m.position.x, b.oz - m.position.z))[0];
+  const e = built.filter(x => seenState(m, x) === "done" && x.gaps && x.gaps.length).sort((a, b) => Math.hypot(a.ox - m.position.x, a.oz - m.position.z) - Math.hypot(b.ox - m.position.x, b.oz - m.position.z))[0];
   if (!e) return false;
   const from = Math.min(...e.gaps), left = e.gaps.length;
   if (!beginBuild(m, left, e.ox + e.w / 2, e.oz + e.d / 2, what(e))) return true;
-  e.state = "building"; e.glaze = true; e.prog = from; e.gaps = []; e.retry = []; e.retried = false; e.skipped = 0; e.owner = m.slot ? m.slot.idx : 0;
+  setState(m, e, "building"); e.glaze = true; e.prog = from; e.gaps = []; e.retry = []; e.retried = false; e.skipped = 0; e.owner = m.slot ? m.slot.idx : 0;
   logEvent("glaze", m, { type: e.type, at: [e.ox, e.oy, e.oz], windows: left });
   startBuild(m, bs, e, true);
   return true;
 }
 function finish(m, bs, e) {
   if (e.glaze) {   // windows filled in: the structure was already built
-    e.glaze = false; e.state = "done";
+    e.glaze = false; setState(m, e, "done");
     if (BF.villageSim) BF.villageSim.done(m);
     bs.mode = "idle"; bs.entry = null; bs.cool = rnd(RS(m), 10, 20); bs.t = 3; m.ai.route = null;
     logEvent("glazed", m, { type: e.type, at: [e.ox, e.oy, e.oz], left: (e.gaps || []).length });
     if (BF.vlog && m.village) BF.vlog.log(m.village, "build", BF.vlog.nameOf(m) + " (Builder) put glass panes in the windows of " + what(e, true) + " at " + e.ox + ", " + e.oy + ", " + e.oz, [e.ox, e.oy, e.oz]);
     return;
   }
-  e.state = "done"; e.end = +dayNow().toFixed(3);
+  setState(m, e, "done"); e.end = +dayNow().toFixed(3);
   if (BF.villageSim) BF.villageSim.done(m);
   bs.mode = "idle"; bs.entry = null; bs.cool = rnd(RS(m), 40, 80); bs.t = 3; m.ai.route = null;
   const bp = bpOf(e);
@@ -926,7 +939,7 @@ function waterLeft(e) {
 }
 const waterFirst = e => e.type === "well" && !e.glaze && !e.watered && (e.prog | 0) === 0 && waterLeft(e);
 function giveUpWell(m, bs, e, why) {
-  e.state = "abandoned"; e.end = +dayNow().toFixed(3);
+  setState(m, e, "abandoned"); e.end = +dayNow().toFixed(3);
   bs.fail[e.type] = dayNow() + 1;
   if (BF.villageSim) BF.villageSim.done(m);
   bs.mode = "idle"; bs.entry = null; bs.fill = null; bs.cool = rnd(RS(m), 10, 20); bs.t = 3; bs.goal = null; m.ai.route = null;

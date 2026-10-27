@@ -413,7 +413,7 @@ const AI_FIELDS = [
   "t", "mode", "tx", "tz", "fleeT", "target", "losT", "los", "attackCd", "shootCd", "fuse", "strafe", "lookT", "swingT", "provoked", "burnT", "aiming",
   "leaving", "zScanT", "threat", "night", "held", "blockedT", "route", "ri", "stuckT", "routeKind", "doors", "leaveTries", "leaveEnd", "outT",
   "wanderAt", "hScanT", "rescueId", "revengeId", "foeId", "golemFoeT", "gScanT", "golemFoeId", "vScanT", "vTargetId", "doorT", "doorAt", "detour",
-  "fleeJitter", "gLos", "was", "pitT", "pitOut", "pitLogged", "climbT", "chase", "giveUpId", "giveUpT", "chaseBest", "chaseSlowT", "planW", "planL", "planG"];
+  "fleeJitter", "gLos", "was", "pitT", "pitOut", "pitLogged", "climbT", "chase", "giveUpId", "giveUpT", "chaseBest", "chaseSlowT", "planW", "planL", "planG", "planT0", "planN"];
 // The constructors: named stores (the only way V8 sizes an object for all of them), generated from the lists; js/ids.js Refs is the
 // prototype, so the link accessors (m.village, m.ai.foe...) work as on any refs() record and BF.ids.refs passes these through.
 const shapeOf = fields => { const C = new Function(fields.map(k => "this." + k + " = undefined;").join("\n")); C.prototype = BF.ids.Refs; return C; };
@@ -1546,12 +1546,25 @@ function grantPlans() {
   w.sort((a, b) => a.ai.planW - b.ai.planW || idNum(a) - idNum(b) || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
   for (let i = 0; i < w.length && i < PLANS; i++) { const a = w[i].ai; a.planG = t; a.planW = a.planL = undefined; }
 }
+// A villager that plans route after route (two jobs taking its route from each other each tick, r15-73) goes in the game log, once a game
+// minute while it lasts: REPLAN_MAX searches in a minute is far more than any job needs.
+const REPLAN_MAX = 30;
+function replanCheck(m, a) {
+  if (m.type !== "villager") return;
+  const now = BF.simNow ? BF.simNow() : 0;
+  if (!(a.planT0 > now - 60)) { a.planT0 = now; a.planN = 0; }
+  if (++a.planN === REPLAN_MAX && BF.glog) {
+    const p = m.position;
+    BF.glog.log("WARN", "replan", (BF.vlog ? BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession || "villager") + ")" : "A villager") + " planned " + REPLAN_MAX +
+      " routes within a game minute at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z) + " (route " + (a.routeKind || "none") + ")", { village: m.village, at: m });
+  }
+}
 function takePlan() {
   const m = curMob;
   if (!m) { if (planBudget > 0) { planBudget--; return true; } return false; }
   const a = m.ai;
   if (!a) return false;
-  if (a.planG != null) { a.planG = undefined; return true; }
+  if (a.planG != null) { a.planG = undefined; replanCheck(m, a); return true; }
   const t = planTick;
   if (a.planW != null) a.planL = t; else { a.planW = t; a.planL = t; }
   return false;

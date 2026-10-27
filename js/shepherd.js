@@ -557,7 +557,7 @@ function leave(m, S, dt, out) {
     if (!R) return false;
     pen = pensOf(R).find(q => p.x > q.fx0 && p.x < q.fx1 && p.z > q.fz0 && p.z < q.fz1 && Math.abs(p.y - (q.y + 1)) < 2);
     if (!pen) return false;
-    S.exit = pen; S.exitT = 0; S.navFail = 0; m.ai.route = null;
+    S.exit = pen; S.exitT = 0; S.navFail = 0; if (m.ai.routeKind === "farm") m.ai.route = null;   // (not another job's route: standing at the exit already, that dropped its walk back every tick)
   }
   S.exitT += dt;
   const N = BF.mobs.nav, [fx, fy, fz] = N.feetCell(m);
