@@ -98,16 +98,17 @@ function newRec(o) {
   recs.set(r.hid, r);
   return r;
 }
-// A new record's or herd's number. With clusters (js/ctick.js) it comes from the running group's entity id range (js/ids.js), so it
-// doesn't depend on the order groups run in; the counters then just stay past it.
+// A new record's or herd's number. With the cluster tick on (js/ctick.js) it comes from the running cluster's id ranges (js/ids.js), so it
+// doesn't depend on the order clusters run in (wild herds rolled by js/wildlife.js are made per cluster, C2); the counters then just stay past it.
+const clustersOn = () => !!(BF.ctick && BF.ctick.on);
 function newId() {
-  if (!BF.herd.cluster()) return nextId++;
+  if (!clustersOn()) return nextId++;
   const n = +BF.ids.alloc().slice(1);
   if (n >= nextId) nextId = n + 1;
   return n;
 }
 function newHerdId() {
-  if (!BF.herd.cluster()) return nextHerd++;
+  if (!clustersOn()) return nextHerd++;
   const n = +BF.ids.alloc().slice(1);
   if (n >= nextHerd) nextHerd = n + 1;
   return n;

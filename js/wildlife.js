@@ -54,6 +54,13 @@ const ck = (x, z) => Math.floor(x / BF.CS) + "," + Math.floor(z / BF.CS);
 const R = e => BF.rand.of(e);   // seeded random streams (js/rand.js)
 const rnd = (r, a, b) => r.range(a, b);
 const irnd = (r, a, b) => a + r.int(b - a + 1);
+// Clusters (spec r15-39b, C2: js/ctick.js): with the cluster tick on, update runs once per cluster and handles its own chunks only (a
+// chunk is the cluster's of its region: BF.mobs.cl), its monster areas are its own chunks' (worked out once an interval), its timers go by
+// the tick counter, and the chunk and village tables that last (rolled, stored, nights) are registered with BF.ctick.owned.
+const CL = () => BF.mobs.cl;
+const clustered = () => !!(BF.mobs.cl && BF.mobs.cl.owned());
+const chunkBase = k => { const i = k.indexOf(","), CS = BF.CS; return CL().baseAt({ x: (+k.slice(0, i) + 0.5) * CS, z: (+k.slice(i + 1) + 0.5) * CS }); };
+const ownChunk = k => CL().ownsBase(chunkBase(k));
 
 let rolled = new Set();        // chunk keys that had their first-generation roll
 const toRoll = new Set();      // loaded chunks still to roll
@@ -216,39 +223,46 @@ function wildBreeding() {
 // ---------------------------------------------------------------- monster areas, caps and the buffer
 let areaList = [], areaOf = new Map(), areasT = 0;
 let targets = new Map(), targetsDirty = true;   // villagers and golems by chunk, rebuilt at most once a frame when a spawn is checked
-function rebuildAreas() {
-  areaList = []; areaOf = new Map();
+// the areas in force: the world's, or with clusters the running cluster's (its own chunks; worked out at its first use in an interval)
+function areasNow() {
+  if (!clustered()) { if (!areaList.length) rebuildAreas(); return { list: areaList, of: areaOf }; }
+  return BF.ctick.local("wildlife.areas", () => buildAreas(ownChunk));
+}
+function rebuildAreas() { const o = buildAreas(null); areaList = o.list; areaOf = o.of; }
+function buildAreas(mine) {
+  const areaList = [], areaOf = new Map();
   const W = BF.world, VS = BF.villageSim;
   if (VS && VS.areas) for (const a of VS.areas()) {
     const idx = areaList.length, A = { kind: a.kind, key: a.key, n: 0, h: 0, cap: 0 };
-    for (const k of a.keys) if (!areaOf.has(k) && W.chunks.has(k)) { areaOf.set(k, idx); A.n++; }
+    for (const k of a.keys) if (!areaOf.has(k) && W.chunks.has(k) && (!mine || mine(k))) { areaOf.set(k, idx); A.n++; }
     if (A.n) areaList.push(A); else continue;
   }
   const P = { kind: "player", key: "player", n: 0, h: 0, cap: 0 }, pi = areaList.length;
-  for (const k of W.chunks.keys()) if (!areaOf.has(k)) { areaOf.set(k, pi); P.n++; }
+  for (const k of W.chunks.keys()) if (!areaOf.has(k) && (!mine || mine(k))) { areaOf.set(k, pi); P.n++; }
   areaList.push(P);
   // monsters switched off in the world (js/gameopts.js): the cap shrinks by their share of the spawn weights and only monsters that are on
   // count, so turning creepers off leaves zombies' numbers as they were
   const share = BF.mobs.spawnShare(), on = t => BF.mobs.typeDef(t).spawns !== false;
   for (const A of areaList) A.cap = Math.max(1, Math.round(CAP * A.n / CAP_CHUNKS)) * share;
   for (const t of BF.mobs.types) if (BF.mobs.typeDef(t).hostile && on(t)) for (const m of BF.mobs.ofType(t)) if (m.hostile && live(m)) { const i = areaOf.get(ck(m.position.x, m.position.z)); if (i != null) areaList[i].h++; }
+  return { list: areaList, of: areaOf };
 }
 function rebuildTargets() {
   targets = new Map();
+  const f = BF.ctick && BF.ctick.on ? BF.ctick.filter : null;
   for (const m of BF.mobs.list) {
-    if (!live(m) || !(m.type === "villager" || (m.def && m.def.golem))) continue;
+    if (!live(m) || !(m.type === "villager" || (m.def && m.def.golem)) || (f && !f(m))) continue;
     const k = ck(m.position.x, m.position.z), a = targets.get(k);
     if (a) a.push(m); else targets.set(k, [m]);
   }
 }
 // May a monster spawn at (x, y, z)? Its area under the cap, and nothing monsters target within BUFFER blocks.
 function mayHostile(x, y, z) {
-  if (!areaList.length) rebuildAreas();
-  const i = areaOf.get(ck(x, z)), A = areaList[i != null ? i : areaList.length - 1];
+  const AR = areasNow(), i = AR.of.get(ck(x, z)), A = AR.list[i != null ? i : AR.list.length - 1];
   if (A && A.h >= A.cap) return false;
-  const p = BF.player && BF.player.position;
+  const c = clustered(), p = c ? CL().playerPos() : BF.player && BF.player.position;   // (clusters: as the running cluster sees the player)
   const q = p && BF.planet.local({ x, z }, p);   // (across a face edge: seen from the spot)
-  if (p && !BF.player.dead && Math.hypot(q.x - x, p.y - y, q.z - z) < BUFFER) return false;
+  if (p && (c ? CL().playerLives() : !BF.player.dead) && Math.hypot(q.x - x, p.y - y, q.z - z) < BUFFER) return false;
   // villagers and golems within BUFFER: from the region index (spec r15-31); in tests checked against the chunk table it replaced
   const guard = o => live(o) && (o.type === "villager" || (o.def && o.def.golem)) && Math.abs(o.position.x - x) < BUFFER && Math.abs(o.position.z - z) < BUFFER && Math.hypot(o.position.x - x, o.position.y - y, o.position.z - z) < BUFFER;
   const M = BF.mobs, got = M.near({ x, z }, BUFFER).some(guard);
@@ -263,8 +277,8 @@ function mayHostile(x, y, z) {
   });
 }
 function spawned(m) {
-  const i = areaOf.get(ck(m.position.x, m.position.z));
-  const A = areaList[i != null ? i : areaList.length - 1];
+  const AR = areasNow(), i = AR.of.get(ck(m.position.x, m.position.z));
+  const A = AR.list[i != null ? i : AR.list.length - 1];
   if (A) A.h++;
 }
 
@@ -280,10 +294,12 @@ function nightRec(key, n) {
 function watchVillages() {
   const n = nightNow();
   if (n == null || !BF.vlog || !BF.vlog.villageAt) return;
+  const c = clustered();
   for (const m of BF.mobs.ofType("zombie")) {   // (spec r15-31: the zombies only)
     if (!live(m)) continue;
     const rec = BF.vlog.villageAt(m.position.x, m.position.z);
-    if (rec) { const r = nightRec(rec.key, n); if (!r[0]) { r[0] = 1; log("reached", { village: rec.key, night: n }); } }
+    // (clusters: the running cluster's villages only; another cluster's counts it once a zombie of its own gets in)
+    if (rec && (!c || CL().ownsBase("v:" + rec.key))) { const r = nightRec(rec.key, n); if (!r[0]) { r[0] = 1; log("reached", { village: rec.key, night: n }); } }
   }
 }
 function hook() {
@@ -317,9 +333,10 @@ function onLoad(cx, cz) {
   if (!rolled.has(k)) toRoll.add(k);
   if (stored.has(k)) toRestore.add(k);
 }
-function init() { if (BF.world && !init.done) { init.done = true; BF.world.onChunkLoad(onLoad); } hook(); }
+function init() { if (BF.world && !init.done) { init.done = true; BF.world.onChunkLoad(onLoad); } hook(); ownTables(); }
 function update(dt) {
   hook();
+  if (clustered()) return updateCluster();
   const W = BF.world;
   if (toRestore.size) for (const k of [...toRestore]) { toRestore.delete(k); if (W.chunks.has(k)) restore(k); }
   if (toRoll.size && BF.mobs.spawning !== false) {
@@ -336,13 +353,56 @@ function update(dt) {
   breedT -= dt; if (breedT <= 0) { breedT = 2; try { wildBreeding(); } catch (e) { console.error(e); } }
   watchT -= dt; if (watchT <= 0) { watchT = 1; watchVillages(); }
 }
+// With clusters: the running cluster's chunks to bring back and roll; breeding every 2 game seconds and the village watch every second,
+// by the tick counter (each cluster's pass the same tick)
+function updateCluster() {
+  const W = BF.world;
+  if (toRestore.size) for (const k of [...toRestore]) if (ownChunk(k)) { toRestore.delete(k); if (W.chunks.has(k)) restore(k); }
+  if (toRoll.size && BF.mobs.spawning !== false) {
+    let n = 0;
+    for (const k of [...toRoll]) {
+      if (!ownChunk(k)) continue;
+      toRoll.delete(k);
+      if (!W.chunks.has(k) || rolled.has(k)) continue;
+      roll(k);
+      if (++n >= ROLLS_PER_STEP) break;
+    }
+  }
+  targetsDirty = true;
+  const T = BF.rand.tick;
+  if (T % 40 === 0) try { wildBreeding(); } catch (e) { console.error(e); }
+  if (T % 20 === 0) watchVillages();
+}
+// The tables that last, by group (BF.ctick.owned; js/cworkers.js sends each group's part at meetings): a chunk's entries go with its
+// region's cluster, a village's nights with the village's.
+function ownTables() {
+  const C = BF.ctick;
+  if (!C || ownTables.done) return;
+  ownTables.done = true;
+  const G = (k, g) => CL().groupFor(chunkBase(k)) === g, GV = (k, g) => CL().groupFor("v:" + k) === g;
+  C.owned("wildlife.rolled", {
+    snap: g => { const a = []; for (const k of rolled) if (G(k, g)) a.push(k); return a; },
+    apply: (g, a) => { for (const k of [...rolled]) if (G(k, g)) rolled.delete(k); for (const k of a || []) rolled.add(k); },
+  });
+  C.owned("wildlife.stored", {
+    snap: g => { const a = []; for (const [k, v] of stored) if (G(k, g)) a.push([k, v]); return a; },
+    apply: (g, a) => { for (const k of [...stored.keys()]) if (G(k, g)) stored.delete(k); for (const [k, v] of a || []) stored.set(k, v); },
+  });
+  C.owned("wildlife.nights", {
+    snap: g => { const a = []; for (const [k, v] of nights) if (GV(k, g)) a.push([k, [...v]]); return a; },
+    apply: (g, a) => { for (const k of [...nights.keys()]) if (GV(k, g)) nights.delete(k); for (const [k, v] of a || []) nights.set(k, new Map(v)); },
+  });
+}
 function serialize() {
+  // (with the cluster tick on, chunks and villages in key order: the clusters add theirs in turn, so the order they were met in hangs on the
+  // order clusters ran in; off, in that order as before)
+  const ord = BF.ctick && BF.ctick.on ? it => [...it].sort((a, b) => { const x = Array.isArray(a) ? a[0] : a, y = Array.isArray(b) ? b[0] : b; return x < y ? -1 : x > y ? 1 : 0; }) : it => it;
   const r = [];
-  for (const k of rolled) { const i = k.indexOf(","); r.push(+k.slice(0, i), +k.slice(i + 1)); }
+  for (const k of ord(rolled)) { const i = k.indexOf(","); r.push(+k.slice(0, i), +k.slice(i + 1)); }
   const s = {};
-  for (const [k, a] of stored) s[k] = a;
+  for (const [k, a] of ord(stored)) s[k] = a;
   const nv = {};
-  for (const [k, v] of nights) nv[k] = [...v].map(([n, x]) => [n, x[0], x[1], x[2]]);
+  for (const [k, v] of ord(nights)) nv[k] = [...v].map(([n, x]) => [n, x[0], x[1], x[2]]);
   return { rolled: r, stored: s, nights: nv };
 }
 function deserialize(o) {
@@ -365,7 +425,7 @@ function counts() {
 BF.wildlife = {
   HABITAT, GROUP, ZONE, zoneKind, HOUR, RELOCATE_R, tune, BREED_R, BREED_CHANCE, CROWD_R, CROWD_MAX, CAP, CAP_CHUNKS, BUFFER, NIGHTS,
   init, update, stow, adopt, bring, relocate, mayHostile, spawned, villageStats, daylightBetween,
-  areas: () => { if (!areaList.length) rebuildAreas(); return areaList; }, areaOf: (x, z) => { const i = areaOf.get(ck(x, z)); return i != null ? areaList[i] : null; },
+  areas: () => areasNow().list, areaOf: (x, z) => { const A = areasNow(), i = A.of.get(ck(x, z)); return i != null ? A.list[i] : null; },
   stored: () => stored, isRolled: k => rolled.has(k), counts, log: LOG,
   serialize, deserialize, reset,
 };
