@@ -208,7 +208,7 @@ let vhSent = new Map(), vhVer = null, vhWid = null;
 function vhist() {
   const V = BF.vstats;
   if (!V || !V.history) return undefined;
-  const wid = (BF.glog && BF.glog.world()) || (BF.state && BF.state.seed != null ? "seed-" + BF.state.seed : null);
+  const wid = worldId();
   if (!wid) return undefined;
   const full = V.ver !== vhVer || wid !== vhWid, v = {};
   if (full) { vhSent = new Map(); vhVer = V.ver; vhWid = wid; }
@@ -411,13 +411,19 @@ function stateHash() {
 
 // The simulation's part of a snapshot. ack: what the server answered last time, when the simulation is in a worker (its log position,
 // the commit on disk, the picked villager, a resync).
+// The world the simulation runs: the saved world's id, or (not saved) its seed. When it changes everything is sent again, and the debug
+// server and screen drop what they hold from the last world.
+let feedWid = null;
+const worldId = () => (BF.glog && BF.glog.world()) || (BF.state && BF.state.seed != null ? "seed-" + BF.state.seed : null);
 function simPart(ack) {
   if (ack) applyAck(ack);
+  const wid = worldId();
+  if (wid !== feedWid) { if (feedWid !== null) resync(); feedWid = wid; }
   const pp = BF.player.position;
   const mobs = {};
   for (const m of BF.mobs.list) if (!m.dead && !m.removed) { const k = m.type === "chicken" ? (m.coop ? "chicken (coop)" : "chicken (wild)") : m.type === "cow" ? (m.pasture ? "cow (pasture)" : "cow (wild)") : m.type === "pig" ? (m.sty ? "pig (sty)" : "pig (wild)") : m.type; mobs[k] = (mobs[k] || 0) + 1; }   // chickens: penned and wild (js/poultry.js)
   if (BF.boats) Object.assign(mobs, BF.boats.counts());   // boats by wood ("oak_boat": n) next to the mob types
-  return { mobs, professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp), icons: icons(),
+  return { wid, mobs, professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp), icons: icons(),
     gt: +(BF.sky.day + BF.sky.time).toFixed(5),   // game time now (days), for the day timeline's "now" edge
     vhist: vhist(),   // village history, new samples (js/villagestats.js): the History panel
     mobmap: Date.now() - mobMapT >= MOBMAP_EVERY ? (mobMapT = Date.now(), mobMap(pp)) : undefined,
