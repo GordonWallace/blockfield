@@ -9,6 +9,7 @@
 //              (world.applyEdits: the owner made those and sends them too);
 //   tables     each module table registered with BF.ctick.owned, the owned groups' part (C2-C6 register them);
 //   places     new keys in the place registry (js/ids.js onNew), as js/rworkers.js;
+//   items      the map items the owned groups made (js/blocks.js BF.dynRange: ids from the slot's range, so the same everywhere);
 //   requests   the requests waiting for the meeting (crossing to another group) and those still queued in an owned group, with their
 //              stamps, so the meeting applies and files them as one worker would;
 //   counters   how far each id and creation-number range went (js/ctick.js R2, js/ids.js range, js/rand.js range), so the meeting hands
@@ -148,9 +149,10 @@ function sync() {
   for (const r of I.deferred) if (!r._cw) { r._cw = 1; waited.push(reqOut(r)); }
   const queued = gs.map(g => [g.key, I.pendingOf(g).map(reqOut)]).filter(q => q[1].length);
   const ms = gs.map(g => [g.key, +g.ms.toFixed(3)]);
-  const counters = [I.R2.ids.j, I.R2.made.j, BF.ids.range.top, BF.rand.made];
+  const counters = [I.R2.ids.j, I.R2.made.j, BF.ids.range.top, BF.rand.made, I.R2.dyn.j];
   lap("rest");
-  const out = { born, mobs, recs, edits, tables, chans, reg, waited, queued, ms, counters };
+  const dyn = BF.dynRange.fresh();
+  const out = { born, mobs, recs, edits, tables, chans, reg, dyn, waited, queued, ms, counters };
   const msg = JSON.stringify(out);
   lap("json");
   if (CW.sizes) {   // (tests: what the bytes are, by part and by the mobs' and records' fields)
@@ -170,19 +172,20 @@ function sync() {
   peers = all.map((x, w) => ({ bytes: x.length }));
   // everything every worker measured (its own groups'), for the plan
   groupMs = new Map(); ranBy = new Map();
-  const lift = [I.R2.ids.j, I.R2.made.j, BF.ids.range.top, BF.rand.made];
+  const lift = [I.R2.ids.j, I.R2.made.j, BF.ids.range.top, BF.rand.made, I.R2.dyn.j];
   for (let w = 0; w < all.length; w++) {
     const p = w === CW.me ? { ms, counters } : ps[w];
     for (const [k, v] of p.ms) { groupMs.set(k, v); ranBy.set(k, w); }
-    for (let i = 0; i < 4; i++) if (p.counters[i] > lift[i]) lift[i] = p.counters[i];
+    for (let i = 0; i < 5; i++) if (p.counters[i] > lift[i]) lift[i] = p.counters[i];
   }
-  I.R2.ids.j = lift[0]; I.R2.made.j = lift[1]; BF.ids.range.lift(lift[2]); BF.rand.range.lift(lift[3]);
+  I.R2.ids.j = lift[0]; I.R2.made.j = lift[1]; BF.ids.range.lift(lift[2]); BF.rand.range.lift(lift[3]); I.R2.dyn.j = lift[4];
   const fresh = new Set();
   bornHere = new Set();
   // the others' changes: places and new mobs first (the changes may point at them), then records, mobs, blocks, tables, requests
   for (let w = 0; w < ps.length; w++) {
     const p = ps[w];
     if (!p) continue;
+    for (const [name, id] of p.dyn) if (!BF.dynRange.adopt(name, id)) err("worker " + w + " made item " + name + " as " + id + ", which is another item here");
     for (const [k, e] of p.reg) if (BF.ids.live(k) === undefined) BF.ids.put(R.dec(e, null), k);
     for (const [id, type] of p.born) if (BF.ids.live(id) === undefined) { BF.mobs.blank(type, id); fresh.add(id); }
   }
