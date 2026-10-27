@@ -75,16 +75,26 @@ module.exports = async (pg) => {
   ok("the village unloads again for the longer absence", await leave());
   const savedAt = await lib.sim(pg, ([k, idxs]) => Object.fromEntries(idxs.map(i => { const s = BF.mobSave.serialize().v[k + "#" + i]; return [i, s ? [s.p[0], s.p[2]] : null]; })), [info.key, Object.keys(before2).filter(i => before2[i][2] === "explorer")]);   // where an explorer was when the village unloaded (it walks on while the test waits)
   await lib.sim(pg, () => { BF.sky.time = 0.3; BF.sky.day += 1; if (BF.explorer && !BF.explorer.__ai) { BF.explorer.__ai = BF.explorer.ai; BF.explorer.ai = m => m.profession === "explorer"; } });   // a day later, mid-morning; explorers stand still so the spot they load at can be read
+  // where each explorer is the first time it is back: the restore is what is checked. The stub above only stands in for its own job;
+  // the jobs ahead of it (js/mobs.js jobsAI: storing a full pack, buying food when hungry) still walk it off while the rest of the village loads
+  // (CI on #643: back 8.3 blocks away at a route cell, z 180983.50000008)
+  await lib.sim(pg, k => {
+    const w = globalThis.__rpx = { first: {}, stop: false };
+    const tick = () => {
+      if (w.stop) return;
+      for (const m of BF.mobs.list) if (m.profession === "explorer" && m.village && m.village.key === k && m.slot && !m.dead && !w.first[m.slot.idx]) w.first[m.slot.idx] = [m.position.x, m.position.z];
+      setTimeout(tick, 20);
+    };
+    setTimeout(tick, 20);
+  }, info.key);
   await back();
+  const exFirst = await lib.sim(pg, () => { const w = globalThis.__rpx; w.stop = true; return w.first; });
   const info2 = await lib.sim(pg, k => BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === k && m.slot && !m.dead && m.profession !== "explorer").map(m => { const b = m.slot.bed, c = b ? [b.x, b.z] : [m.village.x, m.village.z]; return { d: Math.hypot(m.position.x - c[0], m.position.z - c[1]), inside: m.position.x >= m.village.wg.minX - 2 && m.position.x <= m.village.wg.maxX + 2 && m.position.z >= m.village.wg.minZ - 2 && m.position.z <= m.village.wg.maxZ + 2, x: m.position.x, z: m.position.z, idx: m.slot.idx }; }), info.key);
   const moved = info2.filter(e => before2[e.idx] && dist(before2[e.idx], [e.x, e.z]) > 4).length;
   ok("after a longer absence the villagers are within the leash of their beds and inside the village", info2.length >= 4 && info2.filter(e => e.d <= 46 && e.inside).length >= Math.ceil(info2.length * 0.85), info2.slice(0, 4));
   ok("they are not back on their old spots", moved >= Math.floor(info2.length / 3), { moved, of: info2.length });   // (a random spot near the bed is often within 4 blocks of where one stood, so a third, not half)
   const ex = Object.keys(before2).filter(k => before2[k][2] === "explorer" && savedAt[k]);   // (one that was not in the village when it unloaded has no spot to compare)
-  if (ex.length) {
-    const nowPos = await snapshot();
-    ok("an explorer comes back at the spot it was at, however long it was away", ex.every(k => nowPos[k] && savedAt[k] && dist(savedAt[k], nowPos[k]) < 6), ex.map(k => [savedAt[k], nowPos[k]]));
-  }
+  if (ex.length) ok("an explorer comes back at the spot it was at, however long it was away", ex.every(k => exFirst[k] && dist(savedAt[k], exFirst[k]) < 6), ex.map(k => [savedAt[k], exFirst[k]]));
   await lib.sim(pg, () => { if (BF.explorer && BF.explorer.__ai) { BF.explorer.ai = BF.explorer.__ai; BF.explorer.__ai = null; } });
   // 3. back at bedtime: in bed
   ok("the village unloads again before night", await leave());
