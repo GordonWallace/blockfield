@@ -92,7 +92,7 @@ function stockGen() {
   const pp = BF.player && BF.player.position, W = BF.world, H = BF.horses;
   if (!pp || !H || !BF.mobs.villages) return;
   for (const R of BF.mobs.villages.values()) {
-    if (!R.wg || stocked.has(R.key) || (BF.planet.distance(R, pp) > 80 && !(BF.villageSim && BF.villageSim.isActive(R.key)))) continue;
+    if (!R.wg || stocked.has(R.key) || !BF.herd.ownsVillage(R.key) || (BF.planet.distance(R, pp) > 80 && !(BF.villageSim && BF.villageSim.isActive(R.key)))) continue;
     const e = genStable(R), st = e && stableOf(R);
     if (!st || st.e !== e) continue;
     const b = st.box;
@@ -106,7 +106,7 @@ function stockGen() {
     }
   }
 }
-function exportAll(out) { if (stocked.size) out["stables:stocked"] = [...stocked]; }
+function exportAll(out) { if (stocked.size) out["stables:stocked"] = [...stocked].sort(); }   // (sorted: with clusters, groups stock in any order)
 function importAll(o) { stocked.clear(); const a = o && o["stables:stocked"]; if (Array.isArray(a)) for (const k of a) stocked.add(String(k)); }
 const inBox = (b, x, z, m = 0) => x > b.x0 - m && x < b.x1 + 1 + m && z > b.z0 - m && z < b.z1 + 1 + m;
 const horsesOf = st => (st && BF.horses ? BF.horses.horsesOf(st.owner) : []);
@@ -534,6 +534,10 @@ let hooked = false, offT = 0;
 function hook() {
   if (hooked || !BF.on) return;
   hooked = true;
+  if (BF.ctick && BF.ctick.owned) BF.ctick.owned("stables.stocked", {   // (clusters: the villages whose stable got its horses, by village)
+    snap: gk => [...stocked].filter(k => BF.clusters.groupOf("v:" + k) === gk),
+    apply(gk, a) { for (const k of [...stocked]) if (BF.clusters.groupOf("v:" + k) === gk) stocked.delete(k); for (const k of a || []) stocked.add(k); },
+  });
   BF.on("horseBred", foal => {
     const r = foal && foal.horse, R = r && recOfOwner(r.owner);
     if (!R || !BF.vlog) return;
@@ -546,8 +550,8 @@ function hook() {
 }
 function tick(dt) {
   hook();
-  if ((offT -= dt) > 0 || !BF.mobs) return;
-  offT = 2;
+  if (BF.herd.cluster()) { if (!BF.herd.every(40) || !BF.mobs) return; }   // (clusters, js/ctick.js: by the tick counter)
+  else { if ((offT -= dt) > 0 || !BF.mobs) return; offT = 2; }
   stockGen();
   for (const m of BF.regions.ofType("villager")) if (m.profession === PROF && live(m) && !m.tradingWith) syncOffers(m);
 }
