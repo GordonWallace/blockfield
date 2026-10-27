@@ -201,7 +201,7 @@ const farmland = {
 BF.farmland = farmland;
 {
   const world = BF.world;
-  if (world && world.onBlockTick) world.onBlockTick(tick);   // a block tick (spec r15-17, js/world.js tickSim)
+  if (world && world.onBlockTick) world.onBlockTick(tick, "farmland");   // a block tick (spec r15-17, js/world.js tickSim)
   hook();
 }
 })();

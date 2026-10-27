@@ -303,6 +303,7 @@ const MOB_FIELDS = [
   "wob", "lastHurt", "homeBedKey", "sleeping", "restored", "attackerId", "attackedAt", "boatCd", "jobPrefer", "cowKit", "cwk", "cwc", "gls", "crumb",
   "penIn", "atOut", "fall", "jobMem", "seek", "exploded", "vdenied", "vanon", "local", "otherId", "sellerId", "goalSellerId", "ledById", "ridingId",
   "pastureKey", "exitKey", "buyFromId", "buyFromAt", "holdForId", "holdT",
+  "cl",   // the mob's cluster (js/clusters.js, spec r15-39b): set when made, moved only at a meeting
   // caches, never saved, sent or hashed (r15-61): the hottest links' last answers (js/ids.js CACHE_FIELDS), the id as a number (js/regiontick.js)
   "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN"];
 const AI_FIELDS = [
@@ -353,6 +354,7 @@ function createMob(type, x, y, z, variant, style) {
   keepPrev(mob);
   list.push(mob);
   if (BF.regions) BF.regions.mobAdded(mob);   // the region index (js/regions.js)
+  if (BF.ctick && BF.ctick.on) BF.clusters.place(mob);   // its cluster, by where it is made (js/clusters.js)
   return mob;
 }
 
@@ -877,8 +879,14 @@ function pitAt(x, y, z) {
   return false;
 }
 // Stops a village mob's walk (and any push) that would take it over the edge into a pit: each horizontal velocity axis that heads for one.
+// A builder at work at its own site (a well it is digging, a foundation): its building route takes it in and out of the dig, and the
+// water a well's builder puts in first can run into it, so that is not a pit to keep it out of or get it out of.
+function atOwnSite(m) {
+  const e = m.bs && m.bs.mode === "build" && m.bs.entry, p = m.position;
+  return !!e && p.x >= e.ox - 2 && p.x < e.ox + e.w + 2 && p.z >= e.oz - 2 && p.z < e.oz + e.d + 2;
+}
 function keepOutOfPits(m) {
-  if (m.inWater || m.onLadder || m.knockT > 0) return;
+  if (m.inWater || m.onLadder || m.knockT > 0 || atOwnSite(m)) return;
   const v = m.vel, p = m.position, y = Math.floor(p.y + 0.01), reach = m.halfWidth + 0.1;
   if (Math.abs(v.x) > 0.01 && pitAt(Math.floor(p.x + Math.sign(v.x) * reach), y, Math.floor(p.z))) v.x = 0;
   if (Math.abs(v.z) > 0.01 && pitAt(Math.floor(p.x), y, Math.floor(p.z + Math.sign(v.z) * reach))) v.z = 0;
@@ -1382,14 +1390,18 @@ let planBudget = 0;
 // table here held only what this worker's own mobs asked, and still held them after their region moved to another worker. A tick number
 // ahead of the counter (a save loaded after the counter restarted) counts as lapsed.
 const PLANS = 2, KEEP = 20;
-let curMob = null, planTick = 0;   // (counts mob updates, not BF.rand.tick: tests step BF.mobs.update on its own)
+let curMob = null, planTick = 0;   // (counts mob updates, not BF.rand.tick: tests step BF.mobs.update on its own; with clusters, the tick)
+// With clusters (spec r15-39b, js/ctick.js) the mob loop's parts run once per cluster: own(m) -> the mob is the running cluster's
+// (null: every mob is)
+const own = () => { const C = BF.ctick; return C && C.on ? C.filter : null; };
 let coarseStep = false, walked = false, coarseN = 0;   // this update is a coarse one; its route walk moved the mob (cellWalk); coarse mobs this tick
 let mobUpdates = 0;   // every mob update run (BF.mobs.updates: test/perf-activity.js checks BF.perf.byState counts each once)
 const idNum = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15; };
 const lapsed = (v, t) => v > t || v < t - KEEP;
 function grantPlans() {
-  const t = ++planTick, w = [];
+  const C = BF.ctick, t = C && C.on ? (planTick = BF.rand.tick) : ++planTick, w = [], mine = own();
   for (const m of list) {
+    if (mine && !mine(m)) continue;
     const a = m.ai;
     if (!a) continue;
     if (a.planG != null && (m.removed || lapsed(a.planG, t))) a.planG = undefined;
@@ -2241,7 +2253,7 @@ function updateMob(m, dt) {
   if (m.coop && BF.poultry) BF.poultry.contain(m, _desired);   // nor does a coop chicken
   if (m.pasture && BF.cowherd) BF.cowherd.contain(m, _desired);   // nor a pasture cow
   if (m.sty && BF.pigFarmer) BF.pigFarmer.contain(m, _desired);   // nor a sty pig
-  if (T.village && !m.rider) {   // in a well or other pit (bug-061): swim for the lowest bank
+  if (T.village && !m.rider && !atOwnSite(m)) {   // in a well or other pit (bug-061): swim for the lowest bank
     if (m.inWater || (ai.pitOut && !m.onGround)) swimOutOfPit(m, dt, _desired);   // (still heading for the bank in the air, jumping out)
     else if (ai.pitOut || ai.pitLogged) { if (ai.pitLogged) moveLog(m, "INFO", "climbed out at " + Math.floor(m.position.x) + ", " + Math.floor(m.position.y) + ", " + Math.floor(m.position.z)); ai.pitOut = null; ai.pitLogged = false; ai.pitT = 0; }
   }
@@ -2461,8 +2473,9 @@ function buildSepGrid() {
   GRID_N.z = GRID_N.h = GRID_N.g = 0;
   if (!gridFast) return buildSepGridRef();
   SEP.clear(); CHUNK.clear();
+  const mine = own();
   for (const o of list) {
-    if (o.dead || o.removed) continue;
+    if (o.dead || o.removed || (mine && !mine(o))) continue;
     const x = o.position.x, z = o.position.z, gx = Math.floor(x / 2), gz = Math.floor(z / 2), hx = Math.floor(x / 16), hz = Math.floor(z / 16);
     if (inSquare(x, z, GRID_EDGE)) { SEP.add(sepKey(gx, gz), o); countIn(CHUNK.add(sepKey(hx, hz), o), o); }
     else { SEP.add(gridKey(gx, gz, 2), o); countIn(CHUNK.add(gridKey(hx, hz, 16), o), o); }
@@ -3188,10 +3201,14 @@ BF.mobs = {
     // far villages coarse (spec r15-64): past the view distance, from the option in force at this tick's start
     const coarseOn = !!(pp && BF.gameOpts && BF.gameOpts.coarse()), view2 = (BF.world.viewDist * BF.CS) ** 2;
     coarseN = 0;
-    for (const m of list) keepPrev(m);   // where each mob was before this tick, for drawing between ticks (js/mobview.js)
+    const mine = own();
+    for (const m of list) if (!mine || mine(m)) keepPrev(m);   // where each mob was before this tick, for drawing between ticks (js/mobview.js)
     // region by region from the shared queue, each region's mobs in id order (spec r15-33, js/regiontick.js); "list" order on request
     // with several workers (spec r15-39, js/rworkers.js) this worker thinks only the regions it owns; the others' changes come after the loop
-    const RW = BF.rworkers, order = BF.rtick ? BF.rtick.plan(list) : list.slice();
+    // with clusters (spec r15-39b, js/ctick.js) only the running cluster's mobs
+    const RW = BF.rworkers;
+    let order = BF.rtick ? BF.rtick.plan(list) : list.slice();
+    if (mine) order = order.filter(mine);
     for (const m of RW && RW.active ? RW.beginThink(order) : order) {
       if (RW && RW.active) RW.thinking(m);
       if (m.removed) continue;
@@ -3231,33 +3248,37 @@ BF.mobs = {
     }
     commitMoves();
     if (RW && RW.active) RW.afterThink();   // the other workers' mobs and requests (js/rworkers.js)
-    updateArrows(dt);
+    // the systems after the loop, each by name (clusters, js/ctick.js: per cluster once converted, else once a tick)
+    const C = BF.ctick, sys = C && C.on ? C.sys : (n, f) => f();
+    sys("arrows", () => updateArrows(dt));
     PF.lap(PC.other);
-    if (BF.builder) BF.builder.tick(dt);
-    if (BF.villageLife) BF.villageLife.tick(dt);   // villager meals, farm scans (js/villagelife.js)
-    if (BF.jobs) BF.jobs.tick(dt);   // jobsite validation, unemployed villagers look for work (js/jobs.js)
-    if (BF.breeding) BF.breeding.tick(dt);   // encounters, hearts, children (js/breeding.js)
-    if (BF.storage) BF.storage.tick(dt);   // chest owners: empty chests and those of dead villagers are freed (js/storage.js)
+    if (BF.builder) sys("builder", () => BF.builder.tick(dt));
+    if (BF.villageLife) sys("villageLife", () => BF.villageLife.tick(dt));   // villager meals, farm scans (js/villagelife.js)
+    if (BF.jobs) sys("jobs", () => BF.jobs.tick(dt));   // jobsite validation, unemployed villagers look for work (js/jobs.js)
+    if (BF.breeding) sys("breeding", () => BF.breeding.tick(dt));   // encounters, hearts, children (js/breeding.js)
+    if (BF.storage) sys("storage", () => BF.storage.tick(dt));   // chest owners: empty chests and those of dead villagers are freed (js/storage.js)
     PF.lap(PC.villagers);
-    if (BF.shepherd) BF.shepherd.tick(dt);   // sheep feeding, breeding, wool regrowth, pen stock (js/shepherd.js)
-    if (BF.horses) BF.horses.tick(dt);   // herds, foals, horses waiting in unloaded chunks (js/horses.js)
-    if (BF.stables) BF.stables.tick(dt);   // stable hands' horse offers, foal log lines (js/stables.js)
-    if (BF.poultry) BF.poultry.tick(dt);   // chickens growing up, laying, coop stock (js/poultry.js)
-    if (BF.cowherd) BF.cowherd.tick(dt);   // calves growing up, pasture stock (js/cowherd.js)
-    if (BF.pigFarmer) BF.pigFarmer.tick(dt);   // piglets growing up, sty stock (js/pigfarmer.js)
+    if (BF.shepherd) sys("shepherd", () => BF.shepherd.tick(dt));   // sheep feeding, breeding, wool regrowth, pen stock (js/shepherd.js)
+    if (BF.horses) sys("horses", () => BF.horses.tick(dt));   // herds, foals, horses waiting in unloaded chunks (js/horses.js)
+    if (BF.stables) sys("stables", () => BF.stables.tick(dt));   // stable hands' horse offers, foal log lines (js/stables.js)
+    if (BF.poultry) sys("poultry", () => BF.poultry.tick(dt));   // chickens growing up, laying, coop stock (js/poultry.js)
+    if (BF.cowherd) sys("cowherd", () => BF.cowherd.tick(dt));   // calves growing up, pasture stock (js/cowherd.js)
+    if (BF.pigFarmer) sys("pigFarmer", () => BF.pigFarmer.tick(dt));   // piglets growing up, sty stock (js/pigfarmer.js)
     PF.lap(PC.vanimals);
-    if (BF.baker) BF.baker.tick(dt);   // event hooks (js/baker.js)
-    if (BF.explorer && BF.explorer.tick) BF.explorer.tick(dt);   // tents of explorers that unloaded while camping (js/explorer.js)
+    if (BF.baker) sys("baker", () => BF.baker.tick(dt));   // event hooks (js/baker.js)
+    if (BF.explorer && BF.explorer.tick) sys("explorer", () => BF.explorer.tick(dt));   // tents of explorers that unloaded while camping (js/explorer.js)
     PF.lap(PC.villagers);
-    if (BF.mobs.spawning !== false) spawnMonsters(dt);   // animals are never spawned around the player: chunks roll them once and they breed (js/wildlife.js)
+    if (BF.mobs.spawning !== false) sys("spawn", () => spawnMonsters(dt));   // animals are never spawned around the player: chunks roll them once and they breed (js/wildlife.js)
     PF.lap(PC.monsters);
-    if (BF.wildlife) BF.wildlife.update(dt);
+    if (BF.wildlife) sys("wildlife", () => BF.wildlife.update(dt));
     PF.lap(PC.wild);
-    try { updateVillages(dt); restockVillagers(dt); if (BF.merchant) BF.merchant.tick(dt); } catch (e) { console.error(e); }
+    sys("villages", () => { try { updateVillages(dt); } catch (e) { console.error(e); } });
+    sys("restock", () => { try { restockVillagers(dt); } catch (e) { console.error(e); } });
+    if (BF.merchant) sys("merchant", () => { try { BF.merchant.tick(dt); } catch (e) { console.error(e); } });
     PF.lap(PC.villagers);
-    despawn(dt);
-    aiTick(dt);
-    if (BF.mobSave) BF.mobSave.update(dt);
+    sys("despawn", () => despawn(dt));
+    sys("aiTick", () => aiTick(dt));
+    if (BF.mobSave) sys("mobSave", () => BF.mobSave.update(dt));
     PF.lap(PC.other);
   },
   // Nearest living mob whose AABB the ray hits within maxDist: {mob, dist} or null.

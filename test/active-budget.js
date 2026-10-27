@@ -1,4 +1,5 @@
-// @ci integration suite=village timeout=900 hosts=worker,server
+// @ci integration suite=village timeout=1500 hosts=worker,server
+// (timeout: its waits add up to 780 s at most, plus getting to the village; a 2 fps runner can take most of them)
 // The simulation budget (spec r15-34, js/active.js): with the budget forced high, villages beyond the nearest four join the simulated set
 // over time, nearest first, through the normal load path; forced low, they leave again one at a time, farthest first, back to the minimum
 // rule, each through the unload countdown (a villager on a task holds its village until the task ends; nothing is cut off). Game log
