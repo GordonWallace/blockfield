@@ -114,6 +114,22 @@ let pick = null, pv = "0", day = null;
 // A planet debug toggle clicked on the debug screen ({tints | wedge | sphere: bool}, js/view.js setDebug): passed to the game the same
 // way. The game's snapshots carry the toggles as they are (pt), which is what the screen shows.
 let ptReq = null, ptv = "0";
+// Fast-forward steps from the debug screen (POST /warp, debug/warp.js): {id, t, op ("faster" | "slower" | "set"), speed (set: 0 freezes)}.
+// Each snapshot says the id of the last step the game applied (s.wc), and the answer carries the steps after it, so quick presses all
+// arrive, in order, once each. Ids start at this server's start time, so a game that knew an earlier server's ids doesn't skip new
+// ones; a step older than WARP_TTL is dropped (a game that connects later doesn't replay old presses).
+const WARP_TTL = 15000;
+let warpOps = [], warpId = Date.now();
+// wc: the last step the game applied; ff: its speed now ({speed, real}), which GET /warp gives the screen. Called with each snapshot, and
+// with the game page's own GET /warp?wc= when it plays on the world server (sooner than the world server's snapshots: those wait on the
+// simulation, and their answers reach the page behind everything else the server sends it).
+let warpNow = null, warpAt = 0;
+function warpAfter(wc, ff) {
+  const now = Date.now();
+  if (ff && typeof ff === "object") { warpNow = { speed: +ff.speed || 0, real: +ff.real || 0 }; warpAt = now; }
+  warpOps = warpOps.filter(w => now - w.t < WARP_TTL);
+  return warpOps.filter(w => w.id > (+wc || 0)).map(w => ({ id: w.id, op: w.op, speed: w.speed }));
+}
 // The open world's game log (js/gamelog.js): {w (world id), name, head (its header line), base (index of lines[0]), lines}, all of it
 // once the game has sent it. Debug screens get it whole when they connect (/events cache, or /glog) and the new entries in each snap.
 let glog = null;
@@ -218,8 +234,9 @@ function take(s) {
   const resync = pushes++ === 0, stale = !s.alerts || s.alerts.av !== av;   // the game's alerts are out of date: send them along
   const staleP = !!s.pick && s.pick.pv !== pv;                                 // so is its picked villager
   const staleT = !!ptReq && !!s.pt && s.pt.tv !== ptv;                         // and a planet toggle it hasn't applied
+  const warp = warpAfter(s.wc, s.ff);   // fast-forward steps the game hasn't applied
   const staleS = (s.screens | 0) !== clients.size;                             // and how many debug screens are open (the perf meter runs while any is, js/perf.js)
-  const o = stale || staleP || staleT || staleS || glogAt != null || build ? Object.assign({ resync }, stale ? { av, alerts } : {}, staleP ? { pick, pv } : {}, staleT ? { pt: ptReq, ptv } : {}, staleS ? { screens: clients.size } : {}, glogAt != null ? { glogAt } : {}, build ? { build } : {}) : null;
+  const o = stale || staleP || staleT || staleS || glogAt != null || build || warp.length ? Object.assign({ resync }, stale ? { av, alerts } : {}, staleP ? { pick, pv } : {}, staleT ? { pt: ptReq, ptv } : {}, staleS ? { screens: clients.size } : {}, glogAt != null ? { glogAt } : {}, build ? { build } : {}, warp.length ? { warp } : {}) : null;
   return o || (resync ? "resync" : "ok");
 }
 // Allow-Private-Network: Chrome asks before a page from a network address (a LAN IP) talks to this machine's localhost
@@ -282,7 +299,36 @@ function serveDebug(req, res) {
     }).bind(null, req, res));
     return;
   }
+  if (url.pathname === "/warp" && req.method === "POST") {   // a fast-forward step from the debug screen ({op: "faster" | "slower"} or {op: "set", speed})
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", c => { body += c; if (body.length > 1e3) req.destroy(); });
+    req.on("end", safe(() => {
+      let o; try { o = JSON.parse(body); } catch (e) { res.writeHead(400, cors()).end("bad json"); return; }
+      const op = o && o.op, speed = o && +o.speed;
+      if (op !== "faster" && op !== "slower" && !(op === "set" && Number.isFinite(speed) && speed >= 0)) { res.writeHead(400, cors()).end("no step"); return; }
+      const w = { id: ++warpId, t: Date.now(), op };
+      if (op === "set") w.speed = speed;
+      warpOps.push(w);
+      if (warpOps.length > 50) warpOps.shift();
+      res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ id: w.id }));
+    }).bind(null, req, res));
+    return;
+  }
+  if (url.pathname === "/warp" && url.searchParams.has("wc")) {   // the game page on the world server: its speed, and the steps after wc for it
+    const sp = url.searchParams, warp = warpAfter(sp.get("wc"), sp.has("speed") ? { speed: sp.get("speed"), real: sp.get("real") } : null);
+    res.writeHead(200, cors({ "Content-Type": "application/json", "Cache-Control": "no-cache" })).end(JSON.stringify({ warp }));
+    return;
+  }
+  if (url.pathname === "/warp") {   // the game's fast-forward as of its latest report (debug/warp.js polls it): {ff: {speed, real}, age (ms)}
+    res.writeHead(200, cors({ "Content-Type": "application/json", "Cache-Control": "no-cache" })).end(JSON.stringify({ ff: warpNow, age: warpAt ? Date.now() - warpAt : null }));
+    return;
+  }
   if (url.pathname === "/alerts") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ av, alerts })); return; }
+  if (url.pathname === "/warp.js") {   // the screen's fast-forward controls (arrow keys, buttons)
+    fs.readFile(path.join(__dirname, "warp.js"), (err, data) => err ? res.writeHead(404).end() : res.writeHead(200, { "Content-Type": TYPES[".js"], "Cache-Control": "no-cache" }).end(data));
+    return;
+  }
   if (url.pathname === "/vhist") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify(vhist.cached())); return; }   // the village history as the server holds it
   if (url.pathname === "/vhist-view.js") {   // the History panel's code (kept out of index.html)
     fs.readFile(path.join(__dirname, "vhist-view.js"), (err, data) => err ? res.writeHead(404).end() : res.writeHead(200, { "Content-Type": TYPES[".js"], "Cache-Control": "no-cache" }).end(data));
