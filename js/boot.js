@@ -85,6 +85,7 @@ BF.simStep = simStep;
 // fast-forwarding), so behaviour is the same at any speed and frame rate. Stops early if the frame budget runs out; those ticks are
 // dropped, not owed (W.done). Returns the number of ticks run. BF.simFrame runs it on its own (tests: a forced frame rate).
 // With region workers (js/rworkers.js) the leader's journal gets the frame's measure, so the followers' budgets decide alike.
+let lastBusy = null;   // (the thread's busy ms at the last frame: js/threadload.js total)
 function simFrame(raw) {
   const W = BF.warp, plan = W.plan(raw), t0 = performance.now(), RJ = BF.rworkers.journal ? BF.rworkers : null;
   let done = 0;
@@ -92,7 +93,12 @@ function simFrame(raw) {
     simStep(plan.h);
     done++;
   }
-  const ms = performance.now() - t0;   // the simulation's share of real time, for the budget (js/active.js, spec r15-34)
+  // the simulation's share of real time, for the budget (js/active.js, spec r15-34): in the page the ticks' time (the page also draws);
+  // where the simulation has a thread of its own (a Web Worker, the world server), everything that thread did since the last frame:
+  // streaming the chunks, the page's messages and the rest grow with the villages too (Gordon, 2026-10-28: 42 villages, 0.2x at 3x)
+  let ms = performance.now() - t0;
+  const TL = !BF.page && BF.tload && BF.tload.total ? BF.tload : null;
+  if (TL) { const b = TL.total(); if (lastBusy != null && b >= lastBusy) ms = Math.max(ms, b - lastBusy); lastBusy = b; }
   if (RJ) RJ.rec(["a", ms, raw]);
   if (BF.active) BF.active.frame(ms, raw);
   return done;

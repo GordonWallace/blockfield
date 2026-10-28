@@ -23,7 +23,8 @@
 //   villages  "auto": as many as the machine runs at 1x, nearest first (the default) | "nearest": the minimum rule only
 //   share     "auto" | 0.2 .. 1: the most of each real second the simulation may take at 1x. Automatic is 80% where the simulation has a
 //             thread of its own (a Web Worker, the world server: the rest is headroom for chunks, saves and spikes) and 40% in the page
-//             (frames need the rest). Measured as simulation ms per game second (the simulation clock, BF.simNow), so the set is the one
+//             (frames need the rest). Measured as simulation ms per game second (the simulation clock, BF.simNow; on a thread of its own
+//             everything the thread did, streaming and messages included: js/boot.js simFrame), so the set is the one
 //             that keeps 1x whatever the speed, and region workers' copies, replaying the leader's measure, decide alike
 //   reach     0: no limit (the search for the next village widens as needed, up to SEARCH_MAX blocks a decision) | blocks
 //   mem       "auto": a quarter of the machine's memory (the world server's, from Node; a browser's navigator.deviceMemory), 500 MB to

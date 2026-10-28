@@ -6,7 +6,7 @@
 // browser the thread's entry points are timed: wrap(fn) or begin() / end() round them (the page's frame, the simulation's loop and
 // messages, a follower's journal batches). The debug server adds the real per-core load of the computer it runs on (os.cpus).
 // Samples every SAMPLE ms; keeps the last HIST of them (a minute) for the screen's sparkline.
-// API: BF.tload = { begin(), end(), wrap(fn) -> fn, report() -> {busy (0..1, the last sample), avg (0..1, the last minute), hist: [0..100]},
+// API: BF.tload = { begin(), end(), wrap(fn) -> fn, report() -> {busy (0..1, the last sample), avg (0..1, the last minute), hist: [0..100]}, total() -> ms,
 //                   ELU (true in Node: the event loop's measure, not the timed entry points) }
 (() => {
 "use strict";
@@ -46,5 +46,13 @@ function report() {
   return { busy: cur, avg, hist: hist.slice() };
 }
 
-BF.tload = { begin, end, wrap, report, ELU, SAMPLE, HIST };
+// The busy ms so far, the barrier's waits taken off: the simulation budget's measure where the simulation has a thread of its own
+// (js/boot.js simFrame, js/active.js), so streaming chunks, the page's messages and everything else the thread does count, not only the
+// ticks. (Node's measure counts a loop turn once it ends: the caller takes differences over many turns.)
+function total() {
+  const b = ELU ? P.eventLoopUtilization().active : busyMs + (depth ? now() - t0 : 0);
+  return Math.max(0, b - waitNow());
+}
+
+BF.tload = { begin, end, wrap, report, total, ELU, SAMPLE, HIST };
 })();
