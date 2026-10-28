@@ -29,6 +29,7 @@
 const BF = (globalThis.BF = globalThis.BF || {});
 const now = () => performance.now();
 const LEAD = 0.7;      // the share of a worker's load the first worker takes on (it also serves the player and the client)
+const MOB_MS = 0.01;   // a group not measured yet: its guessed ms a tick for each of its mobs (about what a mob costs on one thread)
 const SOLO_MS = 0.6;   // below this many ms a tick in all, every group goes to the first worker (an exchange costs more than it saves)
 
 const CW = { active: false, n: 1, me: 0, link: null, owners: new Map(), shuffle: 0, fixed: false };
@@ -450,9 +451,16 @@ function plan(groups) {
   est = new Map();
   const perBase = new Map();
   for (const [k, ms] of smooth) { const g = lastGroups.get(k); if (g) for (const b of g) perBase.set(b, ms / g.length); }
+  // a group with nothing measured (every group at the first meeting, so the first interval doesn't run all on the first worker; a new
+  // group whose bases ran nowhere yet): MOB_MS a mob a tick
+  let counts = null;
+  const guess = k => {
+    if (!counts) { counts = new Map(); for (const m of BF.mobs.list) if (!m.removed) { const gk = groupOf(m); counts.set(gk, (counts.get(gk) || 0) + 1); } }
+    return (counts.get(k) || 0) * MOB_MS * C().MEET;
+  };
   for (const g of groups) {
     let ms = smooth.get(g.key);
-    if (ms === undefined) { ms = 0; for (const b of g.bases || []) ms += perBase.get(b) || 0; }
+    if (ms === undefined) { let seen = false; ms = 0; for (const b of g.bases || []) if (perBase.has(b)) { seen = true; ms += perBase.get(b); } if (!seen) ms = guess(g.key); }
     est.set(g.key, ms);
   }
   lastGroups = new Map(groups.map(g => [g.key, g.bases || []]));
@@ -565,6 +573,9 @@ function setup(o) {
   if (CW.active) RW().SKIP.delete("prev"); else RW().SKIP.add("prev");
   if (!hooked && BF.world && BF.world.onBlockSet) { BF.world.onBlockSet(onSet); hooked = true; }
   tRun = now();
+  // the first interval's owners (guessed from each group's mobs: nothing is measured yet), its shadows and this worker's mobs, as after
+  // any meeting (before, the first worker ran the whole first interval alone: seconds on a big world, while the others waited)
+  if (CW.active && !CW.pull && K.groups().length) met(K.groups());
   if (CW.active) note(CW.n + " workers share the clusters (worker " + CW.me + " of " + CW.n + ")");
 }
 let hooked = false;
