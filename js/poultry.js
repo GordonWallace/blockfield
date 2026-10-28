@@ -230,7 +230,7 @@ function makeBuiltCoop(rec, e) {
 }
 function coopsOf(rec) {
   if (!rec._coops) {
-    Object.defineProperty(rec, "_coops", { value: [], writable: true, enumerable: false, configurable: true });   // (hidden, as js/cowherd.js _pastures: its pens point back at rec)
+    rec._coops = [];
     const bl = (rec.wg && rec.wg.buildings) || [];
     bl.forEach((b, i) => { if (b.type === "coop") rec._coops.push(makeGenCoop(rec, b, i)); });
   }
