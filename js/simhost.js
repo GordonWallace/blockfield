@@ -150,10 +150,12 @@ function run(w, via) {
   });
 }
 
-// ?workers=N, ?split=always|never and ?verify=N (spec r15-39, js/rplay.js): region workers for the simulation worker, when the URL says
+// ?workers=N, ?split=always|never, ?clusters=1 and ?verify=N (spec r15-39, r15-39b, js/rplay.js): region workers for the simulation worker,
+// when the URL says (clusters=1: the split shares the clusters, js/cworkers.js, not the regions' thinking)
 function urlWorkers() {
   const q = location.search.slice(1), w = /(?:^|[?&])workers=(\d+)/.exec(q), s = /(?:^|[?&])split=(always|never|auto)/.exec(q), v = /(?:^|[?&])verify=(\d+)/.exec(q);
-  return { workers: w ? +w[1] : undefined, split: s ? s[1] : undefined, verify: v ? +v[1] : undefined };
+  const c = /(?:^|[?&])clusters=1/.test(q);
+  return { workers: w ? +w[1] : undefined, split: s ? s[1] : undefined, kind: c ? "clusters" : undefined, verify: v ? +v[1] : undefined };
 }
 
 // ---- the world server's socket (ws://<this page's host>/sim, server/world.js), made to look like a Worker for run(): protocol packets

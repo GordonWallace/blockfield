@@ -49,6 +49,7 @@ const C = () => BF.ctick;
 // every exchange by what it is for (stats().x): how many, ms in all, ms of it waiting at the barrier for the other workers
 const X = {};
 function xchange(tag, msg) {
+  if (CW.preExchange) CW.preExchange();   // (play: the leader's journal out first, js/rplay.js)
   const L = CW.link, t0 = now(), w0 = L.waitMs, all = L.exchange(msg), x = X[tag] || (X[tag] = { n: 0, ms: 0, wait: 0 });
   x.n++; x.ms += now() - t0; x.wait += L.waitMs - w0;
   return all;
@@ -97,9 +98,9 @@ let touched = new Map();   // "name\u0000key" -> [name, key]
 function onTouch(name, key) { if (CW.active && C().cur && !replaying) touched.set(name + "\u0000" + JSON.stringify(key), [name, key]); }
 // New keys in the place registry while an owned pass runs: places (a ":" in the key) go to the others; mobs made here are sent in full
 let bornHere = new Set();
-const onNewPlace = (o, k) => {
+const onNewPlace = (o, k, had) => {
   if (!CW.active || !C().cur || typeof k !== "string") return;
-  if (k.includes(":")) regNew.push([k, o]); else if (k.charCodeAt(0) === 101) bornHere.add(o);
+  if (k.includes(":")) regNew.push([k, o]); else if (!had && k.charCodeAt(0) === 101) bornHere.add(o);
 };
 
 // ---------------------------------------------------------------- requests, as plain JSON
@@ -171,7 +172,7 @@ function sync() {
   const chans = [];
   for (const [name, key] of touched.values()) { const ch = R.chan(name), o = ch.get(key); chans.push([name, key, o == null ? null : ch.state(o)]); }
   touched = new Map();
-  const reg = regNew.map(([k, o]) => [k, R.enc(o, null)]);
+  const reg = [...new Map(regNew)].map(([k, o]) => [k, R.enc(o, null)]);   // (a key put again: its last object)
   regNew = [];
   const waited = [];
   for (const r of I.deferred) if (!r._cw) { r._cw = 1; waited.push(reqOut(r)); }
@@ -226,7 +227,7 @@ function sync() {
     const p = ps[w];
     if (!p) continue;
     for (const [name, id] of p.dyn) if (!BF.dynRange.adopt(name, id)) err("worker " + w + " made item " + name + " as " + id + ", which is another item here");
-    for (const [k, e] of p.reg) if (BF.ids.live(k) === undefined) BF.ids.put(R.dec(e, null), k);
+    for (const [k, e] of p.reg) BF.ids.put(R.dec(e, null), k);   // (new, or put again: a newborn's bed claimed anew is a new object under its key)
     for (const [id, type] of p.born) if (BF.ids.live(id) === undefined) { BF.mobs.blank(type, id); fresh.add(id); }
   }
   for (let w = 0; w < ps.length; w++) {
@@ -282,7 +283,11 @@ function sync() {
     replaying = true;
     try { if (p.edits.length) BF.world.applyEdits(p.edits, false, true); } finally { replaying = false; }
     lap("in.edits");
-    for (const [name, gk, data] of p.tables) { const t = K.table(name); if (t) t.apply(gk, data); if (CW.prof) lap("in.table." + name); }
+    for (const [name, gk, data] of p.tables) {
+      const t = K.table(name);
+      if (t) try { t.apply(gk, data); } catch (e) { e.message = "owned table " + name + " (group " + gk + "): " + e.message; throw e; }
+      if (CW.prof) lap("in.table." + name);
+    }
     lap("in.tables");
     for (const [name, key, data] of p.chans) { const ch = R.chan(name); if (ch) ch.set(ch.get(key), data, key); }
   } }); } finally { I.tablesStep(false); }
@@ -330,6 +335,7 @@ function met(groups) {
     for (const rec of BF.mobs.villages.values()) if (ownsKey(BF.clusters.groupOf("v:" + rec.key))) recShadows.set(rec, R.snap(rec));
     lap("met.recsnap");
     T.snap += now() - t0;
+    afterMet();
     tRun = now();
     hourly();
     return;
@@ -345,8 +351,51 @@ function met(groups) {
     for (const rec of BF.mobs.villages.values()) if (ownsKey(BF.clusters.groupOf("v:" + rec.key))) recShadows.set(rec, R.snap(rec));
   }
   T.snap += now() - t0;
+  afterMet();
   tRun = now();
   hourly();
+}
+// ---------------------------------------------------------------- in play (js/rplay.js): at the end of a meeting, every worker alike
+// whenMet(fn): fn at the end of the next meeting, when everything every worker sent is in (a save: js/save.js saveNow, inside gathered);
+// queued at the same point of the leader's journal on every worker, so they all run it at the same meeting (fn(true); fn(false) if the
+// workers stop first). leave(): at the end of the
+// next meeting every worker takes every mob's current copy (partial copies) and goes on as one with a whole world (js/rplay.js back to
+// one). CW.verify n (tests): every n meetings the workers compare their gathered state hashes; a difference sets rworkers.mismatch.
+let atMet = [], leaving = false;
+function whenMet(fn) { atMet.push(fn); }
+function leave() { if (CW.active) leaving = true; }
+function afterMet() {
+  if (CW.verify && meetings % CW.verify === 0) check();
+  const fns = atMet;
+  atMet = [];
+  for (const fn of fns) fn(true);
+  if (!leaving) return;
+  leaving = false;
+  if (CW.partial) fetch(BF.mobs.list);
+  CW.active = false; CW.partial = false; mine = new Set(); holder = new Map();
+  shadows = new Map(); recShadows = new Map();
+  RW().onTouch = null; plainCopies();
+  note("back to one with the whole world, after " + meetings + " meetings");
+}
+function check() {
+  const h = gathered(() => BF.stateHash.full());
+  const all = xchange("verify", JSON.stringify([h.hash, h.parts]));
+  const [h0, p0] = JSON.parse(all[0]);
+  RW().checks = (RW().checks || 0) + 1;
+  for (let w = 1; w < all.length; w++) {
+    const [hw, pw] = JSON.parse(all[w]);
+    if (hw === h0) continue;
+    const parts = Object.keys(p0).filter(k => p0[k] !== pw[k]);
+    if (!RW().mismatch) RW().mismatch = { tick: BF.rand.tick, worker: w, parts };
+    err("worker " + w + "'s world differs from the first worker's at the meeting at tick " + BF.rand.tick + " (" + parts.join(", ") + ")");
+  }
+  // CW_DUMP=<folder> (Node; a debug tool): when the copies differ, every worker writes the differing parts' texts there as
+  // <part>-w<worker>.txt (gathered, as the hash was), to diff
+  const dump = globalThis.process && process.env && process.env.CW_DUMP;
+  if (dump && all.some(x => JSON.parse(x)[0] !== h0)) {
+    const fs = process.getBuiltinModule("fs"), parts = Object.keys(p0).filter(k => all.some(x => JSON.parse(x)[1][k] !== p0[k]));
+    for (const k of parts) { const t = gathered(() => BF.stateHash.text(k)); try { fs.writeFileSync(dump + "/" + k + "-w" + CW.me + ".txt", String(t)); } catch (e) { err("CW_DUMP: " + e.message); } }
+  }
 }
 // Partial copies: the mobs whose current copy is on another worker than the one that runs them next, sent whole by their holder (every
 // worker works out the same list, so they all exchange, or none)
@@ -543,6 +592,10 @@ let lastGroups = new Map();
 
 // ---------------------------------------------------------------- setup and reporting
 // o: {n, me, link (js/rworkers.js attach(...))}. Every worker calls it at the same point of the same world, with the cluster tick on.
+// the coop and pen lists on village records (js/poultry.js, js/shepherd.js) go by their own tables (js/herd.js penTable), not in the
+// records' changes (they point back at the record); with region workers (js/rworkers.js) they go with the records as before
+const PENS = ["_coops", "_pens"];
+function plainCopies() { RW().SKIP.add("prev"); for (const k of PENS) RW().SKIP.delete(k); }
 function setup(o) {
   const K = C();
   const off = Object.keys(K.SYSTEMS).filter(k => !K.SYSTEMS[k] && (!K.only || K.only.has(k)));
@@ -564,13 +617,13 @@ function setup(o) {
   shadows = new Map(); recShadows = new Map(); known = new Set(BF.mobs.list); journal = new Map(); regNew = []; groupMs = new Map(); lastGroups = new Map(); meetings = 0; warned = 0;
   for (const k in T) T[k] = 0;
   for (const k in X) delete X[k];
-  smooth = new Map(); handMs = 0.5; handOwn = null; base = []; lapT = now();
+  smooth = new Map(); handMs = 0.5; handOwn = null; base = []; lapT = now(); atMet = []; leaving = false;
   if (BF.ids && BF.ids.hooks) BF.ids.hooks.onNew = onNewPlace;
   RW().onTouch = CW.active ? onTouch : null;
   touched = new Map();
   // a mob's start-of-tick place (prev: js/mobs.js keepPrev) is set only where the mob runs, so it is sent too (js/rworkers.js leaves it
   // out: there every copy sets it); the first worker draws every mob from it
-  if (CW.active) RW().SKIP.delete("prev"); else RW().SKIP.add("prev");
+  if (CW.active) { RW().SKIP.delete("prev"); for (const k of PENS) RW().SKIP.add(k); } else plainCopies();
   if (!hooked && BF.world && BF.world.onBlockSet) { BF.world.onBlockSet(onSet); hooked = true; }
   tRun = now();
   // the first interval's owners (guessed from each group's mobs: nothing is measured yet), its shadows and this worker's mobs, as after
@@ -585,7 +638,12 @@ function stop(why) {
   if (CW.link) try { CW.link.stop(); } catch (e) { /* already */ }
   if (BF.glog) BF.glog.log(why ? "ERROR" : "INFO", "workers", "Cluster workers stopped" + (why ? ": " + why : ""));
   shadows = new Map(); recShadows = new Map();
-  RW().SKIP.add("prev");
+  plainCopies();
+  // (partial copies: this copy goes on alone as it is, so no more fetches; the mobs other workers ran stay as this copy last had them)
+  CW.partial = false; mine = new Set(); holder = new Map(); CW.preExchange = null;
+  const fns = atMet;
+  atMet = []; leaving = false;
+  for (const fn of fns) fn(false);
 }
 
 // The worker that runs group key: its owner, or in pull mode the one that ran it last interval; 0 when not split (the debug screen's
@@ -645,7 +703,7 @@ function gathered(fn) {
 // waited apply, js/villagesim.js before it reads or changes a village's mobs, js/mobs.js before a chunk unloads its mobs): those mobs' current copies here, sent whole by the workers that ran
 // them; from then on current everywhere (the meeting changes every copy alike), so none is handed over for them. Elsewhere: nothing.
 // fetch(ms, pred): those of them for which pred is true of the current copy (only its holder can tell: a stale copy may not have the
-// field yet), so every worker exchanges, whatever it finds.
+// field yet, or be somewhere else), so every worker exchanges, whatever it finds; returns them (the same set on every worker).
 function fetch(ms, pred) {
   if (!CW.partial) return;
   // who has each current copy: at a meeting, the last swap says; between the ticks of an interval (a chunk unloading), its group's owner
@@ -673,9 +731,13 @@ function fetch(ms, pred) {
   for (const [ids] of got) for (const id of ids) holder.delete(id);
   T.fetched += out.length + got.reduce((n, [ids]) => n + ids.length, 0);
   if (BF.regions) BF.regions.tick();
+  if (!pred) return;
+  const sent = new Set(out);
+  for (const [ids] of got) for (const id of ids) { const m = BF.ids.live(id); if (m) sent.add(m); }
+  return sent;
 }
 // current(m): this worker's copy of m is current (partial copies: it runs m, or every copy is current)
 const current = m => !CW.partial || mine.has(m) || (atMeeting && !holder.has(m.id));
-Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, current, gathered, fetch, pull: false, partial: false });
+Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, current, gathered, fetch, whenMet, leave, pull: false, partial: false, verify: 0 });
 BF.cworkers = CW;
 })();

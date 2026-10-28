@@ -198,7 +198,7 @@ function reset() { toShut.length = 0; }
 //                    once per group, and a group's own are new at each meeting);
 //   gateTable(name, list)  registers a list of gates to shut ({at, m, t}) with BF.ctick.owned, by the cluster of the mob that held the gate;
 //   villageTable(name, get)  registers a Map keyed by village key (save data waiting for its pens...) with BF.ctick.owned;
-//   penTable(name, o)  registers the stock of pens kept in a hidden field of the village record (see below).
+//   penTable(name, o)  registers the stock of pens kept in a hidden field of the village record (see below; o.keep: other fields of a pen that go too, a coop's eggs).
 // Every group always true without the cluster tick.
 const cluster = () => { const C = BF.ctick; return C && C.on && C.filter ? C : null; };   // (null too in a system not converted yet: it sees everything)
 const ownsVillage = k => { const C = cluster(); return !C || BF.clusters.groupOf("v:" + k) === C.cur.key; };
@@ -237,7 +237,11 @@ function penTable(name, o) {
       const out = {};
       for (const rec of BF.mobs.villages.values()) {
         if (!rec[o.field] || BF.clusters.groupOf("v:" + rec.key) !== gk) continue;
-        out[rec.key] = rec[o.field].filter(p => p[o.list]).map(p => ({ idx: p.idx, list: p[o.list].map(s => Object.assign({}, s)), culls: p.culls }));
+        out[rec.key] = rec[o.field].filter(p => p[o.list] || (o.keep && o.keep.some(f => p[f]))).map(p => {
+          const e = { idx: p.idx, list: (p[o.list] || []).map(s => Object.assign({}, s)), culls: p.culls };
+          if (o.keep) for (const f of o.keep) e[f] = p[f];
+          return e;
+        });
       }
       return JSON.parse(JSON.stringify(out));
     },
@@ -254,6 +258,7 @@ function penTable(name, o) {
           for (const s of p[o.list] || []) if (s && s.mobId != null) had.set(s.mobId, s); else if (s) spare.push(s);
           p[o.list] = e.list.map(s => { const h = s.mobId != null ? had.get(s.mobId) : spare.shift(); return h ? Object.assign(h, BF.ids.refs(s)) : BF.ids.refs(s); });
           if (e.culls !== undefined) p.culls = e.culls;
+          if (o.keep) for (const f of o.keep) p[f] = e[f];
           for (const s of p[o.list]) { const m = s.mobId != null ? BF.ids.live(s.mobId) : null; if (m) { m[o.mob] = s; m[o.pen] = p; } }   // (one state object, as on the owner)
         }
       }

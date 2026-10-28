@@ -57,8 +57,8 @@ BF.newWorld = function (seed, opts) {
 // The BF.perf points charge each part's time to its category of the villager-seconds meter (js/perf.js); they do nothing while it's off.
 const PF = BF.perf;
 function simStep(h) {
+  if (BF.rworkers.journal) BF.rworkers.tick(h);   // region workers (js/rworkers.js): the leader's journal gets the tick, the followers run it too (by clusters too)
   if (BF.ctick && BF.ctick.on) { PF.beginStep(); BF.ctick.step(h); PF.endStep(h); return; }   // by clusters (spec r15-39b, js/ctick.js)
-  if (BF.rworkers.journal) BF.rworkers.tick(h);   // region workers (js/rworkers.js): the leader's journal gets the tick, the followers run it too
   PF.beginStep();
   BF.warp.advance(h);
   BF.rand.step();   // the tick that keys world-event rolls (js/rand.js)

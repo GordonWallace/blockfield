@@ -507,6 +507,8 @@ function makeShared(n, bytes) {
   return { n, bytes, ctl: new SharedArrayBuffer((CTL + 2 * n) * 4), boxes };
 }
 const TE = new TextEncoder(), TD = new TextDecoder();
+// (e.rw: the workers can't go on; a caller that keeps going after an error, a chunk unload's hooks, passes it on: js/world.js)
+const rwErr = text => { const e = new Error(text); e.rw = true; return e; };
 const SPIN = 20000, TIMEOUT = 120000;
 function attach(sh, me, n) {
   const C = new Int32Array(sh.ctl), half = sh.bytes >> 1;
@@ -525,7 +527,7 @@ function attach(sh, me, n) {
       const t0 = now();
       while (Atomics.load(C, 0) === g) {
         Atomics.wait(C, 0, g, 1000);
-        if (now() - t0 > TIMEOUT) { link.stop(); throw new Error("region workers: no answer from the other workers in " + TIMEOUT / 1000 + " s"); }
+        if (now() - t0 > TIMEOUT) { link.stop(); throw rwErr("region workers: no answer from the other workers in " + TIMEOUT / 1000 + " s"); }
       }
       if (Atomics.load(C, 2)) throw stopErr();
     },
@@ -534,7 +536,7 @@ function attach(sh, me, n) {
       const h = round++ & 1, v = views[me], at = h * half;
       if (scratch.length < Math.min(half, mine.length * 3)) scratch = new Uint8Array(Math.min(half, Math.max(mine.length * 3, scratch.length * 2)));
       const r = TE.encodeInto(mine, scratch);   // (browsers' encodeInto takes no shared memory either: encoded here, then copied in)
-      if (r.read < mine.length) { link.stop(); throw new Error("region workers: a message of " + mine.length + " characters is too big for the mailbox"); }
+      if (r.read < mine.length) { link.stop(); throw rwErr("region workers: a message of " + mine.length + " characters is too big for the mailbox"); }
       v.set(scratch.subarray(0, r.written), at);
       Atomics.store(C, CTL + me * 2 + h, r.written);
       link.bytesOut += r.written;
@@ -552,7 +554,7 @@ function attach(sh, me, n) {
       return out;
     },
   };
-  const stopErr = () => { const e = new Error("region workers stopped: worker " + link.who() + " crashed or stopped"); e.rwStop = true; return e; };
+  const stopErr = () => { const e = rwErr("region workers stopped: worker " + link.who() + " crashed or stopped"); e.rwStop = true; return e; };
   return link;
 }
 
@@ -945,7 +947,7 @@ function takeDyn() { const d = dynNew; dynNew = []; return d; }
 // Places registered while this worker thinks (a house a builder finished, made its home: js/ids.js place keys hold a ":"): the other
 // workers register a copy under the same key, else the key the mob's changes carry would read nothing there.
 let regNew = [];
-const onNewPlace = (o, k) => { if (RW.active && owning && typeof k === "string" && k.includes(":")) regNew.push([k, o]); };   // (hooked at setup: js/ids.js loads after this file)
+const onNewPlace = (o, k, had) => { if (RW.active && owning && !had && typeof k === "string" && k.includes(":")) regNew.push([k, o]); };   // (hooked at setup: js/ids.js loads after this file)
 function takeReg() { const d = regNew; regNew = []; return d.map(([k, o]) => [k, enc(o, null)]); }
 function adoptReg(list) { for (const [k, e] of list || []) if (BF.ids.live(k) === undefined) BF.ids.put(dec(e, null), k); }
 function adoptDyn(list, from) { for (const [name, id] of list || []) if (!BF.dynItemAs(name, id)) out_of_step("worker " + from + " made item " + name + " as " + id + ", which is another item here"); }

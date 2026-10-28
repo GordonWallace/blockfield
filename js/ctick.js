@@ -455,7 +455,7 @@ function ownedLog(name, map, groupOfKey, enc, dec, ver) {
     apply(g, o) {
       const got = new Set(o.keys);
       for (const k of keysOf(map, g, groupOfKey)) if (!got.has(k)) { map.delete(k); had.delete(k); }
-      for (const [k, j] of o.put) { const v = dec ? dec(j, k) : j; map.set(k, v); had.set(k, ver ? ver(k, v) : JSON.stringify(j)); }
+      for (const [k, j] of o.put) { const t = ver ? null : JSON.stringify(j), v = dec ? dec(j, k) : j; map.set(k, v); had.set(k, ver ? ver(k, v) : t); }   // (the text before dec: it may put objects in j, js/baker.js its baker)
       applied(map, g);
     },
   });

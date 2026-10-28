@@ -661,9 +661,11 @@ function installHeld() {
   if (!heldChunks.size) return;
   const list = [...heldChunks.values()];
   heldChunks.clear();
+  const RJ = BF.rworkers && BF.rworkers.journal ? BF.rworkers : null;
   for (const c of list) {
     if (world.chunks.has(c.key)) continue;
     const e = world.edits.get(c.key);
+    if (RJ) RJ.rec(["c", c.cx, c.cz]);   // (the followers make it too: js/rplay.js; built from the same edits, it comes out the same)
     installChunk((e ? e.size : -1) === c.eSig ? c : buildChunk(c.cx, c.cz));   // (edited meanwhile: built again)
   }
   if (BF.glog) BF.glog.log("DEBUG", "chunks", "Loaded " + list.length + " chunk" + (list.length > 1 ? "s" : "") + " held for the cluster meeting");
@@ -705,7 +707,7 @@ function unload(key) {
   world.chunks.delete(key); CGEN++; forgetChunk(c);   // (caches must not keep its arrays alive, r15-35)
   world._dirty.delete(key);
   MP.queue.delete(c);
-  for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }
+  for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { if (err && err.rw) throw err; console.error(err); } }
 }
 
 // Keeps only chunk key's meshes (its block data goes, as on unloading): it is far from the player, meshed and unchanged. The meshes' arrays
@@ -724,7 +726,7 @@ function purge(key) {
   world.chunks.delete(key); CGEN++; forgetChunk(c);   // (caches must not keep its arrays alive, r15-35)
   world._dirty.delete(key);
   world.purged = (world.purged || 0) + 1;
-  for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }
+  for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { if (err && err.rw) throw err; console.error(err); } }
 }
 const NOARR = new Float32Array(0);
 function freeArray() { this.array = NOARR; }

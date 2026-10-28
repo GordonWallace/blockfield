@@ -50,8 +50,10 @@ function tx(stores, mode, fn) {
 const reqP = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 
 // ---------- snapshot / restore ----------
-function snapshot() {
-  if (BF.rworkers) BF.rworkers.rec(["s"]);   // (region workers: the followers take one too, in case serializing changes anything: js/rworkers.js)
+function snapshot(o) {
+  // (region workers: the followers take one too, in case serializing changes anything: js/rworkers.js; o.quiet: they take this one
+  // already, at a meeting of the cluster workers, js/save.js saveNow)
+  if (BF.rworkers && !(o && o.quiet)) BF.rworkers.rec(["s"]);
   const edits = {};
   for (const [k, m] of BF.world.edits) {
     if (!m.size) continue;
@@ -358,10 +360,24 @@ const save = {
         resolve(ok);
       }));
     }
-    let data;
     const t0 = performance.now();
-    try { data = snapshot(); } catch (e) { console.error(e); return Promise.resolve(false); }
-    const t1 = performance.now();
+    // cluster workers in play (js/rplay.js, js/cworkers.js): each worker's copy is current only for its own clusters, so the save waits for
+    // the next meeting (at most a game second), where every worker sends its mobs and the world is taken whole (the followers alike)
+    const CW = BF.cworkers;
+    if (CW && CW.active && BF.rworkers && BF.rworkers.journal) {
+      BF.rworkers.rec(["sm"]);
+      const name = save.current.name;
+      return new Promise(res => CW.whenMet(ok => {
+        if (!ok) { slog("ERROR", "Saving world \"" + name + "\" failed (the cluster workers stopped first); the previous save is kept"); res(false); return; }
+        let data;
+        try { data = CW.gathered(() => snapshot({ quiet: true })); } catch (e) { console.error(e); res(false); return; }
+        res(save.current ? write(data, performance.now()) : false);
+      }));
+    }
+    let data0;
+    try { data0 = snapshot(); } catch (e) { console.error(e); return Promise.resolve(false); }
+    return write(data0, performance.now());
+    function write(data, t1) {
     const meta = Object.assign({}, save.current, { lastPlayed: Date.now(), gameMode: data.player && data.player.gameMode || save.current.gameMode, seed: data.seed, gen: data.gen, biomeScale: data.biomeScale || 1, villages: data.villages || 1, monsters: data.monsters || save.current.monsters, version: data.version, game: BF.VERSION, time: data.time });
     save.current = meta;
     return tx(["worlds", "data"], "readwrite", t => { t.objectStore("worlds").put(meta); t.objectStore("data").put(data, meta.id); })
@@ -377,6 +393,7 @@ const save = {
         slog("ERROR", "Saving world \"" + meta.name + "\" failed (" + why + "); the previous save is kept");
         BF.emit("saveFailed", e); return false;
       });
+    }
   },
 
   // A saved world as a .bfworld file, downloaded (spec r15-42): the world server's copy (debug/server.js serves it), or this browser's.

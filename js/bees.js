@@ -385,12 +385,13 @@ const moveL = [];
 function housekeeping() {
   const now = simNow(), pp = playerPos() || { x: 0, y: 0, z: 0 }, day = today(), C = cluster();
   const list = C ? [...loaded.values()].filter(h => homeMine(C, h)) : [...loaded.values()];   // (clusters: the group's homes; CAP is per group)
+  const dist = new Map();   // (not kept on the home: a beekeeper's job holds its home, and each worker's copy would have its own)
   for (const h of list) {
     if (h.day < day) { if (h.bees > 0 && h.bees < MAX && flowersNear(h, true).length >= GROW_FLOWERS) h.bees++; h.day = day; }   // one bee a game day it is loaded
     h.rest = h.rest.filter(t => t > now);
-    h.dist = BF.planet.distance(h, pp);
+    dist.set(h, BF.planet.distance(h, pp));
   }
-  list.sort((a, b) => a.dist - b.dist);
+  list.sort((a, b) => dist.get(a) - dist.get(b));
   let left = CAP;
   for (const h of list) { h.allow = canFly(h) ? Math.min(h.bees, left) : 0; left -= h.allow; h.hurry = !canFly(h); }
   // bees over a home's allowance (dusk, rain, the cap) or homeless at dusk head home
@@ -640,11 +641,10 @@ if (BF.rworkers) {
 
 // (the multi-worker runtime, js/cworkers.js: each group's homes and the bees out of them at meetings). Homes go as what changed since
 // every worker last had them (as BF.ctick.ownedLog: had, the text every worker has; gone, the group's homes broken since), so homes that
-// sit still (unloaded, or at night) cost nothing; the bees that are out go whole. A home's dist (to the player) is left out: each group's
-// housekeeping works it out again before it is read.
+// sit still (unloaded, or at night) cost nothing; the bees that are out go whole.
 const hadHome = new Map();     // home key -> its text every worker has
 const dropped = new Set();     // home keys taken out of recs since the last meeting (broken), for their group's gone list
-const homeText = h => JSON.stringify(h, (k, v) => (k === "dist" ? undefined : v));
+const homeText = h => JSON.stringify(h);
 const groupOfKey = k => { const p = k.split(","); return BF.clusters.groupOf(BF.clusters.ofRegion(BF.regions.keyOf(+p[0], 0, +p[2]))); };
 function tables() {
   const K = BF.ctick;
@@ -680,7 +680,7 @@ function tables() {
       for (const h of o.put || []) {
         const k = pk(h.x, h.y, h.z), was = recs.get(k);
         hadHome.set(k, JSON.stringify(h));
-        if (was) { for (const f in was) if (!(f in h) && f !== "dist") delete was[f]; Object.assign(was, h); }
+        if (was) { for (const f in was) if (!(f in h)) delete was[f]; Object.assign(was, h); }
         else recs.set(k, h);
       }
       K.applied(recs, gk);
