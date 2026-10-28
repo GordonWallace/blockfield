@@ -17,10 +17,14 @@ const seed = +(process.argv[2] || 3);
 let fails = 0;
 const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) fails++; };
 const freePort = () => new Promise(r => { const s = net.createServer(); s.listen(0, () => { const p = s.address().port; s.close(() => r(p)); }); });
+const servers = [];   // (killed on any exit: a failed or timed-out run otherwise leaves its world server simulating, and the next runs crawl)
+process.on('exit', () => { for (const s of servers) try { s.kill('SIGKILL'); } catch (e) {} });
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => process.exit(1));
 async function server(args) {
   const game = await freePort(), debug = await freePort();
   const srv = cp.spawn(process.execPath, ['debug/server.js', '--game', String(game), '--debug', String(debug)].concat(args || []), { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   srv.out = '';
+  servers.push(srv);
   const stopped = () => { if (/the simulation stopped/.test(srv.out) && !srv.told) { srv.told = true; console.log('FAIL the simulation stopped; server output (last 8000):\n' + srv.out.replace(/^\[builder\].*\n/gm, '').slice(-8000)); process.exit(1); } };
   srv.stdout.on('data', d => { srv.out += d; stopped(); });
   srv.stderr.on('data', d => { srv.out += d; stopped(); });
@@ -45,7 +49,9 @@ async function open(b, url) {
   await pg.waitForFunction(() => !BF.preparing && BF.client, null, { timeout: 600000 });
   return pg;
 }
-const sim = (pg, fn, arg) => pg.evaluate(([f, a]) => BF.simHost.eval(f, a), [String(fn), arg === undefined ? null : arg]);
+// (a simulation that stopped answering fails the call after 200 s (past the workers' 120 s barrier timeout, js/rworkers.js) instead of hanging the test)
+const sim = (pg, fn, arg) => Promise.race([pg.evaluate(([f, a]) => BF.simHost.eval(f, a), [String(fn), arg === undefined ? null : arg]),
+  new Promise((_, rej) => setTimeout(() => rej(new Error('the simulation did not answer in 200 s')), 200000))]);
 async function until(pg, fn, ms) {
   const t0 = Date.now();
   const late = () => new Promise(r => setTimeout(() => r('late'), 30000));   // (a simulation that stopped answering)
@@ -63,12 +69,13 @@ const run = async (pg, minutes) => {
   await pg.evaluate(() => BF.warp.set(0));
 };
 
-let S = null;
+let S = null, PG = null;
 (async () => {
   const b = await chromium.launch();
   const saves = fs.mkdtempSync(path.join(os.tmpdir(), 'bf-cp-'));
   S = await server(['--test', '--saves', saves, '--workers', '3', '--split', 'always', '--clusters', '--verify', process.env.CP_VERIFY || '100']);
   const pg = await open(b, S.url + '?sim=server&workers=3');
+  PG = pg;
   check(await pg.evaluate(() => BF.simHost.mode === 'server'), 'the page is the world server\'s client');
   const r = await pg.evaluate(async seed => {
     BF.player.start();
@@ -94,7 +101,9 @@ let S = null;
     console.log('  status: ' + JSON.stringify(s1).slice(0, 800));
   }
   check(s1.split && s1.clustered && s1.followers === 2, `still split over 3 workers (${s1.text})`);
-  check(groups.length === 3 && groups.every(n => n > 0), `every worker runs some clusters (${groups.join('/')})`);
+  // (not every worker: the player's group, on the first worker, reaches the view and the player's run since the last meeting, so
+  // with 4 simulated villages one follower may be left idle when the first worker is the slowest anyway, js/cworkers.js plan)
+  check(groups.length === 3 && groups[0] > 0 && groups.slice(1).some(n => n > 0), `the followers run some clusters (${groups.join('/')})`);
   check(s1.checks > 0 && !s1.mismatch, `the copies were compared ${s1.checks} times at meetings and never differed${s1.mismatch ? ' (' + JSON.stringify(s1.mismatch).slice(0, 300) + ')' : ''}`);
   const f3 = await pg.evaluate(() => new Promise(r => BF.client.query('f3', {}, r)));
   const wt = f3 && (f3.workersText || (f3.f3 && f3.f3.workersText));
@@ -108,14 +117,19 @@ let S = null;
   // (the simulation's own log, by index, base() the oldest kept: the page's copy of it comes in batches)
   const mark = () => sim(pg, () => BF.glog.base() + BF.glog.entries().length);
   const loggedSince = (re, from) => sim(pg, ([src, from]) => { const b = BF.glog.base(); return BF.glog.entries().slice(Math.max(0, from - b)).some(e => (e.k === 'workers' || e.k === 'clusters') && new RegExp(src).test(e.x)); }, [re.source, from]);
-  const logUntil = async (re, from) => { const t0 = Date.now(); while (Date.now() - t0 < 300000) { if (await loggedSince(re, from)) return true; await new Promise(r => setTimeout(r, 1000)); } return false; };
+  const logUntil = async (re, from, ms = 300000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await loggedSince(re, from).catch(() => false)) return true; await new Promise(r => setTimeout(r, 1000)); } return false; };
+  await pg.evaluate(() => BF.warp.set(0));   // (1x: while back to one each follower runs the whole world again, and on a small machine it can't keep up
+  // with a faster leader, so the split waits until it does)
   const m0 = await mark();
   await sim(pg, () => { BF.rplay.testSolo(); return true; });
+  let t1 = Date.now();
   const one = (await logUntil(/back to one with the whole world/, m0)) && (await logUntil(/^Cluster tick off/, m0));
-  check(one, 'back to one: the workers took the whole world at a meeting and the cluster tick went off');
-  const again = (await logUntil(/clusters are split over/, m0)) && (await until(pg, () => BF.rplay.status().split && BF.cworkers.active, 300000));   // (splitting again boots the followers' copies again: minutes on a busy machine)
+  check(one, `back to one: the workers took the whole world at a meeting and the cluster tick went off (${Math.round((Date.now() - t1) / 1000)} s)`);
+  t1 = Date.now();
+  const again = (await logUntil(/clusters are split over/, m0, 600000)) && (await until(pg, () => BF.rplay.status().split && BF.cworkers.active, 300000));   // (splitting again boots the followers' copies again: minutes on a busy machine)
+  if (!again) console.log('  server output (last 3000):\n' + S.srv.out.replace(/^\[(builder|breeding)\].*\n/gm, '').slice(-3000));
   if (!again) console.log('  status: ' + JSON.stringify(Object.assign(await status(pg), { loads: undefined })).slice(0, 900) + '\n  marks: ' + m0 + ' ' + JSON.stringify(await sim(pg, () => [BF.glog.base(), BF.glog.entries().length, !!(BF.cworkers && BF.cworkers.active)])) + '\n  log: ' + (await sim(pg, () => BF.glog.entries().filter(e => e.k === 'workers' || e.k === 'clusters').slice(-8).map(e => e.l + ' ' + e.x).join(' | '))).slice(0, 1500));
-  check(again, 'split=always: split again');
+  check(again, `split=always: split again (${Math.round((Date.now() - t1) / 1000)} s)`);
   await run(pg, 5);
   const s2 = await status(pg);
   check(s2.split && !s2.mismatch && s2.checks > s1.checks, `split again, the copies still agree (${s2.checks} checks; ${s2.text})`);
@@ -127,4 +141,12 @@ let S = null;
   await b.close();
   console.log(fails ? `${fails} FAILED` : 'all ok');
   process.exit(fails ? 1 : 0);
-})().catch(e => { console.error(e); if (S) console.error('server output (last 6000):\n' + S.srv.out.slice(-6000)); process.exit(1); });
+})().catch(async e => {
+  console.error(e);
+  if (S) console.error('server output (last 4000, without the builders\' and breeding lines):\n' + S.srv.out.replace(/^\[(builder|breeding)\].*\n/gm, '').slice(-4000));
+  if (PG) {   // (where the page is: its connection, and whether the world still moves)
+    const at = () => PG.evaluate(() => ({ clock: BF.client && BF.client.world.clock ? BF.client.world.clock.day + BF.client.world.clock.time : null, host: BF.simHost.mode, crashed: String(BF.simHost.crashed || '') })).catch(x => String(x));
+    const a = await at(); await new Promise(r => setTimeout(r, 5000)); console.error('page: ' + JSON.stringify(a) + ' then ' + JSON.stringify(await at()));
+  }
+  process.exit(1);
+});

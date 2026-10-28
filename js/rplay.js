@@ -311,6 +311,7 @@ function follower(post) {
       case "d": BF.world.replay.extendDown(o[1], o[2], o[3]); break;
       case "v": RW.clock = o[3]; BF.villageSim.update(o[1], o[2]); break;
       case "a": if (BF.active) BF.active.frame(o[1], o[2]); break;
+      case "b": if (BF.active) BF.active.set(o[1], true); break;   // (the player changed the distant-village settings: the leader's simworker.js journals them)
       case "f": BF.inventory.simFrame(o[1]); BF.maps.simFrame(); BF.player.simRide(o[1]); break;
       case "s": BF.save.snapshot(); break;
       case "feed": if (BF.debugFeed && BF.debugFeed.simPart) BF.debugFeed.simPart(o[1]); break;   // (the world server's debug screen: reading it works out things lazily, as F3 does)

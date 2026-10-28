@@ -116,13 +116,31 @@ function start(o) {
   const fresh = () => { const s = srv.spare || new Sim(srv); srv.spare = null; return s; };
   const warm = () => { if (!srv.spare && !srv.stopping) srv.spare = new Sim(srv); };   // the next page's thread, loading while nobody waits
   const toPage = m => { if (srv.client) srv.client.send(typeof m === "string" ? m : JSON.stringify(m)); };
+  // pacing: a page that reads slower than the world sends (a slow machine at a high speed) would leave everything after it, a query's
+  // answer too, waiting behind a growing queue (minutes, in a test at 100x with clusters). Past PACE_HIGH bytes waiting, the
+  // simulation sends moving things twice a second instead of every tick (protocol.js pace: each send is the change since the last),
+  // until the queue is under PACE_LOW
+  const PACE_HIGH = 512 * 1024, PACE_LOW = 64 * 1024;
+  function pace(s) {
+    const ws = srv.client;
+    if (srv.paced || !ws || ws.bufferedAmount < PACE_HIGH) return;
+    srv.paced = s;
+    s.post({ server: "pace", behind: true });
+    if (!srv.paceLogged || Date.now() - srv.paceLogged > 60000) { srv.paceLogged = Date.now(); logIn(s, "The page reads slower than the world sends (" + Math.round(ws.bufferedAmount / 1024) + " KB waiting): moving things go to it twice a second until it catches up"); }
+    const t = setInterval(() => {
+      if (srv.client === ws && ws.bufferedAmount > PACE_LOW && srv.active === s && !s.dead) return;
+      clearInterval(t);
+      if (!s.dead) s.post({ server: "pace", behind: false });
+      if (srv.paced === s) srv.paced = null;
+    }, 100);
+  }
   const sims = () => [srv.active, srv.held, srv.spare].filter(s => s && !s.dead);
   const logIn = (s, text, lvl = "INFO") => { if (s && !s.dead) s.post({ h: JSON.stringify({ t: "clientLog", list: [{ l: lvl, k: "server", x: text }] }), b: null }); };
 
   // ---- from a simulation thread
   srv.fromSim = (s, m) => {
     if (m && m.h != null) {
-      if (s === srv.active && srv.client) srv.client.send(packetOut(m));
+      if (s === srv.active && srv.client) { srv.client.send(packetOut(m)); pace(s); }
       else if (!s.played && m.h.startsWith('{"t":"log"') && s.early.length < 200) s.early.push(m);   // (a fresh thread's boot lines: for its first page)
       return;
     }

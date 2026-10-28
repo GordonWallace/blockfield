@@ -233,6 +233,7 @@ const kb = n => (n >= 1024 ? (n / 1024).toFixed(1) + " KB" : Math.round(n) + " B
 const ckey = (cx, cz) => cx + "," + cz;
 const sectionsOf = c => c.secs.map(s => (typeof s === "number" ? s : s.slice()));
 let liveSim = null;   // the sim end the world's block hook reports to
+const PACE_MS = 500;   // (serve: how often entities go to a page that has fallen behind)
 function serve(send, opts) {
   opts = opts || {};
   const R = !!opts.replica;
@@ -251,6 +252,7 @@ function serve(send, opts) {
     movedTo: null,            // replica: where self.pos last put the player, until the client's messages say it is there (playerIn)
     moveSeq: 0,               // replica: counts self.pos moves (sent as mv); a player message carrying the latest mv was sent after the client took it
     cursorSent: null, screenSent: null,   // (r15-44: the held stack and the open screen, in every mode)
+    behind: false, entsAt: 0, // the page reads slower than this sends (the world server, pace()): entities go every PACE_MS, the change since the last
   };
   const out = msg => {
     let p;
@@ -497,8 +499,7 @@ function serve(send, opts) {
     // entities: after a tick; after a request applied (changed); and every flush while the world is frozen or paused, when nothing ticks
     // but a request, a command or a test can still move things (no ticks then, so the diff is the only cost)
     const still = !!((BF.warp && BF.warp.frozen) || (BF.state && BF.state.paused));
-    if (ticked || force || S.changed || still) flushEntities(ticked);
-    S.changed = false;
+    if ((ticked || force || S.changed || still) && (!S.behind || force || now() - S.entsAt >= PACE_MS)) { flushEntities(ticked); S.entsAt = now(); S.changed = false; }
     // replica (r15-43): the sign text store whenever it changed (a few entries; the page draws sign texts from it)
     if (R && BF.signs && BF.signs.ver !== S.signsVer) { S.signsVer = BF.signs.ver; S.fx.push({ kind: "signs", store: BF.signs.serialize() }); }
     if (S.fx.length) {
@@ -606,7 +607,8 @@ function serve(send, opts) {
     each((kind, o, x, z) => { if (inView(x, z)) m.set(nOf(o), { kind, s: stateOf(kind, o) }); });
     return { entities: m, chunks: wanted() };
   }
-  const sim = { receive, flush, reset, hello, onBlock, onFx: e => S.fx.push(e), onLog: e => S.logs.push(e), S, interest, nOf, replica: R };
+  const pace = on => { S.behind = !!on; };
+  const sim = { receive, flush, reset, hello, pace, onBlock, onFx: e => S.fx.push(e), onLog: e => S.logs.push(e), S, interest, nOf, replica: R };
   liveSim = sim;
   return sim;
 }
