@@ -146,6 +146,10 @@ async function main(argv) {
   }
   // the villager-seconds meter, on for the run (a harness asks for it: js/perf.js)
   BF.perf.ask(true); BF.perf.reset();
+  // chunk churn during the run (built and unloaded keys; chunk building is outside the sim step, so it shows only in real time)
+  const churn = { built: new Map(), gone: new Set(), unloaded: 0 };
+  BF.world.onChunkLoad((cx, cz) => { const k = cx + ',' + cz; churn.built.set(k, (churn.built.get(k) || 0) + 1); });
+  BF.world.onChunkUnload((cx, cz) => { churn.unloaded++; churn.gone.add(cx + ',' + cz); });
   const ticks = Math.round(seconds / BF.warp.TICK), every = a.every ? Math.max(1, Math.round(+a.every / BF.warp.TICK)) : 0;
   const done = pool ? pool.list.map(f => f.ask({ ticks })) : [];
   for (let i = 1; i <= ticks; i++) {
@@ -187,6 +191,8 @@ async function main(argv) {
     vss: Math.round(T.vs / T.real), mobss: Math.round(T.mobs / T.real), msPerTick: +(T.stepMs / Math.max(1, T.steps)).toFixed(3),
     speed: +(T.game / T.real).toFixed(2), villagers, mobs: BF.mobs.list.length, chunks: BF.world.chunks.size, hash: H.hash, parts: H.parts,
     workers, census: census(BF),
+    churn: { built: [...churn.built.values()].reduce((x, y) => x + y, 0), unloaded: churn.unloaded, both: [...churn.built.keys()].filter(k => churn.gone.has(k)).length,
+      twice: [...churn.built.values()].filter(n => n > 1).length },
   };
   if (a.save) fs.writeFileSync(a.save, saveJSON(h.save()));
   if (a.dump) { const o = {}; for (const k of BF.stateHash.PARTS) o[k] = BF.stateHash.text(k); fs.writeFileSync(a.dump, JSON.stringify(o)); }   // --dump file: every hash part's text (tests: where two runs differ)
@@ -195,6 +201,7 @@ async function main(argv) {
   else {
     say(`ticked ${r.seconds.toFixed(0)} game s (${r.ticks} ticks) in ${r.real} s: ${r.speed}x real time`);
     say(`${r.vss} V·s/s  ${r.mobss} mob-s/s  ${r.msPerTick} ms/tick  ${villagers} villagers, ${r.mobs} mobs, ${r.chunks} chunks`);
+    say(`chunks built ${r.churn.built}, unloaded ${r.churn.unloaded} (${r.churn.both} keys both, ${r.churn.twice} built twice)`);
     say(`hash ${r.hash}`);
     if (a.save) say(`saved to ${a.save}`);
   }

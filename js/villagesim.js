@@ -9,7 +9,7 @@
 // worked out again), so villages, their records and the trips' pins come and go only there, never between two clusters' passes; the
 // countdowns that tasks read (mayStart, timeLeft) then hold for the whole interval in every cluster. Trips ask for their pin at the
 // meeting too (js/merchant.js meet, run first): pin and unpin are called only between ticks then.
-// API: BF.villageSim = { RADIUS, MAX, MAX_PINS, keepKeys, update(px, pz) -> changed, isActive(key), status(), pin(id, a, b, keys) -> ok, unpin(id),
+// API: BF.villageSim = { RADIUS, MAX, MAX_PINS, keepKeys, update(px, pz) -> changed, isActive(key), status(), count(), pin(id, a, b, keys) -> ok, unpin(id),
 //                        pins(), pinned() -> [worldgen villages], simulated() -> [worldgen villages], corridor(a, b) -> chunk keys, exportSeen(out), importSeen(o), reset() }
 (() => {
 "use strict";
@@ -519,6 +519,7 @@ BF.villageSim = {
   update,
   pin, unpin, corridor,
   pins: () => pins,
+  count: () => active.size,   // villages simulated now (js/mobs.js: the A* searches a tick hands out)
   simulated: () => [...active.values()].map(e => e.v),   // every village simulated now (the minimum, pins and the budget's extras)
   pinned: () => { const out = [], seenK = new Set(); for (const p of pins.values()) for (const v of [p.a, p.b]) if (!seenK.has(vKey(v))) { seenK.add(vKey(v)); out.push(v); } return out; },
   isPinned: key => pinnedKeys().has(key),
