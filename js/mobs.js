@@ -149,10 +149,17 @@ function placeThing(o, p) {
 function ownsThing(o, p, of) {
   const C = BF.ctick;
   if (!C || !C.on || !C.filter) return true;
-  const tok = C.groups();
+  return ownsBase(thingBase(o, p, of));
+}
+// thingBase(o, p, of?) -> o's base this interval, worked out now if it wasn't yet (as ownsThing does). The owned tables' snap and apply
+// (drops, boats, arrows) go by it, not by clOf: a thing no pass on this worker has looked at (one restored from a save, on a worker that
+// runs none of its groups or no group at all) has no base yet, and with clOf's undefined it was neither sent nor replaced, so each copy
+// kept its own version of it. Every copy works out the same base: the thing is where it was at the last meeting until its group runs it.
+function thingBase(o, p, of) {
+  const tok = BF.ctick.groups();
   let t = thingCl.get(o);
   if (!t || t[0] !== tok) thingCl.set(o, (t = [tok, (of && of(o)) || baseAt(p)]));
-  return ownsBase(t[1]);
+  return t[1];
 }
 const clOf = o => { const t = thingCl.get(o); return t ? t[1] : undefined; };
 // a thing sent at a meeting (js/cworkers.js: an owned table's apply) keeps the base it had where it ran, until it is worked out again
@@ -202,9 +209,9 @@ function ownTables() {
   const dec = o => keepThing(Object.assign({}, o, { pos: V3(o.pos), prev: V3(o.prev), vel: V3(o.vel), look: V3(o.look), dir: V3(o.dir), owner: o.owner ? BF.ids.live(o.owner) || null : null,
     victim: o.victim ? BF.ids.live(o.victim) || null : null, hit: null, cl: undefined }), o.cl);
   C.owned("mobs.arrows", {
-    snap: g => arrows.filter(a => clOf(a) !== undefined && groupFor(clOf(a)) === g).map(enc),
+    snap: g => arrows.filter(a => groupFor(thingBase(a, a.pos)) === g).map(enc),
     apply(g, a) {
-      for (let i = arrows.length - 1; i >= 0; i--) if (clOf(arrows[i]) !== undefined && groupFor(clOf(arrows[i])) === g) arrows.splice(i, 1);
+      for (let i = arrows.length - 1; i >= 0; i--) if (groupFor(thingBase(arrows[i], arrows[i].pos)) === g) arrows.splice(i, 1);
       for (const o of a || []) arrows.push(dec(o));
     },
   });
@@ -1511,11 +1518,15 @@ const navCell = (x, y, z) => walkCell(x, y, z) || ladderCell(x, y, z);
 // its cell and overhangs all eight around it, those clear above knee height too (or it would walk its head into a ledge beside the route),
 // and no fence gates: it can't open one, and through one left open it walked into a pen that was then shut on it (r15-70).
 let planBudget = 0;
-// A* searches (spec r15-33). In the mob loop a mob may search only with a grant: PLANS grants are handed out at the start of each tick
+// A* searches (spec r15-33). In the mob loop a mob may search only with a grant: PLANS grants per simulated village (at least PLANS) are
+// handed out at the start of each tick
 // to the mobs that have been waiting longest (then by id), so who gets a search never depends on the order mobs think in (regions,
 // later threads). A mob that asks without one joins the waiting list and searches in a later tick (one tick later when few are
 // waiting); one that stopped asking for KEEP ticks leaves it, and an unused grant lapses after KEEP ticks. Outside the mob loop (the
-// village ticks after it, in a fixed order) searches share planBudget as before.
+// village ticks after it, in a fixed order) searches share planBudget (PLANS per village too) as before.
+// Per village, not per world (chunk churn thread, 2026-10-28): one thread's 2 a tick for the whole world left 2,341 mobs of a 100-village
+// world waiting ~10 s for a search, while the cluster tick handed out 2 per group; now both hand out PLANS for each simulated village in
+// the scope that runs (the world, or the running cluster group's village bases), so the two do the same work.
 // The waiting list and the grants live on the mobs (ai.planW: the tick it first asked, planL: last asked, planG: granted), not in a
 // module table, so that every copy of the world (spec r15-39: several workers, each thinking some regions) hands out the same grants: a
 // table here held only what this worker's own mobs asked, and still held them after their region moved to another worker. A tick number
@@ -1531,7 +1542,23 @@ let coarseStep = false, walked = false, coarseN = 0;   // this update is a coars
 let mobUpdates = 0;   // every mob update run (BF.mobs.updates: test/perf-activity.js checks BF.perf.byState counts each once)
 const idNum = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15; };
 const lapsed = (v, t) => v > t || v < t - KEEP;
-function grantPlans() {
+// the searches a tick hands out in the scope that runs: PLANS per simulated village there, at least PLANS
+function planShare() {
+  const C = BF.ctick, g = C && C.on ? C.cur : null;
+  let n = 0;
+  if (g) { if (g.bases) for (const b of g.bases) if (b.charCodeAt(0) === 118) n++; }   // ("v:<village key>" bases, js/clusters.js)
+  else if (BF.villageSim && BF.villageSim.count) n = BF.villageSim.count();
+  return PLANS * Math.max(1, n);
+}
+// the game log notes the world's share when it changes (a village joined or left the simulated set)
+let shareLogged = 0;
+function logShare() {
+  const n = BF.villageSim && BF.villageSim.count ? BF.villageSim.count() : 0, all = PLANS * Math.max(1, n);
+  if (all === shareLogged) return;
+  shareLogged = all;
+  if (BF.glog) BF.glog.log("INFO", "plans", "Route searches a tick: " + all + " (" + PLANS + " for each of " + n + " running village" + (n === 1 ? "" : "s") + ")");
+}
+function grantPlans(share) {
   const C = BF.ctick, t = C && C.on ? (planTick = BF.rand.tick) : ++planTick, w = [], mm = ownMobs();
   for (const m of mm || list) {
     if (mm && m.removed) continue;
@@ -1544,7 +1571,7 @@ function grantPlans() {
   }
   if (!w.length) return;
   w.sort((a, b) => a.ai.planW - b.ai.planW || idNum(a) - idNum(b) || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
-  for (let i = 0; i < w.length && i < PLANS; i++) { const a = w[i].ai; a.planG = t; a.planW = a.planL = undefined; }
+  for (let i = 0; i < w.length && i < share; i++) { const a = w[i].ai; a.planG = t; a.planW = a.planL = undefined; }
 }
 // A villager that plans route after route (two jobs taking its route from each other each tick, r15-73) goes in the game log, once a game
 // minute while it lasts: REPLAN_MAX searches in a minute is far more than any job needs.
@@ -3474,7 +3501,7 @@ BF.mobs = {
   shapeAi, MOB_FIELDS, AI_FIELDS,   // one mob layout (test/mob-shape.js, js/mobsave.js)
   // clusters (spec r15-39b, C2) for the other systems of C2 (js/drops.js, js/boats.js, js/wildlife.js, js/mobsave.js): see placeThing,
   // ownsThing, ownsBase, groupFor; baseAt(p) -> the base cluster of p's region; the player as the running cluster sees it
-  cl: { placeThing, ownsThing, clOf, keepThing, ownsBase, groupFor, baseAt, playerPos, playerLives, owned: () => !!own() },
+  cl: { placeThing, ownsThing, thingBase, clOf, keepThing, ownsBase, groupFor, baseAt, playerPos, playerLives, owned: () => !!own() },
   list,
   toolHolders,   // profession -> (villager => item id of the tool drawn in its hands, or null): sets the villager's `held`
   types: Object.keys(TYPES),
@@ -3520,8 +3547,10 @@ BF.mobs = {
   update(dt) {
     if (!ready) return;
     dt = Math.min(dt, 0.05);
-    planBudget = 2; // A* searches per frame outside the mob loop
-    grantPlans();   // and the mob loop's (spec r15-33)
+    logShare();
+    const share = planShare();
+    planBudget = share; // A* searches per frame outside the mob loop
+    grantPlans(share);   // and the mob loop's (spec r15-33)
     // the region index (r15-30) up to date before the mobs query it (spec r15-31): main.js syncs it after each step, but tests and tools
     // step BF.mobs.update on its own, and move mobs between steps
     if (BF.regions) BF.regions.tick(ownMobs() || undefined);   // (clusters: the running group's mobs, js/ctick.js; the others are kept by theirs)
@@ -3829,7 +3858,7 @@ BF.mobs = {
     BF.ids.reset();
     villageT = restockT = 0;   // (and the counters and timers below, so a world started after another plays as in a fresh page: spec r15-39)
     surfAcc = caveAcc = chunkArrT = 0; chunkArr = [];
-    planTick = planBudget = 0;
+    planTick = planBudget = shareLogged = 0;
     aiAcc = aiEma = aiN = aiWork = 0;
     if (BF.builder) BF.builder.reset();
     if (BF.bridges) BF.bridges.reset();

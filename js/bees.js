@@ -541,7 +541,7 @@ function onSet(x, y, z, old, id) {
   if (isFlower(id)) addFlower(x, y, z);
   if (isHome(old) && !isHome(id)) {
     const k = pk(x, y, z), h = recs.get(k);
-    recs.delete(k); loaded.delete(k); loadedVer++;
+    recs.delete(k); loaded.delete(k); loadedVer++; dropped.add(k);
     if (!h) return;
     // its bees that are out look for a home with room within R; the rest are lost
     const outB = bees.filter(b => b.home === h), ang = [];
@@ -568,7 +568,7 @@ function onReplayed(x, y, z, old, id) {
   if (isFlower(old)) delFlower(x, y, z);
   if (isFlower(id)) addFlower(x, y, z);
   const k = pk(x, y, z);
-  if (isHome(old) && !isHome(id)) { recs.delete(k); if (loaded.delete(k)) loadedVer++; }
+  if (isHome(old) && !isHome(id)) { if (recs.delete(k)) dropped.add(k); if (loaded.delete(k)) loadedVer++; }
   else if (isHome(id) && !isHome(old)) {
     let h = recs.get(k);
     if (!h) { h = { x, y, z, kind: id === NEST ? "nest" : "hive", bees: 0, honey: 0, day: today(), out: 0, rest: [], emT: 0, angry: 0, fl: null, flT: -1e9, scatter: false }; recs.set(k, h); }
@@ -638,25 +638,52 @@ if (BF.rworkers) {
   BF.rworkers.channel("lure", { key: m => m.id, get: id => BF.ids.get(id), state: m => lures.has(m), set: (m, on) => { if (!m) return; if (on) lures.add(m); else lures.delete(m); } });
 }
 
-// (the multi-worker runtime, js/cworkers.js: each group's homes and the bees out of them at meetings)
+// (the multi-worker runtime, js/cworkers.js: each group's homes and the bees out of them at meetings). Homes go as what changed since
+// every worker last had them (as BF.ctick.ownedLog: had, the text every worker has; gone, the group's homes broken since), so homes that
+// sit still (unloaded, or at night) cost nothing; the bees that are out go whole. A home's dist (to the player) is left out: each group's
+// housekeeping works it out again before it is read.
+const hadHome = new Map();     // home key -> its text every worker has
+const dropped = new Set();     // home keys taken out of recs since the last meeting (broken), for their group's gone list
+const homeText = h => JSON.stringify(h, (k, v) => (k === "dist" ? undefined : v));
+const groupOfKey = k => { const p = k.split(","); return BF.clusters.groupOf(BF.clusters.ofRegion(BF.regions.keyOf(+p[0], 0, +p[2]))); };
 function tables() {
   const K = BF.ctick;
   if (!K || !K.owned) return;
   const plain = o => JSON.parse(JSON.stringify(o));
-  const homeOf = gk => h => BF.clusters.groupOf(homeBase(h)) === gk;
+  const homeGroup = (k, h) => BF.clusters.groupOf(homeBase(h));
   const beeOf = gk => b => BF.clusters.groupOf(b.cl !== undefined ? b.cl : b.home ? homeBase(b.home) : "w:none") === gk;
   K.owned("bees", {
-    snap(gk) {
-      const homes = [...recs.values()].filter(homeOf(gk)).map(h => plain(h));
+    reset() { hadHome.clear(); dropped.clear(); },
+    snap(gk, all) {
+      const put = [], gone = [];
+      for (const k of K.keysOf(recs, gk, homeGroup)) {
+        const t = homeText(recs.get(k));
+        if (all || hadHome.get(k) !== t) { hadHome.set(k, t); put.push(JSON.parse(t)); }
+      }
+      for (const k of dropped) {
+        if (recs.has(k)) { dropped.delete(k); continue; }   // (broken and placed again: sent as it is now)
+        if (groupOfKey(k) !== gk) continue;
+        dropped.delete(k);
+        if (hadHome.delete(k)) gone.push(k);
+      }
       const out = bees.filter(beeOf(gk)).map(b => plain(Object.assign({}, b, { home: b.home ? pk(b.home.x, b.home.y, b.home.z) : null,
         follow: b.follow ? Object.assign({}, b.follow, { who: b.follow.who === "player" ? "player" : b.follow.who.id }) : null, rng: b.rng, hm0: null, hm1: null, lastD: b.lastD === Infinity ? "inf" : b.lastD })));   // (hm0 / hm1: caches of world columns; JSON has no Infinity)
-      return { homes, out };
+      return { put, gone, out };
     },
     apply(gk, o) {
       if (!o) return;
-      const keep = new Set();
-      for (const h of o.homes || []) { const k = pk(h.x, h.y, h.z), was = recs.get(k); keep.add(k); if (was) Object.assign(was, h); else recs.set(k, h); }
-      for (const [k, h] of recs) if (!keep.has(k) && homeOf(gk)(h)) { recs.delete(k); if (loaded.delete(k)) { loadedVer++; BF.glog && BF.glog.log("INFO", "bees", "Cluster workers: the home at " + k + " was broken on its group's worker"); } }   // (broken there)
+      for (const k of o.gone || []) {   // (broken on its group's worker)
+        hadHome.delete(k); dropped.delete(k);
+        recs.delete(k);
+        if (loaded.delete(k)) { loadedVer++; BF.glog && BF.glog.log("INFO", "bees", "Cluster workers: the home at " + k + " was broken on its group's worker"); }
+      }
+      for (const h of o.put || []) {
+        const k = pk(h.x, h.y, h.z), was = recs.get(k);
+        hadHome.set(k, JSON.stringify(h));
+        if (was) { for (const f in was) if (!(f in h) && f !== "dist") delete was[f]; Object.assign(was, h); }
+        else recs.set(k, h);
+      }
+      K.applied(recs, gk);
       for (let i = bees.length - 1; i >= 0; i--) if (beeOf(gk)(bees[i])) { bees[i].gone = true; bees.splice(i, 1); }
       byGroup = null;
       for (const e of o.out || []) {

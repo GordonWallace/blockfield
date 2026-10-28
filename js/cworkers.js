@@ -134,9 +134,11 @@ function sync() {
   lap("refs");
   // mobs not here at the last meeting that this worker made, or that every worker made between ticks (a chunk loading) and this one
   // runs: in full, every field (links by id), filled in under the same id
-  const born = [];
+  // (one made between ticks in a place no group has yet, a chunk loading at the edge, ran nowhere: every worker has it as it was made)
+  const born = [], live = new Set(K.groups().map(g => g.key));
   for (const m of BF.mobs.list) {
-    if (m.removed || known.has(m) || !(bornHere.has(m) || ownsKey(groupOf(m)))) continue;
+    if (m.removed || known.has(m)) continue;
+    if (!bornHere.has(m)) { const gk = groupOf(m); if (!live.has(gk) || !ownsKey(gk)) continue; }
     const o = {};
     for (const k of Object.keys(m)) o[k] = m[k];   // (a plain copy, its own fields: the codec writes m itself as a reference)
     born.push([m.id, m.type, R.enc(o, m)]);
@@ -163,7 +165,8 @@ function sync() {
   const tables = [];
   const gs = K.groups().filter(owns);
   I.tablesStep(true);   // (each table's keys by group made once for all the snaps)
-  for (const name of K.tables()) { const t = K.table(name); for (const g of gs) tables.push([name, g.key, t.snap(g.key)]); }
+  lap("edits");
+  for (const name of K.tables()) { const t = K.table(name); for (const g of gs) tables.push([name, g.key, t.snap(g.key)]); if (CW.prof) lap("snap." + name); }
   I.tablesStep(false);
   const chans = [];
   for (const [name, key] of touched.values()) { const ch = R.chan(name), o = ch.get(key); chans.push([name, key, o == null ? null : ch.state(o)]); }
@@ -279,7 +282,7 @@ function sync() {
     replaying = true;
     try { if (p.edits.length) BF.world.applyEdits(p.edits, false, true); } finally { replaying = false; }
     lap("in.edits");
-    for (const [name, gk, data] of p.tables) { const t = K.table(name); if (t) t.apply(gk, data); }
+    for (const [name, gk, data] of p.tables) { const t = K.table(name); if (t) t.apply(gk, data); if (CW.prof) lap("in.table." + name); }
     lap("in.tables");
     for (const [name, key, data] of p.chans) { const ch = R.chan(name); if (ch) ch.set(ch.get(key), data, key); }
   } }); } finally { I.tablesStep(false); }
@@ -396,12 +399,15 @@ function handover() {
   if (!moves.length) return;
   const t0 = now();
   R.refs();
-  const out = [mineOut.map(m => m.id), R.encMany(mineOut.map(whole))];
+  // (each to its new owner only: the others keep their stale copies, as for any mob they don't run)
+  const byDest = Array.from({ length: CW.n }, () => []);
+  for (const m of mineOut) byDest[CW.owners.get(groupOf(m)) || 0].push(m);
+  const out = byDest.map(ms => (ms.length ? JSON.stringify([ms.map(m => m.id), R.encMany(ms.map(whole))]) : ""));
   T.moved += moves.length;
   const all = xchange("handover", JSON.stringify(out));
   T.exchange += now() - t0;
   const got = [];
-  R.atLater(() => { for (let w = 0; w < all.length; w++) if (w !== CW.me) { const [ids, e] = JSON.parse(all[w]); got.push([w, ids, R.decAll(e)]); } });
+  R.atLater(() => { for (let w = 0; w < all.length; w++) if (w !== CW.me) { const part = JSON.parse(all[w])[CW.me]; if (part) { const [ids, e] = JSON.parse(part); got.push([w, ids, R.decAll(e)]); } } });
   const pairs = [], fresh = new Set();
   for (const [w, ids, [os, made]] of got) { for (const x of made) fresh.add(x); ids.forEach((id, i) => { const m = BF.ids.live(id); if (m) pairs.push([m, os[i]]); else err("worker " + w + " handed over mob " + id + ", which this worker doesn't have"); }); }
   refillAll(pairs, fresh);

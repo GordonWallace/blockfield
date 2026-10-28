@@ -166,7 +166,7 @@ function ownTables() {
   const C = BF.ctick;
   if (!C || ownTables.done) return;
   ownTables.done = true;
-  const G = (d, g) => { const b = CL().clOf(d); return b !== undefined && CL().groupFor(b) === g; };
+  const G = (d, g) => CL().groupFor(CL().thingBase(d, d.pos)) === g;   // (thingBase: a drop no pass here has seen yet, restored from a save, too)
   C.owned("drops", {
     snap: g => drops.list.filter(d => G(d, g)).map(d => [d.key, d.id, d.count, V(d.pos), V(d.vel), d.age, d.pickupDelay, d.wear || 0, CL().clOf(d)]),
     apply(g, a) {

@@ -9,7 +9,7 @@
 // worked out again), so villages, their records and the trips' pins come and go only there, never between two clusters' passes; the
 // countdowns that tasks read (mayStart, timeLeft) then hold for the whole interval in every cluster. Trips ask for their pin at the
 // meeting too (js/merchant.js meet, run first): pin and unpin are called only between ticks then.
-// API: BF.villageSim = { RADIUS, MAX, MAX_PINS, keepKeys, update(px, pz) -> changed, isActive(key), status(), pin(id, a, b, keys) -> ok, unpin(id),
+// API: BF.villageSim = { RADIUS, MAX, MAX_PINS, keepKeys, update(px, pz) -> changed, isActive(key), status(), count(), pin(id, a, b, keys) -> ok, unpin(id),
 //                        pins(), pinned() -> [worldgen villages], simulated() -> [worldgen villages], corridor(a, b) -> chunk keys, exportSeen(out), importSeen(o), reset() }
 (() => {
 "use strict";
@@ -364,11 +364,20 @@ function step() {
 // village's mobs before the set reads their tasks or stops them (fetchVillage).
 // (which mobs is asked of each one's current copy: a stale copy may not show yet that it joined the village or became a merchant)
 const fetch = pred => { if (BF.cworkers && BF.cworkers.partial) BF.cworkers.fetch(BF.mobs.list, pred); };
-const fetchVillage = key => fetch(m => m.villageId === key || m.penVillageId === key || (m.ledBy && m.ledBy.villageId === key));
+// (at a meeting each village's mobs come over once, those of every village the set may stop in one exchange: fetched)
+let fetched = null;
+function fetchVillages(keys) {
+  const ks = new Set(fetched ? keys.filter(k => !fetched.has(k)) : keys);
+  if (!ks.size) return;
+  if (fetched) for (const k of ks) fetched.add(k);
+  fetch(m => ks.has(m.villageId) || ks.has(m.penVillageId) || (m.ledBy && ks.has(m.ledBy.villageId)));
+}
+const fetchVillage = key => fetchVillages([key]);
 function meet() {
   if (BF.merchant && BF.merchant.meet) { fetch(m => m.mc); BF.merchant.meet(); }
   if (focusX == null) return;
-  if (check(focusX, focusZ, simClock, BF.simNow())) stepChanged = true;
+  fetched = new Set();
+  try { if (check(focusX, focusZ, simClock, BF.simNow())) stepChanged = true; } finally { fetched = null; }
 }
 function check(px, pz, clk, now) {
   let winChanged = false;
@@ -408,6 +417,7 @@ function check(px, pz, clk, now) {
   // a village that would stop waits for its villagers' tasks (the countdown); one the player came back to cancels it
   const nd = nowDay();
   for (const k of [...ending.keys()]) if (next.has(k) || !active.has(k)) ending.delete(k);
+  if (fetched) fetchVillages([...active.keys()].filter(k => { if (next.has(k)) return false; const en = ending.get(k); return !en || !(nd < en.until || nd < en.t0); }));   // (the ones the loop below reads: starting or ending their countdown)
   for (const [k, e] of active) {
     if (next.has(k)) continue;
     let en = ending.get(k);
@@ -519,6 +529,7 @@ BF.villageSim = {
   update,
   pin, unpin, corridor,
   pins: () => pins,
+  count: () => active.size,   // villages simulated now (js/mobs.js: the A* searches a tick hands out)
   simulated: () => [...active.values()].map(e => e.v),   // every village simulated now (the minimum, pins and the budget's extras)
   pinned: () => { const out = [], seenK = new Set(); for (const p of pins.values()) for (const v of [p.a, p.b]) if (!seenK.has(vKey(v))) { seenK.add(vKey(v)); out.push(v); } return out; },
   isPinned: key => pinnedKeys().has(key),

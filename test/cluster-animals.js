@@ -49,7 +49,7 @@ function child() {
     const keys = C.groups().map(g => g.key), n = {};
     for (const name of ['horses.records', 'horses.herds']) {
       const t = C.table(name);
-      n[name] = t ? keys.reduce((s, k) => s + t.snap(k).length, 0) : -1;
+      n[name] = t ? keys.reduce((s, k) => { const p = t.snap(k, true); return s + (Array.isArray(p) ? p.length : p.keys.length); }, 0) : -1;   // (records: {keys, put})
     }
     return n;
   };
