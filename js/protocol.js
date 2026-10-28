@@ -23,7 +23,7 @@
 //        local: { connect(), disconnect(), on, sim, client }, worker: { connect(worker, via?) -> client, disconnect() }, host(send, opts) -> sim end (in the worker), hosted() -> it,
 //        flush(), stats(), resetStats(), check() -> {ok, diffs, ...}, mirrorHash(), simHash(keys),
 //        queries (what -> fn(args)), HOT, COLD }
-//      BF.client = the client end once connected: { world: {chunks, entities, villages, clock, getBlock(x, y, z), k(entity, alpha), rt, draw(dTicks, realDt), drawLag(), drawStats(); off the page an entity's prev / to / k are the drawing clock's}, mode, request(kind, target, data) -> req,
+//      BF.client = the client end once connected: { world: {chunks, entities, villages, clock, getBlock(x, y, z), k(entity, alpha), rt, draw(dTicks, realDt), place(rt), drawLag(), drawStats(); off the page an entity's prev / to / k are the drawing clock's}, mode, request(kind, target, data) -> req,
 //        query(what, args, fn), view(x, y, z, dist), speed(s, pause), save(), receive(packet), hello, player(state), worldOp(op, args, fn), meta(m),
 //        log(entries), self (the latest self fields), onEdits(chunks, full), onSelf(m), onLog(list), onEvents(list) }
 (() => {
@@ -752,7 +752,11 @@ function connect(send, mode) {
     DRAW.frames++;
     if (world.rt >= T && dTicks > 0) DRAW.waits++;
     if (world.rt > T) world.rt = T;
-    const rt = world.rt;
+    return world.place(world.rt);
+  };
+  // every entity with recent states drawn at clock rt (draw(), each frame; tests call it to hold the clock somewhere)
+  world.place = rt => {
+    world.rt = rt;
     for (const r of world.entities.values()) {
       const h = r.hist;
       if (!h) continue;
@@ -840,7 +844,7 @@ function connect(send, mode) {
         }
         Object.assign(r, e.s);
         if (drawn) {
-          const h = r.hist, L = h[h.length - 1];
+          const h = r.hist || (r.hist = [snap(r, T)]), L = h[h.length - 1];   // (a first change within its own tick: a request while frozen)
           if (L.t === T) Object.assign(L, e.s); else h.push(snap(r, T));
           if (h.length > HIST_MAX) h.splice(0, h.length - HIST_MAX);
         }
