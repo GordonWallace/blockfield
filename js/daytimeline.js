@@ -46,6 +46,7 @@ const gone = new Set();  // keys in had dropped here since the last meeting
 // (ver: every change but the one each sample makes, the last stretch going on: that goes alone as its end)
 const verOf = L => L.v + "|" + (L.name || "");
 const endOf = L => (L.s.length ? L.s[L.s.length - 1][1] : null);
+const ENDS_EVERY = 8;   // (meetings between those ends: display only, so the other workers' copies may lag a few game seconds)
 BF.onLoad(() => {
   const C = BF.ctick;
   if (!C || !C.owned || !C.tailDiff) return;
@@ -54,10 +55,10 @@ BF.onLoad(() => {
   C.owned("daytimeline.lines", {
     reset() { had.clear(); gone.clear(); },
     snap(g, all) {
-      const put = [], ends = [], del = [];
+      const put = [], ends = [], del = [], endsDue = Math.floor(BF.rand.tick / C.MEET) % ENDS_EVERY === 0;
       for (const k of C.keysOf(lines, g, groupOf)) {
         const L = lines.get(k), h = all ? null : had.get(k), ver = verOf(L), end = endOf(L);
-        if (h && h.ver === ver) { if (h.end !== end) { h.end = end; lastText(h.s, L); ends.push([k, end]); } continue; }
+        if (h && h.ver === ver) { if (h.end !== end && endsDue) { h.end = end; lastText(h.s, L); ends.push([k, end]); } continue; }
         const s = C.tailDiff(h ? h.s : null, L.s), e = C.tailDiff(h ? h.e : null, L.e);
         had.set(k, { ver, s: s.texts, e: e.texts, end });
         put.push([k, s.d, e.d, L.v, L.name || null]);
