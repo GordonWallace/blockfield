@@ -33,7 +33,10 @@ const pending = new Map();         // village key -> built list (same array as r
 BF.onLoad(() => {
   const C = BF.ctick;
   if (!C || !C.ownedMap) return;
-  C.ownedMap("builder.built", pending, k => C.ofVillage(k), list => JSON.parse(JSON.stringify(list)), (j, k) => { const R = BF.mobs.villages.get(k); return R && R.built ? R.built : j; });
+  // (a village with a record: its list is the record's, which goes with the record, so the entry goes once, empty, and never again)
+  const hasRec = k => { const R = BF.mobs.villages.get(k); return !!(R && R.built); };
+  C.ownedMap("builder.built", pending, k => C.ofVillage(k), (list, k) => (hasRec(k) ? [] : JSON.parse(JSON.stringify(list))), (j, k) => { const R = BF.mobs.villages.get(k); return R && R.built ? R.built : j.length || !pending.has(k) ? j : pending.get(k); },
+    (k, list) => (hasRec(k) ? "rec" : JSON.stringify(list)));
 });
 const log = [];
 

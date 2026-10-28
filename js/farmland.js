@@ -34,6 +34,9 @@ const isDry = id => (ids(), id === DRY && DRY != null);
 
 const stamps = new Map();   // "x,y,z" -> game day (all farmland ever seen, loaded or not)
 const tracked = new Map();  // "x,y,z" -> [x, y, z], farmland in loaded chunks
+// (several workers: the tracked keys every worker has as of the last meeting, and the ones of those untracked here since: a group's
+// part of the table is only what changed, owned below)
+const sent = new Set(), gone = new Map();
 const due = new Set();      // keys to look at first (just loaded or placed)
 let order = [], pos = 0, orderDirty = true, last = 0, carry = 0, lastRain = -1e9, hooked = false;
 
@@ -83,10 +86,10 @@ function tillId(x, y, z) { ids(); return DRY != null && hydrated(x, y, z) !== tr
 
 function track(x, y, z) {
   const k = pk(x, y, z);
-  if (!tracked.has(k)) { const p = [x, y, z]; tracked.set(k, p); bucketAdd(k, p); orderDirty = true; }
+  if (!tracked.has(k)) { const p = [x, y, z]; tracked.set(k, p); bucketAdd(k, p); orderDirty = true; gone.delete(k); }
   due.add(k);
 }
-function untrack(k) { const p = tracked.get(k); if (tracked.delete(k)) { bucketDel(k, p); orderDirty = true; } due.delete(k); }
+function untrack(k) { const p = tracked.get(k); if (tracked.delete(k)) { bucketDel(k, p); orderDirty = true; if (sent.has(k)) gone.set(k, p); } due.delete(k); }
 
 // Looks at one block now and applies any change it is due.
 function check(x, y, z) {
@@ -217,7 +220,7 @@ function hook() {
   });
   for (const c of BF.world.chunks.values()) scanChunk(c.cx, c.cz, c);
 }
-function reset() { stamps.clear(); tracked.clear(); due.clear(); order = []; pos = 0; last = 0; carry = 0; orderDirty = true; lastRain = -1e9; buckets = null; rainSt.at = -1; }
+function reset() { stamps.clear(); tracked.clear(); sent.clear(); gone.clear(); due.clear(); order = []; pos = 0; last = 0; carry = 0; orderDirty = true; lastRain = -1e9; buckets = null; rainSt.at = -1; }
 
 const farmland = {
   isFarmland, isDry, tillId, hydrated, tick, onSet, check, reset,   // reset: called by world.reset (new world / load)
@@ -261,11 +264,24 @@ BF.farmland = farmland;
     const cellOf = (k, p) => CC.cellGroup(p[0], p[2]);
     const own = () => {
       if (!BF.ctick || !BF.ctick.owned) return;
+      // a group's part: the blocks tracked since the last meeting and the keys untracked (all: every block, the group's whole part)
+      const goneOf = gk => { const out = []; for (const [k, p] of gone) if (cellOf(k, p) === gk) out.push(k); return out; };
       BF.ctick.owned("farmland.tracked", {
-        snap: gk => { const out = []; for (const k of BF.ctick.keysOf(tracked, gk, cellOf)) out.push(tracked.get(k)); return { blocks: out, rain: lastRain }; },
+        reset() { sent.clear(); gone.clear(); },
+        snap: (gk, all) => {
+          const add = [], del = all ? [] : goneOf(gk);
+          for (const k of BF.ctick.keysOf(tracked, gk, cellOf)) if (all || !sent.has(k)) { add.push(tracked.get(k)); sent.add(k); }
+          for (const k of del) { sent.delete(k); gone.delete(k); }
+          return { add, del, all: !!all, rain: lastRain };
+        },
         apply: (gk, o) => {
-          for (const k of BF.ctick.keysOf(tracked, gk, cellOf)) { const p = tracked.get(k); tracked.delete(k); bucketDel(k, p); }
-          for (const p of o.blocks) { const k = pk(p[0], p[1], p[2]); tracked.set(k, [p[0], p[1], p[2]]); bucketAdd(k, tracked.get(k)); orderDirty = true; }
+          if (o.all) {
+            const keep = new Set(o.add.map(p => pk(p[0], p[1], p[2])));
+            for (const k of BF.ctick.keysOf(tracked, gk, cellOf)) if (!keep.has(k)) { const p = tracked.get(k); tracked.delete(k); bucketDel(k, p); sent.delete(k); orderDirty = true; }
+          }
+          for (const k of o.del) { const p = tracked.get(k); if (tracked.delete(k)) { bucketDel(k, p); orderDirty = true; } sent.delete(k); }
+          for (const p of o.add) { const k = pk(p[0], p[1], p[2]); if (!tracked.has(k)) { const q = [p[0], p[1], p[2]]; tracked.set(k, q); bucketAdd(k, q); orderDirty = true; } sent.add(k); }
+          for (const k of goneOf(gk)) gone.delete(k);   // (untracked here too: what its owner said is what every worker has)
           BF.ctick.applied(tracked, gk);
           if (o.rain > lastRain) lastRain = o.rain;
         },
