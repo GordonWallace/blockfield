@@ -641,7 +641,8 @@ if (BF.rworkers) {
 
 // (the multi-worker runtime, js/cworkers.js: each group's homes and the bees out of them at meetings). Homes go as what changed since
 // every worker last had them (as BF.ctick.ownedLog: had, the text every worker has; gone, the group's homes broken since), so homes that
-// sit still (unloaded, or at night) cost nothing; the bees that are out go whole.
+// sit still (unloaded, or at night) cost nothing; the bees that are out go whole with full copies, and with partial copies only to a
+// group's new worker (carry, below).
 const hadHome = new Map();     // home key -> its text every worker has
 const dropped = new Set();     // home keys taken out of recs since the last meeting (broken), for their group's gone list
 const homeText = h => JSON.stringify(h);
@@ -649,9 +650,8 @@ const groupOfKey = k => { const p = k.split(","); return BF.clusters.groupOf(BF.
 function tables() {
   const K = BF.ctick;
   if (!K || !K.owned) return;
-  const plain = o => JSON.parse(JSON.stringify(o));
   const homeGroup = (k, h) => BF.clusters.groupOf(homeBase(h));
-  const beeOf = gk => b => BF.clusters.groupOf(b.cl !== undefined ? b.cl : b.home ? homeBase(b.home) : "w:none") === gk;
+  const beeOf = gk => b => beeGroup(b) === gk;
   K.owned("bees", {
     reset() { hadHome.clear(); dropped.clear(); },
     snap(gk, all) {
@@ -666,8 +666,7 @@ function tables() {
         dropped.delete(k);
         if (hadHome.delete(k)) gone.push(k);
       }
-      const out = bees.filter(beeOf(gk)).map(b => plain(Object.assign({}, b, { home: b.home ? pk(b.home.x, b.home.y, b.home.z) : null,
-        follow: b.follow ? Object.assign({}, b.follow, { who: b.follow.who === "player" ? "player" : b.follow.who.id }) : null, rng: b.rng, hm0: null, hm1: null, lastD: b.lastD === Infinity ? "inf" : b.lastD })));   // (hm0 / hm1: caches of world columns; JSON has no Infinity)
+      const out = partial() ? null : bees.filter(beeOf(gk)).map(beeOut);   // (partial copies: carried at handovers instead, below)
       return { put, gone, out };
     },
     apply(gk, o) {
@@ -686,14 +685,39 @@ function tables() {
       K.applied(recs, gk);
       for (let i = bees.length - 1; i >= 0; i--) if (beeOf(gk)(bees[i])) { bees[i].gone = true; bees.splice(i, 1); }
       byGroup = null;
-      for (const e of o.out || []) {
-        const b = Object.assign({}, e, { home: e.home ? recs.get(e.home) || null : null, lastD: e.lastD === "inf" ? Infinity : e.lastD });
-        if (e.home && !b.home && BF.herd) BF.herd.lost("bees", "the home at " + e.home);
-        if (e.follow) b.follow = Object.assign({}, e.follow, { who: e.follow.who === "player" ? "player" : BF.ids.live(e.follow.who) || "player" });
-        bees.push(b);
-      }
+      for (const e of o.out || []) beeIn(e);
     },
   });
+  // partial copies (js/cworkers.js carry): only the worker running a group keeps its bees that are out; nothing else reads them (they
+  // aren't in the state hash or the save, and the player's group, whose bees the page draws, is on the first worker)
+  if (BF.cworkers && BF.cworkers.carry) BF.cworkers.carry("bees", {
+    give(destOf) {
+      const by = new Map(), me = BF.cworkers.me;
+      for (let i = bees.length - 1; i >= 0; i--) {
+        const b = bees[i], d = destOf(beeGroup(b));
+        if (d === me) continue;
+        let a = by.get(d);
+        if (!a) by.set(d, (a = []));
+        a.unshift(beeOut(b));
+        b.gone = true; bees.splice(i, 1);
+      }
+      byGroup = null;
+      return [...by];
+    },
+    take(list) { for (const e of list) beeIn(e); byGroup = null; },
+    all: () => bees.map(beeOut),
+  });
+}
+const partial = () => !!(BF.cworkers && BF.cworkers.partial);
+// a bee that is out as plain JSON for another worker, and back (its home, and the mob it follows, by key and id)
+const plainOf = o => JSON.parse(JSON.stringify(o));
+const beeOut = b => plainOf(Object.assign({}, b, { home: b.home ? pk(b.home.x, b.home.y, b.home.z) : null,
+  follow: b.follow ? Object.assign({}, b.follow, { who: b.follow.who === "player" ? "player" : b.follow.who.id }) : null, rng: b.rng, hm0: null, hm1: null, lastD: b.lastD === Infinity ? "inf" : b.lastD }));   // (hm0 / hm1: caches of world columns; JSON has no Infinity)
+function beeIn(e) {
+  const b = Object.assign({}, e, { home: e.home ? recs.get(e.home) || null : null, lastD: e.lastD === "inf" ? Infinity : e.lastD });
+  if (e.home && !b.home && BF.herd) BF.herd.lost("bees", "the home at " + e.home);
+  if (e.follow) b.follow = Object.assign({}, e.follow, { who: e.follow.who === "player" ? "player" : BF.ids.live(e.follow.who) || "player" });
+  bees.push(b);
 }
 BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(() => { ids(); if (NEST != null) hook(); }); });   // (clusters: set up at the first meeting, js/ctick.js warm)
 function hook() {
