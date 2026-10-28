@@ -464,7 +464,7 @@ function ownTables() {
   const C = BF.ctick;
   if (!C || ownTables.done) return;
   ownTables.done = true;
-  const G = (b, g) => { const k = CL().clOf(b); return k !== undefined && CL().groupFor(k) === g; };
+  const G = (b, g) => CL().groupFor(CL().thingBase(b, b.pos, passengerCl)) === g;   // (thingBase: a boat no pass here has seen yet, restored from a save, too)
   const V = v => [v.x, v.y, v.z];
   C.owned("boats", {
     snap: g => list.filter(b => b.id != null && G(b, g)).map(b => { const o = { id: b.id, cl: CL().clOf(b), pos: V(b.pos), prev: V(b.prev), vel: V(b.vel) }; for (const k of F) o[k] = b[k]; return o; }),
