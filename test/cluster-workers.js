@@ -56,6 +56,14 @@ function child() {
     if (bees) o['bee homes'] = md5(BF.bees.loadedHomes().map(h => [h.x, h.y, h.z]).sort().join(';'));   // (loaded is not in the hash)
     return o;
   };
+  // the bees that are out, by their cluster (js/bees.js beeGroup; not in the state hash; with partial copies only the worker running a group has its bees, so
+  // the parent puts the workers' lists together)
+  const beesOut = () => {
+    const by = {};
+    for (const b of (BF.bees && BF.bees.list) || []) { const k = String(b.cl !== undefined ? b.cl : b.home ? BF.clusters.ofRegion(BF.regions.keyOf(b.home.x, 0, b.home.z)) : 'none'); (by[k] || (by[k] = [])).push(JSON.stringify([b.x, b.y, b.z, b.mode, b.home ? [b.home.x, b.home.y, b.home.z] : null, b.trips])); }
+    for (const k in by) by[k] = md5(by[k].sort().join(';'));
+    return by;
+  };
   const textOf = k => {
     const kind = k.slice(0, k.indexOf(' ')), id = k.slice(k.indexOf(' ') + 1);
     if (k === 'bee homes') return BF.bees.loadedHomes().map(h => [h.x, h.y, h.z].join(',')).sort().join(' ');
@@ -71,7 +79,7 @@ function child() {
         C.interval(BF.warp.TICK);
         const s = C.stats();
         const [parts, os] = all(() => [BF.stateHash.parts(), objs()]);
-        parentPort.postMessage({ parts, objs: os, tick: BF.rand.tick, mobs: BF.mobs.list.length, groups: s.groups.length,
+        parentPort.postMessage({ parts, objs: os, beesOut: beesOut(), tick: BF.rand.tick, mobs: BF.mobs.list.length, groups: s.groups.length,
           errors: errors.splice(0), owners: shared ? [...BF.cworkers.owners] : null, text: shared ? BF.cworkers.text() : null });
       } else if (msg.do === 'text') parentPort.postMessage(all(() => ({ texts: msg.keys.map(textOf), parts: msg.parts.map(p => BF.stateHash.text(p)) })));
       else if (msg.do === 'stats') parentPort.postMessage({ stats: shared ? BF.cworkers.stats() : null, sizes: shared ? BF.cworkers.sizes : null });
@@ -177,6 +185,14 @@ async function main() {
       const keys = new Set([...Object.keys(r.objs), ...Object.keys(o.objs)]);
       const objs = [...keys].filter(k => r.objs[k] !== o.objs[k]).sort();
       diffs.push({ w: w - 1, parts, objs });
+    }
+    {   // the bees that are out: every worker's (full copies), or all of them put together (partial copies), as the reference's
+      const lists = partial ? [Object.assign({}, ...out.slice(1).map(o => o.beesOut))] : out.slice(1).map(o => o.beesOut);
+      if (partial) { const seen = new Set(); for (let w = 1; w < out.length; w++) for (const k in out[w].beesOut) { if (seen.has(k)) diffs.push({ w: w - 1, parts: ['bees out (two workers have cluster ' + k + "'s)"], objs: [] }); seen.add(k); } }
+      lists.forEach((l, i) => {
+        const ks = [...new Set([...Object.keys(r.beesOut), ...Object.keys(l)])].filter(k => r.beesOut[k] !== l[k]);
+        if (ks.length) diffs.push({ w: partial ? 0 : i, parts: ['bees out (clusters ' + ks.slice(0, 4).join(', ') + ')'], objs: [] });
+      });
     }
     if (s === 1 || s % 10 === 0 || diffs.length) console.log(`second ${s}: tick ${r.tick}, ${r.mobs} mobs, ${r.groups} groups; ${out[1].text}; owners ${out[1].owners.map(x => x.join('>')).join(' ')}`);
     if (diffs.length) {
