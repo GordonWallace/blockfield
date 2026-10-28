@@ -557,7 +557,7 @@ function leave(m, S, dt, out) {
     if (!R) return false;
     pen = pensOf(R).find(q => p.x > q.fx0 && p.x < q.fx1 && p.z > q.fz0 && p.z < q.fz1 && Math.abs(p.y - (q.y + 1)) < 2);
     if (!pen) return false;
-    S.exit = pen; S.exitT = 0; S.navFail = 0; m.ai.route = null;
+    S.exit = pen; S.exitT = 0; S.navFail = 0; if (m.ai.routeKind === "farm") m.ai.route = null;   // (not another job's route: standing at the exit already, that dropped its walk back every tick)
   }
   S.exitT += dt;
   const N = BF.mobs.nav, [fx, fy, fz] = N.feetCell(m);
@@ -569,6 +569,12 @@ function leave(m, S, dt, out) {
   }
   const st = BF.villageLife.travel(m, S, dt, out, pen.out[0], pen.y + 1, pen.out[1], m.def.speed);
   if (st === "going" && S.exitT < 30) { m.ai.mode = "idle"; m.ai.t = 2; return true; }
+  if (st === "arrived" && S.exitT < 30 && p.x > pen.fx0 && p.x < pen.fx1 && p.z > pen.fz0 && p.z < pen.fz1) {   // close enough to the cell outside, but still in the open gate (it stayed open all day): the last step out
+    const dx = pen.out[0] + 0.5 - p.x, dz = pen.out[1] + 0.5 - p.z, d = Math.hypot(dx, dz) || 1;
+    m.ai.mode = "idle"; m.ai.t = 2;
+    out.x = dx / d * m.def.speed; out.z = dz / d * m.def.speed;
+    return true;
+  }
   S.exit = null;
   return false;
 }

@@ -104,11 +104,11 @@ const onNewPlace = (o, k) => {
 // ---------------------------------------------------------------- requests, as plain JSON
 function reqOut(r) {
   const R = RW();
-  return [r.kind, R.enc(r.target, null), R.encData(r), r.from, r.tick, r.region == null ? -1 : r.region, r._from, r._n, r._at, r._due, r.seq];
+  return [r.kind, R.enc(r.target, null), R.encData(r), r.from, r.tick, r.region == null ? -1 : r.region, r._from, r._n, r._at, r._due, r.seq, r.by];
 }
 function reqIn(a) {
   const R = RW();
-  const r = BF.req.revive({ kind: a[0], target: R.dec(a[1], null), data: R.dec(a[2], null), from: a[3], tick: a[4], region: a[5], seq: a[10] });
+  const r = BF.req.revive({ kind: a[0], target: R.dec(a[1], null), data: R.dec(a[2], null), from: a[3], tick: a[4], region: a[5], seq: a[10], by: a[11] });
   if (a[6] !== undefined && a[6] !== null) { r._from = a[6]; r._n = a[7]; r._at = a[8]; r._due = a[9]; }
   return r;
 }
@@ -175,9 +175,10 @@ function sync() {
   const ms = gs.map(g => [g.key, +g.ms.toFixed(3)]);
   const counters = [I.R2.ids.j, I.R2.made.j, BF.ids.range.top, BF.rand.made, I.R2.dyn.j];
   const hand = CW.me === 0 && handOwn !== null ? +handOwn.toFixed(3) : null;
+  const other = tRun > 0 ? +Math.max(0, t0 - tRun - gs.reduce((a, g) => a + g.ms, 0)).toFixed(3) : null;   // (this interval's time outside its groups)
   lap("rest");
   const dyn = BF.dynRange.fresh();
-  const out = { born, mobs, sums, gone: goneE, rows, recs, edits, tables, chans, reg, dyn, waited, queued, ms, counters, hand };
+  const out = { born, mobs, sums, gone: goneE, rows, recs, edits, tables, chans, reg, dyn, waited, queued, ms, counters, hand, other };
   const msg = JSON.stringify(out);
   lap("json");
   if (CW.sizes) {   // (tests: what the bytes are, by part and by the mobs' and records' fields)
@@ -185,6 +186,7 @@ function sync() {
     for (const k in out) add(k, out[k]);
     for (const [, ops] of mobs) if (ops) for (const op of ops) add("mob." + op[0], op);
     for (const [, ops] of recs) for (const op of ops) add("rec." + op[0], op);
+    for (const [name, , part] of tables) add("table." + name, part);
   }
   R.indexScope = null;
   const t1 = now();
@@ -204,6 +206,11 @@ function sync() {
     const p = w === CW.me ? { ms, counters } : ps[w];
     for (const [k, v] of p.ms) { groupMs.set(k, v); ranBy.set(k, w); }
     for (let i = 0; i < 5; i++) if (p.counters[i] > lift[i]) lift[i] = p.counters[i];
+  }
+  for (let w = 0; w < all.length; w++) {
+    const v = w === CW.me ? other : ps[w].other;
+    if (v === null || v === undefined) continue;
+    base[w] = base[w] === undefined ? v : base[w] + SMOOTH * (v - base[w]);
   }
   const h0 = CW.me === 0 ? hand : ps[0].hand;
   if (h0 !== null && h0 !== undefined) handMs = h0;
@@ -462,9 +469,10 @@ const kids = (v, fn) => { if (Array.isArray(v)) { for (let i = 0; i < v.length; 
 // meeting, which every worker waits for: about half a ms a villager), so the plan starts from where each group's mobs are and moves
 // a group only when the time it saves over the next HORIZON intervals pays for that; it also works out the plain plan (the player's
 // group on the first worker, the rest longest first, each to the least loaded, the first worker counting LEAD of its load as room)
-// and keeps whichever costs less. With full copies a move costs nothing, so the plain plan wins unless the other is as good.
+// and keeps whichever costs less. With full copies a move costs nothing, so the plain plan wins unless the other is as good. Each
+// worker's load starts from its measured time outside the groups (base), so the first worker's extra work is counted as it is.
 const SMOOTH = 0.3, HORIZON = 4;
-let est = new Map(), smooth = new Map(), handMs = 0.5, handOwn = null;
+let est = new Map(), smooth = new Map(), handMs = 0.5, handOwn = null, base = [];   // (base: each worker's smoothed time outside groups)
 function plan(groups) {
   const prev = CW.owners;
   const fresh = new Map();
@@ -495,7 +503,10 @@ function plan(groups) {
   for (const v of est.values()) total += v;
   CW.solo = total / C().MEET < SOLO_MS;
   if (CW.solo) { CW.owners = new Map(); return; }
-  const n = CW.n, room = w => (w === 0 ? LEAD : 1);
+  // each worker's own time outside the groups (its share of every tick's global part, and the first worker's player and client), as
+  // measured and swapped: what its groups add to; until every worker has measured it, the first worker counts LEAD of its load as room
+  const n = CW.n, measured = base.length === n && base.every(v => v !== undefined), room = w => (w === 0 && !measured ? LEAD : 1);
+  const start = () => (measured ? base.slice() : new Array(n).fill(0));
   const order = groups.slice().sort((a, b) => est.get(b.key) - est.get(a.key) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   // held.get(key)[w]: the group's mobs whose current copy is on worker w only (partial copies; the holders from the last swap, the
   // same on every worker); a group on w costs the handover of the rest
@@ -513,11 +524,11 @@ function plan(groups) {
   const least = load => { let w = 0; for (let i = 1; i < n; i++) if (load[i] / room(i) < load[w] / room(w)) w = i; return w; };
   const score = (own, load) => { let mx = 0, c = 0; for (let w = 0; w < n; w++) mx = Math.max(mx, load[w] / room(w)); for (const g of groups) c += cost(g.key, own.get(g.key)); return mx + c / HORIZON; };
   // the plain plan
-  const A = new Map(), loadA = new Array(n).fill(0);
+  const A = new Map(), loadA = start();
   for (const g of order) { const w = g.player ? 0 : least(loadA); A.set(g.key, w); loadA[w] += est.get(g.key); }
   // from where the mobs are: each group where it costs least (its last worker on a tie, else none yet), the free ones longest first to
   // the least loaded, then single moves off the most loaded worker while one saves more than it costs
-  const B = new Map(), loadB = new Array(n).fill(0);
+  const B = new Map(), loadB = start();
   for (const g of order) {
     if (g.player) { B.set(g.key, 0); loadB[0] += est.get(g.key); continue; }
     const a = held.get(g.key);
@@ -562,6 +573,7 @@ function setup(o) {
   if (o.n > 1 && !K.on) throw new Error("cluster workers need the cluster tick on (BF.ctick.on)");
   CW.n = o.n; CW.me = o.me; CW.link = o.link; CW.active = o.n > 1;
   if (CW.active && K.warmed) K.warmed();   // (started after the cluster tick's first meeting: every system set up here now, js/ctick.js warm)
+  for (const name of K.tables()) { const t = K.table(name); if (t.reset) t.reset(); }   // (the tables that send only changes start from nothing sent)
   // o.claims (a SharedArrayBuffer of two Int32, the same for every worker: makeShared): the workers pull groups (the cluster order)
   // (only on request, o.pull: with partial copies a group that changes worker is sent whole, so groups stay on their planned owners)
   CW.pull = !!(CW.active && o.pull && o.claims && K.order === "cluster" && !CW.shuffle);
@@ -575,7 +587,7 @@ function setup(o) {
   shadows = new Map(); recShadows = new Map(); known = new Set(BF.mobs.list); journal = new Map(); regNew = []; groupMs = new Map(); lastGroups = new Map(); meetings = 0; warned = 0;
   for (const k in T) T[k] = 0;
   for (const k in X) delete X[k];
-  smooth = new Map(); handMs = 0.5; handOwn = null; lapT = now(); atMet = []; leaving = false;
+  smooth = new Map(); handMs = 0.5; handOwn = null; base = []; lapT = now(); atMet = []; leaving = false;
   if (BF.ids && BF.ids.hooks) BF.ids.hooks.onNew = onNewPlace;
   RW().onTouch = CW.active ? onTouch : null;
   touched = new Map();

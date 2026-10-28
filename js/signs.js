@@ -992,15 +992,16 @@ BF.onLoad(() => {
   C.owned("signs", {
     snap(gk) {
       const d = [];
-      for (const [k, e] of data) if (g(k) === gk) d.push([k, e]);
+      for (const k of C.keysOf(data, gk, g)) d.push([k, data.get(k)]);
       const sn = [];
       for (let i = seenNew.length - 1; i >= 0; i--) if (seenNew[i][0] === gk) { sn.push(seenNew[i][1]); seenNew.splice(i, 1); }
       return { d, sn };
     },
     apply(gk, o) {
       const got = new Set(o.d.map(x => x[0]));   // (in place: the store's order is saved and hashed)
-      for (const k of [...data.keys()]) if (!got.has(k) && g(k) === gk) data.delete(k);
+      for (const k of C.keysOf(data, gk, g)) if (!got.has(k)) data.delete(k);
       for (const [k, e] of o.d) data.set(k, e);
+      C.applied(data, gk);
       for (const ak of o.sn) seen.add(ak);
       for (const [k, p] of autoPlan) if (seen.has(p.ak)) autoPlan.delete(k);
       groupCache.clear(); touched();

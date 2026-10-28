@@ -42,7 +42,7 @@ const num = v => Number.isInteger(v) ? String(v) : Number.isFinite(v) ? "f" + Ma
 const SKIP = new Set(["def", "root", "model", "meshes", "material", "mesh", "geo", "geometry", "walkPhase", "walkAmt", "headYaw", "headPitch",
   "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg", "_ri", "_rs", "_res",
   "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN",   // caches on mobs (r15-61: js/ids.js links, js/regiontick.js ids)
-  "swingT", "cl"]);   // ai.swingT: the arm swing, drawn and heard only, set by the professions' unseeded "visual" rolls (r15-20 report)
+  "swingT", "cl", "planT0", "planN"]);   // ai.swingT: the arm swing, drawn and heard only, set by the professions' unseeded "visual" rolls (r15-20 report); ai.planT0/planN: the replan count for the game log (r15-73)
 // cl: a mob's cluster (js/clusters.js, spec r15-39b), worked out from the rest of the world at each meeting.
 // Fields named _snd...: mobs' sound timers (js/audio.js), heard only.
 const skipKey = k => SKIP.has(k) || k.startsWith("_snd");
@@ -209,7 +209,14 @@ function update() {
   BF.glog.log("INFO", "statehash", `State hash at the start of day ${day}: ${r.hash} (${r.ms} ms)`);
 }
 
+// The cells two edits texts disagree on (tests: region workers out of step): ["chunk key:edit index", ...], at most max.
+function editsDiff(p, q, max = 8) {
+  const cells = t => { const m = new Map(); for (const part of String(t || "").split("|")) { const at = part.lastIndexOf(":"); if (at < 0) continue; const k = part.slice(0, at); for (const c of part.slice(at + 1).split(",")) { const [i, id] = c.split("="); m.set(k + ":" + i, id); } } return m; };
+  const a = cells(p), b = cells(q), out = [];
+  for (const k of new Set([...a.keys(), ...b.keys()])) if (a.get(k) !== b.get(k)) { out.push(k); if (out.length >= max) break; }
+  return out;
+}
 const stateHash = () => full().hash;
-Object.assign(stateHash, { PARTS: Object.keys(PARTS), parts: () => full().parts, full, text: partText, canon: text, hashStr, update, last: null });
+Object.assign(stateHash, { PARTS: Object.keys(PARTS), parts: () => full().parts, full, text: partText, canon: text, hashStr, update, editsDiff, last: null });
 BF.stateHash = stateHash;
 })();

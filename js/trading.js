@@ -307,12 +307,27 @@ const rnd = (r, a, b) => r.range(a, b);
 const rndInt = (r, a, b) => a + r.int(b - a + 1);
 
 // ---------------------------------------------------------------- inventory helpers (array of {id,count}|null)
+// Think order must not matter (spec r15-71): a mob changing its own inventory while it thinks (spinning string, crafting, paying into
+// escrow) first keeps a copy of it as it was, and the others thinking this tick read that copy (count, bestWear, canFit, view) until the
+// mob loop ends (inv.release, js/mobs.js). Kept per inventory for one loop, like the separation grid.
+const held = new Map();   // inventory -> {owner, copy}
+function hold(a) {
+  const by = BF.rand && BF.rand.thinker;
+  if (!by || by.inv !== a || held.has(a) || !BF.req || BF.req.phase !== "think") return;
+  held.set(a, { owner: by, copy: inv.clone(a) });
+}
+function view(a) {
+  if (!held.size || !a) return a;
+  const h = held.get(a);
+  return h && BF.rand.thinker !== h.owner ? h.copy : a;
+}
 const inv = {
   create: () => new Array(SLOTS).fill(null),
-  count(a, id) { let n = 0; for (const s of a) if (s && s.id === id) n += s.count; return n; },
+  count(a, id) { a = view(a); let n = 0; for (const s of a) if (s && s.id === id) n += s.count; return n; },
   // Adds into existing stacks first, then empty slots. Returns the leftover that did not fit.
   // wear: uses spent on a worn tool (BF.wearStack); a worn stack never merges with another.
   add(a, id, n, wear) {
+    hold(a);
     const max = stackOf(id);
     for (let i = 0; i < a.length && n > 0; i++) {
       const s = a[i];
@@ -326,6 +341,7 @@ const inv = {
   // Removes up to n and returns what came out as stacks, wear included. From the last slots first;
   // best: the least worn first (what a villager sells).
   take(a, id, n, best) {
+    hold(a);
     const idx = [];
     for (let i = a.length - 1; i >= 0; i--) if (a[i] && a[i].id === id) idx.push(i);
     if (best) idx.sort((i, j) => (a[i].wear || 0) - (a[j].wear || 0) || j - i);
@@ -344,14 +360,15 @@ const inv = {
   // Removes up to n (from the last slots first). Returns how many were removed.
   remove(a, id, n) { let got = 0; for (const s of inv.take(a, id, n)) got += s.count; return got; },
   // Wear of the stack a villager would sell first (0 when it has an unworn one).
-  bestWear(a, id) { let w = -1; for (const s of a) if (s && s.id === id && (w < 0 || (s.wear || 0) < w)) w = s.wear || 0; return Math.max(0, w); },
+  bestWear(a, id) { a = view(a); let w = -1; for (const s of a) if (s && s.id === id && (w < 0 || (s.wear || 0) < w)) w = s.wear || 0; return Math.max(0, w); },
   // Could `adds` ([{id,n}]) be stored once `removes` ([{id,n}]) have been taken out?
   canFit(a, adds, removes) {
-    const sim = a.map(s => s && { id: s.id, count: s.count });
+    const sim = view(a).map(s => s && { id: s.id, count: s.count });
     for (const r of removes || []) inv.remove(sim, r.id, r.n);
     for (const x of adds) if (inv.add(sim, x.id, x.n) > 0) return false;
     return true;
   },
+  view, release() { held.clear(); },
   clone: a => a.map(s => s && (s.wear > 0 ? { id: s.id, count: s.count, wear: s.wear } : { id: s.id, count: s.count })),   // wear: uses spent on a tool (BF.wearStack)
 };
 

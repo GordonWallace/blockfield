@@ -1,4 +1,4 @@
-// @ci integration suite=world timeout=1200
+// @ci integration suite=world timeout=1200 args=--bees
 // Clusters on several workers (spec r15-39b, item C7: js/cworkers.js). Each worker runs only the cluster groups it owns and the
 // workers swap what their groups changed at each meeting; the world must come out the same as one worker running every group.
 // One worker_thread runs the reference (the cluster tick on one worker) and n more run the same world as cluster workers, all booted
@@ -13,7 +13,9 @@
 // loop's tables owned). --plan: planned from the measured times (js/cworkers.js plan). --order cluster --pull (without --shuffle): nobody
 // owns a group, each worker takes the next one when it is free (js/cworkers.js claim), so groups move between workers as with --shuffle.
 // --partial: partial copies (js/cworkers.js CW.partial): each worker is compared with every mob's current copy gathered in (gathered).
-// Usage: node test/cluster-workers.js [--workers 2] [--seed 3] [--extra 3] [--seconds 30] [--shuffle k | --plan] [--order tick|cluster] [--pull] [--partial]
+// --bees: bee homes broken and placed in different groups' passes (seconds 3 and 6): every worker's records and loaded homes must follow
+// the owner's (js/bees.js onReplayed and the bees table: a home broken on its group's worker used to stay in the others' records).
+// Usage: node test/cluster-workers.js [--workers 2] [--seed 3] [--extra 3] [--seconds 30] [--shuffle k | --plan] [--order tick|cluster] [--pull] [--partial] [--bees]
 //                                    [--profile converted|a,b,c]
 const path = require('path'), crypto = require('crypto');
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
@@ -24,7 +26,7 @@ else main().catch(e => { console.error(e); process.exit(1); });
 
 // ---------------------------------------------------------------- a worker: one world
 function child() {
-  const { me, n, seed, extra, order, shuffle, fixed, profile, shared, pull, partial } = workerData;
+  const { me, n, seed, extra, order, shuffle, fixed, profile, shared, pull, partial, bees } = workerData;
   for (const k of ['log', 'info', 'debug']) console[k] = () => {};
   const { load } = require('../tools/headless.js');
   const { BF } = load();
@@ -42,15 +44,18 @@ function child() {
     BF.cworkers.sizes = {};
     BF.cworkers.setup({ n, me, link: BF.rworkers.attach(shared, me, n), claims: shared.claims, pull, partial });
   }
+  const homeEdits = bees ? beeEdits(BF) : null;
   const md5 = t => crypto.createHash('md5').update(t).digest('hex').slice(0, 16);
   const objs = () => {
     const o = {};
     for (const m of BF.mobs.list) if (!m.removed) o['mob ' + m.id] = md5(BF.stateHash.canon(m)) + ' in ' + m.cl;   // (and its cluster: the meetings place it alike)
     for (const [k, v] of BF.mobs.villages) o['village ' + k] = md5(BF.stateHash.canon(v));
+    if (bees) o['bee homes'] = md5(BF.bees.loadedHomes().map(h => [h.x, h.y, h.z]).sort().join(';'));   // (loaded is not in the hash)
     return o;
   };
   const textOf = k => {
     const kind = k.slice(0, k.indexOf(' ')), id = k.slice(k.indexOf(' ') + 1);
+    if (k === 'bee homes') return BF.bees.loadedHomes().map(h => [h.x, h.y, h.z].join(',')).sort().join(' ');
     const o = kind === 'mob' ? BF.ids.live(id) : BF.mobs.villages.get(id);
     return o ? (kind === 'mob' ? 'in ' + o.cl + ' ' : '') + BF.stateHash.canon(o) : null;
   };
@@ -59,6 +64,7 @@ function child() {
       const all = fn => (shared ? BF.cworkers.gathered(fn) : fn());   // (partial copies: every mob's current copy, from its worker)
       if (msg.do === 'interval') {
         BF.boot.stream();
+        if (homeEdits) homeEdits(msg.s);
         C.interval(BF.warp.TICK);
         const s = C.stats();
         const [parts, os] = all(() => [BF.stateHash.parts(), objs()]);
@@ -75,17 +81,53 @@ function child() {
   parentPort.postMessage({ booted: true });
 }
 
+// --bees: at second 3 the first loaded home (by position) is broken in its group's pass, and a hive is placed above a home in each of two
+// other groups (both in the same interval, on different workers when the owners differ); at second 6 the first placed hive is broken
+// again. Picked alike in every copy, between intervals; done in the group's own pass (on its worker), mid-interval, as a villager would.
+function beeEdits(BF) {
+  const C = BF.ctick, W = BF.world, todo = [];
+  const prev = BF.mobs.update;
+  BF.mobs.update = function () {
+    const t = BF.rand.tick;
+    for (const e of todo) if (!e.done && C.cur && C.cur.key === e.g && t >= e.at) { e.done = true; W.setBlock(e.x, e.y, e.z, e.id); }
+    return prev.apply(this, arguments);
+  };
+  let placed = null;
+  return s => {
+    const at = BF.rand.tick + 5;
+    if (s === 3) {
+      const homes = BF.bees.loadedHomes().slice().sort((a, b) => a.x - b.x || a.z - b.z || a.y - b.y), used = new Set();
+      for (const h of homes) {
+        const g = C.ofCell(h.x, h.z);
+        if (used.has(g)) continue;
+        if (!used.size) todo.push({ g, at, x: h.x, y: h.y, z: h.z, id: BF.B.air || 0 });
+        else {
+          let y = h.y + 1;
+          while (y < h.y + 5 && W.getBlock(h.x, y, h.z) !== 0) y++;
+          if (y >= h.y + 5) continue;
+          const e = { g, at: at + used.size, x: h.x, y, z: h.z, id: BF.B.beehive };
+          todo.push(e); if (!placed) placed = e;
+        }
+        used.add(g);
+        if (used.size >= 3) break;
+      }
+      if (used.size < 3) throw new Error('--bees: loaded homes in only ' + used.size + ' groups');
+    }
+    if (s === 6 && placed) todo.push({ g: placed.g, at, x: placed.x, y: placed.y, z: placed.z, id: BF.B.air || 0 });
+  };
+}
+
 // ---------------------------------------------------------------- the parent
 async function main() {
   const n = +arg('workers', 2), seed = +arg('seed', 3), extra = +arg('extra', 3), seconds = +arg('seconds', 30);
-  const partial = process.argv.includes('--partial');
+  const partial = process.argv.includes('--partial'), bees = process.argv.includes('--bees');
   const order = arg('order', 'tick'), pull = order === 'cluster' && process.argv.includes('--pull') && arg('shuffle') == null;
   const profile = arg('profile', 'converted'), plan = process.argv.includes('--plan'), fixed = !plan && !pull && arg('shuffle') == null;
   const shuffle = plan || pull ? 0 : +arg('shuffle', 1);
   const { load } = require('../tools/headless.js');
   const shared = load().BF.cworkers.makeShared(n);
   const spawn = data => {
-    const w = new Worker(__filename, { workerData: Object.assign({ seed, extra, order, shuffle, fixed, profile, pull, partial }, data) });
+    const w = new Worker(__filename, { workerData: Object.assign({ seed, extra, order, shuffle, fixed, profile, pull, partial, bees }, data) });
     const waiting = [];
     w.on('message', m => { const f = waiting.shift(); if (f) f(m); });
     w.on('error', e => { console.error(e); process.exit(1); });
@@ -100,7 +142,7 @@ async function main() {
   let fails = 0, errs = 0;
   const all = [ref, ...ws];
   for (let s = 1; s <= seconds; s++) {
-    const out = await Promise.all(all.map(x => x.ask({ do: 'interval' })));
+    const out = await Promise.all(all.map(x => x.ask({ do: 'interval', s })));
     const bad = out.find(o => o.error);
     if (bad) { console.error('a worker failed:\n' + bad.error); process.exit(1); }
     const r = out[0];

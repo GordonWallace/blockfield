@@ -397,6 +397,23 @@ world.ensureRange = function (x, z, y0, y1) {
   return true;
 };
 
+// (tests: region workers out of step, js/rworkers.js) While world.trail is a Map, every edit notes who made it: "chunk key:edit index" ->
+// its last 3 writes [tick, request phase (js/requests.js), the calls that made it (the first frames outside this file), id], so a cell
+// that differs between workers can be traced to the system that wrote it on each. Set by js/rplay.js with ?verify= (tests) only.
+world.trail = null;
+function trailNote(key, i, id, who) {
+  const k = key + ":" + i, a = world.trail.get(k) || [];
+  a.push([BF.rand ? BF.rand.tick : 0, BF.req ? BF.req.phase : "", who || caller(), id]);
+  if (a.length > 3) a.shift();
+  world.trail.set(k, a);
+}
+function caller() {
+  const lines = String(new Error().stack).split("\n").filter(l => /^\s*at /.test(l) && !/\/world\.js[?:]/.test(l));
+  return lines.slice(0, 4).map(l => l.trim().slice(3).replace(/[a-z]+:\/\/[^/]+\//, "").replace(/\?v=\d+/, "").replace(/:\d+(\)?)$/, "$1")).join(" < ");
+}
+// The trail of cells: ["chunk key:edit index", ...] -> {cell: [[tick, phase, who, id], ...] or null}.
+world.trailOf = cells => { const o = {}; for (const k of cells) o[k] = world.trail ? world.trail.get(k) || null : "off"; return o; };
+
 // Sets a block, records the edit, and schedules remeshing. Returns false if the chunk isn't loaded.
 world.setBlock = function (x, y, z, id) {
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
@@ -416,6 +433,7 @@ world.setBlock = function (x, y, z, id) {
   let e = world.edits.get(c.key);
   if (!e) world.edits.set(c.key, (e = new Map()));
   e.set(i, id);
+  if (world.trail) trailNote(c.key, i, id);
   for (let k = 0; k < setL.length; k++) setL[k](c, i, id);   // (the protocol's block changes, js/protocol.js)
   updateColumn(c, lx, lz);
   world._dirty.add(c.key);
@@ -484,6 +502,7 @@ function applyCell(key, i, id, replayed) {
   let e = world.edits.get(key);
   if (!e) world.edits.set(key, (e = new Map()));
   e.set(i, id);
+  if (world.trail) trailNote(key, i, id, replayed ? "another worker's" : "from the simulation");
   const c = world.chunks.get(key);
   if (!c) { if (world.farMeshes.has(key) && !staleFar.has(key)) { staleFar.add(key); lastCenter = null; } return; }
   const y = (i >> 8) + BF.MIN_Y, lx = i & 15, lz = (i >> 4) & 15;
@@ -1271,6 +1290,28 @@ function cellGroup(x, z) {
   return g;
 }
 const mineCell = (x, z) => { const g = clusterCur(); return !g || cellGroup(x, z) === g.key; };
+// The loaded chunks of group key gk (a chunk's group is its centre cell's), in world.chunks order: one pass over the chunks for every group,
+// made again when the groups or the chunk set change (chunks come and go only at meetings), instead of each group's pass sorting out its
+// own from all of them (js/grass.js, js/mobs.js monster spawning, js/wildlife.js areas)
+let byGroup = null, byGroupAt = { gs: null, ep: -1, gen: -1 };
+function groupChunks(gk) {
+  const C = CT();
+  if (!C) return [];
+  const gs = C.groups(), A = byGroupAt;
+  if (!byGroup || A.gs !== gs || A.ep !== C.epoch || A.gen !== CGEN) {
+    A.gs = gs; A.ep = C.epoch; A.gen = CGEN;
+    byGroup = new Map();
+    const live = new Set(gs.map(e => e.key)), first = gs.length ? gs[0].key : null, CS = BF.CS, rg = new Map();
+    for (const c of world.chunks.values()) {
+      const k = BF.regions.keyOf(c.cx * CS + 8, 0, c.cz * CS + 8);
+      let g = rg.get(k);
+      if (g === undefined) { g = BF.clusters.groupOf(BF.clusters.ofRegion(k)); if (!live.has(g)) g = first; rg.set(k, g); }
+      const a = byGroup.get(g);
+      if (a) a.push(c); else byGroup.set(g, [c]);
+    }
+  }
+  return byGroup.get(gk) || [];
+}
 // A cell of another group within r blocks of (x, z) (axis and diagonal), as [x, z], or null when every cell there is the running
 // group's. Regions are 64-block squares, so the four corners of the square are enough.
 function foreignNear(x, z, r) {
@@ -1298,7 +1339,9 @@ function onBlockTickReq(req) {
 }
 // A table of cells ("x,y,z" keys: a Set, or a Map with plain values) as BF.ctick.owned wants it: a group's part and putting it back.
 // enc / dec (Maps): a value to plain JSON and back onto the entry already there (dec(plain, old) -> the entry to keep).
-// (js/requests.js and js/ctick.js load after this file: the handler and the tables are registered once every file is in, BF.onLoad)
+// Only what changed since this worker last sent or got it goes: the entries whose JSON changed (a Set's new keys), and the keys gone
+// from the table (a key's cell names its group, so the group's owner finds them among the keys every worker has); snap(g, true) puts
+// the whole part (tests: a part sent and snapped again).
 const ownQ = [];
 let ownDone = false;
 function clusterSetup() {
@@ -1314,21 +1357,45 @@ function ownCellsNow(name, coll, enc, dec) {
   const C = BF.ctick;
   const isMap = coll instanceof Map;
   const of = k => { const i = k.indexOf(","), j = k.lastIndexOf(","); return cellGroup(+k.slice(0, i), +k.slice(j + 1)); };
+  const had = new Map();   // key -> its JSON (a Set's: 1) as every worker has it
+  let goneAt = -1, gone = null;   // (the keys gone from the table, by group: worked out once a swap)
+  const goneOf = gk => {
+    if (goneAt !== BF.rand.tick || !gone) {
+      goneAt = BF.rand.tick; gone = new Map();
+      for (const k of had.keys()) if (!coll.has(k)) { const g = of(k); let a = gone.get(g); if (!a) gone.set(g, (a = [])); a.push(k); }
+    }
+    return gone.get(gk) || [];
+  };
+  const put1 = (k, j) => {
+    if (!isMap) { coll.add(k); had.set(k, 1); return; }
+    coll.set(k, dec ? dec(j, coll.get(k)) : j); had.set(k, JSON.stringify(j));
+  };
   C.owned(name, {
-    snap(gk) {
-      const out = [];
-      for (const k of C.keysOf(coll, gk, of)) out.push(isMap ? [k, enc ? enc(coll.get(k)) : coll.get(k)] : k);
-      return out;
+    reset() { had.clear(); gone = null; },
+    snap(gk, all) {
+      const put = [];
+      for (const k of C.keysOf(coll, gk, of)) {
+        if (!isMap) { if (all || !had.has(k)) { had.set(k, 1); put.push(k); } continue; }
+        const j = enc ? enc(coll.get(k)) : coll.get(k), t = JSON.stringify(j);
+        if (all || had.get(k) !== t) { had.set(k, t); put.push([k, j]); }
+      }
+      if (all) return { all: true, put, gone: [] };
+      const g = goneOf(gk);
+      for (const k of g) had.delete(k);
+      return { put, gone: g };
     },
-    apply(gk, list) {
-      const old = new Map();
-      for (const k of C.keysOf(coll, gk, of)) { if (isMap) old.set(k, coll.get(k)); coll.delete(k); }
-      for (const it of list) { if (isMap) coll.set(it[0], dec ? dec(it[1], old.get(it[0])) : it[1]); else coll.add(it); }
+    apply(gk, o) {
+      if (o.all) {
+        const keep = new Set(isMap ? o.put.map(it => it[0]) : o.put);
+        for (const k of C.keysOf(coll, gk, of)) if (!keep.has(k)) { coll.delete(k); had.delete(k); }
+      }
+      for (const k of o.gone) { coll.delete(k); had.delete(k); }
+      for (const it of o.put) if (isMap) put1(it[0], it[1]); else put1(it);
       C.applied(coll, gk);
     },
   });
 }
-world.clusterCells = { cellGroup, mineCell, foreignNear, toMeeting, onMeeting, ownCells, later, cur: clusterCur };
+world.clusterCells = { cellGroup, groupChunks, mineCell, foreignNear, toMeeting, onMeeting, ownCells, later, cur: clusterCur };
 // Chunks wait for the next meeting: true while the cluster tick is on and an interval is under way.
 const heldNow = () => !!(CT() && BF.rand && BF.rand.tick % CT().MEET !== 0);
 world.heldNow = heldNow;

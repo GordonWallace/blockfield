@@ -614,17 +614,21 @@ function ai(m, dt, out) {
   if (!s) return seekAI(m, dt, out, nav);
   if (m.seek) m.seek = null;
   if (!nav || NO_JOB[m.profession] || m.profession === "builder") return false;
-  const J = m.job || (m.job = { mode: "off", t: rnd(RS(m), 5, 30) });
+  const J = m.job || (m.job = { mode: "off", t: rnd(RS(m), 5, 30), askT: 0 });
   const t = BF.sky ? BF.sky.time : 0.2;
   if (t < WORK_START || t > WORK_END) { if (J.mode !== "off") { J.mode = "off"; m.ai.route = null; endTask(m); } return false; }
   if (J.mode === "off") {
     J.t -= dt;
-    if (J.t > 3 && m.profession === "cartographer" && BF.cartography && BF.cartography.wantsJob(m)) J.t = rnd(RS(m), 1, 3);   // something to craft: go to the table soon
-    if (J.t > 3 && m.profession === "furniture_maker" && BF.furniture && BF.furniture.wantsJob(m)) J.t = rnd(RS(m), 1, 3);    // wool and boards in hand: go make beds
-    if (J.t > 3 && m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.wantsJob(m)) J.t = rnd(RS(m), 1, 3);          // a tool to make or finish
-    if (J.t > 3 && m.profession === "stable_hand" && BF.stables && BF.stables.wantsJob(m)) J.t = rnd(RS(m), 1, 3);            // leather and iron or string in hand: go make tack
-    if (J.t > 3 && m.profession === "fletcher" && BF.fletcher && BF.fletcher.wantsJob(m)) J.t = rnd(RS(m), 1, 3);            // arrows or a bow to make or finish
-    if (J.t > 3 && m.profession === "shepherd" && BF.shepherd && BF.shepherd.wantsSpin(m)) J.t = rnd(RS(m), 1, 3);           // wool to spin into string
+    // whether there is work at the table: asked once a game second (some answers cost a toolsmith's whole plan, ~0.3 ms), not every tick
+    if (J.t > 3 && (J.askT = (J.askT || 0) - dt) <= 0) {
+      J.askT = 1;
+      if (m.profession === "cartographer" && BF.cartography && BF.cartography.wantsJob(m)) J.t = rnd(RS(m), 1, 3);   // something to craft: go to the table soon
+      if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.wantsJob(m)) J.t = rnd(RS(m), 1, 3);    // wool and boards in hand: go make beds
+      if (m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.wantsJob(m)) J.t = rnd(RS(m), 1, 3);          // a tool to make or finish
+      if (m.profession === "stable_hand" && BF.stables && BF.stables.wantsJob(m)) J.t = rnd(RS(m), 1, 3);            // leather and iron or string in hand: go make tack
+      if (m.profession === "fletcher" && BF.fletcher && BF.fletcher.wantsJob(m)) J.t = rnd(RS(m), 1, 3);            // arrows or a bow to make or finish
+      if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.wantsSpin(m)) J.t = rnd(RS(m), 1, 3);           // wool to spin into string
+    }
     if (J.t > 0) return false;
     if (Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) > 40 || !BF.world.isLoaded(s.x, s.z)) { J.t = rnd(RS(m), 20, 40); return false; }
     if (!nav.takePlan()) { J.t = 0.3; return false; }
