@@ -696,7 +696,7 @@ Items `<sp>_sign` x8 (`places: "sign"`, stack 16, tab functional, fuel 10 s), re
   `BF.breeding.bedCount(rec)` (falls back to the worldgen house beds still standing).
 - **Save**: snapshot field `signs = {v:1, data: [[anchor, text, auto|null, autoKey|null]], seen: [autoKeys]}` (`serialize/deserialize`; old saves have none). Sign blocks are ordinary edits.
 - **API** `BF.signs = {get(x,y,z) -> {anchor, W, H, wall, f, wood, cells, text, auto, autoKey, cols, rows, lines} | null, setText(x,y,z,text, force?), groupAt, layout, clampText, capacity(W,H),
-  place, interact, openEditor, closeEditor, isOpen, registerAuto, runAuto, planArch, drawArch, villageName, nameFor, serialize, deserialize, reset, isSign(id), signId(wood, wall, f), onSet}`.
+  place, interact, openEditor, closeEditor, isOpen, registerAuto, runAuto, planArch, drawArch, villageName, nameFor, serialize, deserialize, reset, isSign(id), signId(wood, wall, f), onSet, onView}`. `onView(x, y, z, oldId, id)`: a replica page's cell change from the simulation (`world.js` applyCell), which only tracks sign cells for drawing (bug-097).
 - **Not done / notes.** 4 facings only (vanilla 16 for standing signs); no back-side text, glow ink or dyes; signs have no collision (vanilla); the auto sign updates when its own chunk is loaded
   (the village record needs the player within ~96 blocks, before that the counts come from worldgen); adding a sign next to an auto board can merge into it, which turns it into an ordinary sign.
 
