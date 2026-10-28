@@ -810,7 +810,9 @@ let threadBusy = [];   // by worker: the last minute's busy share, for the map's
 function renderThreads(s) {
   const pg = s.page, sim = s.threads || [], host = s.host, onSrv = !!s.server, rows = [];
   const pct = v => (v == null ? "?" : Math.round(v * 100) + "%");
-  if (pg) rows.push({ name: pg.sim ? "Page (draws, runs the simulation)" : "Page (draws, input)", avg: pg.avg, busy: pg.busy, worker: pg.sim ? 0 : null });
+  // (the page's frames: how many a second, its busy ms a frame and how much of that the drawing call took, bug-098)
+  const pf = pg && pg.frame, pfs = pf ? ` \u00B7 ${Math.round(pf.fps)} fps, ${pf.ms.toFixed(1)} ms a frame (${pf.draw.toFixed(1)} drawing)` : "";
+  if (pg) rows.push({ name: (pg.sim ? "Page (draws, runs the simulation)" : "Page (draws, input)") + pfs, avg: pg.avg, busy: pg.busy, worker: pg.sim ? 0 : null });
   for (const t of sim) rows.push({ name: t.worker === 0 ? (onSrv ? "Simulation (world server thread)" : "Simulation (Web Worker)") : t.name + (onSrv ? " (server thread)" : ""), avg: t.avg, busy: t.busy, worker: t.worker });
   if (host) rows.push({ name: onSrv ? "World server main thread" : "Debug server", avg: host.main.hist.length ? host.main.hist.reduce((a, v) => a + v, 0) / host.main.hist.length / 100 : host.main.busy, busy: host.main.busy, worker: null });
   threadBusy = [];

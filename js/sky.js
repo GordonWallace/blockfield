@@ -536,6 +536,7 @@ function paint(t, day, dt) {
     cu.color.value.copy(cloudCol);
     cu.fogCol.value.copy(horizon);
     cu.under.value = cam.position.y < cloudY ? 1 : 0;
+    if (W && W.draw) W.draw(dt);   // the rain or snow and the bolt, at the drawn game time (js/weather.js)
 }
 
 BF.sky = sky;
