@@ -230,7 +230,7 @@ function makeBuiltCoop(rec, e) {
 }
 function coopsOf(rec) {
   if (!rec._coops) {
-    rec._coops = [];
+    Object.defineProperty(rec, "_coops", { value: [], writable: true, enumerable: false, configurable: true });   // (hidden, as js/cowherd.js _pastures: its pens point back at rec)
     const bl = (rec.wg && rec.wg.buildings) || [];
     bl.forEach((b, i) => { if (b.type === "coop") rec._coops.push(makeGenCoop(rec, b, i)); });
   }
@@ -355,7 +355,7 @@ function hook() {
   hooked = true;
   BF.on("mobKilled", m => { if (m && m.type === "chicken" && m.coop) leaveCoop(m); });
   BF.herd.villageTable("poultry.pending", () => pending);   // (clusters: save data waiting for its coops, by village)
-  BF.herd.penTable("poultry.coops", { field: "_coops", list: "hens", mob: "hen", pen: "coop", of: coopsOf });   // (and the flocks)
+  BF.herd.penTable("poultry.coops", { field: "_coops", list: "hens", mob: "hen", pen: "coop", of: coopsOf, keep: ["eggs"] });   // (and the flocks; the eggs in the nest)
   BF.herd.gateTable("poultry.toShut", toShut);             // (and the gates keepers held open, by keeper)
 }
 function tick(dt) {

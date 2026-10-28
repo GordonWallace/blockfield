@@ -97,9 +97,9 @@ let touched = new Map();   // "name\u0000key" -> [name, key]
 function onTouch(name, key) { if (CW.active && C().cur && !replaying) touched.set(name + "\u0000" + JSON.stringify(key), [name, key]); }
 // New keys in the place registry while an owned pass runs: places (a ":" in the key) go to the others; mobs made here are sent in full
 let bornHere = new Set();
-const onNewPlace = (o, k) => {
+const onNewPlace = (o, k, had) => {
   if (!CW.active || !C().cur || typeof k !== "string") return;
-  if (k.includes(":")) regNew.push([k, o]); else if (k.charCodeAt(0) === 101) bornHere.add(o);
+  if (k.includes(":")) regNew.push([k, o]); else if (!had && k.charCodeAt(0) === 101) bornHere.add(o);
 };
 
 // ---------------------------------------------------------------- requests, as plain JSON
@@ -171,7 +171,7 @@ function sync() {
   const chans = [];
   for (const [name, key] of touched.values()) { const ch = R.chan(name), o = ch.get(key); chans.push([name, key, o == null ? null : ch.state(o)]); }
   touched = new Map();
-  const reg = regNew.map(([k, o]) => [k, R.enc(o, null)]);
+  const reg = [...new Map(regNew)].map(([k, o]) => [k, R.enc(o, null)]);   // (a key put again: its last object)
   regNew = [];
   const waited = [];
   for (const r of I.deferred) if (!r._cw) { r._cw = 1; waited.push(reqOut(r)); }
@@ -226,7 +226,7 @@ function sync() {
     const p = ps[w];
     if (!p) continue;
     for (const [name, id] of p.dyn) if (!BF.dynRange.adopt(name, id)) err("worker " + w + " made item " + name + " as " + id + ", which is another item here");
-    for (const [k, e] of p.reg) if (BF.ids.live(k) === undefined) BF.ids.put(R.dec(e, null), k);
+    for (const [k, e] of p.reg) BF.ids.put(R.dec(e, null), k);   // (new, or put again: a newborn's bed claimed anew is a new object under its key)
     for (const [id, type] of p.born) if (BF.ids.live(id) === undefined) { BF.mobs.blank(type, id); fresh.add(id); }
   }
   for (let w = 0; w < ps.length; w++) {
@@ -282,7 +282,11 @@ function sync() {
     replaying = true;
     try { if (p.edits.length) BF.world.applyEdits(p.edits, false, true); } finally { replaying = false; }
     lap("in.edits");
-    for (const [name, gk, data] of p.tables) { const t = K.table(name); if (t) t.apply(gk, data); if (CW.prof) lap("in.table." + name); }
+    for (const [name, gk, data] of p.tables) {
+      const t = K.table(name);
+      if (t) try { t.apply(gk, data); } catch (e) { e.message = "owned table " + name + " (group " + gk + "): " + e.message; throw e; }
+      if (CW.prof) lap("in.table." + name);
+    }
     lap("in.tables");
     for (const [name, key, data] of p.chans) { const ch = R.chan(name); if (ch) ch.set(ch.get(key), data, key); }
   } }); } finally { I.tablesStep(false); }
@@ -383,6 +387,13 @@ function check() {
     const parts = Object.keys(p0).filter(k => p0[k] !== pw[k]);
     if (!RW().mismatch) RW().mismatch = { tick: BF.rand.tick, worker: w, parts };
     err("worker " + w + "'s world differs from the first worker's at the meeting at tick " + BF.rand.tick + " (" + parts.join(", ") + ")");
+  }
+  // CW_DUMP=<folder> (Node; a debug tool): when the copies differ, every worker writes the differing parts' texts there as
+  // <part>-w<worker>.txt (gathered, as the hash was), to diff
+  const dump = globalThis.process && process.env && process.env.CW_DUMP;
+  if (dump && all.some(x => JSON.parse(x)[0] !== h0)) {
+    const fs = process.getBuiltinModule("fs"), parts = Object.keys(p0).filter(k => all.some(x => JSON.parse(x)[1][k] !== p0[k]));
+    for (const k of parts) { const t = gathered(() => BF.stateHash.text(k)); try { fs.writeFileSync(dump + "/" + k + "-w" + CW.me + ".txt", String(t)); } catch (e) { err("CW_DUMP: " + e.message); } }
   }
 }
 // Partial copies: the mobs whose current copy is on another worker than the one that runs them next, sent whole by their holder (every
@@ -613,6 +624,8 @@ function stop(why) {
   if (BF.glog) BF.glog.log(why ? "ERROR" : "INFO", "workers", "Cluster workers stopped" + (why ? ": " + why : ""));
   shadows = new Map(); recShadows = new Map();
   RW().SKIP.add("prev");
+  // (partial copies: this copy goes on alone as it is, so no more fetches; the mobs other workers ran stay as this copy last had them)
+  CW.partial = false; mine = new Set(); holder = new Map(); CW.preExchange = null;
   const fns = atMet;
   atMet = []; leaving = false;
   for (const fn of fns) fn(false);
@@ -675,7 +688,7 @@ function gathered(fn) {
 // waited apply, js/villagesim.js before it reads or changes a village's mobs, js/mobs.js before a chunk unloads its mobs): those mobs' current copies here, sent whole by the workers that ran
 // them; from then on current everywhere (the meeting changes every copy alike), so none is handed over for them. Elsewhere: nothing.
 // fetch(ms, pred): those of them for which pred is true of the current copy (only its holder can tell: a stale copy may not have the
-// field yet), so every worker exchanges, whatever it finds.
+// field yet, or be somewhere else), so every worker exchanges, whatever it finds; returns them (the same set on every worker).
 function fetch(ms, pred) {
   if (!CW.partial) return;
   // who has each current copy: at a meeting, the last swap says; between the ticks of an interval (a chunk unloading), its group's owner
@@ -703,6 +716,10 @@ function fetch(ms, pred) {
   for (const [ids] of got) for (const id of ids) holder.delete(id);
   T.fetched += out.length + got.reduce((n, [ids]) => n + ids.length, 0);
   if (BF.regions) BF.regions.tick();
+  if (!pred) return;
+  const sent = new Set(out);
+  for (const [ids] of got) for (const id of ids) { const m = BF.ids.live(id); if (m) sent.add(m); }
+  return sent;
 }
 // current(m): this worker's copy of m is current (partial copies: it runs m, or every copy is current)
 const current = m => !CW.partial || mine.has(m) || (atMeeting && !holder.has(m.id));

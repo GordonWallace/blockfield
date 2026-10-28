@@ -229,7 +229,7 @@ function makeBuiltPen(rec, e) {
 }
 function pensOf(rec) {
   if (!rec._pens) {
-    rec._pens = [];
+    Object.defineProperty(rec, "_pens", { value: [], writable: true, enumerable: false, configurable: true });   // (hidden, as js/cowherd.js _pastures: its pens point back at rec)
     const bl = (rec.wg && rec.wg.buildings) || [];
     bl.forEach((b, i) => { if (b.type === "pen") rec._pens.push(makePen(rec, b, i)); });
   }

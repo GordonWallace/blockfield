@@ -1996,7 +1996,7 @@ function homeOfBed(rec, b) {
 // nearest free bed of the village and keeps it: it sleeps there every night and the claim is saved (trades.pack). Newborns claim theirs in js/breeding.js.
 function claimBed(m, n, dt) {
   const rec = m.village, B = BF.breeding;
-  if (!rec || !B || !B.freeBed || (m.slot && m.slot.bred) || (m.bed && m.bed.tent) || m.homeBed !== undefined) return;
+  if (!rec || !B || !B.freeBed || m.bred || (m.bed && m.bed.tent) || m.homeBed !== undefined) return;
   if (m.bed && bedOK(m.bed)) return;
   if ((n.claimT = (n.claimT || 0) - dt) > 0) return;
   n.claimT = 5;                                              // none free: look again in a few seconds
@@ -2010,7 +2010,7 @@ BF.claims.kind("bed", {
   free: (m, d) => BF.breeding && BF.breeding.bedFree(m.village, d.bed, m) ? null : "taken",
   take(m, d) {
     const b = Object.assign({}, d.bed), rec = m.village;
-    if (m.slot && m.slot.bred) { m.bed = b; if (m.bredEntry) m.bredEntry.bed = b; return; }   // a newborn's bed (js/breeding.js)
+    if (m.bred) { m.bed = b; if (m.bredEntry) m.bredEntry.bed = b; return; }   // a newborn's bed (js/breeding.js; m.bred, not its slot: another worker's copy of a newborn has no slot object, js/cworkers.js)
     m.bed = Object.assign(b, { claimed: true });
     const h = homeOfBed(rec, b);
     if (h) m.home = h;
@@ -2018,7 +2018,7 @@ BF.claims.kind("bed", {
     m.ai.route = null;
     if (BF.vlog && BF.vlog.log) BF.vlog.log(rec, "bed", BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.child ? "child" : m.profession) + ") claimed the bed at " + b.x + ", " + b.y + ", " + b.z);
   },
-  result(m, ok) { if (!ok && m.ai.night && !(m.slot && m.slot.bred)) m.ai.night.claimT = 0; },   // lost it to someone first: look again next tick
+  result(m, ok) { if (!ok && m.ai.night && !m.bred) m.ai.night.claimT = 0; },   // lost it to someone first: look again next tick
 });
 // Without a bed at night: walk into the nearest building (its own house first) that has room, along a path through the door. True while going.
 const inHouse = (h, x, z) => x >= h.x && x <= h.x + h.w && z >= h.z && z <= h.z + h.d;
@@ -3530,10 +3530,12 @@ BF.mobs = {
         { const c = BF.planet.canon(mx, mz, GC); if (!c.off) { mx = c.x; mz = c.z; } }
         return Math.floor(mx / BF.CS) === cx && Math.floor(mz / BF.CS) === cz;
       };
-      if (BF.cworkers && BF.cworkers.partial) BF.cworkers.fetch(list.filter(m => !m.removed && inChunk(m)));   // (partial copies: stored and saved as they are now)
+      // (partial copies: the mobs in it, stored and saved as they are now; which they are, their current copies say, since a stale copy
+      // may be somewhere else, so every worker takes the same ones)
+      const cur = BF.cworkers && BF.cworkers.partial ? BF.cworkers.fetch(list, m => !m.removed && inChunk(m)) : null;
       for (let i = list.length - 1; i >= 0; i--) {
         const m = list[i];
-        if (inChunk(m)) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
+        if (cur ? cur.has(m) : inChunk(m)) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
       }
       for (let i = arrows.length - 1; i >= 0; i--) {
         const a = arrows[i];

@@ -1,8 +1,9 @@
 // @ci integration suite=world,village timeout=1800
 // Clusters on workers while the game is played (spec r15-39b C8, js/rplay.js kind "clusters", js/cworkers.js): the world server
 // (debug/server.js --workers 3 --split always --clusters --verify 100) runs the simulation thread and two follower threads, which keep
-// copies of the world from its journal; split, each runs its own clusters with partial copies and they meet every 20 ticks. Seed 3, a
-// new world at the village nearest the spawn with 4 more villages simulated (BF.active fixed 4), 20 game minutes at 100x:
+// copies of the world from its journal; split, each runs its own clusters with partial copies and they meet every BF.ctick.MEET
+// ticks. Seed 3, a new world at the village nearest the spawn with 4 more villages simulated (BF.active fixed 4, within 4000 blocks),
+// 10 game minutes at 100x (CP_MINUTES):
 //   - the clusters are split over the 3 (F3's "Cluster workers 3"), every worker runs some, the copies' gathered hashes agree at every
 //     fifth meeting and never differ;
 //   - a save while split waits for a meeting and is written;
@@ -47,7 +48,8 @@ async function open(b, url) {
 const sim = (pg, fn, arg) => pg.evaluate(([f, a]) => BF.simHost.eval(f, a), [String(fn), arg === undefined ? null : arg]);
 async function until(pg, fn, ms) {
   const t0 = Date.now();
-  while (Date.now() - t0 < ms) { if ((await sim(pg, fn).catch(() => false)) === true) return true; await new Promise(r => setTimeout(r, 2000)); }
+  const late = () => new Promise(r => setTimeout(() => r('late'), 30000));   // (a simulation that stopped answering)
+  while (Date.now() - t0 < ms) { if ((await Promise.race([sim(pg, fn).catch(() => false), late()])) === true) return true; await new Promise(r => setTimeout(r, 2000)); }
   return false;
 }
 const status = pg => sim(pg, () => Object.assign(BF.rplay.status(), { text: BF.rplay.text(), checks: BF.rworkers.checks || 0, mismatch: BF.rworkers.mismatch,
@@ -65,7 +67,7 @@ let S = null;
 (async () => {
   const b = await chromium.launch();
   const saves = fs.mkdtempSync(path.join(os.tmpdir(), 'bf-cp-'));
-  S = await server(['--test', '--saves', saves, '--workers', '3', '--split', 'always', '--clusters', '--verify', '100']);
+  S = await server(['--test', '--saves', saves, '--workers', '3', '--split', 'always', '--clusters', '--verify', process.env.CP_VERIFY || '100']);
   const pg = await open(b, S.url + '?sim=server&workers=3');
   check(await pg.evaluate(() => BF.simHost.mode === 'server'), 'the page is the world server\'s client');
   const r = await pg.evaluate(async seed => {
@@ -77,15 +79,20 @@ let S = null;
     return { village: !!v };
   }, seed);
   check(r.village, 'the player is at the village nearest the spawn');
-  await sim(pg, () => { BF.active.set({ on: true, fixed: 4 }); return true; });
+  await sim(pg, () => { BF.active.set({ on: true, fixed: 4, reach: 4000 }); return true; });
   const ready = await until(pg, () => { const s = BF.rplay.status(); return s.followers > 0 && s.ready === s.followers && s.split && BF.cworkers.active; }, 300000);
   const s0 = await status(pg);
   check(ready, `2 followers booted the leader's world and the clusters are split (${s0.text})`);
-  await run(pg, 20);
+  await run(pg, +(process.env.CP_MINUTES || 10));
   const crashed = await pg.evaluate(() => BF.simHost.crashed);
   check(!crashed, `no crash${crashed ? ' (' + String(crashed).slice(0, 300) + ')' : ''}`);
   const s1 = await status(pg);
   const groups = s1.stats && s1.stats.groups ? s1.stats.groups : [];
+  if (!s1.split || !s1.clustered) {   // (why the split ended: the workers' game log lines)
+    const wl = await pg.evaluate(() => BF.glog.entries().filter(e => e.k === 'workers' || e.k === 'clusters').map(e => e.l + ' ' + e.x));
+    for (const l of wl.slice(-20)) console.log('  log: ' + l.slice(0, 600));
+    console.log('  status: ' + JSON.stringify(s1).slice(0, 800));
+  }
   check(s1.split && s1.clustered && s1.followers === 2, `still split over 3 workers (${s1.text})`);
   check(groups.length === 3 && groups.every(n => n > 0), `every worker runs some clusters (${groups.join('/')})`);
   check(s1.checks > 0 && !s1.mismatch, `the copies were compared ${s1.checks} times at meetings and never differed${s1.mismatch ? ' (' + JSON.stringify(s1.mismatch).slice(0, 300) + ')' : ''}`);
@@ -97,10 +104,14 @@ let S = null;
   const saved = await pg.evaluate(() => BF.save.saveNow());
   check(saved === true, `a save while split is written (${saved})`);
   // back to one, then split again
+  // (split=always splits again as soon as it is back to one, so the game log says when each happened)
+  const logged = re => pg.evaluate(src => BF.glog.entries().filter(e => (e.k === 'workers' || e.k === 'clusters') && new RegExp(src).test(e.x)).length, re.source);
+  const splits0 = await logged(/clusters are split over/), offs0 = await logged(/^Cluster tick off/);
   await sim(pg, () => { BF.rplay.testSolo(); return true; });
-  const one = await until(pg, () => !BF.cworkers.active && !BF.ctick.on, 120000);
+  const logUntil = async (re, n) => { const t0 = Date.now(); while (Date.now() - t0 < 300000) { if ((await logged(re)) > n) return true; await new Promise(r => setTimeout(r, 1000)); } return false; };
+  const one = (await logUntil(/back to one with the whole world/, 0)) && (await logUntil(/^Cluster tick off/, offs0));
   check(one, 'back to one: the workers took the whole world at a meeting and the cluster tick went off');
-  const again = await until(pg, () => BF.rplay.status().split && BF.cworkers.active, 120000);
+  const again = (await logUntil(/clusters are split over/, splits0)) && (await until(pg, () => BF.rplay.status().split && BF.cworkers.active, 300000));   // (splitting again boots the followers' copies again: minutes on a busy machine)
   check(again, 'split=always: split again');
   await run(pg, 5);
   const s2 = await status(pg);

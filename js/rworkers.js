@@ -947,7 +947,7 @@ function takeDyn() { const d = dynNew; dynNew = []; return d; }
 // Places registered while this worker thinks (a house a builder finished, made its home: js/ids.js place keys hold a ":"): the other
 // workers register a copy under the same key, else the key the mob's changes carry would read nothing there.
 let regNew = [];
-const onNewPlace = (o, k) => { if (RW.active && owning && typeof k === "string" && k.includes(":")) regNew.push([k, o]); };   // (hooked at setup: js/ids.js loads after this file)
+const onNewPlace = (o, k, had) => { if (RW.active && owning && !had && typeof k === "string" && k.includes(":")) regNew.push([k, o]); };   // (hooked at setup: js/ids.js loads after this file)
 function takeReg() { const d = regNew; regNew = []; return d.map(([k, o]) => [k, enc(o, null)]); }
 function adoptReg(list) { for (const [k, e] of list || []) if (BF.ids.live(k) === undefined) BF.ids.put(dec(e, null), k); }
 function adoptDyn(list, from) { for (const [name, id] of list || []) if (!BF.dynItemAs(name, id)) out_of_step("worker " + from + " made item " + name + " as " + id + ", which is another item here"); }

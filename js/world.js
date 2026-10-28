@@ -660,9 +660,11 @@ function installHeld() {
   if (!heldChunks.size) return;
   const list = [...heldChunks.values()];
   heldChunks.clear();
+  const RJ = BF.rworkers && BF.rworkers.journal ? BF.rworkers : null;
   for (const c of list) {
     if (world.chunks.has(c.key)) continue;
     const e = world.edits.get(c.key);
+    if (RJ) RJ.rec(["c", c.cx, c.cz]);   // (the followers make it too: js/rplay.js; built from the same edits, it comes out the same)
     installChunk((e ? e.size : -1) === c.eSig ? c : buildChunk(c.cx, c.cz));   // (edited meanwhile: built again)
   }
   if (BF.glog) BF.glog.log("DEBUG", "chunks", "Loaded " + list.length + " chunk" + (list.length > 1 ? "s" : "") + " held for the cluster meeting");

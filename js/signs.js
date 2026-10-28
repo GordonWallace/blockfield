@@ -921,9 +921,12 @@ if (K && K.SPRITES) for (const sp of BF.WOOD_SPECIES || ["oak"]) {
 });
 
 // ---------------------------------------------------------------- save / reset / loop
+// (by key: with several workers each one's store gets the other clusters' signs in another order, js/cworkers.js; the save and the state
+// hash must come out alike)
+const byKey = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 function serialize() {
-  const out = { v: 1, data: [], seen: [...seen] };
-  for (const [k, e] of data) out.data.push([k, e.t || "", e.auto || null, e.ak || null]);
+  const out = { v: 1, data: [], seen: [...seen].sort(byKey) };
+  for (const k of [...data.keys()].sort(byKey)) { const e = data.get(k); out.data.push([k, e.t || "", e.auto || null, e.ak || null]); }
   return out;
 }
 function reset() {
@@ -998,7 +1001,7 @@ BF.onLoad(() => {
       return { d, sn };
     },
     apply(gk, o) {
-      const got = new Set(o.d.map(x => x[0]));   // (in place: the store's order is saved and hashed)
+      const got = new Set(o.d.map(x => x[0]));
       for (const k of C.keysOf(data, gk, g)) if (!got.has(k)) data.delete(k);
       for (const [k, e] of o.d) data.set(k, e);
       C.applied(data, gk);
