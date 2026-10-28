@@ -6,7 +6,10 @@
 // browser the thread's entry points are timed: wrap(fn) or begin() / end() round them (the page's frame, the simulation's loop and
 // messages, a follower's journal batches). The debug server adds the real per-core load of the computer it runs on (os.cpus).
 // Samples every SAMPLE ms; keeps the last HIST of them (a minute) for the screen's sparkline.
-// API: BF.tload = { begin(), end(), wrap(fn) -> fn, report() -> {busy (0..1, the last sample), avg (0..1, the last minute), hist: [0..100]}, total() -> ms,
+// The page also counts its frames (frame(drawMs) once a frame, with the ms its renderer.render call took): the report's frame field has
+// the frames a second, the busy ms a frame and the drawing call's share of them (the debug screen's Threads card, bug-098).
+// API: BF.tload = { begin(), end(), wrap(fn) -> fn, frame(drawMs), report() -> {busy (0..1, the last sample), avg (0..1, the last minute), hist: [0..100], frame: {fps, ms, draw} | null},
+//                   total() -> ms,
 //                   ELU (true in Node: the event loop's measure, not the timed entry points) }
 (() => {
 "use strict";
@@ -21,6 +24,10 @@ let depth = 0, t0 = 0, busyMs = 0;                 // (browser) time inside begi
 let lastT = now(), lastBusy = 0, lastWait = 0, lastElu = ELU ? P.eventLoopUtilization() : null;
 let cur = 0;
 const hist = [];
+// (the page) its frames: how many and the ms in renderer.render, this sample and the last, for the debug screen (bug-098: a page thread
+// near 100% is either the frame's own work or the drawing calls waiting on the graphics card)
+let frames = 0, drawMs = 0, frameRep = null;
+function frame(drawnMs) { frames++; drawMs += drawnMs || 0; }
 function begin() { if (depth++ === 0) t0 = now(); }
 function end() { if (depth > 0 && --depth === 0) { const t = now(); busyMs += t - t0; if (t - lastT >= SAMPLE) sample(); } }
 function wrap(fn) { return function () { begin(); try { return fn.apply(this, arguments); } finally { end(); } }; }
@@ -36,6 +43,8 @@ function sample() {
   lastWait = w;
   b = Math.max(0, Math.min(dt, b - dw));
   cur = b / dt;
+  if (frames) frameRep = { fps: Math.round(frames * 10000 / dt) / 10, ms: Math.round(b / frames * 100) / 100, draw: Math.round(drawMs / frames * 100) / 100 };
+  frames = 0; drawMs = 0;
   lastT = t;
   hist.push(Math.round(cur * 100));
   if (hist.length > HIST) hist.shift();
@@ -43,7 +52,7 @@ function sample() {
 function report() {
   sample();
   const n = hist.length, avg = n ? hist.reduce((a, v) => a + v, 0) / n / 100 : 0;
-  return { busy: cur, avg, hist: hist.slice() };
+  return { busy: cur, avg, hist: hist.slice(), frame: frameRep };
 }
 
 // The busy ms so far, the barrier's waits taken off: the simulation budget's measure where the simulation has a thread of its own
@@ -54,5 +63,5 @@ function total() {
   return Math.max(0, b - waitNow());
 }
 
-BF.tload = { begin, end, wrap, report, total, ELU, SAMPLE, HIST };
+BF.tload = { begin, end, wrap, report, frame, total, ELU, SAMPLE, HIST };
 })();

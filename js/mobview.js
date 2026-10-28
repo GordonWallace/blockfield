@@ -11,7 +11,8 @@
 // where there is no screen (a worker or a server, specs r15-38 / r15-40).
 // Drawn state: between the last two ticks of the fixed tick (r15-10), lerp(m.prev, m, k) of the position, yaw, head and walk angles and
 // age, where m.prev is the tick before and k = BF.client.world.k(m, BF.warp.alpha) (1 when it stood still in the latest tick, or at
-// fast-forward when several ticks went by). A sleeping mob, a ridden one and one that moved more than 4 blocks in a tick (a teleport) are
+// fast-forward when several ticks went by). Off the page (bug-098) prev and m.to are the states either side of the client's drawing clock
+// and k how far between them (js/protocol.js world.draw). A sleeping mob, a ridden one and one that moved more than 4 blocks in a tick (a teleport) are
 // drawn where they are; a rider is placed by its boat or horse every tick.
 // API: BF.mobView = { init(scene), render(dt), viewOf(entity | protocol number | sim mob (tests)) -> {root, model, meshes, ...} | undefined,
 //   drawPos(entity, out), rayBoxOf(o, entity, mn, mx), typeParts(type, variant), buildGeometry(boxes, seed), box(min, max, paint), PX, count() }
@@ -517,26 +518,26 @@ let M = null;   // the client's mirror (BF.client.world) this frame
 const ent = n => (n != null && M ? M.entities.get(n) : null);
 function tickK(m) {
   const a = BF.warp && BF.warp.alpha, p = m.prev;
-  if (!p || !M || typeof a !== "number" || a >= 1 || m.sleeping || m.rider != null) return 1;
+  if (!p || !M || typeof a !== "number" || (a >= 1 && M.rt == null) || m.sleeping || m.rider != null) return 1;   // (M.rt: the drawing clock off the page, js/protocol.js)
   const r = ent(m.riding);
   if (r && r.rider != null) return 1;
-  const dx = m.x - p.x, dy = m.y - p.y, dz = m.z - p.z;
+  const P = m.to || m, dx = P.x - p.x, dy = P.y - p.y, dz = P.z - p.z;   // (to: the state after the drawing clock's, off the page)
   return dx * dx + dy * dy + dz * dz > 16 ? 1 : M.k(m, a);
 }
 const mix = (a, b, k) => (typeof a === "number" ? a + (b - a) * k : b);
 function drawState(m, out) {
-  const k = tickK(m), p = m.prev, P = m;
+  const k = tickK(m), p = m.prev, P = k < 1 && m.to || m;   // (off the page: between prev and to at the drawing clock, js/protocol.js)
   if (k >= 1) {
-    out.x = P.x; out.y = P.y; out.z = P.z; out.yaw = m.yaw; out.headYaw = m.headYaw; out.headPitch = m.headPitch;
+    out.x = m.x; out.y = m.y; out.z = m.z; out.yaw = m.yaw; out.headYaw = m.headYaw; out.headPitch = m.headPitch;
     out.walkPhase = m.walkPhase; out.walkAmt = m.walkAmt; out.age = m.age;
     return out;
   }
   out.x = mix(p.x, P.x, k); out.y = mix(p.y, P.y, k); out.z = mix(p.z, P.z, k);
-  let dy = m.yaw - (typeof p.yaw === "number" ? p.yaw : m.yaw);
+  let dy = P.yaw - (typeof p.yaw === "number" ? p.yaw : P.yaw);
   while (dy > Math.PI) dy -= Math.PI * 2; while (dy < -Math.PI) dy += Math.PI * 2;
-  out.yaw = m.yaw - dy * (1 - k);
-  out.headYaw = mix(p.headYaw, m.headYaw, k); out.headPitch = mix(p.headPitch, m.headPitch, k);
-  out.walkPhase = mix(p.walkPhase, m.walkPhase, k); out.walkAmt = mix(p.walkAmt, m.walkAmt, k); out.age = mix(p.age, m.age, k);
+  out.yaw = P.yaw - dy * (1 - k);
+  out.headYaw = mix(p.headYaw, P.headYaw, k); out.headPitch = mix(p.headPitch, P.headPitch, k);
+  out.walkPhase = mix(p.walkPhase, P.walkPhase, k); out.walkAmt = mix(p.walkAmt, P.walkAmt, k); out.age = mix(p.age, P.age, k);
   return out;
 }
 const _ds = Object.assign({}, D);
