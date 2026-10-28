@@ -89,7 +89,7 @@ let S = null;
   const s1 = await status(pg);
   const groups = s1.stats && s1.stats.groups ? s1.stats.groups : [];
   if (!s1.split || !s1.clustered) {   // (why the split ended: the workers' game log lines)
-    const wl = await pg.evaluate(() => BF.glog.entries().filter(e => e.k === 'workers' || e.k === 'clusters').map(e => e.l + ' ' + e.x));
+    const wl = await sim(pg, () => BF.glog.entries().filter(e => e.k === 'workers' || e.k === 'clusters').map(e => e.l + ' ' + e.x));
     for (const l of wl.slice(-20)) console.log('  log: ' + l.slice(0, 600));
     console.log('  status: ' + JSON.stringify(s1).slice(0, 800));
   }
@@ -105,18 +105,21 @@ let S = null;
   check(saved === true, `a save while split is written (${saved})`);
   // back to one, then split again
   // (split=always splits again as soon as it is back to one, so the game log says when each happened)
-  const logged = re => pg.evaluate(src => BF.glog.entries().filter(e => (e.k === 'workers' || e.k === 'clusters') && new RegExp(src).test(e.x)).length, re.source);
-  const splits0 = await logged(/clusters are split over/), offs0 = await logged(/^Cluster tick off/);
+  // (the simulation's own log, by index, base() the oldest kept: the page's copy of it comes in batches)
+  const mark = () => sim(pg, () => BF.glog.base() + BF.glog.entries().length);
+  const loggedSince = (re, from) => sim(pg, ([src, from]) => { const b = BF.glog.base(); return BF.glog.entries().slice(Math.max(0, from - b)).some(e => (e.k === 'workers' || e.k === 'clusters') && new RegExp(src).test(e.x)); }, [re.source, from]);
+  const logUntil = async (re, from) => { const t0 = Date.now(); while (Date.now() - t0 < 300000) { if (await loggedSince(re, from)) return true; await new Promise(r => setTimeout(r, 1000)); } return false; };
+  const m0 = await mark();
   await sim(pg, () => { BF.rplay.testSolo(); return true; });
-  const logUntil = async (re, n) => { const t0 = Date.now(); while (Date.now() - t0 < 300000) { if ((await logged(re)) > n) return true; await new Promise(r => setTimeout(r, 1000)); } return false; };
-  const one = (await logUntil(/back to one with the whole world/, 0)) && (await logUntil(/^Cluster tick off/, offs0));
+  const one = (await logUntil(/back to one with the whole world/, m0)) && (await logUntil(/^Cluster tick off/, m0));
   check(one, 'back to one: the workers took the whole world at a meeting and the cluster tick went off');
-  const again = (await logUntil(/clusters are split over/, splits0)) && (await until(pg, () => BF.rplay.status().split && BF.cworkers.active, 300000));   // (splitting again boots the followers' copies again: minutes on a busy machine)
+  const again = (await logUntil(/clusters are split over/, m0)) && (await until(pg, () => BF.rplay.status().split && BF.cworkers.active, 300000));   // (splitting again boots the followers' copies again: minutes on a busy machine)
+  if (!again) console.log('  status: ' + JSON.stringify(Object.assign(await status(pg), { loads: undefined })).slice(0, 900) + '\n  marks: ' + m0 + ' ' + JSON.stringify(await sim(pg, () => [BF.glog.base(), BF.glog.entries().length, !!(BF.cworkers && BF.cworkers.active)])) + '\n  log: ' + (await sim(pg, () => BF.glog.entries().filter(e => e.k === 'workers' || e.k === 'clusters').slice(-8).map(e => e.l + ' ' + e.x).join(' | '))).slice(0, 1500));
   check(again, 'split=always: split again');
   await run(pg, 5);
   const s2 = await status(pg);
   check(s2.split && !s2.mismatch && s2.checks > s1.checks, `split again, the copies still agree (${s2.checks} checks; ${s2.text})`);
-  const lines = await pg.evaluate(() => BF.glog.entries().filter(e => e.k === 'workers').map(e => e.l + ' ' + e.x));
+  const lines = await sim(pg, () => BF.glog.entries().filter(e => e.k === 'workers').map(e => e.l + ' ' + e.x));   // (the simulation's log: the page's copy is partial in a long run)
   check(lines.some(l => /clusters are split/i.test(l)) && !lines.some(l => /^ERROR/.test(l)), `the game log has the workers' lines, no errors (${lines.slice(-3).join(' | ').slice(0, 300)})`);
   for (const l of lines) if (/^ERROR/.test(l)) console.log('  ' + l.slice(0, 1200));
   await pg.context().close();
