@@ -41,42 +41,54 @@ const statusOf = m => BF.villagerStatus ? BF.villagerStatus.text(m) : m.sleeping
 
 // several workers (clusters, js/cworkers.js): a villager's timeline is its village's cluster's; at a meeting only the ones that changed
 // go, and of those only their stretches and events that changed (js/ctick.js tailDiff: cut at the front, the last ones changed or new)
-const had = new Map();   // key -> {ver, s, e (each item's JSON)}: what every worker has
-const verOf = L => L.v + "|" + (L.s.length ? L.s[L.s.length - 1][1] : "") + "|" + (L.name || "");
+const had = new Map();   // key -> {ver, s, e (each item's JSON), end}: what every worker has
+const gone = new Set();  // keys in had dropped here since the last meeting
+// (ver: every change but the one each sample makes, the last stretch going on: that goes alone as its end)
+const verOf = L => L.v + "|" + (L.name || "");
+const endOf = L => (L.s.length ? L.s[L.s.length - 1][1] : null);
 BF.onLoad(() => {
   const C = BF.ctick;
   if (!C || !C.owned || !C.tailDiff) return;
   const groupOf = k => C.ofVillage(k.slice(0, k.lastIndexOf("#")));
+  const lastText = (texts, L) => { if (texts && texts.length && L.s.length) texts[texts.length - 1] = JSON.stringify(L.s[L.s.length - 1]); };
   C.owned("daytimeline.lines", {
-    reset() { had.clear(); },
+    reset() { had.clear(); gone.clear(); },
     snap(g, all) {
-      const keys = [], put = [];
+      const put = [], ends = [], del = [];
       for (const k of C.keysOf(lines, g, groupOf)) {
-        const L = lines.get(k), h = all ? null : had.get(k), ver = verOf(L);
-        keys.push(k);
-        if (h && h.ver === ver) continue;
+        const L = lines.get(k), h = all ? null : had.get(k), ver = verOf(L), end = endOf(L);
+        if (h && h.ver === ver) { if (h.end !== end) { h.end = end; lastText(h.s, L); ends.push([k, end]); } continue; }
         const s = C.tailDiff(h ? h.s : null, L.s), e = C.tailDiff(h ? h.e : null, L.e);
-        had.set(k, { ver, s: s.texts, e: e.texts });
+        had.set(k, { ver, s: s.texts, e: e.texts, end });
         put.push([k, s.d, e.d, L.v, L.name || null]);
       }
-      return { keys, put };
+      if (!all) for (const k of gone) if (groupOf(k) === g) { del.push(k); had.delete(k); }
+      for (const k of del) gone.delete(k);
+      return all ? { keys: C.keysOf(lines, g, groupOf).slice(), put, ends } : { del, put, ends };
     },
     apply(g, o) {
-      const got = new Set(o.keys);
-      for (const k of C.keysOf(lines, g, groupOf)) if (!got.has(k)) { lines.delete(k); had.delete(k); }
+      if (o.keys) { const got = new Set(o.keys); for (const k of C.keysOf(lines, g, groupOf)) if (!got.has(k)) { lines.delete(k); had.delete(k); } }
+      for (const k of o.del || []) { lines.delete(k); had.delete(k); }
       for (const [k, ds, de, v, name] of o.put) {
         const L = lineOf(k, true), h = had.get(k);
         const s = ds ? C.tailApply(L.s, h ? h.s : null, ds) : h.s, e = de ? C.tailApply(L.e, h ? h.e : null, de) : h.e;
         L.v = v; if (name) L.name = name; else delete L.name;
-        had.set(k, { ver: verOf(L), s, e });
+        had.set(k, { ver: verOf(L), s, e, end: endOf(L) });
       }
+      for (const [k, end] of o.ends) {
+        const L = lines.get(k), h = had.get(k);
+        if (!L || !L.s.length) continue;
+        L.s[L.s.length - 1][1] = end;
+        if (h) { h.end = end; lastText(h.s, L); }
+      }
+      for (const k of gone) if (groupOf(k) === g) gone.delete(k);   // (dropped here too: what its owner said is what every worker has)
       C.applied(lines, g);
     },
   });
 });
 function lineOf(key, make) {
   let L = lines.get(key);
-  if (!L && make) lines.set(key, L = { s: [], e: [], v: 0 });
+  if (!L && make) { lines.set(key, L = { s: [], e: [], v: 0 }); gone.delete(key); }
   return L;
 }
 // Keeps today and yesterday, and the caps.
@@ -124,7 +136,7 @@ function event(m, kind, text, where) {
   L.v++;
   trim(L, dayNow());
 }
-function drop(m) { const key = keyOf(m); if (key) lines.delete(key); }
+function drop(m) { const key = keyOf(m); if (key && lines.delete(key) && had.has(key)) gone.add(key); }
 
 // What the debug screen draws for one villager (null when it has no timeline).
 function view(key) {
@@ -162,7 +174,7 @@ function update() {
   if (!BF.mobs || !BF.regions) return;
   for (const m of BF.regions.ofType("villager")) if (!m.dead && !m.removed && m.position) sample(m, now);
 }
-function reset() { lines.clear(); had.clear(); last = -1; }
+function reset() { lines.clear(); had.clear(); gone.clear(); last = -1; }
 
 BF.dayTimeline = {
   CATS, catOf, keyOf, sample, event, drop, view, reset, update,

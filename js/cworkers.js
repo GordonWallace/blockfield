@@ -164,7 +164,8 @@ function sync() {
   const tables = [];
   const gs = K.groups().filter(owns);
   I.tablesStep(true);   // (each table's keys by group made once for all the snaps)
-  for (const name of K.tables()) { const t = K.table(name); for (const g of gs) tables.push([name, g.key, t.snap(g.key)]); }
+  lap("edits");
+  for (const name of K.tables()) { const t = K.table(name); for (const g of gs) tables.push([name, g.key, t.snap(g.key)]); if (CW.prof) lap("snap." + name); }
   I.tablesStep(false);
   const chans = [];
   for (const [name, key] of touched.values()) { const ch = R.chan(name), o = ch.get(key); chans.push([name, key, o == null ? null : ch.state(o)]); }
@@ -280,7 +281,7 @@ function sync() {
     replaying = true;
     try { if (p.edits.length) BF.world.applyEdits(p.edits, false, true); } finally { replaying = false; }
     lap("in.edits");
-    for (const [name, gk, data] of p.tables) { const t = K.table(name); if (t) t.apply(gk, data); }
+    for (const [name, gk, data] of p.tables) { const t = K.table(name); if (t) t.apply(gk, data); if (CW.prof) lap("in.table." + name); }
     lap("in.tables");
     for (const [name, key, data] of p.chans) { const ch = R.chan(name); if (ch) ch.set(ch.get(key), data, key); }
   } }); } finally { I.tablesStep(false); }

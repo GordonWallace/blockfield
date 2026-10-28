@@ -469,19 +469,37 @@ function tables() {
   if (tabled || !BF.ctick || !BF.ctick.owned) return;
   tabled = true;
   const K = BF.ctick, plain = o => JSON.parse(JSON.stringify(o));
+  // a group's part: its records' ids, and those that changed since they were last sent or got (had: hid -> the JSON every worker has)
+  const had = new Map();
   K.owned("horses.records", {
-    snap: gk => { const out = []; for (const r of recs.values()) if (recGroup(K, r) === gk) { const c = plain(Object.assign({}, r, { mobId: r.mobId })); c.cl = r.cl; out.push(c); } return out.sort((p, q) => p.hid - q.hid); },
+    reset() { had.clear(); },
+    snap: (gk, all) => {
+      const keys = [], put = [];
+      for (const r of recs.values()) {
+        if (recGroup(K, r) !== gk) continue;
+        keys.push(r.hid);
+        const c = plain(Object.assign({}, r, { mobId: r.mobId })); c.cl = r.cl;
+        const t = JSON.stringify(c);
+        if (all || had.get(r.hid) !== t) { had.set(r.hid, t); put.push(c); }
+      }
+      return { keys, put: put.sort((p, q) => p.hid - q.hid) };
+    },
     apply(gk, a) {
-      const keep = new Set((a || []).map(e => e.hid));
-      for (const r of [...recs.values()]) if (!keep.has(r.hid) && recGroup(K, r) === gk) recs.delete(r.hid);
-      recsV++;
-      for (const e of a || []) {
+      if (!a) return;
+      const keep = new Set(a.keys);
+      let gone = 0, fresh = false;
+      for (const r of [...recs.values()]) if (!keep.has(r.hid) && recGroup(K, r) === gk) { recs.delete(r.hid); had.delete(r.hid); gone++; }
+      if (gone || a.put.length) recsV++;
+      for (const e of a.put) {
+        had.set(e.hid, JSON.stringify(e));
         if (e.lead && e.lead.kind === "mob") e.lead = BF.ids.refs(e.lead);   // the holder by id again
         const old = recs.get(e.hid), r = old ? Object.assign(old, e) : BF.ids.mobRef(e);   // the same object where there is one (m.horse, key order)
+        if (!old) fresh = true;
         recs.set(r.hid, r); if (r.hid >= nextId) nextId = r.hid + 1;
         const m = r.mob; if (m && m.horse && m.horse !== r && m.horse.hid === r.hid) m.horse = r;   // a mob that came over carries a copy: the record is the one
       }
       // back in hid order (the order they were made in), so the horses tick in the same order as on a worker that never sent them
+      if (!fresh) return;
       const all = [...recs.values()].sort((p, q) => p.hid - q.hid);
       recs.clear(); for (const r of all) recs.set(r.hid, r);
     },
