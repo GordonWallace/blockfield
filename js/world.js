@@ -516,6 +516,7 @@ function applyCell(key, i, id, replayed) {
   const x = c.cx * CS + lx, z = c.cz * CS + lz;
   if (BF.light) BF.light.onSet(x, y, z, oldId, id);
   if (BF.skyLight) BF.skyLight.onSet(x, y, z, oldId, id);
+  if (world.replica && BF.signs) BF.signs.onView(x, y, z, oldId, id);   // the page finds the sign to draw its text (js/signs.js, bug-097)
   if (replayed) for (let k = 0; k < replL.length; k++) replL[k](x, y, z, oldId, id);
   if (lx === 0 || lz === 0 || lx === CS - 1 || lz === CS - 1) markNeighboursDirty(c);
 }

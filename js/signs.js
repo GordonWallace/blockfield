@@ -275,6 +275,15 @@ function onSet(x, y, z, oldId, id) {
     }
   }
 }
+// A page drawing a replica world (r15-43): a cell the simulation changed, so the page knows its sign cells to draw texts on; the texts
+// themselves come from the simulation's store (adopt), so nothing moves or pops here (bug-097)
+function onView(x, y, z, oldId, id) {
+  const so = signOf(oldId), sn = signOf(id);
+  if (!so && !sn) return;
+  trackCell(x, y, z, !!sn);
+  groupCache.clear();
+  renderDirty = true;
+}
 function structural(x, y, z, oldId, id, so, sn) {
   const cur = wget, prev = (a, b, c) => (a === x && b === y && c === z ? oldId : wget(a, b, c));
   const oldSeeds = [], newSeeds = [];
@@ -348,7 +357,8 @@ function onChunkUnload(cx, cz) {
   groupCache.clear();
   renderDirty = true;
 }
-if (BF.world && BF.world.onChunkLoad) { BF.world.onChunkLoad(onChunkLoad); BF.world.onChunkUnload(onChunkUnload); }
+// (view: the page's copy of the world finds its signs too, to draw their texts, bug-097)
+if (BF.world && BF.world.onChunkLoad) { BF.world.onChunkLoad(onChunkLoad, true); BF.world.onChunkUnload(onChunkUnload); }
 
 // ---------------------------------------------------------------- in-world text overlays
 function lightAt(x, y, z) {
@@ -1022,7 +1032,7 @@ BF.signs = {
   COLS, ROWS, MAXW, MAXH,
   get, setText, groupAt: (x, y, z) => { const g = groupAt(x, y, z); return g ? { anchor: g.anchor.slice(), W: g.W, H: g.H, key: g.key, f: g.f, wall: g.wall, wood: g.wood, id: g.id } : null; },
   layout, clampText, capacity: (W_, H_) => ({ cols: COLS * W_, rows: ROWS * H_ }),
-  onSet, place, interact, openEditor, closeEditor, isOpen: () => ed.open,
+  onSet, onView, place, interact, openEditor, closeEditor, isOpen: () => ed.open,
   registerAuto, runAuto, autos,
   planArch, drawArch, villageName, nameFor,
   planPosts, assignPosts, drawPosts, postNeighbours, arrowFor, postLine, POST_RANGE,
