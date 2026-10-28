@@ -1543,6 +1543,14 @@ function planShare() {
   else if (BF.villageSim && BF.villageSim.count) n = BF.villageSim.count();
   return PLANS * Math.max(1, n);
 }
+// the game log notes the world's share when it changes (a village joined or left the simulated set)
+let shareLogged = 0;
+function logShare() {
+  const n = BF.villageSim && BF.villageSim.count ? BF.villageSim.count() : 0, all = PLANS * Math.max(1, n);
+  if (all === shareLogged) return;
+  shareLogged = all;
+  if (BF.glog) BF.glog.log("INFO", "plans", "Route searches a tick: " + all + " (" + PLANS + " for each of " + n + " running village" + (n === 1 ? "" : "s") + ")");
+}
 function grantPlans(share) {
   const C = BF.ctick, t = C && C.on ? (planTick = BF.rand.tick) : ++planTick, w = [], mm = ownMobs();
   for (const m of mm || list) {
@@ -3532,6 +3540,7 @@ BF.mobs = {
   update(dt) {
     if (!ready) return;
     dt = Math.min(dt, 0.05);
+    logShare();
     const share = planShare();
     planBudget = share; // A* searches per frame outside the mob loop
     grantPlans(share);   // and the mob loop's (spec r15-33)
@@ -3841,7 +3850,7 @@ BF.mobs = {
     BF.ids.reset();
     villageT = restockT = 0;   // (and the counters and timers below, so a world started after another plays as in a fresh page: spec r15-39)
     surfAcc = caveAcc = chunkArrT = 0; chunkArr = [];
-    planTick = planBudget = 0;
+    planTick = planBudget = shareLogged = 0;
     aiAcc = aiEma = aiN = aiWork = 0;
     if (BF.builder) BF.builder.reset();
     if (BF.bridges) BF.bridges.reset();

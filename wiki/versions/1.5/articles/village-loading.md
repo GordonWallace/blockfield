@@ -76,6 +76,8 @@ Each world has a game option, **Far villages**, that sets how villages beyond yo
 
 The F3 overlay shows the mode on its own line: `Far villages: coarse (120 mobs)` or `Far villages: full detail`. The [[page:game-log]] notes each village switching (kind *coarse*).
 
+Working out a new route is the costliest thing a mob does, so the game rations it: each tick hands out 2 route searches for every running village (at least 2), to the mobs that have waited longest. Before, the whole world shared 2 a tick, so with many villages running, villagers far away could wait many seconds for a route and stood idle meanwhile. Now every running village does its share of work wherever it is.
+
 ## Quitting and loading again
 If you save, quit and load straight away, no game time has passed, so everything that was loaded comes back as it was: villagers, golems, wild and hostile mobs, each in the same place, facing the same way, with the same health and the same job. A village with several golems gets each of them back at its own spot. If more than about 24 seconds of game time have passed, villagers return to the usual places instead.
 
