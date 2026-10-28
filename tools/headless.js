@@ -4,7 +4,7 @@
 // world server (r15-41).
 // Usage: node tools/headless.js [--seed 3] [--seconds 600] [--at village|spawn] [--villages 10] [--view 8] [--log file.log]
 //                               [--save out.json] [--load save.json] [--json] [--every s] [--workers n] [--verify ticks] [--after s] [--shuffle k] [--dump file] [--extra n] [--reach blocks] [--mem MB] [--coarse on|off]
-//                               [--ctick converted|full|a,b,c] [--cworkers n] [--partial] [--sizes]
+//                               [--ctick converted|full|a,b,c] [--cworkers n] [--partial] [--sizes] [--meet ticks]
 //   --at village (default): the player moves to the village nearest the spawn first, so villagers are simulated; spawn: stays there.
 //   --extra n: the n nearest other villages are simulated too, however far (js/active.js fixed set; a heavier load to measure with), as
 //   long as they are within --reach blocks (default 4000) and their chunks fit in --mem MB (default 500); the boot line says how many came.
@@ -20,6 +20,7 @@
 //   --cworkers: each group's interval in turn) or tick; either way the groups are planned onto workers at each meeting (js/cworkers.js
 //   plan), or with --pull (cluster order) each worker takes the next group when it is free; --shuffle k: the groups change workers at
 //   every meeting; --partial: partial copies (each worker's copy of a mob is current only while it runs it; the end hash gathers them);
+//   --meet t (benchmarks): the clusters meet every t ticks instead of 20 (every worker the same; hashes differ from the default's).
 //   --sizes: what worker 0 sends at a meeting, KB by part. --load works with --cworkers too (every worker restores the save): use a
 //   settled save to measure, since a fresh world's first minutes spawn wild animals per cluster.
 //   --json: one JSON line at the end ({seed, seconds, ticks, vss, mobss, msPerTick, real, villagers, mobs, chunks, hash, parts, workers,
@@ -104,6 +105,7 @@ async function main(argv) {
   const nw = a.workers != null ? Math.max(1, +a.workers | 0) : 1, ncw = a.cworkers != null ? Math.max(1, +a.cworkers | 0) : 1;
   const only = a.ctick == null || a.ctick === 'full' ? null : a.ctick === 'converted' ? BF.ctick.converted() : String(a.ctick).split(',');
   let pool = null;
+  if (a.meet != null) BF.ctick.setMeet(+a.meet);
   if (a.ctick != null || ncw > 1) {
     BF.ctick.only = only; BF.ctick.on = true;
     if (a.order) BF.ctick.order = a.order;
@@ -118,7 +120,7 @@ async function main(argv) {
       settings: { at: a.at || 'village', villages: a.villages != null ? +a.villages : undefined, viewDist: a.view != null ? +a.view : undefined, extra: a.extra != null ? +a.extra : undefined, reach: a.reach != null ? +a.reach : undefined, memMB: a.mem != null ? +a.mem : undefined, coarse: a.coarse } } })));
     for (const [i, b] of boots.entries()) if (b.booted !== H0.hash) throw new Error(`cluster worker ${i + 1} booted a different world (${b.booted}, not ${H0.hash})`);
     const shared = BF.cworkers.makeShared(ncw), order = a.order || 'cluster';
-    await Promise.all(pool.list.map(f => f.ask({ cstart: { shared, me: f.me, n: ncw, only, order, shuffle: +a.shuffle || 0, pull: !!a.pull, partial: !!a.partial } })));
+    await Promise.all(pool.list.map(f => f.ask({ cstart: { shared, me: f.me, n: ncw, only, order, shuffle: +a.shuffle || 0, pull: !!a.pull, partial: !!a.partial, meet: a.meet != null ? +a.meet : null } })));
     BF.ctick.order = order;
     BF.cworkers.shuffle = +a.shuffle || 0;
     BF.cworkers.setup({ n: ncw, me: 0, link: BF.rworkers.attach(shared, 0, ncw), claims: shared.claims, pull: !!a.pull, partial: !!a.partial });

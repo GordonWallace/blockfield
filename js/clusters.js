@@ -16,14 +16,14 @@
 // rebuild() runs at a meeting (js/ctick.js) and works all of it out again from the state then; between meetings the answers don't
 // change, except for regions first met (worked out with the meeting's village list and player position) and new mobs (placed by
 // where they are made).
-// API: BF.clusters = { MEET, REACH, rebuild(), ofRegion(key) -> base, groupOf(base) -> group key, groups() -> [{key, bases}], baseOf(mob)
+// API: BF.clusters = { MEET, setMeet(n) (benchmarks, through BF.ctick.setMeet), REACH, rebuild(), ofRegion(key) -> base, groupOf(base) -> group key, groups() -> [{key, bases}], baseOf(mob)
 //                      -> base (worked out now), place(mob) (sets m.cl), of(mob) -> m.cl, summary(mob) -> what rebuild reads of it, remote
 //                      (set: id -> summary, the other workers' mobs for the next rebuild), stats(), text(), reset() }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
 
-const MEET = 20;     // ticks between meetings (one game second)
+let MEET = 20;       // ticks between meetings (one game second; setMeet: benchmarks)
 const REACH = 600;   // blocks from a village's centre that its cluster reaches at most (half the usual distance to the next, plus some)
 const CELL = 8;      // regions along a side of a wild cluster (512 blocks)
 const VIEW_PAD = 48; // blocks past the view distance that still go in the player's group
@@ -149,5 +149,5 @@ function stats() {
 const text = () => { const s = stats(); return "Clusters: " + s.groups.length + " (" + s.groups.map(g => g.key + (g.player ? "*" : "") + " " + g.mobs).join(", ") + ")"; };
 function reset() { villages = []; player = null; regionBase.clear(); groupOfBase = new Map(); groupList = []; meetings = 0; claimed = null; remote = null; }
 
-BF.clusters = { MEET, REACH, rebuild, ofRegion, groupOf, groups: () => groupList, baseOf, place, summary, set remote(r) { remote = r; }, of: m => m.cl, villageOf, stats, text, reset };
+BF.clusters = { get MEET() { return MEET; }, setMeet(n) { MEET = n; }, REACH, rebuild, ofRegion, groupOf, groups: () => groupList, baseOf, place, summary, set remote(r) { remote = r; }, of: m => m.cl, villageOf, stats, text, reset };
 })();

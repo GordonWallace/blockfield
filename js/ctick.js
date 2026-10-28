@@ -36,7 +36,7 @@
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
-const MEET = 20;       // ticks between meetings (js/clusters.js MEET)
+let MEET = 20;         // ticks between meetings (js/clusters.js MEET; setMeet: benchmarks)
 const RANGE = 256;     // ids (and creation numbers) in one range
 const DYN_RANGE = 4;   // dynamic item ids (map items, js/blocks.js) in one range: rare, and the item list skips the unused ones
 const HOUR = 1200 / 24;
@@ -598,7 +598,9 @@ function reset() {
 }
 
 BF.ctick = {
-  MEET, SYSTEMS,
+  get MEET() { return MEET; }, SYSTEMS,
+  // (benchmarks, tools/headless.js --meet: ticks between meetings, set before the cluster tick goes on, the same on every worker)
+  setMeet(n) { if (on) throw new Error("BF.ctick.setMeet: the cluster tick is on"); MEET = Math.max(1, n | 0); BF.clusters.setMeet(MEET); },
   get on() { return on; }, set on(v) { setOn(v); },
   get order() { return order; }, set order(o) { setOrder(o); },
   get cur() { return cur; },
