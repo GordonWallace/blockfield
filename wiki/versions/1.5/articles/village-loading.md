@@ -28,10 +28,10 @@ Beyond the nearest villages, the game keeps adding villages, nearest first, as l
 
 The time limit counts everything the simulation's thread does, not just the villages' ticks: loading the terrain around them and sending the page what it draws grow with the number of villages too. It is measured as the time the simulation would need at normal speed, so fast-forwarding doesn't push villages out: the set stays the one your computer runs at 1x, and fast-forward just runs slower than asked if it doesn't fit.
 
-- If the simulation has needed less than the limit for 10 seconds in a row, the next nearest village that is not running yet starts running too. If there is room for several, up to 3 join at once. A village loads exactly as a nearby village does, and its villagers come out and carry on with their day. Villages are only added if the time they are expected to take still fits within the limit.
-- If the simulation has needed more than the limit for 10 seconds in a row, the farthest of these extra villages stops, through the usual countdown below, so its villagers finish their tasks first. It is not picked again for 5 minutes.
+- If the simulation has needed less than the limit for 10 seconds in a row, the next nearest village that is not running yet starts running too. If there is room for several, up to 3 join at once. A village loads exactly as a nearby village does, and its villagers come out and carry on with their day. Villages are only added if the time they are expected to take still fits within the limit. No village is added for the limit at night: the villagers are asleep then and the simulation needs far less than it will in the morning. Villages still start when you come near them at night.
+- If the simulation has needed more than the limit for 10 seconds in a row, the farthest of these extra villages stops, through the countdown below but cut to at most 60 game seconds, so it is gone within a minute. It is not picked again for 5 minutes, and no other village stops for the limit until it has gone.
 - Nothing is stopped within 60 seconds of a village being added, and no village is added while the game runs under 30 frames a second at normal speed. This keeps the set from flickering.
-- An extra village beyond the distance limit stops the same way.
+- An extra village beyond the distance limit stops the same way, with the same 60-second countdown, and so do all the extra villages when you switch to *Nearest only*. Until they have gone, the pause menu's button says how many are unloading.
 - On a slow computer the game never runs fewer villages than the minimum rules above.
 - Extra villages do not count toward the safety valve's limits below. While any are running, the limit sheds them instead of the safety valve stopping villages.
 
@@ -47,7 +47,7 @@ When a village would stop, because you moved away, because other villages pushed
 5. If you come back within range, the countdown is cancelled and the village carries on.
 6. When the timer reaches zero, the village unloads **together with all its villagers**, its iron golems and the animals that belong to its pens, coops, pastures and paddocks. Nobody is ever unloaded without their village.
 
-If a villager is still out on an errand when the timer ends, the game logs a loading error, with the task's own estimate and how long it had been running, and unloads the village anyway. [[villager:explorer|Explorers]] do not hold up the timer: they unload with their village wherever they are, and are put back exactly where they stood when it returns. A [[villager:merchant]] on a caravan trip counts as one long task, and no merchant starts a long trip while its village is counting down.
+If a villager is still out on an errand when the timer ends, the game logs a loading error (a WARN when the countdown was the 60-second one of an extra village), with the task's own estimate and how long it had been running, and unloads the village anyway. [[villager:explorer|Explorers]] do not hold up the timer: they unload with their village wherever they are, and are put back exactly where they stood when it returns. A [[villager:merchant]] on a caravan trip counts as one long task, and no merchant starts a long trip while its village is counting down.
 
 On the debug screen each village shows how long it has before it unloads, a list of what each villager is doing with its estimate, and the list of loading errors. Each loading error is also an ERROR line in the world's [[page:game-log]].
 

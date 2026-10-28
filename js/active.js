@@ -132,10 +132,16 @@ function footprintOf(key) {
   if (keys) fp.set(key, keys);
   return keys;
 }
+// Extras let go, until they have unloaded (key -> why): their unload countdown is capped at WAIT_CAP game seconds (villageSim asks waitCap),
+// so a village past a new distance limit, or one the time limit can't afford, goes in a minute rather than when its longest task ends
+// (up to 40 minutes for a caravan trip), and while one is still going no other leaves for the time limit (its cost is still in the measure).
+const leaving = new Map();
+const WAIT_CAP = 60;
+const leavingNow = () => { for (const k of [...leaving.keys()]) if (extras.has(k) || !VS().isActive(k)) leaving.delete(k); return leaving.size; };
 function drop(key, why) {
   const x = extras.get(key);
   if (!x) return;
-  extras.delete(key); fp.delete(key);
+  extras.delete(key); fp.delete(key); leaving.set(key, why);
   note(`${vname(key)} leaves the simulated set (${why}): it unloads once its villagers' tasks are done`, key);
 }
 
@@ -152,13 +158,18 @@ function decide(px, pz, base) {
   }
   if (opt.fixed > 0) return fixedSet(px, pz, base, t, ed);
   const f = used(), slow = BF.warp && BF.warp.speed === 1 && fps < opt.minFps;
+  // at night the villagers sleep and the measure is low: no village joins for the time limit then (Gordon, 2026-10-28), and the day starts a
+  // fresh window (villages still join the minimum set when the player comes near)
+  const night = !!(BF.sky && BF.sky.isNight && BF.sky.isNight());
+  if (night) underMs = 0;
+  if (leavingNow()) overMs = 0;   // (a village let go still counts in the measure: a fresh window once it has unloaded)
   if (overMs >= opt.win * 1000 && t - lastLoad >= opt.hold * 1000 && extras.size) {
     let far = null;
     for (const [k, x] of extras) if (!far || x.d > far[1].d) far = [k, x];
     overMs = 0;
     cooling.set(far[0], t + opt.cool * 1000);
     drop(far[0], `over budget: the simulation needed ${pct(f)} of each second at 1x for ${opt.win} s, limit ${pct(opt.budget)}`);
-  } else if (underMs >= opt.win * 1000 && !slow) {
+  } else if (underMs >= opt.win * 1000 && !slow && !night) {
     underMs = 0;
     const running = base.size + extras.size, share = running ? f / running : 0;
     if (f + share <= opt.budget) {
@@ -239,7 +250,7 @@ function fixedSet(px, pz, base, t, ed) {
 // the villages simulated now (villageSim's set, extras counting down included): from the start and with the budget off too, which the last
 // decision's figure (lastN, 0 before the first) was not
 const simulated = () => (VS() ? VS().count() : lastN);
-const text = () => `Distant villages: ${simulated()} simulated (${!opt.on ? "off" : opt.budget > 0 ? "up to " + pct(opt.budget) + " of each second" : "nearest only"})`;
+const text = () => `Distant villages: ${simulated()} simulated${leavingNow() ? ", " + leaving.size + " unloading" : ""} (${!opt.on ? "off" : opt.budget > 0 ? "up to " + pct(opt.budget) + " of each second" : "nearest only"})`;
 // "Automatic, up to 80% of each second (automatic), no distance limit, memory 2000 MB (automatic)": the settings in words (the game log, the menu)
 function describe(s) {
   s = clean(s);
@@ -250,6 +261,7 @@ function describe(s) {
 BF.active = {
   BUDGETS, CHOICES, DEFAULT, frame, decide,
   isExtra: key => extras.has(key),
+  waitCap: key => (leaving.has(key) && !extras.has(key) ? WAIT_CAP : null), waitWhy: key => leaving.get(key) || null, leaving: () => (leavingNow(), [...leaving.keys()]),
   extras: () => [...extras.keys()],
   opts: () => Object.assign({}, opt),
   // tests and the pause menu (a budget chosen there is remembered)
@@ -284,6 +296,6 @@ BF.active = {
   feed: () => ({ on: opt.on, budget: opt.budget, used: used(), fps: Math.round(fps), villages: simulated(), extra: VS() && VS().extraCount ? VS().extraCount() : extras.size, extras: [...extras].map(([k, x]) => ({ key: k, name: vname(k), d: Math.round(x.d) })),
     under: Math.round(underMs / 1000), over: Math.round(overMs / 1000), memMB: opt.memMB, reach: opt.reach, settings: Object.assign({}, S), log: decisions.slice(-12) }),
   log: () => decisions.slice(),
-  reset() { fixedAt = null; emptyAt = null; lastClock = null; extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, game: 0, frames: 0 }; fps = 60; decide.memTold = false; },
+  reset() { leaving.clear(); fixedAt = null; emptyAt = null; lastClock = null; extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, game: 0, frames: 0 }; fps = 60; decide.memTold = false; },
 };
 })();

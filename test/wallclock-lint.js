@@ -63,7 +63,7 @@ const LINES = [
   ["boot.js", "chunks + \" chunks loaded in \" + ((performance.now() - t0) / 1000).toFixed(1)", "the headless boot's own timing (above)"],
   ["timewarp.js", "const now = performance.now();\n  if (n > 0) droppedAll += n;", "the dropped-ticks WARN in the game log, at most once a real minute (r15-10)"],
   ["boot.js", "performance.now() - t0 < W.BUDGET_MS", "steps per frame within BUDGET_MS (above)"],
-  ["boot.js", "const ms = performance.now() - t0;", "the frame's simulation ms for the budget (js/active.js, r15-34)"],
+  ["boot.js", "let ms = performance.now() - t0;", "the frame's simulation ms for the budget (js/active.js, r15-34); with the thread busy time from BF.tload.total() on its own thread)"],
   ["mobs.js", "const t0 = performance.now(), a = findPathFast(", "BF.debug.pathCompare timing of findPath vs findPathOld (r15-05, debug only; the route returned doesn't depend on it)"],
   ["mobs.js", "const t0 = performance.now(); villagerAI(m, dt, _desired); aiAcc += performance.now() - t0;", "villager AI ms for the debug screen only (the force-unload limit counts updates, aiWork)"],
   ["weather.js", "const t0 = performance.now();\n    if (!inited) init();", "weather ms for the debug line"],
