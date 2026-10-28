@@ -53,6 +53,8 @@ Village life has moved over: builders, jobs, breeding, storage, bakers, explorer
 
 The animals have moved over: sheep pens, chicken coops, cow pastures, pig sties, horses and their herds, stables and bees each run with the cluster they belong to (a pen with its village, a horse with where it is or was last seen, a herd with where it was at the last meeting, bees with their home). With the clusters on, two things play a little differently: at most 600 bees are out at once in each cluster rather than in the whole world, and only bees in the player's own cluster follow a flower the player holds (the others are too far away to see it anyway).
 
+To try clusters while you play, add `--clusters` to `./run.sh` along with a number of workers (`./run.sh --workers 4 --clusters`), or `?clusters=1` with `?workers=<n>` to the game's address in the browser. The split then shares out the clusters instead of the regions' thinking: the group with you in it stays on the first worker, which also serves your page, and the rest go to whichever worker has the least to do. F3 shows each worker's groups and time a tick. If the page can't keep up with what a fast world sends it (a slow machine at 100x), the world server sends the moving mobs and items twice a second instead of every tick until it catches up, and the [[page:game-log]] notes it.
+
 When the clusters are split over several workers, a worker keeps only its own clusters' mobs up to date. It sees every other mob where it was at the last meeting, and at a meeting it is sent whole only the mobs that change worker (or that something on it is about to read, like a merchant arriving or a chunk being unloaded). So a meeting sends a short summary of each mob instead of every change to every mob.
 
 ## What it costs
