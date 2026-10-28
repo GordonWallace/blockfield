@@ -1511,11 +1511,15 @@ const navCell = (x, y, z) => walkCell(x, y, z) || ladderCell(x, y, z);
 // its cell and overhangs all eight around it, those clear above knee height too (or it would walk its head into a ledge beside the route),
 // and no fence gates: it can't open one, and through one left open it walked into a pen that was then shut on it (r15-70).
 let planBudget = 0;
-// A* searches (spec r15-33). In the mob loop a mob may search only with a grant: PLANS grants are handed out at the start of each tick
+// A* searches (spec r15-33). In the mob loop a mob may search only with a grant: PLANS grants per simulated village (at least PLANS) are
+// handed out at the start of each tick
 // to the mobs that have been waiting longest (then by id), so who gets a search never depends on the order mobs think in (regions,
 // later threads). A mob that asks without one joins the waiting list and searches in a later tick (one tick later when few are
 // waiting); one that stopped asking for KEEP ticks leaves it, and an unused grant lapses after KEEP ticks. Outside the mob loop (the
-// village ticks after it, in a fixed order) searches share planBudget as before.
+// village ticks after it, in a fixed order) searches share planBudget (PLANS per village too) as before.
+// Per village, not per world (chunk churn thread, 2026-10-28): one thread's 2 a tick for the whole world left 2,341 mobs of a 100-village
+// world waiting ~10 s for a search, while the cluster tick handed out 2 per group; now both hand out PLANS for each simulated village in
+// the scope that runs (the world, or the running cluster group's village bases), so the two do the same work.
 // The waiting list and the grants live on the mobs (ai.planW: the tick it first asked, planL: last asked, planG: granted), not in a
 // module table, so that every copy of the world (spec r15-39: several workers, each thinking some regions) hands out the same grants: a
 // table here held only what this worker's own mobs asked, and still held them after their region moved to another worker. A tick number
@@ -1531,7 +1535,15 @@ let coarseStep = false, walked = false, coarseN = 0;   // this update is a coars
 let mobUpdates = 0;   // every mob update run (BF.mobs.updates: test/perf-activity.js checks BF.perf.byState counts each once)
 const idNum = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15; };
 const lapsed = (v, t) => v > t || v < t - KEEP;
-function grantPlans() {
+// the searches a tick hands out in the scope that runs: PLANS per simulated village there, at least PLANS
+function planShare() {
+  const C = BF.ctick, g = C && C.on ? C.cur : null;
+  let n = 0;
+  if (g) { if (g.bases) for (const b of g.bases) if (b.charCodeAt(0) === 118) n++; }   // ("v:<village key>" bases, js/clusters.js)
+  else if (BF.villageSim && BF.villageSim.count) n = BF.villageSim.count();
+  return PLANS * Math.max(1, n);
+}
+function grantPlans(share) {
   const C = BF.ctick, t = C && C.on ? (planTick = BF.rand.tick) : ++planTick, w = [], mm = ownMobs();
   for (const m of mm || list) {
     if (mm && m.removed) continue;
@@ -1544,7 +1556,7 @@ function grantPlans() {
   }
   if (!w.length) return;
   w.sort((a, b) => a.ai.planW - b.ai.planW || idNum(a) - idNum(b) || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
-  for (let i = 0; i < w.length && i < PLANS; i++) { const a = w[i].ai; a.planG = t; a.planW = a.planL = undefined; }
+  for (let i = 0; i < w.length && i < share; i++) { const a = w[i].ai; a.planG = t; a.planW = a.planL = undefined; }
 }
 // A villager that plans route after route (two jobs taking its route from each other each tick, r15-73) goes in the game log, once a game
 // minute while it lasts: REPLAN_MAX searches in a minute is far more than any job needs.
@@ -3520,8 +3532,9 @@ BF.mobs = {
   update(dt) {
     if (!ready) return;
     dt = Math.min(dt, 0.05);
-    planBudget = 2; // A* searches per frame outside the mob loop
-    grantPlans();   // and the mob loop's (spec r15-33)
+    const share = planShare();
+    planBudget = share; // A* searches per frame outside the mob loop
+    grantPlans(share);   // and the mob loop's (spec r15-33)
     // the region index (r15-30) up to date before the mobs query it (spec r15-31): main.js syncs it after each step, but tests and tools
     // step BF.mobs.update on its own, and move mobs between steps
     if (BF.regions) BF.regions.tick(ownMobs() || undefined);   // (clusters: the running group's mobs, js/ctick.js; the others are kept by theirs)
