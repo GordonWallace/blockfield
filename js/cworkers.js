@@ -133,9 +133,11 @@ function sync() {
   lap("refs");
   // mobs not here at the last meeting that this worker made, or that every worker made between ticks (a chunk loading) and this one
   // runs: in full, every field (links by id), filled in under the same id
-  const born = [];
+  // (one made between ticks in a place no group has yet, a chunk loading at the edge, ran nowhere: every worker has it as it was made)
+  const born = [], live = new Set(K.groups().map(g => g.key));
   for (const m of BF.mobs.list) {
-    if (m.removed || known.has(m) || !(bornHere.has(m) || ownsKey(groupOf(m)))) continue;
+    if (m.removed || known.has(m)) continue;
+    if (!bornHere.has(m)) { const gk = groupOf(m); if (!live.has(gk) || !ownsKey(gk)) continue; }
     const o = {};
     for (const k of Object.keys(m)) o[k] = m[k];   // (a plain copy, its own fields: the codec writes m itself as a reference)
     born.push([m.id, m.type, R.enc(o, m)]);
