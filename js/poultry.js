@@ -355,7 +355,7 @@ function hook() {
   hooked = true;
   BF.on("mobKilled", m => { if (m && m.type === "chicken" && m.coop) leaveCoop(m); });
   BF.herd.villageTable("poultry.pending", () => pending);   // (clusters: save data waiting for its coops, by village)
-  BF.herd.penTable("poultry.coops", { field: "_coops", list: "hens", mob: "hen", pen: "coop", of: coopsOf });   // (and the flocks)
+  BF.herd.penTable("poultry.coops", { field: "_coops", list: "hens", mob: "hen", pen: "coop", of: coopsOf, keep: ["eggs"] });   // (and the flocks; the eggs in the nest)
   BF.herd.gateTable("poultry.toShut", toShut);             // (and the gates keepers held open, by keeper)
 }
 function tick(dt) {

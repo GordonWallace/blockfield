@@ -421,6 +421,8 @@ function campOwners() {
 }
 BF.onLoad(() => { if (BF.ctick && BF.ctick.onMeet) BF.ctick.onMeet(campOwners, "explorer camps", "end"); });
 const campDrop = k => { camps.delete(k); if (BF.rworkers) BF.rworkers.touch("camp", k); };
+// (a camp changed in place, in tick or onSpawn: with clusters on workers only the camp's cluster runs them, so the others need it too)
+const campTouch = k => { if (BF.rworkers) BF.rworkers.touch("camp", k); };
 if (BF.rworkers) BF.rworkers.channel("camp", {
   key: k => k, get: k => k, state: k => { const e = camps.get(k); return e ? Object.assign({}, e) : null; },
   set: (k, e) => { if (e) camps.set(k, Object.assign({}, e)); else camps.delete(k); },
@@ -442,14 +444,14 @@ function tick(dt) {
     if (C && (campOwner.get(k) || C.ofVillage(k.slice(0, k.lastIndexOf("#")))) !== C.cur.key) continue;
     if (here.has(k) && !e.returned) continue;   // its own AI strikes it in the morning
     if (!e.returned && now >= e.until) {
-      e.returned = true;
+      e.returned = true; campTouch(k);
       if (BF.glog) BF.glog.log("INFO", "explorer", "camper " + k + " away when the night ended: its tent at " + e.x + ", " + e.z + " is taken down and goes back into its pack", { at: [e.x, e.y, e.z] });
     }
     if (e.returned && !e.removed && BF.world.isLoaded(e.x, e.z)) {
       if (tentAt(e)) BF.blockReq.cells(null, BF.tents.strikeCells(e.x, e.y, e.z, BF.tentId(e.f, 0, 1)));   // nobody's request: no items move
-      e.removed = true;
+      e.removed = true; campTouch(k);
     }
-    if (e.returned && e.removed && e.given) camps.delete(k);
+    if (e.returned && e.removed && e.given) campDrop(k);
   }
 }
 // A villager of its village loading (mobs.js updateVillages, after its saved state and snapshot are back on it).
@@ -459,9 +461,9 @@ function onSpawn(m) {
   if (!e && !(m.ex && m.ex.camp)) return;
   const X = state(m);
   if (e && e.returned) {
-    if (!e.given) { T().inv.add(m.inv, tentItem(), 1); e.given = true; log("tent_back", m, { at: e.x + "," + e.z }); }
+    if (!e.given) { T().inv.add(m.inv, tentItem(), 1); e.given = true; log("tent_back", m, { at: e.x + "," + e.z }); campTouch(k); }
     X.camp = null;
-    if (e.removed) camps.delete(k);
+    if (e.removed) campDrop(k);
     return;
   }
   if (!X.camp) return;

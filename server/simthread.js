@@ -130,6 +130,7 @@ parentPort.on("message", d => {
         if (!BF.save || !BF.save.current) { post({ server: "save", ok: false, why: "no world here" }); return; }
         BF.save.saveNow().then(ok => post({ server: "save", ok: !!ok, why: BF.save.lastError }), e => post({ server: "save", ok: false, why: String(e && e.message || e) }));
       }
+      else if (d.server === "pace") { if (BF.proto.hosted()) BF.proto.hosted().pace(!!d.behind); }   // (the page reads slowly: server/world.js pace)
       else if (d.server === "writeFail") idb.worlds.failWrites(d.n, d.code);   // (test/server-saves.js: a full disk)
       else if (d.server === "shutdown") {
         if (!BF || !BF.save || !BF.save.current) { post({ server: "shutdown", ok: false }); return; }

@@ -28,7 +28,8 @@ let gen = 0;
 // gen and the cluster view (hide) changing: lookAt reads through get(), which hides other clusters' mobs; village, slot and home read the
 // registry itself, so a cluster entering or leaving doesn't drop their answers
 let vgen = 0;
-// onNew(obj, id): a key registered for the first time (js/rworkers.js: a place made while a region worker thinks goes to the others)
+// onNew(obj, id, had): a key registered, or put again with another object (had) (js/rworkers.js, js/cworkers.js: a place made while a
+// worker thinks goes to the others)
 const hooks = { onNew: null };
 // Removed mobs, kept readable for a while (id -> {o, t}): code that held a mob saw it go (m.removed) and acted on that a little later;
 // it still does. After GHOST game seconds a link to it reads undefined.
@@ -65,7 +66,7 @@ function put(obj, id) {
     if (stats.collisions <= 20 && BF.glog) BF.glog.log("WARN", "ids", "Entity id " + id + " was taken over by another object" + (obj.type ? " (" + obj.type + ")" : ""));
   }
   if (had !== obj) { reg.set(id, obj); gen++; vgen++; }
-  if (!had && hooks.onNew) hooks.onNew(obj, id);
+  if (had !== obj && hooks.onNew) hooks.onNew(obj, id, had);
   return obj;
 }
 function remove(x) {
