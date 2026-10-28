@@ -168,7 +168,7 @@ const ending = new Map();        // village key -> {t0, until (game day), est: [
 const errors = [];               // loading errors, newest last (shown on the debug screen)
 const nowDay = () => dayNow();
 function logError(kind, data, lvl) {
-  errors.push(Object.assign({ kind, t: +nowDay().toFixed(3) }, data)); if (errors.length > 100) errors.shift();
+  if (!lvl) { errors.push(Object.assign({ kind, t: +nowDay().toFixed(3) }, data)); if (errors.length > 100) errors.shift(); }   // (a WARN is no loading error)
   if (BF.glog) BF.glog.log(lvl || "ERROR", "loading", kind === "task-running" ? data.who + "'s task was cut off when the village unloaded: " + data.task + " (estimate " + data.estimate + " s, ran " + data.ran + " s; " + data.why + ")"
     : data.who + " was stopped mid-task: " + data.task + " (" + data.action + "; " + data.why + ")", { village: data.village });   // js/gamelog.js
 }

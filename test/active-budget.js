@@ -1,5 +1,5 @@
 // @ci integration suite=village timeout=1500 hosts=worker,server
-// (timeout: its waits add up to 780 s at most, plus getting to the village; a 2 fps runner can take most of them)
+// (timeout: its waits add up to 1140 s at most, plus getting to the village; a 2 fps runner can take most of them)
 // The simulation budget (spec r15-34, js/active.js): with the budget forced high, villages beyond the nearest four join the simulated set
 // over time, nearest first, through the normal load path; forced low, they leave again one at a time, farthest first, back to the minimum
 // rule, each through the unload countdown (a villager on a task holds its village until the task ends; nothing is cut off). Game log
@@ -33,7 +33,7 @@ module.exports = async (pg) => {
   const feed = await lib.sim(pg, () => (BF.debugFeed.snapshot || BF.debugFeed.simPart)().budget);   // (off the page the simulation makes its part of the snapshot)
   ok("the debug feed carries the budget and the decision log", !!feed && feed.extras.length >= 2 && feed.log.length >= 2, feed && { villages: feed.villages, extras: feed.extras.length, log: feed.log.length });
 
-  // 2. forced low: the farthest leaves first; a villager on a task holds its village (the countdown) until the task is over
+  // 2. forced low: the farthest leaves first; a villager on a task holds its village (the countdown) until the task is over, at most 60 game s since it left for the budget (js/active.js waitCap)
   await lib.sim(pg, k => {
     const r = BF.mobs.villages.get(k), m = r && r.members.find(x => x.type === "villager" && !x.child && x.profession !== "explorer" && x.profession !== "merchant");
     if (!m) return;
@@ -46,11 +46,20 @@ module.exports = async (pg) => {
   // 10x, so the other villagers' tasks end in real minutes (the budget is per real second, and this one is always over)
   await pg.evaluate(() => BF.warp.set(BF.warp.SPEEDS.indexOf(10)));   // (the page's speed: the simulation follows it)
   await lib.sim(pg, () => BF.active.set({ budget: 0.000001 }));
-  const drained = await wait(() => BF.active.extras().length === 0, null, 120000);
-  const down = await lib.sim(pg, k => ({ extras: BF.active.extras(), counting: BF.villageSim.countdown(k), active: BF.villageSim.isActive(k), leaves: BF.active.log().filter(e => /leaves the simulated set/.test(e.text)).map(e => e.text) }), first);
+  // (one leaves at a time: the next only once the last has unloaded, its countdown cut to 60 game s; the held village's countdown is caught
+  // while it runs)
+  let drained = false, counting = null;
+  for (const end = Date.now() + 480000; Date.now() < end && !drained; await pg.waitForTimeout(250)) {
+    const st = await lib.sim(pg, k => ({ n: BF.active.extras().length, cd: BF.villageSim.countdown(k), cap: BF.active.waitCap(k) }), first);
+    if (st.cd && !counting) counting = Object.assign({ cap: st.cap }, st.cd);
+    drained = st.n === 0;
+  }
+  if (drained && !counting) await wait(k => !!BF.villageSim.countdown(k) || !BF.villageSim.isActive(k), first, 10000);
+  const down = await lib.sim(pg, k => ({ extras: BF.active.extras(), counting: BF.villageSim.countdown(k), cap: BF.active.waitCap(k), active: BF.villageSim.isActive(k), leaves: BF.active.log().filter(e => /leaves the simulated set/.test(e.text)).map(e => e.text) }), first);
+  if (!counting && down.counting) counting = Object.assign({ cap: down.cap }, down.counting);
   ok("forced low: the extras leave the set, one decision each, over budget", drained && down.leaves.length >= up.ex.length, down.leaves);
   ok("the nearest extra (with a villager on a task) is the last to leave", /over budget/.test(down.leaves[down.leaves.length - 1] || "") && down.leaves.length >= 2, down.leaves.slice(-1));
-  if (held) ok("a village with a villager on a task counts down instead of unloading at once", down.active && !!down.counting && down.counting.left > 0, down.counting);
+  if (held) ok("a village with a villager on a task counts down instead of unloading at once, at most 60 game s (it left for the budget)", !!counting && counting.cap === 60 && counting.max <= 60, counting);
   await lib.sim(pg, () => { const m = globalThis.__held; if (m) { delete m.vtask; delete m.sleeping; m.vtask = null; m.sleeping = false; } });
   // (on a slow runner 10x isn't reached and a long task can outlast the wait: a village still counting down is honouring it)
   const back = await wait(n => BF.villageSim.count() <= n, base.n, 300000);
