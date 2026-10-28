@@ -5,7 +5,7 @@
 // the same way (tools/headless.js: seed 3 at the village nearest the spawn, the --extra nearest other villages simulated too) with the
 // same systems (BF.ctick.only: --profile converted, the default and CI: the systems js/ctick.js SYSTEMS marks converted; or a list,
 // "mobloop,builder,...", each run as converted for the test: how a C2-C6 thread tries its systems before flipping their lines).
-// They run in lockstep, interval by interval (a meeting every 20 ticks), loading
+// They run in lockstep, interval by interval (a meeting every BF.ctick.MEET ticks), loading
 // chunks between intervals; after each interval every worker's state hash parts (js/statehash.js) and every mob's and village record's
 // canonical text are compared with the reference's, and the first objects that differ are printed with where their text first differs.
 // Owners: by default (and CI) by a hash of each group, never moving. --shuffle k: the groups change workers at every meeting (by a hash

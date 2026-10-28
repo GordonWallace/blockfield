@@ -1,5 +1,5 @@
 // Cluster tick (spec r15-39b, item C1). With BF.ctick.on, the simulation runs by clusters (js/clusters.js): groups of villages and the
-// land round them that don't affect each other between meetings, which come every MEET ticks (one game second). Off by default: the
+// land round them that don't affect each other between meetings, which come every MEET ticks (two game seconds). Off by default: the
 // game ticks as before (js/boot.js simStep) until the systems are converted (items C2-C6) and the workers that use it exist (C7).
 //   a tick      the global part once (the clock, the tick counter, the sky and weather), then the scoped part once per group (mobs,
 //               day timelines, drops, boats, furnaces, the think hooks, apply, block ticks, deliver), each with the group's own context;
@@ -36,7 +36,7 @@
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
-let MEET = 20;         // ticks between meetings (js/clusters.js MEET; setMeet: benchmarks)
+let MEET = 40;         // ticks between meetings (js/clusters.js MEET; setMeet: benchmarks)
 const RANGE = 256;     // ids (and creation numbers) in one range
 const DYN_RANGE = 4;   // dynamic item ids (map items, js/blocks.js) in one range: rare, and the item list skips the unused ones
 const HOUR = 1200 / 24;
