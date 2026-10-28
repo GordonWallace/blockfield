@@ -22,10 +22,10 @@ module.exports = async (pg) => {
     const ex = BF.active.extras().map(k => { const v = BF.worldgen.villagesNear(p.x, p.z, 1400).find(v => Math.round(v.x) + "," + Math.round(v.z) === k); return { k, d: v ? Math.round(ed(v, p.x, p.z)) : -1, active: BF.villageSim.isActive(k) }; });
     return { n: BF.villageSim.count(), ex, text: BF.active.text(), log: BF.active.log().map(e => e.text), glog: BF.glog.recent(5000).filter(e => e.k === "budget").map(e => e.l + " " + e.x) };
   });
-  ok("forced high: more villages join over time, one per decision", grew && up.n >= base.n + 2 && up.ex.every(e => e.active), up);
+  ok("forced high: more villages join over time (up to 3 a decision)", grew && up.n >= base.n + 2 && up.ex.every(e => e.active), up);
   ok("nearest first: each extra is no nearer than the one before it", up.ex.every((e, i) => i === 0 || e.d >= up.ex[i - 1].d - 1), up.ex);
   ok("the game log has an INFO line for each village that joined", up.glog.filter(l => /^INFO .*joins the simulated set/.test(l)).length >= up.ex.length, up.glog);
-  ok("the pause menu's line counts them", new RegExp("^Simulated villages: " + up.n + " \\(budget 1000%\\)$").test(up.text), up.text);
+  ok("the pause menu's line counts them", new RegExp("^Distant villages: " + up.n + " simulated \\(up to 1000% of each second\\)$").test(up.text), up.text);
   // an extra loads like any other village: its villagers come out (the planet's chunks take a while)
   const first = up.ex[0].k;
   const people = await wait(k => { const r = BF.mobs.villages.get(k); return !!(r && r.members && r.members.some(m => m.type === "villager")); }, first, 150000);
@@ -60,5 +60,5 @@ module.exports = async (pg) => {
   // 3. off: the minimum only, and the setting is logged
   await lib.sim(pg, () => BF.active.set({ on: false }));
   const off = await lib.sim(pg, () => ({ text: BF.active.text(), log: BF.glog.recent(5000).filter(e => e.k === "budget").map(e => e.x).slice(-1)[0] }));
-  ok("turned off: logged, and the menu says so", /budget off\)$/.test(off.text) && /off/.test(off.log), off);
+  ok("turned off: logged, and the menu says so", /\(off\)$/.test(off.text) && /off/.test(off.log), off);
 };

@@ -10,6 +10,7 @@ By default the game starts none: the simulation runs on its one thread. Region w
 
 - `./run.sh --workers <n>` (or `run.cmd --workers <n>`) sets the number for the [[page:world-server]], counting the simulation's own thread: `--workers 4` starts 3 more. `--workers 1` (the default) is none.
 - In the browser, adding `?workers=<n>` to the game's address does the same for that visit.
+- The pause menu's **Distant villages** panel has a **Cluster workers** line: *1 (clusters off)* (the default for now), *Automatic*, or 2 to 16. *Automatic* is one worker per performance core, and the line shows the number it would use. The world server works it out for its own computer: Apple's performance cores on a Mac, the performance cores on an Intel hybrid chip under Linux, and the physical cores elsewhere (half the logical CPUs on Windows). In a browser it guesses half the CPUs the browser reports. More than one worker splits the world's clusters (below) between them. The setting applies from the next world you start. `--workers` on the command line, or `?workers=` in the address, overrides it, and the line then says so. Each change is an INFO line in the [[page:game-log]].
 - The browser needs the page served with the headers that allow shared memory (`./run.sh` and its debug server send them). A page opened as a file, or served by another web server, runs on one worker, and F3 says why.
 
 ## When it splits

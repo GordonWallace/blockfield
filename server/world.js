@@ -29,6 +29,8 @@
 //   { stop() -> Promise (saves every world), status(), http(req, res, path) -> true when it answered (/saves/...) }
 "use strict";
 const { Worker } = require("worker_threads");
+const os = require("os");
+const { perfCores } = require("./cores.js");
 const path = require("path"), fs = require("fs"), v8 = require("v8");
 const WS = require("./ws.js"), IDB = require("./idb.js"), SaveFile = require("../js/savefile.js");
 
@@ -79,11 +81,12 @@ class Sim {
   constructor(srv) {
     this.n = nextSim++; this.srv = srv; this.id = null; this.name = null; this.ready = false; this.dead = false; this.crashed = false;
     this.waits = {}; this.onReady = []; this.early = []; this.played = false;
-    this.w = new Worker(SIMTHREAD, { workerData: { saves: srv.saves, build: srv.build, coarse: srv.coarse } });   // (coarse: --coarse on|off, js/gameopts.js)
+    this.w = new Worker(SIMTHREAD, { workerData: { saves: srv.saves, build: srv.build, coarse: srv.coarse, memMB: Math.round(os.totalmem() / 1048576) } });   // (coarse: --coarse on|off, js/gameopts.js; memMB: the Distant villages' automatic memory limit, js/active.js)
     this.w.on("message", m => srv.fromSim(this, m));
     this.w.on("error", e => srv.simStopped(this, "it failed: " + (e && e.stack || e)));
     this.w.on("exit", code => srv.simStopped(this, "it exited (code " + code + ")"));
-    this.post({ boot: { three: null, workers: srv.workers, split: srv.split, verify: srv.verify } });   // (region workers per world: js/rplay.js)
+    const p = srv.plan(); this.workers = p.workers;   // (region workers per world: js/rplay.js; the command line's, else the page's Cluster workers setting)
+    this.post({ boot: { three: null, workers: p.workers, split: p.split, kind: p.kind, verify: srv.verify } });
   }
   post(m, transfer) { if (!this.dead) this.w.postMessage(m, transfer || []); }
   // a server request answered by the thread's {server: kind} (one at a time per kind); wait() only waits for it
@@ -112,6 +115,13 @@ function start(o) {
   // follower still replays every tick on its own copy, about a core each, and the split hasn't paid; clusters, r15-39b, take over)
   const workers = o.workers > 0 ? Math.floor(o.workers) : 1;
   const srv = { saves: o.saves, build: o.build || null, coarse: o.coarse === "on" || o.coarse === "off" ? o.coarse : null, workers, split: o.split || null, verify: o.verify || 0, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
+  // The page's Cluster workers setting (js/simhost.js workers: {workers: {n: "auto" | N}} before its boot, and again when the player changes
+  // it): the worker count for the worlds started from then on, clusters split over them (spec r15-39b) when more than one. --workers on
+  // the command line wins (benchmarks and tests).
+  srv.cli = o.workers > 0;
+  srv.pageWorkers = null;   // {n, setting}
+  srv.plan = () => (srv.cli || !srv.pageWorkers ? { workers: srv.workers, split: srv.split, kind: srv.kind || null } :
+    srv.pageWorkers.n > 1 ? { workers: srv.pageWorkers.n, split: srv.split || "always", kind: "clusters" } : { workers: 1, split: null, kind: null });
   const debug = o.debug || null;
   const fresh = () => { const s = srv.spare || new Sim(srv); srv.spare = null; return s; };
   const warm = () => { if (!srv.spare && !srv.stopping) srv.spare = new Sim(srv); };   // the next page's thread, loading while nobody waits
@@ -161,7 +171,7 @@ function start(o) {
     srv.page = null; srv.feedAck = null; srv.iconsAsked = false; srv.tests = []; srv.budget = null;
     say("a page connected");
     const h = srv.held;
-    ws.send(JSON.stringify({ hello: { server: "blockfield", version: o.version || null, threads: srv.workers, held: h ? { id: h.id, name: h.name } : null } }));   // threads: a world's simulation threads (region workers, r15-39)
+    ws.send(JSON.stringify({ hello: { server: "blockfield", version: o.version || null, threads: srv.plan().workers, cores: perfCores(), fixed: srv.cli ? srv.workers : null, held: h ? { id: h.id, name: h.name } : null } }));   // threads: a world's simulation threads (region workers, r15-39); cores: the Cluster workers' Automatic count (server/cores.js); fixed: --workers
     ws.on("message", (data, binary) => { try { binary ? fromPagePacket(packetIn(data)) : fromPageText(JSON.parse(data.toString("utf8"))); } catch (e) { say("a bad message from the page: " + e.message); } });
     ws.on("close", (code, reason) => {
       if (srv.client !== ws) return;
@@ -179,6 +189,7 @@ function start(o) {
       warm();
       return;
     }
+    if (m.workers && typeof m.workers === "object") { pageWorkers(m.workers); return; }   // (not {auto, workers: N}: an automated browser's)
     if (m.saves) { saves(m.saves).then(r => toPage({ saves: Object.assign({ rid: m.saves.rid }, r) }), e => toPage({ saves: { rid: m.saves.rid, ok: false, why: String(e && e.message || e) } })); return; }
     if (m.feedPage) { srv.page = m.feedPage; return; }
     if (m.feedIcons) {
@@ -230,6 +241,20 @@ function start(o) {
       if (q.quit && q.id && srv.active.id === q.id) { say("world " + JSON.stringify(srv.active.name) + " quit to the title screen"); srv.active.id = null; srv.active.name = null; }
     }
     if (srv.active) srv.active.post(p, p.b ? [p.b] : []);
+  }
+  // the page's Cluster workers setting: for the worlds started from now on (the spare thread, booted with the old count, is replaced)
+  function pageWorkers(w) {
+    const auto = w.n === "auto", n = auto ? perfCores().n : Math.max(1, Math.min(64, Math.floor(+w.n) || 1));
+    const was = srv.plan().workers;
+    srv.pageWorkers = { n, setting: auto ? "auto" : n };
+    if (srv.cli) { if (w.changed) logIn(srv.active, "Cluster workers setting " + (auto ? "Automatic (" + n + ")" : n) + " not used: the world server was started with --workers " + srv.workers, "WARN"); return; }
+    const now = srv.plan().workers;
+    if (srv.spare && srv.spare.workers !== now) { srv.spare.kill(); srv.spare = null; warm(); }
+    if (now !== was || w.changed) {
+      const c = perfCores();
+      say("cluster workers for the next worlds: " + now + (auto ? " (automatic: " + c.n + " " + c.how + ")" : ""));
+      logIn(srv.active, "Cluster workers from the next world started: " + (now > 1 ? now + ", the clusters split over them" : "1 (clusters off)") + (auto ? " (Automatic: " + c.n + " " + c.how + " on this machine)" : ""));
+    }
   }
   // a held world's thread goes once its save (from the page closing) is done
   function letGo(s) { if (s.detachedDone) s.kill(); else s.wait("detached", 30000).then(() => s.kill()); }

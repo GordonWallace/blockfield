@@ -344,7 +344,7 @@
     <div class="card"><h3>Frame rate</h3><div class="big" id="c-fps">-</div><div class="sub" id="c-calls"></div><canvas class="spark" id="s-fps"></canvas></div>
     <div class="card" id="c-perf" title="Villager-seconds of game time simulated per real second (js/perf.js): speed times villagers. The split is ms per simulation step by part; streaming is per frame, spread over its steps"><h3>Performance <span class="sub" id="c-perf-st"></span></h3>
       <div class="big" id="c-vss">-</div><div class="sub" id="c-perf-ms"></div><div class="psplit" id="c-split"></div><canvas class="spark" id="s-vss"></canvas></div>
-    <div class="card" id="c-budgetcard" title="Simulation budget (js/active.js, spec r15-34): villages beyond the nearest four are simulated while the simulation uses less than this share of each real second; over it for 10 s, the farthest extra unloads with the countdown"><h3>Simulation budget <span class="sub" id="c-budget-st"></span></h3>
+    <div class="card" id="c-budgetcard" title="Distant villages (js/active.js, spec r15-34, the pause menu's settings): villages beyond the nearest four are simulated, nearest first, while the simulation needs less than this share of each real second at 1x, within the distance and memory limits; over it for 10 s, the farthest extra unloads with the countdown"><h3>Simulation budget <span class="sub" id="c-budget-st"></span></h3>
       <div class="big" id="c-budget">-</div><div class="sub" id="c-budget-sub"></div><div class="bar"><i id="b-budget"></i></div><div class="sub" id="c-budget-ex"></div><div class="sub" id="c-budget-log" style="margin-top:6px;max-height:110px;overflow:auto"></div></div>
     <div class="card" id="c-reqcard" title="The request queue (js/requests.js, spec r15-17): requests applied and refused, and world writes still made directly (by module) until the systems are converted"><h3>Requests</h3>
       <div class="big" id="c-req">-</div><div class="sub" id="c-req-sub"></div><div class="psplit" id="c-direct"></div></div>
@@ -897,7 +897,7 @@ function renderBudget(b) {
   $("c-budget-st").textContent = on ? "budget " + pc(b.budget) : "off";
   const ex = b.extra != null ? b.extra : b.extras.length;
   $("c-budget").innerHTML = `${b.villages} <small>${b.villages === 1 ? "village" : "villages"} simulated (${b.villages - ex} nearest + ${ex} extra)</small>`;
-  $("c-budget-sub").textContent = `simulation took ${pc(b.used)} of real time` + (on ? ` (limit ${pc(b.budget)})` : "") + ` · ${b.fps} fps` + (on ? ` · ${b.over ? "over for " + b.over + " s" : "under for " + b.under + " s"}` : "");
+  $("c-budget-sub").textContent = `simulation needs ${pc(b.used)} of each second at 1x` + (on ? ` (limit ${pc(b.budget)}${b.reach > 0 ? ", within " + b.reach + " blocks" : ""}, memory ${b.memMB} MB)` : "") + ` · ${b.fps} fps` + (on ? ` · ${b.over ? "over for " + b.over + " s" : "under for " + b.under + " s"}` : "");
   $("b-budget").style.width = Math.min(100, Math.round(on ? b.used / b.budget * 100 : 0)) + "%";
   $("c-budget-ex").textContent = b.extras.length ? "Extra: " + b.extras.map(e => `${e.name} (${e.d} blocks)`).join(", ") : "No extra villages";
   $("c-budget-log").innerHTML = b.log.slice().reverse().map(e => `<div>day ${e.day.toFixed(2)} · ${esc(e.text)}</div>`).join("");

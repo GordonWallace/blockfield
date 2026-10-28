@@ -18,17 +18,24 @@ A running village keeps the terrain of its area and 16 blocks around it loaded a
 On the [[page:the-planet|planet]] these distances are measured on the planet itself, across the edges between the cube's faces. A villager who walks over an edge keeps its ground loaded on the far side, and a caravan's road is kept loaded the whole way, whichever faces it crosses. Villages always sit several hundred blocks from a face edge (see [[page:villages]]), so the 200 and 216 block limits are always reached on the village's own face.
 
 ## More villages when the computer has time to spare
-The game measures how much of each real second the simulation takes. The pause menu's **Simulated villages** button shows how many villages are running and the budget, for example "Simulated villages: 6 (budget 40%)". Click it to choose 20%, 40% (the default), 60%, 80% or off; the choice is remembered.
+Beyond the nearest villages, the game keeps adding villages, nearest first, as long as the simulation keeps up at normal speed. The pause menu's **Distant villages** button shows how many villages are running, for example "Distant villages: 14 simulated (up to 80% of each second)". Click it to open the settings. Click a line to move it to its next choice. Your choices are remembered.
 
-- If the simulation has used less than the budget for 10 seconds in a row, the next nearest village that is not running yet, up to 1000 blocks away, starts running too. It loads exactly as a nearby village does, and its villagers come out and carry on with their day. A village is only added if the time it is expected to take still fits in the budget.
-- If the simulation has used more than the budget for 10 seconds in a row, the farthest of these extra villages stops, through the usual countdown below, so its villagers finish their tasks first. It is not picked again for 5 minutes.
+- **Villages**: *Automatic* (the default) runs as many villages as your computer can at normal speed, nearest first. *Nearest only* keeps just the nearest villages from the rules above.
+- **Time limit**: the most of each real second the simulation may take. *Automatic* (the default) is 80% when the simulation has a thread of its own (the [[page:world-server]] or a worker in the browser) and 40% when it runs in the page, which also has to draw the frames. You can also pick 20%, 40%, 60%, 80% or 100%.
+- **Distance limit**: *None* (the default), or 500, 1000, 2000, 4000 or 8000 blocks. With no limit, the game looks farther out whenever the nearer villages are all running.
+- **Memory limit**: the most memory the extra villages' terrain may take between them (a village holds about 5 to 7 MB). *Automatic* (the default) is a quarter of the computer's memory, between 500 MB and 8000 MB (at most 2000 MB in a browser). You can also pick 250 MB up to 8000 MB.
+- **Cluster workers**: see [[page:several-cores]]. This one applies from the next world you start; the others apply at once.
+
+The time limit is measured as the time the simulation would need at normal speed, so fast-forwarding doesn't push villages out: the set stays the one your computer runs at 1x, and fast-forward just runs slower than asked if it doesn't fit.
+
+- If the simulation has needed less than the limit for 10 seconds in a row, the next nearest village that is not running yet starts running too. If there is room for several, up to 3 join at once. A village loads exactly as a nearby village does, and its villagers come out and carry on with their day. Villages are only added if the time they are expected to take still fits within the limit.
+- If the simulation has needed more than the limit for 10 seconds in a row, the farthest of these extra villages stops, through the usual countdown below, so its villagers finish their tasks first. It is not picked again for 5 minutes.
 - Nothing is stopped within 60 seconds of a village being added, and no village is added while the game runs under 30 frames a second at normal speed. This keeps the set from flickering.
-- The extra villages' terrain may take up at most 500 MB of memory between them (a village holds about 5 to 7 MB).
-- An extra village more than 1000 blocks from you stops the same way.
-- The budget is per real second, so when you fast-forward each village costs more of it and fewer extra villages fit. Speed and the number of villages trade one for one. On a slow computer the game never runs fewer villages than the minimum rules above.
-- Extra villages do not count toward the safety valve's limits below. While any are running, the budget sheds them instead of the safety valve stopping villages.
+- An extra village beyond the distance limit stops the same way.
+- On a slow computer the game never runs fewer villages than the minimum rules above.
+- Extra villages do not count toward the safety valve's limits below. While any are running, the limit sheds them instead of the safety valve stopping villages.
 
-Each village that joins or leaves for the budget, with the reason, is an INFO line in the world's [[page:game-log]] (kind *budget*). The debug screen's Simulation budget card shows how many villages are simulated (the nearest ones the rule above keeps, plus the extras), the share of real time the simulation took against the budget's limit, the extra villages and the latest decisions.
+Each change to these settings, and each village that joins or leaves, with the reason, is an INFO line in the world's [[page:game-log]] (kind *budget*). So is reaching the memory limit or running out of villages within reach. The debug screen's Simulation budget card shows how many villages are simulated (the nearest ones the rule above keeps, plus the extras), the share of each second the simulation needs at normal speed against the limit, the extra villages and the latest decisions.
 
 ## The countdown before a village stops
 When a village would stop, because you moved away, because other villages pushed it out of the nearest four, or because the simulation went over its budget, it does not stop at once. It counts down.

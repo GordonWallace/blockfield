@@ -137,7 +137,7 @@ function initSim() {
 // settings: what the page's start screen and options give: villages, biomeScale, monsters, gameMode, viewDist (chunks, default 8),
 // at ("spawn" or "village": the player moves to the nearest village before the first tick; default "spawn"), extra (measuring: that
 // many more villages simulated, the nearest, js/active.js fixed), reach (blocks: how far those may be, default 4000), memMB (their chunks'
-// memory limit, default js/active.js's 500).
+// memory limit, default 500).
 function headless(o) {
   o = o || {};
   const s = o.settings || {};
@@ -147,8 +147,8 @@ function headless(o) {
   if (BF.gameOpts && s.coarse != null) BF.gameOpts.override(s.coarse === "on" || s.coarse === true ? true : s.coarse === "off" || s.coarse === false ? false : null);   // --coarse (js/gameopts.js)
   if (o.save) BF.save.restore(o.save, o.save.meta || null);
   else BF.newWorld(o.seed != null ? +o.seed : 1337, { villages: s.villages, biomeScale: s.biomeScale, monsters: s.monsters, gameMode: s.gameMode });
-  // the nearest n villages simulated besides the minimum, up to reach blocks away (default 4000), within memMB of chunks (default 500: js/active.js)
-  if (s.extra > 0) BF.active.set({ on: true, fixed: s.extra | 0, reach: s.reach > 0 ? +s.reach : 4000, ...(s.memMB > 0 ? { memMB: +s.memMB } : {}) });
+  // the nearest n villages simulated besides the minimum, up to reach blocks away (default 4000), within memMB of chunks (default 500)
+  if (s.extra > 0) BF.active.set({ on: true, fixed: s.extra | 0, reach: s.reach > 0 ? +s.reach : 4000, memMB: s.memMB > 0 ? +s.memMB : 500 });   // (500: as before the Distant villages settings' automatic memory, so runs compare)
   const village = !o.save && s.at === "village" ? toVillage() : null;
   const chunks = settle();
   BF.glog.log("INFO", "headless", "Headless simulation booted: " + (o.save ? "a save" : "seed " + BF.state.seed) +
