@@ -48,6 +48,7 @@ const C = () => BF.ctick;
 // every exchange by what it is for (stats().x): how many, ms in all, ms of it waiting at the barrier for the other workers
 const X = {};
 function xchange(tag, msg) {
+  if (CW.preExchange) CW.preExchange();   // (play: the leader's journal out first, js/rplay.js)
   const L = CW.link, t0 = now(), w0 = L.waitMs, all = L.exchange(msg), x = X[tag] || (X[tag] = { n: 0, ms: 0, wait: 0 });
   x.n++; x.ms += now() - t0; x.wait += L.waitMs - w0;
   return all;

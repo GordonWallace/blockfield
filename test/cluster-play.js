@@ -20,8 +20,9 @@ async function server(args) {
   const game = await freePort(), debug = await freePort();
   const srv = cp.spawn(process.execPath, ['debug/server.js', '--game', String(game), '--debug', String(debug)].concat(args || []), { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   srv.out = '';
-  srv.stdout.on('data', d => { srv.out += d; });
-  srv.stderr.on('data', d => { srv.out += d; });
+  const stopped = () => { if (/the simulation stopped/.test(srv.out) && !srv.told) { srv.told = true; console.log('FAIL the simulation stopped; server output (last 8000):\n' + srv.out.replace(/^\[builder\].*\n/gm, '').slice(-8000)); process.exit(1); } };
+  srv.stdout.on('data', d => { srv.out += d; stopped(); });
+  srv.stderr.on('data', d => { srv.out += d; stopped(); });
   await new Promise((res, rej) => {
     const t = setTimeout(() => rej(new Error('debug/server.js did not start: ' + srv.out)), 20000);
     const poll = setInterval(() => { if (/listening|serving|http:\/\//i.test(srv.out)) { clearInterval(poll); clearTimeout(t); res(); } }, 200);
@@ -60,10 +61,11 @@ const run = async (pg, minutes) => {
   await pg.evaluate(() => BF.warp.set(0));
 };
 
+let S = null;
 (async () => {
   const b = await chromium.launch();
   const saves = fs.mkdtempSync(path.join(os.tmpdir(), 'bf-cp-'));
-  const S = await server(['--test', '--saves', saves, '--workers', '3', '--split', 'always', '--clusters', '--verify', '100']);
+  S = await server(['--test', '--saves', saves, '--workers', '3', '--split', 'always', '--clusters', '--verify', '100']);
   const pg = await open(b, S.url + '?sim=server&workers=3');
   check(await pg.evaluate(() => BF.simHost.mode === 'server'), 'the page is the world server\'s client');
   const r = await pg.evaluate(async seed => {
@@ -111,4 +113,4 @@ const run = async (pg, minutes) => {
   await b.close();
   console.log(fails ? `${fails} FAILED` : 'all ok');
   process.exit(fails ? 1 : 0);
-})().catch(e => { console.error(e); process.exit(1); });
+})().catch(e => { console.error(e); if (S) console.error('server output (last 6000):\n' + S.srv.out.slice(-6000)); process.exit(1); });

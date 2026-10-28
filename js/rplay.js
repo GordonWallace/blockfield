@@ -52,6 +52,9 @@ function clusterOn(sh, me, n, link, verify) {
   BF.ctick.only = null; BF.ctick.on = true; BF.ctick.order = "tick";
   BF.cworkers.verify = verify > 0 ? Math.max(1, Math.round(verify / BF.ctick.MEET)) : 0;
   BF.cworkers.setup({ n, me, link, claims: sh.claims, partial: true });
+  // (an exchange between ticks, a chunk unloading with mobs in it: the leader's journal must be out first, or the followers never get
+  // the op that brings them to it)
+  BF.cworkers.preExchange = me === 0 ? flush : null;
 }
 function setup(o) {
   const cores = Math.max(1, o.cores | 0 || 2);
