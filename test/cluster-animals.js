@@ -56,7 +56,7 @@ function child() {
   process.on('message', msg => {
     if (msg.do === 'interval') {
       BF.boot.stream();
-      if (off) for (let t = 0; t < 20; t++) BF.simStep(BF.warp.TICK); else C.interval(BF.warp.TICK);
+      if (off) for (let t = 0; t < C.MEET; t++) BF.simStep(BF.warp.TICK); else C.interval(BF.warp.TICK);
       process.send({ parts: BF.stateHash.parts(), herds: H.herds.size, recs: H.records.size, owners: owners(), errors: errors.splice(0) });
     } else if (msg.do === 'end') process.send({ herds0, herds1: herdText(), centres: centres() }, () => process.exit(0));
   });
