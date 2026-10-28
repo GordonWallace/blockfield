@@ -560,6 +560,21 @@ function onSet(x, y, z, old, id) {
     recs.set(k, h); h.scatter = false; loaded.set(k, h); loadedVer++;
   }
 }
+// Another worker's cell, at a meeting (js/cworkers.js, without setBlock): flowers, and homes placed or broken there. Only the home's
+// record follows the block here (in loaded while its chunk is); its counts and its bees come with its group's table (tables apply), so
+// nothing is rehomed or drawn from a random stream. (Without this, a home broken on its group's worker stayed in the others' records and
+// one placed there was never in their loaded: the bees hash part differed, and so did the homes a group ran after it changed workers.)
+function onReplayed(x, y, z, old, id) {
+  if (isFlower(old)) delFlower(x, y, z);
+  if (isFlower(id)) addFlower(x, y, z);
+  const k = pk(x, y, z);
+  if (isHome(old) && !isHome(id)) { recs.delete(k); if (loaded.delete(k)) loadedVer++; }
+  else if (isHome(id) && !isHome(old)) {
+    let h = recs.get(k);
+    if (!h) { h = { x, y, z, kind: id === NEST ? "nest" : "hive", bees: 0, honey: 0, day: today(), out: 0, rest: [], emT: 0, angry: 0, fl: null, flT: -1e9, scatter: false }; recs.set(k, h); }
+    loaded.set(k, h); loadedVer++;
+  }
+}
 // The planet: bee b, now belonging to home o, flies on in o's frame (a home on another face: its position and heading turned with it,
 // its errand dropped, since its landing spot was in the old frame).
 function toFrameOf(b, o) {
@@ -639,7 +654,9 @@ function tables() {
     },
     apply(gk, o) {
       if (!o) return;
-      for (const h of o.homes || []) { const k = pk(h.x, h.y, h.z), was = recs.get(k); if (was) Object.assign(was, h); else recs.set(k, h); }
+      const keep = new Set();
+      for (const h of o.homes || []) { const k = pk(h.x, h.y, h.z), was = recs.get(k); keep.add(k); if (was) Object.assign(was, h); else recs.set(k, h); }
+      for (const [k, h] of recs) if (!keep.has(k) && homeOf(gk)(h)) { recs.delete(k); if (loaded.delete(k)) { loadedVer++; BF.glog && BF.glog.log("INFO", "bees", "Cluster workers: the home at " + k + " was broken on its group's worker"); } }   // (broken there)
       for (let i = bees.length - 1; i >= 0; i--) if (beeOf(gk)(bees[i])) { bees[i].gone = true; bees.splice(i, 1); }
       byGroup = null;
       for (const e of o.out || []) {
@@ -658,7 +675,7 @@ function hook() {
   tables();
   W().onChunkLoad(scanChunk);
   W().onChunkUnload(unloadChunk);
-  if (W().onReplayedSet) W().onReplayedSet((x, y, z, old, id) => { if (isFlower(old)) delFlower(x, y, z); if (isFlower(id)) addFlower(x, y, z); });   // (another worker's cells, at a meeting: js/cworkers.js)
+  if (W().onReplayedSet) W().onReplayedSet(onReplayed);   // (another worker's cells, at a meeting: js/cworkers.js)
   for (const c of W().chunks.values()) scanChunk(c.cx, c.cz, c);
   if (BF.on) BF.on("blockBroken", (x, y, z, id) => {   // the player broke a home: its bees that were out sting
     if (!isHome(id) || !lastBroken || ckey(x, y, z) !== pk(lastBroken.x, lastBroken.y, lastBroken.z)) return;
@@ -673,10 +690,12 @@ function reset() {
 }
 
 // ---------------------------------------------------------------- saving
-// [x, y, z, kind (0 nest, 1 hive), bees, honey, day, ...]; bees that are out count as home.
+// [x, y, z, kind (0 nest, 1 hive), bees, honey, day, ...]; bees that are out count as home. By position (x, z, y), not in the order the
+// homes were found: with clusters on several workers, homes placed in two groups in the same interval are recorded in a different order
+// on each (the state hash's bees part is this).
 function serialize() {
   const a = [];
-  for (const h of recs.values()) a.push(h.x, h.y, h.z, h.kind === "nest" ? 0 : 1, h.bees, h.honey, h.day);
+  for (const h of [...recs.values()].sort((p, q) => p.x - q.x || p.z - q.z || p.y - q.y)) a.push(h.x, h.y, h.z, h.kind === "nest" ? 0 : 1, h.bees, h.honey, h.day);
   return a;
 }
 function deserialize(a) {

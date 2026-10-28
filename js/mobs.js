@@ -3605,6 +3605,7 @@ BF.mobs = {
       if (pon) PF.mobLap(m, st);
     }
     commitMoves();
+    if (BF.trades && BF.trades.inv.release) BF.trades.inv.release();   // (own-inventory copies kept for the others thinking, js/trading.js)
     runLaters();
     if (RW && RW.active) RW.afterThink();   // the other workers' mobs and requests (js/rworkers.js)
     // the systems after the loop, each by name (clusters, js/ctick.js: per cluster once converted, else once a tick)
