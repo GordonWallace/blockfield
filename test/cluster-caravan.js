@@ -100,7 +100,7 @@ function child() {
       const g = BF.clusters.groupOf(m.cl);
       const rows = BF.sharedTable.rows();
       process.send({ parts: BF.stateHash.parts(), tick: BF.rand.tick, stage: st.trip ? st.stage : null, cl: m.cl, inA: g === BF.clusters.groupOf('v:' + A.key), inB: g === BF.clusters.groupOf('v:' + B.key),
-        dead: !!m.dead, pinned: BF.villageSim.pins().has(tripId), rows: rows.length, stamps: rows.every(r => r.tick === BF.sharedTable.tick), tableAt: BF.sharedTable.tick,
+        dead: !!m.dead, pinned: BF.villageSim.pins().has(tripId), rows: rows.length, stamps: rows.every(r => r.tick === BF.sharedTable.tick), tableAt: BF.sharedTable.tick, meet: C.MEET,
         sold: st.trip ? st.trip.soldN : null, errors: errors.splice(0) });
     } else if (msg.do === 'text') { process.send({ text: BF.stateHash.text(msg.part) });
     } else if (msg.do === 'asks') {
@@ -175,7 +175,7 @@ async function parent() {
       if ((x.stage === 'unload' || x.stage === null) && s.unloadInA === null) s.unloadInA = x.inA;   // (the unloading round is often over within the interval)
       if (x.stage === null && s.ended === null) s.ended = n;
       if (s.ended !== null && s.unpinned === null && !x.pinned) s.unpinned = n;
-      if (!x.stamps || x.tableAt !== x.tick - 20 && x.tableAt !== x.tick) s.stamps = false;
+      if (!x.stamps || x.tableAt !== x.tick - x.meet && x.tableAt !== x.tick) s.stamps = false;
       s.rows = x.rows;
     });
     if (r.every(x => x.stage === null || x.dead) && seen.every(s => s.unpinned !== null)) break;
