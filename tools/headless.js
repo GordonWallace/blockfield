@@ -3,10 +3,11 @@
 // villager-seconds per second (js/perf.js) and the world state hash (js/statehash.js). The fast CI path, and the base of the Node
 // world server (r15-41).
 // Usage: node tools/headless.js [--seed 3] [--seconds 600] [--at village|spawn] [--villages 10] [--view 8] [--log file.log]
-//                               [--save out.json] [--load save.json] [--json] [--every s] [--workers n] [--verify ticks] [--after s] [--shuffle k] [--dump file] [--extra n] [--coarse on|off]
+//                               [--save out.json] [--load save.json] [--json] [--every s] [--workers n] [--verify ticks] [--after s] [--shuffle k] [--dump file] [--extra n] [--reach blocks] [--mem MB] [--coarse on|off]
 //                               [--ctick converted|full|a,b,c] [--cworkers n] [--partial]
 //   --at village (default): the player moves to the village nearest the spawn first, so villagers are simulated; spawn: stays there.
-//   --extra n: the n nearest other villages are simulated too, however far (js/active.js fixed set; a heavier load to measure with).
+//   --extra n: the n nearest other villages are simulated too, however far (js/active.js fixed set; a heavier load to measure with), as
+//   long as they are within --reach blocks (default 4000) and their chunks fit in --mem MB (default 500); the boot line says how many came.
 //   --coarse on|off: far villages coarse or full detail for this run, whatever the world's option (spec r15-64, js/gameopts.js).
 //   --log: the game log, one line an entry (js/logmatch.js gameLine), as the debug screen's download writes it.
 //   --save / --load: the save data as js/save.js stores it (snapshot / restore), as JSON. --every: print the hash every s game seconds.
@@ -88,11 +89,12 @@ async function main(argv) {
   const t0 = performance.now();
   const h = BF.boot.headless({
     seed, save: a.load ? JSON.parse(fs.readFileSync(a.load, 'utf8')) : null,
-    settings: { at: a.at || 'village', villages: a.villages != null ? +a.villages : undefined, viewDist: a.view != null ? +a.view : undefined, extra: a.extra != null ? +a.extra : undefined, coarse: a.coarse },
+    settings: { at: a.at || 'village', villages: a.villages != null ? +a.villages : undefined, viewDist: a.view != null ? +a.view : undefined, extra: a.extra != null ? +a.extra : undefined, reach: a.reach != null ? +a.reach : undefined, memMB: a.mem != null ? +a.mem : undefined, coarse: a.coarse },
   });
   const p = BF.player.position;
   say(`booted ${a.load ? a.load : 'seed ' + BF.state.seed} in ${((performance.now() - t0) / 1000).toFixed(1)} s: ${BF.world.chunks.size} chunks, ` +
     `${BF.mobs.list.length} mobs, player at ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}${h.village ? ' (nearest village)' : ''}`);
+  if (a.extra != null) { const o = BF.active.opts(), n = BF.active.extras().length; say(`extra villages: ${n} of the ${a.extra} asked` + (n < +a.extra ? ` (the rest are over ${o.reach} blocks away or past the ${o.memMB} MB chunk limit: --reach, --mem)` : '')); }
   const H0 = h.stateHash();
   say(`hash at the start ${H0.hash}`);
   // --workers n (spec r15-39): n - 1 followers (server/regionthread.js) boot the same world from this one's river network, then every
@@ -110,7 +112,7 @@ async function main(argv) {
     pool = require('../server/regionthread.js').spawn(ncw);
     const rivers = BF.worldgen.riverState();
     const boots = await Promise.all(pool.list.map(f => f.ask({ boot: { seed, rivers,
-      settings: { at: a.at || 'village', villages: a.villages != null ? +a.villages : undefined, viewDist: a.view != null ? +a.view : undefined, extra: a.extra != null ? +a.extra : undefined } } })));
+      settings: { at: a.at || 'village', villages: a.villages != null ? +a.villages : undefined, viewDist: a.view != null ? +a.view : undefined, extra: a.extra != null ? +a.extra : undefined, reach: a.reach != null ? +a.reach : undefined, memMB: a.mem != null ? +a.mem : undefined } } })));
     for (const [i, b] of boots.entries()) if (b.booted !== H0.hash) throw new Error(`cluster worker ${i + 1} booted a different world (${b.booted}, not ${H0.hash})`);
     const shared = BF.cworkers.makeShared(ncw), order = a.order || 'cluster';
     await Promise.all(pool.list.map(f => f.ask({ cstart: { shared, me: f.me, n: ncw, only, order, shuffle: +a.shuffle || 0, pull: !!a.pull, partial: !!a.partial } })));
@@ -124,7 +126,7 @@ async function main(argv) {
     pool = require('../server/regionthread.js').spawn(nw);
     const rivers = BF.worldgen.riverState();
     const boots = await Promise.all(pool.list.map(f => f.ask({ boot: { seed, save: a.load ? JSON.parse(fs.readFileSync(a.load, 'utf8')) : null, rivers,
-      settings: { at: a.at || 'village', villages: a.villages != null ? +a.villages : undefined, viewDist: a.view != null ? +a.view : undefined, extra: a.extra != null ? +a.extra : undefined, coarse: a.coarse } } })));
+      settings: { at: a.at || 'village', villages: a.villages != null ? +a.villages : undefined, viewDist: a.view != null ? +a.view : undefined, extra: a.extra != null ? +a.extra : undefined, reach: a.reach != null ? +a.reach : undefined, memMB: a.mem != null ? +a.mem : undefined, coarse: a.coarse } } })));
     for (const [i, b] of boots.entries()) if (b.booted !== H0.hash) throw new Error(`region worker ${i + 1} booted a different world (${b.booted}, not ${H0.hash})`);
     if (+a.after > 0) {   // --after s: every copy plays s game seconds on its own first, then the split starts mid-run (as it does in play)
       const t = Math.round(+a.after / BF.warp.TICK), wait = pool.list.map(f => f.ask({ ticks: t }));

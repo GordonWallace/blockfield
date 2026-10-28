@@ -226,19 +226,20 @@ let targets = new Map(), targetsDirty = true;   // villagers and golems by chunk
 // the areas in force: the world's, or with clusters the running cluster's (its own chunks; worked out at its first use in an interval)
 function areasNow() {
   if (!clustered()) { if (!areaList.length) rebuildAreas(); return { list: areaList, of: areaOf }; }
-  return BF.ctick.local("wildlife.areas", () => buildAreas(ownChunk));
+  return BF.ctick.local("wildlife.areas", () => { const own = BF.world.clusterCells.groupChunks(BF.ctick.cur.key); return buildAreas(new Set(own.map(c => c.key)), own); });
 }
 function rebuildAreas() { const o = buildAreas(null); areaList = o.list; areaOf = o.of; }
-function buildAreas(mine) {
+// (mine: with clusters the running cluster's chunk keys, and own those chunks in world.chunks order)
+function buildAreas(mine, own) {
   const areaList = [], areaOf = new Map();
   const W = BF.world, VS = BF.villageSim;
   if (VS && VS.areas) for (const a of VS.areas()) {
     const idx = areaList.length, A = { kind: a.kind, key: a.key, n: 0, h: 0, cap: 0 };
-    for (const k of a.keys) if (!areaOf.has(k) && W.chunks.has(k) && (!mine || mine(k))) { areaOf.set(k, idx); A.n++; }
+    for (const k of a.keys) if (!areaOf.has(k) && W.chunks.has(k) && (!mine || mine.has(k))) { areaOf.set(k, idx); A.n++; }
     if (A.n) areaList.push(A); else continue;
   }
   const P = { kind: "player", key: "player", n: 0, h: 0, cap: 0 }, pi = areaList.length;
-  for (const k of W.chunks.keys()) if (!areaOf.has(k) && (!mine || mine(k))) { areaOf.set(k, pi); P.n++; }
+  for (const k of own ? own.map(c => c.key) : W.chunks.keys()) if (!areaOf.has(k)) { areaOf.set(k, pi); P.n++; }
   areaList.push(P);
   // monsters switched off in the world (js/gameopts.js): the cap shrinks by their share of the spawn weights and only monsters that are on
   // count, so turning creepers off leaves zombies' numbers as they were
@@ -250,7 +251,7 @@ function buildAreas(mine) {
 function rebuildTargets() {
   targets = new Map();
   const f = BF.ctick && BF.ctick.on ? BF.ctick.filter : null;
-  for (const m of BF.mobs.list) {
+  for (const m of (f && BF.ctick.mobs()) || BF.mobs.list) {   // (clusters: the running group's own, js/ctick.js mobs)
     if (!live(m) || !(m.type === "villager" || (m.def && m.def.golem)) || (f && !f(m))) continue;
     const k = ck(m.position.x, m.position.z), a = targets.get(k);
     if (a) a.push(m); else targets.set(k, [m]);
@@ -362,6 +363,7 @@ function updateCluster() {
   if (toRoll.size && BF.mobs.spawning !== false) {
     let n = 0;
     for (const k of [...toRoll]) {
+      if (rolled.has(k)) { toRoll.delete(k); continue; }   // (rolled by its group on another worker: nothing left to do, whoever owns it)
       if (!ownChunk(k)) continue;
       toRoll.delete(k);
       if (!W.chunks.has(k) || rolled.has(k)) continue;

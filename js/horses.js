@@ -95,7 +95,7 @@ function newRec(o) {
   const r = BF.ids.mobRef({ hid, x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, coat: o.coat || COATS[irnd(rs, 0, 6)], mark: o.mark || MARKS[irnd(rs, 0, 4)],
     maxHp: st.hp, hp: st.hp, speed: st.speed, jump: st.jump, tamed: !!o.tamed, owner: o.owner || null, saddle: !!o.saddle, temper: 0,
     growAt: o.growAt != null ? o.growAt : null, cd: o.cd || 0, fed: null, herd: o.herd || null, lead: null, post: null, pen: o.pen || null, rider: false, mob: null, avoid: null, mate: null, cl: undefined });
-  recs.set(r.hid, r);
+  recs.set(r.hid, r); recsV++;
   return r;
 }
 // A new record's or herd's number. With the cluster tick on (js/ctick.js) it comes from the running cluster's id ranges (js/ids.js), so it
@@ -124,7 +124,7 @@ function embody(r) {
   r.t = null;
   const m = BF.mobs.spawn("horse", r.x, r.y, r.z);
   if (!m) return null;
-  m.horse = r; r.mob = m;
+  m.horse = r; r.mob = m; recsV++;
   if (m.cl !== undefined) r.cl = m.cl;   // (clusters: the record goes with its horse)
   m.kind = "horse"; m.ctl = RIDE;
   m.maxHp = r.maxHp; m.hp = clamp(r.hp, 1, r.maxHp);
@@ -144,7 +144,7 @@ function syncLook(m) {
 function store(r) {
   const m = r.mob;
   if (!m) return;
-  r.x = m.position.x; r.y = m.position.y; r.z = m.position.z; r.yaw = m.yaw; r.hp = m.hp;
+  r.x = m.position.x; r.y = m.position.y; r.z = m.position.z; r.yaw = m.yaw; r.hp = m.hp; recsV++;
 }
 function fx(m, color, n) { const V = BF.villageLife; if (V && V.particles && m.position) V.particles(m.position.x, m.position.y + m.height + 0.3, m.position.z, color, n, 0.6); }
 const isFoal = r => r.growAt != null;
@@ -416,11 +416,46 @@ function leads() {
 //    last in when the horse goes (chunk unloaded, left behind), and a record never seen out goes with where it waits;
 //  - a herd goes with the cluster its centre was in when the interval started (worked out by the first group to look at it in the interval,
 //    before any group moved it: the same in every order).
-const groupNow = (C, b) => { const k = BF.clusters.groupOf(b); return C.groups().some(g => g.key === k) ? k : null; };
+let liveG = null, liveOf = null;   // (the groups' keys, for the groups list in force)
+const groupNow = (C, b) => {
+  const gs = C.groups();
+  if (liveOf !== gs) { liveOf = gs; liveG = new Set(gs.map(g => g.key)); }
+  const k = BF.clusters.groupOf(b);
+  return liveG.has(k) ? k : null;
+};
 function recGroup(C, r) {
   const m = r.mobId != null ? BF.ids.live(r.mobId) : undefined;
   const k = m && m.cl !== undefined ? groupNow(C, m.cl) : r.cl !== undefined ? groupNow(C, r.cl) : null;
   return k != null ? k : BF.clusters.groupOf(BF.clusters.ofRegion(BF.regions.keyOf(r.x, 0, r.z)));
+}
+// The running group's records, in recs order: what testing every record with recGroup finds, without each group's pass testing them all
+// every tick. Sorted out once per meeting and again when a record comes, goes, gets or loses its horse or moves its waiting spot (recsV).
+// Between those a record's group is fixed while its horse lives (a mob's cluster changes only at meetings, js/ctick.js epoch) and it
+// stays so when the horse goes if the record is of the same group (r.cl or its spot); the other records ("loose": no horse here, or one
+// whose going would move the record) are tested at each call, as before.
+let recsV = 0, byRec = null;
+function recsOf(C) {
+  const gs = C.groups();
+  if (!byRec || byRec.ep !== C.epoch || byRec.gs !== gs || byRec.v !== recsV) {
+    byRec = { ep: C.epoch, gs, v: recsV, by: new Map(), loose: [] };
+    let i = 0;
+    for (const r of recs.values()) {
+      const m = r.mobId != null ? BF.ids.live(r.mobId) : undefined, k = m && m.cl !== undefined ? groupNow(C, m.cl) : null;
+      if (k == null) { byRec.loose.push(i++, r); continue; }
+      const kc = r.cl !== undefined ? groupNow(C, r.cl) : null;
+      const fb = kc != null ? kc : BF.clusters.groupOf(BF.clusters.ofRegion(BF.regions.keyOf(r.x, 0, r.z)));
+      if (fb !== k) { byRec.loose.push(i++, r); continue; }
+      const a = byRec.by.get(k);
+      if (a) a.push(i++, r); else byRec.by.set(k, [i++, r]);
+    }
+  }
+  const own = byRec.by.get(C.cur.key) || [], L = byRec.loose, out = [];
+  if (!L.length) { for (let i = 1; i < own.length; i += 2) out.push(own[i]); return out; }
+  for (let i = 0, j = 0; i < own.length || j < L.length;) {
+    if (j >= L.length || (i < own.length && own[i] < L[j])) { out.push(own[i + 1]); i += 2; }
+    else { if (recGroup(C, L[j + 1]) === C.cur.key) out.push(L[j + 1]); j += 2; }
+  }
+  return out;
 }
 function herdMine(C, h) {
   const at = Math.floor((BF.rand.tick - 1) / C.MEET);
@@ -439,6 +474,7 @@ function tables() {
     apply(gk, a) {
       const keep = new Set((a || []).map(e => e.hid));
       for (const r of [...recs.values()]) if (!keep.has(r.hid) && recGroup(K, r) === gk) recs.delete(r.hid);
+      recsV++;
       for (const e of a || []) {
         if (e.lead && e.lead.kind === "mob") e.lead = BF.ids.refs(e.lead);   // the holder by id again
         const old = recs.get(e.hid), r = old ? Object.assign(old, e) : BF.ids.mobRef(e);   // the same object where there is one (m.horse, key order)
@@ -467,10 +503,10 @@ function tick(dt) {
   tables();
   const C = BF.herd.cluster();
   const t = now(), P = BF.player, pp = P && P.position;
-  for (const r of recs.values()) {
-    if (C) { if (recGroup(C, r) !== C.cur.key) continue; const lm = r.mobId != null ? BF.ids.live(r.mobId) : undefined; if (lm && lm.cl !== undefined) r.cl = lm.cl; }   // (clusters: another group's)
+  for (const r of C ? recsOf(C) : recs.values()) {
+    if (C) { const lm = r.mobId != null ? BF.ids.live(r.mobId) : undefined; if (lm && lm.cl !== undefined && r.cl !== lm.cl) { r.cl = lm.cl; recsV++; } }   // (clusters: only the running group's)
     const m = r.mob;
-    if (m && m.dead) { recs.delete(r.hid); continue; }   // died: gone for good
+    if (m && m.dead) { recs.delete(r.hid); recsV++; continue; }   // died: gone for good
     if (m && m.removed) { store(r); r.t = now(); r.mob = null; if (r.rider) r.rider = false; continue; }   // chunk unloaded or left behind: it waits there
     if (m) {
       if (isFoal(r) && t >= r.growAt) { r.growAt = null; syncLook(m); }
@@ -482,8 +518,7 @@ function tick(dt) {
   if (C) back = pp && BF.herd.every(20);   // (clusters: by the tick counter)
   else { backT -= dt; back = backT <= 0 && pp; if (back) backT = 1; }
   if (back) {   // horses waiting where they were come back as soon as their chunk is loaded, wherever the player is (idea-037)
-    for (const r of recs.values()) {
-      if (C && recGroup(C, r) !== C.cur.key) continue;
+    for (const r of C ? recsOf(C) : recs.values()) {
       if (r.mob || !BF.world.isLoaded(r.x, r.z)) continue;
       const m = embody(r);
       if (m && r.rider && P && !P.vehicle && P.mount) P.mount(m, true);
@@ -706,13 +741,13 @@ function deserialize(o) {
       lead: Array.isArray(e.post) ? { kind: "post", x: e.post[0], y: e.post[1], z: e.post[2] } : e.led ? { kind: "player" } : null, post: Array.isArray(e.post) ? e.post : null,
       pen: e.pen && typeof e.pen === "object" ? e.pen : null, rider: !!e.rider, mob: null,
       avoid: e.avoid && typeof e.avoid === "object" ? e.avoid : null, mate: null, cl: undefined });   // (every field a live record has, so a reload doesn't change the record, bug-084)
-    recs.set(r.hid, r);
+    recs.set(r.hid, r); recsV++;
     nextId = Math.max(nextId, r.hid + 1);
   }
   backT = 0;
 }
 function reset() {
-  recs.clear(); herds.clear(); nextId = 1; nextHerd = 1; backT = 0;
+  recs.clear(); herds.clear(); nextId = 1; nextHerd = 1; backT = 0; recsV++;
 }
 
 BF.horses = {

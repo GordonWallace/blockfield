@@ -295,7 +295,7 @@ function scoped(h) {
   if (BF.inventory.simTick) sys("furnaceClock", () => BF.inventory.simTick(h));
   BF.world.tickParts.think();
   BF.world.tickParts.apply();
-  if (BF.regions) BF.regions.tick();
+  if (BF.regions) BF.regions.tick(mobs());   // (the running group's mobs: no other moved in its pass)
 }
 function pass(g, h) {
   if (W() && !W().pull && !W().owns(g)) { g.tick = BF.rand.tick; if (g.bases) for (const b of g.bases) clocks.set(b, g.tick); return; }   // (another worker runs it)
@@ -326,6 +326,7 @@ function step(h) {
   }
   if (due()) meetNow();
   global(h);
+  if (BF.regions) BF.regions.tick();   // (what moved between ticks; each pass then keeps its own group's mobs, js/regions.js tick(some))
   for (const g of groups) pass(g, h);
   BF.req.endTick();
   S.ticks++; H.ticks++; S.since++;
@@ -339,6 +340,7 @@ function interval(h) {
   while (BF.rand.tick % MEET !== 0) { step(h); n++; }
   if (order === "tick") { for (let t = 0; t < MEET; t++) step(h); return n + MEET; }
   if (due()) meetNow();
+  if (BF.regions) BF.regions.tick();   // (what moved between ticks, as step)
   const views = [];
   for (let t = 0; t < MEET; t++) { global(h); views.push(view()); }
   // every group in turn; on several workers each takes the next group from the shared queue when it is free (js/cworkers.js claim)
