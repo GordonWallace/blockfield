@@ -18,12 +18,12 @@
 // so the page generates and lights its chunks itself and only the edits cross. The page owns the player's body (position, look,
 // health, hunger: player messages); the simulation sends back what it does to the player (self: hurts, inventory, food, teleports).
 // Game log: INFO "protocol" when the in-page transport connects and once a game hour while the debug overlay or screen is on (bytes per
-// second by type), ERROR for a message the other end can't take (bad packet, unknown type, a failed query or encoding).
+// second by type), ERROR for a message the other end can't take (bad packet, unknown type, a failed query or encoding). INFO when the page has to draw the entities more than 250 ms behind the simulation (once a minute at most, bug-098).
 // API: BF.proto = { VERSION, TYPES, encode(msg) -> packet, decode(packet) -> msg, bytes(packet), serve(send, opts?) -> sim end, connect(send) -> client end,
 //        local: { connect(), disconnect(), on, sim, client }, worker: { connect(worker, via?) -> client, disconnect() }, host(send, opts) -> sim end (in the worker), hosted() -> it,
 //        flush(), stats(), resetStats(), check() -> {ok, diffs, ...}, mirrorHash(), simHash(keys),
 //        queries (what -> fn(args)), HOT, COLD }
-//      BF.client = the client end once connected: { world: {chunks, entities, villages, clock, getBlock(x, y, z)}, mode, request(kind, target, data) -> req,
+//      BF.client = the client end once connected: { world: {chunks, entities, villages, clock, getBlock(x, y, z), k(entity, alpha), rt, draw(dTicks, realDt), drawLag(), drawStats(); off the page an entity's prev / to / k are the drawing clock's}, mode, request(kind, target, data) -> req,
 //        query(what, args, fn), view(x, y, z, dist), speed(s, pause), save(), receive(packet), hello, player(state), worldOp(op, args, fn), meta(m),
 //        log(entries), self (the latest self fields), onEdits(chunks, full), onSelf(m), onLog(list), onEvents(list) }
 (() => {
@@ -722,11 +722,83 @@ function connect(send, mode) {
     } };
   // r15-37: how far to draw entity r from prev towards its current fields, given the warp's alpha: alpha when r changed in the latest tick
   // and prev is the tick just before; else 1 (it stood still, or several ticks went by since the last message: fast-forward).
-  world.k = (r, a) => (r.prev && r.ct === world.tick && r.ct - r.pt === 1 && typeof a === "number" ? Math.max(0, Math.min(1, a)) : 1);
+  // bug-098: with the simulation elsewhere (a worker or the world server) its ticks arrive on their own schedule, late or several at a
+  // time, and the page's alpha (its own clock) is not in step with them: mobs snapped forward and back. There the page keeps a drawing
+  // clock (world.rt, in ticks, moved on by draw() every frame) a little behind the newest tick it has, each moving entity keeps its
+  // recent states (hist: {t, hot fields}), and draw() points prev and to at the two states either side of the clock, with k how far
+  // between them (r.k). Renderers draw lerp(prev, to || r, k). In the page (rt null) the alpha rule above holds.
+  world.rt = null;
+  world.k = (r, a) => {
+    if (!r.prev) return 1;
+    if (world.rt != null) return r.k != null ? r.k : 1;
+    return r.ct === world.tick && r.ct - r.pt === 1 && typeof a === "number" ? Math.max(0, Math.min(1, a)) : 1;
+  };
+  // The drawing clock: dTicks the ticks the page's clock drew this frame (0 while frozen or paused), realDt its real seconds. It moves on
+  // at the rate the ticks have been arriving (so a simulation a little under its speed doesn't leave it waiting at the newest tick every
+  // few frames), aims `lag` ticks behind the newest (a little more than the longest recent wait for the next entities message, so the
+  // next is there before the clock gets to it), eases back to that aim, and never runs past the newest: it waits there instead of guessing.
+  const HIST_MAX = 48, CADENCE = 6;   // CADENCE: a change this few ticks after the last is drawn from it (animals idling in a pen step every 5 ticks)
+  const DRAW = { lag: 1.5, peak: 1, lastT: -1, lastAt: 0, tickMs: 50, rate: null, winT: -1, winAt: 0, frames: 0, waits: 0, toldAt: -1e9 };
+  world.draw = (dTicks, realDt) => {
+    const T = world.tick;
+    if (T < 0) { world.rt = null; return; }
+    const aim = T - DRAW.lag;
+    realDt = Math.max(0, Math.min(0.25, realDt || 0));
+    if (world.rt == null || world.rt > T + 1 || world.rt < aim - 20 - DRAW.lag) world.rt = aim;   // (a new world, a load, a long stall)
+    else if (dTicks > 0) {
+      world.rt += DRAW.rate != null ? DRAW.rate * realDt : dTicks;
+      world.rt += (aim - world.rt) * (1 - Math.exp(-realDt / 0.5));
+    }
+    DRAW.frames++;
+    if (world.rt >= T && dTicks > 0) DRAW.waits++;
+    if (world.rt > T) world.rt = T;
+    const rt = world.rt;
+    for (const r of world.entities.values()) {
+      const h = r.hist;
+      if (!h) continue;
+      let i = 0;
+      while (i + 1 < h.length && h[i + 1].t <= rt) i++;
+      if (i > 0) { h.splice(0, i); i = 0; }   // (the states before the clock's are done with)
+      if (h.length < 2 || rt >= h[h.length - 1].t) { r.prev = null; r.to = null; r.k = 1; if (h.length > 1) h.splice(0, h.length - 1); continue; }
+      const A = h[0], B = h[1];
+      r.prev = A; r.to = B === h[h.length - 1] ? null : B;   // (to null: its current fields)
+      r.k = rt <= A.t ? 0 : (rt - A.t) / (B.t - A.t);
+    }
+    return rt;
+  };
+  // the lag in ticks, the arrival rate (ticks a second), and the frames drawn / those that waited at the newest tick since the last call
+  world.drawStats = () => { const o = { lag: DRAW.lag, rate: DRAW.rate, frames: DRAW.frames, waits: DRAW.waits }; DRAW.frames = DRAW.waits = 0; return o; };
+  world.drawLag = () => DRAW.lag;
+  // each entities message: how long it was since the last one, in ticks (the larger of the ticks it moved on and the real time between
+  // them at the simulation's pace); the lag follows the peak of those, decaying slowly, within 1.5 ticks and 0.4 real seconds. And the
+  // rate the ticks arrive, measured over half a second at a time and smoothed.
+  function arrived(T) {
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now(), ck = world.clock;
+    const sp = ck && ck.achieved > 0 ? ck.achieved : ck && ck.speed > 0 ? ck.speed : 1;
+    DRAW.tickMs = 50 / Math.max(0.05, sp);
+    if (DRAW.lastT >= 0 && T > DRAW.lastT) {
+      const gap = Math.max(T - DRAW.lastT, (now - DRAW.lastAt) / DRAW.tickMs);
+      DRAW.peak = Math.max(gap, DRAW.peak * 0.97);
+      DRAW.lag = Math.max(1.5, Math.min(DRAW.peak + 0.5, Math.max(2, 400 / DRAW.tickMs)));
+      // the game log: the page drawing far behind (the ticks arriving very unevenly), at most once a minute
+      if (DRAW.lag * DRAW.tickMs > 250 && now - DRAW.toldAt > 60000) {
+        DRAW.toldAt = now;
+        glog("INFO", "The page draws the mobs " + Math.round(DRAW.lag * DRAW.tickMs) + " ms behind the simulation: its ticks arrive unevenly (up to " + Math.round(gap) + " ticks apart)");
+      }
+    }
+    if (DRAW.winT < 0 || T < DRAW.winT || now - DRAW.winAt > 3000) { DRAW.winT = T; DRAW.winAt = now; DRAW.rate = null; }
+    else if (now - DRAW.winAt >= 500) {
+      const r = (T - DRAW.winT) * 1000 / (now - DRAW.winAt);
+      DRAW.rate = DRAW.rate == null ? r : DRAW.rate + (r - DRAW.rate) * 0.3;
+      DRAW.winT = T; DRAW.winAt = now;
+    }
+    if (T !== DRAW.lastT) { DRAW.lastT = T; DRAW.lastAt = now; }
+  }
+  const snap = (r, t) => { const o = { t }; for (const f of HOT[r.kind]) o[f] = r[f]; return o; };
   world.gen = 0;   // counts hello messages: a new world (the render layers drop what they were showing)
   const C = { world, mode: mode || "in page", hello: null, lastView: null };
   const out = msg => send(encode(msg));
-  function clear() { world.chunks.clear(); world.entities.clear(); world.villages.clear(); world.clock = null; world.log = []; world.tick = -1; }
+  function clear() { world.chunks.clear(); world.entities.clear(); world.villages.clear(); world.clock = null; world.log = []; world.tick = -1; world.rt = null; DRAW.lastT = -1; DRAW.winT = -1; DRAW.rate = null; }
   const LOG_KEEP = 500;
   const ON = {
     hello(m) { C.hello = m; clear(); C.lastView = null; world.gen++; },
@@ -750,17 +822,28 @@ function connect(send, mode) {
     // from a tick's message stood still in it, so when the ticks come one by one its prev is its state at the tick before the change.
     // A change within the same tick (a request while frozen) only overwrites the current fields.
     entities(m) {
-      const T = m.tick, step = T === world.tick + 1;
+      const T = m.tick, was = world.tick, drawn = world.rt != null;
+      arrived(T);
       for (const e of m.add) world.entities.set(e.n, Object.assign({ n: e.n, kind: e.kind, prev: null, pt: null, ct: T }, e.s));
       for (const e of m.set) {
         const r = world.entities.get(e.n);
         if (!r) continue;
         if (r.ct !== T) {
-          const prev = r.prev || (r.prev = {});
-          for (const f of HOT[r.kind]) prev[f] = r[f];
-          r.pt = step ? T - 1 : r.ct; r.ct = T;
+          if (drawn) {   // off the page: its states over time (it stood still from its last change up to the last tick heard of)
+            const h = r.hist || (r.hist = [snap(r, r.ct)]), s0 = T - r.ct <= CADENCE ? r.ct : Math.max(r.ct, Math.min(was, T - 1));
+            if (s0 > h[h.length - 1].t) h.push(snap(r, s0));
+          } else {
+            const prev = r.prev || (r.prev = {});
+            for (const f of HOT[r.kind]) prev[f] = r[f];
+          }
+          r.pt = Math.max(r.ct, Math.min(was, T - 1)); r.ct = T;
         }
         Object.assign(r, e.s);
+        if (drawn) {
+          const h = r.hist, L = h[h.length - 1];
+          if (L.t === T) Object.assign(L, e.s); else h.push(snap(r, T));
+          if (h.length > HIST_MAX) h.splice(0, h.length - HIST_MAX);
+        }
       }
       for (const n of m.gone) world.entities.delete(n);
       world.tick = T;
