@@ -373,7 +373,7 @@ function afterMet() {
   if (CW.partial) fetch(BF.mobs.list);
   CW.active = false; CW.partial = false; mine = new Set(); holder = new Map();
   shadows = new Map(); recShadows = new Map();
-  RW().onTouch = null; RW().SKIP.add("prev");
+  RW().onTouch = null; plainCopies();
   note("back to one with the whole world, after " + meetings + " meetings");
 }
 function check() {
@@ -584,6 +584,10 @@ let lastGroups = new Map();
 
 // ---------------------------------------------------------------- setup and reporting
 // o: {n, me, link (js/rworkers.js attach(...))}. Every worker calls it at the same point of the same world, with the cluster tick on.
+// the coop and pen lists on village records (js/poultry.js, js/shepherd.js) go by their own tables (js/herd.js penTable), not in the
+// records' changes (they point back at the record); with region workers (js/rworkers.js) they go with the records as before
+const PENS = ["_coops", "_pens"];
+function plainCopies() { RW().SKIP.add("prev"); for (const k of PENS) RW().SKIP.delete(k); }
 function setup(o) {
   const K = C();
   const off = Object.keys(K.SYSTEMS).filter(k => !K.SYSTEMS[k] && (!K.only || K.only.has(k)));
@@ -611,7 +615,7 @@ function setup(o) {
   touched = new Map();
   // a mob's start-of-tick place (prev: js/mobs.js keepPrev) is set only where the mob runs, so it is sent too (js/rworkers.js leaves it
   // out: there every copy sets it); the first worker draws every mob from it
-  if (CW.active) RW().SKIP.delete("prev"); else RW().SKIP.add("prev");
+  if (CW.active) { RW().SKIP.delete("prev"); for (const k of PENS) RW().SKIP.add(k); } else plainCopies();
   if (!hooked && BF.world && BF.world.onBlockSet) { BF.world.onBlockSet(onSet); hooked = true; }
   tRun = now();
   if (CW.active) note(CW.n + " workers share the clusters (worker " + CW.me + " of " + CW.n + ")");
@@ -623,7 +627,7 @@ function stop(why) {
   if (CW.link) try { CW.link.stop(); } catch (e) { /* already */ }
   if (BF.glog) BF.glog.log(why ? "ERROR" : "INFO", "workers", "Cluster workers stopped" + (why ? ": " + why : ""));
   shadows = new Map(); recShadows = new Map();
-  RW().SKIP.add("prev");
+  plainCopies();
   // (partial copies: this copy goes on alone as it is, so no more fetches; the mobs other workers ran stay as this copy last had them)
   CW.partial = false; mine = new Set(); holder = new Map(); CW.preExchange = null;
   const fns = atMet;
