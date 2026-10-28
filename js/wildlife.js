@@ -363,6 +363,7 @@ function updateCluster() {
   if (toRoll.size && BF.mobs.spawning !== false) {
     let n = 0;
     for (const k of [...toRoll]) {
+      if (rolled.has(k)) { toRoll.delete(k); continue; }   // (rolled by its group on another worker: nothing left to do, whoever owns it)
       if (!ownChunk(k)) continue;
       toRoll.delete(k);
       if (!W.chunks.has(k) || rolled.has(k)) continue;
