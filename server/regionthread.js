@@ -5,7 +5,7 @@
 //   {boot: {seed, save, settings, rivers}}   the same world as the leader's (rivers: the leader's solved river network, not solved again);
 //                                             answers {booted: hash}
 //   {start: {shared, me, n}}                  joins the leader's mailboxes and barrier (BF.rworkers.setup) at this tick
-//   {cstart: {shared, me, n, only, order, shuffle}}  the cluster tick on with those systems, and joins as a cluster worker (js/cworkers.js)
+//   {cstart: {shared, me, n, only, order, shuffle, meet}}  the cluster tick on with those systems (meet: ticks between meetings), and joins as a cluster worker (js/cworkers.js)
 //   {ticks: k}                                k headless ticks in lockstep with the leader's (chunks stream with no budget, as the leader's)
 //   {hash: true}                              answers {hash: full state hash} (tests)
 //   {stop: true}                              leaves
@@ -63,6 +63,7 @@ if (!isMainThread && workerData && workerData.me != null && !workerData.saves &&
         parentPort.postMessage({ started: true });
       } else if (d.cstart) {
         const s = d.cstart;
+        if (s.meet != null) BF.ctick.setMeet(s.meet);
         BF.ctick.only = s.only; BF.ctick.on = true; BF.ctick.order = s.order || "tick";
         BF.cworkers.shuffle = s.shuffle || 0;
         BF.cworkers.setup({ n: s.n, me: s.me, link: BF.rworkers.attach(s.shared, s.me, s.n), claims: s.shared.claims, pull: !!s.pull, partial: !!s.partial });
