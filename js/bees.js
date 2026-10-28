@@ -79,6 +79,7 @@ const canFly = h => dayOut() && !wetAt(h);
 // ---------------------------------------------------------------- homes
 const recs = new Map();        // "x,y,z" -> home record, every home ever seen (saved)
 const loaded = new Map();      // "x,y,z" -> record, homes in loaded chunks
+let loadedVer = 0;             // (counts the changes to loaded: each group's homes are listed again, homesOf)
 const flowers = new Map();     // chunk key -> Set of "x,y,z" flower cells in loaded chunks
 const bees = [];               // bees out in the world
 const lures = new Set();       // villagers holding a flower for bees to follow (js/beekeeper.js)
@@ -100,7 +101,7 @@ function track(x, y, z, id) {
   let h = recs.get(k);
   if (!h || (h.kind === "nest") !== (id === NEST)) { h = newRec(x, y, z, id, edited(x, y, z)); recs.set(k, h); }
   h.out = 0; h.rest = []; h.scatter = true; h.flT = -1e9;
-  loaded.set(k, h);
+  loaded.set(k, h); loadedVer++;
   return h;
 }
 function homeAt(x, y, z) { return recs.get(ckey(x, y, z)) || null; }
@@ -421,8 +422,8 @@ function housekeeping() {
 // Bees scattered around a home whose chunk just loaded by day in dry weather (preferring flowers), and bees coming out of their homes.
 function release(dt) {
   const now = simNow(), C = cluster();
-  for (const h of loaded.values()) {
-    if (h.allow == null || (C && !homeMine(C, h))) continue;
+  for (const h of C ? homesOf(C) : loaded.values()) {
+    if (h.allow == null) continue;
     if (h.scatter) {
       h.scatter = false;
       if (h.allow > 0 && h.out === 0) {
@@ -462,6 +463,17 @@ const beeMine = (C, b) => beeGroup(b) === C.cur.key;
 let byGroup = null, byGroupAt = -1;
 const NO_BEES = [];
 function addTo(b) { const k = beeGroup(b), a = byGroup.get(k); if (a) a.push(b); else byGroup.set(k, [b]); }
+// Each group's homes in loaded, in its order: a home's group changes only at meetings, so listed at the first use after one or after
+// loaded changed (instead of every group testing every home, every tick)
+let homesBy = null, homesAt = -1, homesVer = -1;
+const NO_HOMES = [];
+function homesOf(C) {
+  if (!homesBy || homesAt !== C.epoch || homesVer !== loadedVer) {
+    homesBy = new Map(); homesAt = C.epoch; homesVer = loadedVer;
+    for (const h of loaded.values()) { const k = BF.clusters.groupOf(homeBase(h)), a = homesBy.get(k); if (a) a.push(h); else homesBy.set(k, [h]); }
+  }
+  return homesBy.get(C.cur.key) || NO_HOMES;
+}
 function groupBees(C) {
   if (!byGroup || byGroupAt !== C.epoch) { byGroup = new Map(); byGroupAt = C.epoch; for (const b of bees) addTo(b); }
   return byGroup.get(C.cur.key) || NO_BEES;
@@ -520,7 +532,7 @@ function unloadChunk(cx, cz) {
     if (Math.floor(h.x / cs) !== cx || Math.floor(h.z / cs) !== cz) continue;
     for (let i = bees.length - 1; i >= 0; i--) if (bees[i].home === h) removeBee(bees[i]);   // dropped: only the count stays
     h.out = 0; h.rest = []; h.allow = null;
-    loaded.delete(k);
+    loaded.delete(k); loadedVer++;
   }
 }
 // world.setBlock: homes placed and broken, flowers planted and picked.
@@ -529,7 +541,7 @@ function onSet(x, y, z, old, id) {
   if (isFlower(id)) addFlower(x, y, z);
   if (isHome(old) && !isHome(id)) {
     const k = pk(x, y, z), h = recs.get(k);
-    recs.delete(k); loaded.delete(k);
+    recs.delete(k); loaded.delete(k); loadedVer++;
     if (!h) return;
     // its bees that are out look for a home with room within R; the rest are lost
     const outB = bees.filter(b => b.home === h), ang = [];
@@ -545,7 +557,7 @@ function onSet(x, y, z, old, id) {
   }
   if (isHome(id) && !isHome(old)) {
     const k = pk(x, y, z), h = newRec(x, y, z, id, true);
-    recs.set(k, h); h.scatter = false; loaded.set(k, h);
+    recs.set(k, h); h.scatter = false; loaded.set(k, h); loadedVer++;
   }
 }
 // The planet: bee b, now belonging to home o, flies on in o's frame (a home on another face: its position and heading turned with it,
@@ -657,7 +669,7 @@ function hook() {
 function reset() {
   for (const b of bees) b.gone = true;
   byGroup = null;
-  bees.length = 0; recs.clear(); loaded.clear(); flowers.clear(); lures.clear(); cropGrid = new Map(); lastBroken = null; acc = 0; lureT = 0;
+  bees.length = 0; recs.clear(); loaded.clear(); loadedVer++; flowers.clear(); lures.clear(); cropGrid = new Map(); lastBroken = null; acc = 0; lureT = 0;
 }
 
 // ---------------------------------------------------------------- saving
@@ -677,6 +689,7 @@ function deserialize(a) {
     recs.set(pk(h.x, h.y, h.z), h);
   }
   for (const [k, h] of loaded) { const r = recs.get(k); if (r) loaded.set(k, r); else loaded.delete(k); }
+  loadedVer++;
 }
 
 function stats() {

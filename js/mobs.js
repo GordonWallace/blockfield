@@ -2843,9 +2843,8 @@ function spawnInCluster(dt) {
   const C = BF.ctick, W = BF.world, CS = BF.CS;
   const by = C.local("spawnChunks", () => {
     const m = new Map();
-    for (const ch of W.chunks.values()) {
+    for (const ch of W.clusterCells.groupChunks(C.cur.key)) {   // (the group's chunks: those whose base it handles, as ownsBase)
       const b = baseAt({ x: ch.cx * CS + CS / 2, z: ch.cz * CS + CS / 2 });
-      if (!ownsBase(b)) continue;
       const a = m.get(b);
       if (a) a.push(ch); else m.set(b, [ch]);
     }
@@ -2930,18 +2929,26 @@ function applyDead(rec) {
 let villageT = 0;
 // Villager trading state by stable key (village "x,z" + roster slot index): kept while unloaded and saved with the world.
 const villagerSaves = new Map();
+let villagesV = 0;   // (counts the records made or dropped: js/regions.js syncVillages)
 function villagerKey(m) { return m.villageId && m.slot ? m.villageId + "#" + m.slot.idx : null; }
 let restockT = 0;
 // With the cluster tick on (spec r15-39b, js/ctick.js) a module timer would count down once per cluster: every cluster runs its own on
 // the tick counter instead (the same ticks in every order and on every worker), every `s` game seconds at tick phase `at`.
 const everyTicks = (s, at) => BF.rand.tick % Math.round(s / BF.warp.TICK) === at;
-const recMine = (rec, C) => BF.clusters.groupOf("v:" + rec.key) === C.cur.key;   // (a village record of the running cluster)
+// (a village record of the running cluster; its group by key, worked out once per meeting: groups change only there, js/ctick.js epoch)
+const recG = { ep: -1, m: new Map() };
+function recMine(rec, C) {
+  if (recG.ep !== C.epoch) { recG.ep = C.epoch; recG.m.clear(); }
+  let g = recG.m.get(rec.key);
+  if (g === undefined) { g = BF.clusters.groupOf("v:" + rec.key); recG.m.set(rec.key, g); }
+  return g === C.cur.key;
+}
 function restockVillagers(dt) { // once per in-game day, never while someone is trading with the villager
   const f = BF.ctick && BF.ctick.filter;
   if (f) { if (!everyTicks(2, 1)) return; }
   else { restockT -= dt; if (restockT > 0) return; restockT = 2; }
   if (!BF.trades || !BF.sky) return;
-  for (const m of list) if (m.type === "villager" && !m.dead && !m.removed && !m.tradingWith && !m.child && (!f || f(m))) { BF.trades.restock(m, BF.sky.day); if (BF.prices) BF.prices.tick(m, BF.sky.day); if (BF.market) BF.market.sync(m); }
+  for (const m of ownMobs() || list) if (m.type === "villager" && !m.dead && !m.removed && !m.tradingWith && !m.child && (!f || f(m))) { BF.trades.restock(m, BF.sky.day); if (BF.prices) BF.prices.tick(m, BF.sky.day); if (BF.market) BF.market.sync(m); }
 }
 const VILLAGERS_PER_VILLAGE = 24;   // roster cap of classic villages; villages of village generator 2 carry their own population (rec.pop, 2-100)
 const EXPLORER_CHANCE = 0.7;   // per cartographer in the roster
@@ -3326,7 +3333,7 @@ function meetVillages() {
     const key = Math.round(v.x) + "," + Math.round(v.z);
     if (villages.has(key)) continue;
     const rec = newVillageRec(key, v);
-    villages.set(key, rec); applyDead(rec);
+    villages.set(key, rec); villagesV++; applyDead(rec);
     if (BF.glog) BF.glog.log("INFO", "clusters", "Village record made at the meeting (tick " + BF.rand.tick + ")", { village: rec });
   }
 }
@@ -3353,7 +3360,7 @@ function updateVillages(dt) {
     const key = Math.round(v.x) + "," + Math.round(v.z);
     let rec = villages.get(key);
     if (!rec && f) continue;   // (made at the next meeting, below)
-    if (!rec) { rec = newVillageRec(key, v); villages.set(key, rec); applyDead(rec); }
+    if (!rec) { rec = newVillageRec(key, v); villages.set(key, rec); villagesV++; applyDead(rec); }
     if (!mineR(rec)) continue;
     const lp = BF.planet.local(v, pp, VQ);   // (the player seen from the village, across a face edge)
     const away = v.pop ? Math.hypot(Math.max(0, v.minX - lp.x, lp.x - v.maxX), Math.max(0, v.minZ - lp.z, lp.z - v.maxZ)) > 24   // sized villages: near any part of it
@@ -3517,7 +3524,7 @@ BF.mobs = {
     grantPlans();   // and the mob loop's (spec r15-33)
     // the region index (r15-30) up to date before the mobs query it (spec r15-31): main.js syncs it after each step, but tests and tools
     // step BF.mobs.update on its own, and move mobs between steps
-    if (BF.regions) BF.regions.tick();
+    if (BF.regions) BF.regions.tick(ownMobs() || undefined);   // (clusters: the running group's mobs, js/ctick.js; the others are kept by theirs)
     // the villager-seconds meter (js/perf.js): each lap charges the time since the last to a category; nothing while it's off
     const PF = BF.perf, PC = PF.C, pon = PF.on;
     buildSepGrid();
@@ -3649,7 +3656,7 @@ BF.mobs = {
   isWild, spawnGroup, penBoxes, inPenBox, standable, roofLedge, findPath, findPathFast, findPathOld, routeCost, pathsAgree, pathStatsReset,   // findPath(sx, sy, sz, {x, z, at(x, y, z)}, maxNodes, tall): A* route cells (tests); the Fast/Old pair and routeCost for test/findpath-compare.js
   findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },
   skyOpen(x, y, z) { return !!skyAt(x, y, z).open; }, skyDark(x, y, z) { return skyAt(x, y, z).level <= CAVE_SKY; }, typeDef: type => TYPES[type] || null, passiveTypes: PASSIVE_TYPES,
-  villages,
+  villages, get villagesV() { return villagesV; },
   later,
   // A mob's links, read from its ids (js/ids.js): work on a plain copy of a mob too (a save, a worker), where m.village is not there.
   villageOf: m => m ? BF.ids.get(m.villageId) : undefined,
@@ -3815,7 +3822,7 @@ BF.mobs = {
     list.length = 0;
     arrows.length = 0;
     BF.fx.clear();   // and the effects playing
-    villages.clear();
+    villages.clear(); villagesV++;
     villagerSaves.clear();
     pendingDead.clear();
     BF.ids.reset();
