@@ -149,10 +149,17 @@ function placeThing(o, p) {
 function ownsThing(o, p, of) {
   const C = BF.ctick;
   if (!C || !C.on || !C.filter) return true;
-  const tok = C.groups();
+  return ownsBase(thingBase(o, p, of));
+}
+// thingBase(o, p, of?) -> o's base this interval, worked out now if it wasn't yet (as ownsThing does). The owned tables' snap and apply
+// (drops, boats, arrows) go by it, not by clOf: a thing no pass on this worker has looked at (one restored from a save, on a worker that
+// runs none of its groups or no group at all) has no base yet, and with clOf's undefined it was neither sent nor replaced, so each copy
+// kept its own version of it. Every copy works out the same base: the thing is where it was at the last meeting until its group runs it.
+function thingBase(o, p, of) {
+  const tok = BF.ctick.groups();
   let t = thingCl.get(o);
   if (!t || t[0] !== tok) thingCl.set(o, (t = [tok, (of && of(o)) || baseAt(p)]));
-  return ownsBase(t[1]);
+  return t[1];
 }
 const clOf = o => { const t = thingCl.get(o); return t ? t[1] : undefined; };
 // a thing sent at a meeting (js/cworkers.js: an owned table's apply) keeps the base it had where it ran, until it is worked out again
@@ -202,9 +209,9 @@ function ownTables() {
   const dec = o => keepThing(Object.assign({}, o, { pos: V3(o.pos), prev: V3(o.prev), vel: V3(o.vel), look: V3(o.look), dir: V3(o.dir), owner: o.owner ? BF.ids.live(o.owner) || null : null,
     victim: o.victim ? BF.ids.live(o.victim) || null : null, hit: null, cl: undefined }), o.cl);
   C.owned("mobs.arrows", {
-    snap: g => arrows.filter(a => clOf(a) !== undefined && groupFor(clOf(a)) === g).map(enc),
+    snap: g => arrows.filter(a => groupFor(thingBase(a, a.pos)) === g).map(enc),
     apply(g, a) {
-      for (let i = arrows.length - 1; i >= 0; i--) if (clOf(arrows[i]) !== undefined && groupFor(clOf(arrows[i])) === g) arrows.splice(i, 1);
+      for (let i = arrows.length - 1; i >= 0; i--) if (groupFor(thingBase(arrows[i], arrows[i].pos)) === g) arrows.splice(i, 1);
       for (const o of a || []) arrows.push(dec(o));
     },
   });
@@ -3494,7 +3501,7 @@ BF.mobs = {
   shapeAi, MOB_FIELDS, AI_FIELDS,   // one mob layout (test/mob-shape.js, js/mobsave.js)
   // clusters (spec r15-39b, C2) for the other systems of C2 (js/drops.js, js/boats.js, js/wildlife.js, js/mobsave.js): see placeThing,
   // ownsThing, ownsBase, groupFor; baseAt(p) -> the base cluster of p's region; the player as the running cluster sees it
-  cl: { placeThing, ownsThing, clOf, keepThing, ownsBase, groupFor, baseAt, playerPos, playerLives, owned: () => !!own() },
+  cl: { placeThing, ownsThing, thingBase, clOf, keepThing, ownsBase, groupFor, baseAt, playerPos, playerLives, owned: () => !!own() },
   list,
   toolHolders,   // profession -> (villager => item id of the tool drawn in its hands, or null): sets the villager's `held`
   types: Object.keys(TYPES),

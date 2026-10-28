@@ -15,7 +15,9 @@
 // --partial: partial copies (js/cworkers.js CW.partial): each worker is compared with every mob's current copy gathered in (gathered).
 // --bees: bee homes broken and placed in different groups' passes (seconds 3 and 6): every worker's records and loaded homes must follow
 // the owner's (js/bees.js onReplayed and the bees table: a home broken on its group's worker used to stay in the others' records).
-// Usage: node test/cluster-workers.js [--workers 2] [--seed 3] [--extra 3] [--seconds 30] [--shuffle k | --plan] [--order tick|cluster] [--pull] [--partial] [--bees]
+// --restored: items on the ground before the tick starts, as from a save (with --plan: see restoredDrops). --load file: boot from a save
+// (tools/headless.js --save) instead of the seed.
+// Usage: node test/cluster-workers.js [--workers 2] [--seed 3] [--extra 3] [--seconds 30] [--shuffle k | --plan] [--order tick|cluster] [--pull] [--partial] [--bees] [--restored] [--load save.json]
 //                                    [--profile converted|a,b,c]
 const path = require('path'), crypto = require('crypto');
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
@@ -26,13 +28,14 @@ else main().catch(e => { console.error(e); process.exit(1); });
 
 // ---------------------------------------------------------------- a worker: one world
 function child() {
-  const { me, n, seed, extra, order, shuffle, fixed, profile, shared, pull, partial, bees } = workerData;
+  const { me, n, seed, extra, order, shuffle, fixed, profile, shared, pull, partial, bees, save, restored } = workerData;
   for (const k of ['log', 'info', 'debug']) console[k] = () => {};
   const { load } = require('../tools/headless.js');
   const { BF } = load();
   const errors = [];
   BF.glog.setSink(e => { if (e.l === 'ERROR' && errors.length < 50) errors.push(e.k + ': ' + e.x); });
-  BF.boot.headless({ seed, settings: { at: 'village', extra } });
+  BF.boot.headless({ seed, save: save ? JSON.parse(require('fs').readFileSync(save, 'utf8')) : null, settings: { at: 'village', extra } });
+  if (restored) restoredDrops(BF);
   const C = BF.ctick;
   C.only = profile === 'converted' ? C.converted() : profile.split(',');
   for (const k of C.only) if (C.SYSTEMS[k] === false) C.SYSTEMS[k] = true;   // (a system tried before it is marked converted)
@@ -81,6 +84,24 @@ function child() {
   parentPort.postMessage({ booted: true });
 }
 
+// --restored: items lying on the ground before the cluster tick starts, as a save restores them (js/drops.js restore: no pass has worked
+// out their cluster), a few round each village's centre, alike in every copy. With --plan the first meeting gives every group to the
+// first worker (nothing measured yet), so the others run no pass that interval: they must still send and replace those items by
+// their cluster at the meeting (js/mobs.js thingBase; until it they kept their own copies, and the worlds drifted apart).
+function restoredDrops(BF) {
+  const ids = ['oak_log', 'stick', 'apple', 'cobblestone'].map(k => BF.resolveItem(k)).filter(x => x != null);
+  let i = 0;
+  for (const k of [...BF.mobs.villages.keys()].sort()) {
+    const [x, z] = k.split(',').map(Number);
+    if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+    for (let j = 0; j < 4; j++) {
+      const px = x + 0.5 + (j % 2) * 2, pz = z + 0.5 + (j >> 1) * 2;
+      if (!BF.world.isLoaded(px, pz)) continue;
+      BF.drops.spawn(ids[i++ % ids.length], 1 + (j % 3), px, BF.worldgen.heightAt(Math.floor(px), Math.floor(pz)) + 2, pz, { vel: new THREE.Vector3(0, 0, 0), pickupDelay: 0 });
+    }
+  }
+}
+
 // --bees: at second 3 the first loaded home (by position) is broken in its group's pass, and a hive is placed above a home in each of two
 // other groups (both in the same interval, on different workers when the owners differ); at second 6 the first placed hive is broken
 // again. Picked alike in every copy, between intervals; done in the group's own pass (on its worker), mid-interval, as a villager would.
@@ -120,14 +141,14 @@ function beeEdits(BF) {
 // ---------------------------------------------------------------- the parent
 async function main() {
   const n = +arg('workers', 2), seed = +arg('seed', 3), extra = +arg('extra', 3), seconds = +arg('seconds', 30);
-  const partial = process.argv.includes('--partial'), bees = process.argv.includes('--bees');
+  const partial = process.argv.includes('--partial'), bees = process.argv.includes('--bees'), save = arg('load', null), restored = process.argv.includes('--restored');
   const order = arg('order', 'tick'), pull = order === 'cluster' && process.argv.includes('--pull') && arg('shuffle') == null;
   const profile = arg('profile', 'converted'), plan = process.argv.includes('--plan'), fixed = !plan && !pull && arg('shuffle') == null;
   const shuffle = plan || pull ? 0 : +arg('shuffle', 1);
   const { load } = require('../tools/headless.js');
   const shared = load().BF.cworkers.makeShared(n);
   const spawn = data => {
-    const w = new Worker(__filename, { workerData: Object.assign({ seed, extra, order, shuffle, fixed, profile, pull, partial, bees }, data) });
+    const w = new Worker(__filename, { workerData: Object.assign({ seed, extra, order, shuffle, fixed, profile, pull, partial, bees, save, restored }, data) });
     const waiting = [];
     w.on('message', m => { const f = waiting.shift(); if (f) f(m); });
     w.on('error', e => { console.error(e); process.exit(1); });
