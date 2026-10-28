@@ -538,6 +538,12 @@ function leave(m, S, dt, out) {
   }
   const st = BF.villageLife.travel(m, S, dt, out, P.out[0], P.y + 1, P.out[1], m.def.speed);
   if (st === "going" && S.exitT < 30) { m.ai.mode = "idle"; m.ai.t = 2; return true; }
+  if (st === "arrived" && S.exitT < 30 && p.x > P.fx0 && p.x < P.fx1 && p.z > P.fz0 && p.z < P.fz1) {   // close enough to the cell outside, but still in the open gate (it stayed open all day): the last step out
+    const dx = P.out[0] + 0.5 - p.x, dz = P.out[1] + 0.5 - p.z, d = Math.hypot(dx, dz) || 1;
+    m.ai.mode = "idle"; m.ai.t = 2;
+    out.x = dx / d * m.def.speed; out.z = dz / d * m.def.speed;
+    return true;
+  }
   S.exit = null;
   return false;
 }
