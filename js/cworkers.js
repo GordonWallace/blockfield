@@ -372,6 +372,10 @@ function afterMet() {
   if (!leaving) return;
   leaving = false;
   if (CW.partial) fetch(BF.mobs.list);
+  if (CW.partial && carries.size) {   // (every worker sends all it holds to all: each has everything again)
+    const all = xchange("carry.leave", JSON.stringify([...carries].map(([name, h]) => [name, h.all()])));
+    for (let w = 0; w < all.length; w++) if (w !== CW.me) for (const [name, data] of JSON.parse(all[w])) { const h = carries.get(name); if (h) h.take(data); }
+  }
   CW.active = false; CW.partial = false; mine = new Set(); holder = new Map();
   shadows = new Map(); recShadows = new Map();
   RW().onTouch = null; plainCopies();
@@ -397,6 +401,18 @@ function check() {
     for (const k of parts) { const t = gathered(() => BF.stateHash.text(k)); try { fs.writeFileSync(dump + "/" + k + "-w" + CW.me + ".txt", String(t)); } catch (e) { err("CW_DUMP: " + e.message); } }
   }
 }
+// Carried parts (partial copies): what only the worker running a group needs, kept in a system's own list rather than an owned table
+// (js/bees.js: the bees that are out, which every meeting sent whole to every worker before). At a handover each worker gives what it
+// holds of groups now on another worker to their new owner; at setup (every worker has everything) each keeps only its own groups';
+// back to one (leave), every worker sends all it holds to all. carry(name, {give(destOf) -> [[dest, data]] (taken out here; destOf(group
+// key) -> worker), take(data), all() -> data}). With full copies the system sends them at every meeting as before (CW.partial false).
+const carries = new Map();
+let ownerWas = new Map();   // group key -> its worker at the last handover (a group not in it is new: its parts may be anywhere)
+function carry(name, h) { carries.set(name, h); }
+const ownerOf = k => CW.owners.get(k) || 0;
+const regrouped = () => C().groups().some(g => ownerWas.get(g.key) !== ownerOf(g.key));
+const noteOwners = () => { ownerWas = new Map(C().groups().map(g => [g.key, ownerOf(g.key)])); };
+function carryKeep() { if (CW.partial) for (const h of carries.values()) h.give(ownerOf); noteOwners(); }   // (what goes elsewhere is dropped: its owner has it)
 // Partial copies: the mobs whose current copy is on another worker than the one that runs them next, sent whole by their holder (every
 // worker works out the same list, so they all exchange, or none)
 function handover() {
@@ -408,22 +424,31 @@ function handover() {
   }
   const mineOut = moves.filter(m => holder.get(m.id) === CW.me);
   holder = new Map();
-  if (!moves.length) return;
+  const carried = carries.size > 0 && regrouped();   // (every worker works it out alike)
+  if (!moves.length && !carried) return;
   const t0 = now();
   R.refs();
   // (each to its new owner only: the others keep their stale copies, as for any mob they don't run)
   const byDest = Array.from({ length: CW.n }, () => []);
   for (const m of mineOut) byDest[CW.owners.get(groupOf(m)) || 0].push(m);
   const out = byDest.map(ms => (ms.length ? JSON.stringify([ms.map(m => m.id), R.encMany(ms.map(whole))]) : ""));
+  const cout = Array.from({ length: CW.n }, () => null);
+  if (carried) { for (const [name, h] of carries) for (const [d, data] of h.give(ownerOf)) (cout[d] || (cout[d] = {}))[name] = data; noteOwners(); }
   T.moved += moves.length;
-  const all = xchange("handover", JSON.stringify(out));
+  const all = xchange("handover", JSON.stringify([out, cout]));
   T.exchange += now() - t0;
-  const got = [];
-  R.atLater(() => { for (let w = 0; w < all.length; w++) if (w !== CW.me) { const part = JSON.parse(all[w])[CW.me]; if (part) { const [ids, e] = JSON.parse(part); got.push([w, ids, R.decAll(e)]); } } });
+  const got = [], cin = [];
+  R.atLater(() => { for (let w = 0; w < all.length; w++) if (w !== CW.me) {
+    const [o, c] = JSON.parse(all[w]), part = o[CW.me];
+    if (part) { const [ids, e] = JSON.parse(part); got.push([w, ids, R.decAll(e)]); }
+    if (c && c[CW.me]) cin.push(c[CW.me]);
+  } });
   const pairs = [], fresh = new Set();
   for (const [w, ids, [os, made]] of got) { for (const x of made) fresh.add(x); ids.forEach((id, i) => { const m = BF.ids.live(id); if (m) pairs.push([m, os[i]]); else err("worker " + w + " handed over mob " + id + ", which this worker doesn't have"); }); }
   refillAll(pairs, fresh);
+  for (const c of cin) for (const name in c) { const h = carries.get(name); if (h) h.take(c[name]); }   // (after the mobs: a bee follows one)
   if (BF.regions) BF.regions.tick();
+  if (!moves.length) return;
   const per = (now() - t0) / moves.length;   // (ms a mob handed over, for the plan: the first worker's goes to all at the next swap)
   handOwn = handOwn === null ? per : handOwn + SMOOTH * (per - handOwn);
 }
@@ -625,6 +650,7 @@ function setup(o) {
   // out: there every copy sets it); the first worker draws every mob from it
   if (CW.active) { RW().SKIP.delete("prev"); for (const k of PENS) RW().SKIP.add(k); } else plainCopies();
   if (!hooked && BF.world && BF.world.onBlockSet) { BF.world.onBlockSet(onSet); hooked = true; }
+  if (CW.active) carryKeep();   // (every worker has every group's carried parts: each keeps its own)
   tRun = now();
   // the first interval's owners (guessed from each group's mobs: nothing is measured yet), its shadows and this worker's mobs, as after
   // any meeting (before, the first worker ran the whole first interval alone: seconds on a big world, while the others waited)
@@ -738,6 +764,6 @@ function fetch(ms, pred) {
 }
 // current(m): this worker's copy of m is current (partial copies: it runs m, or every copy is current)
 const current = m => !CW.partial || mine.has(m) || (atMeeting && !holder.has(m.id));
-Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, current, gathered, fetch, whenMet, leave, pull: false, partial: false, verify: 0 });
+Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, current, gathered, fetch, whenMet, leave, carry, pull: false, partial: false, verify: 0 });
 BF.cworkers = CW;
 })();

@@ -745,13 +745,26 @@ function dropFar(key) {
   world.farMeshes.delete(key);
 }
 
+// The chunks streaming drops in one pass, in order (["u", key] unloads, ["g", key] purges): the hooks of world.onChunkDrops hear of them
+// all first, so with partial cluster copies the mobs in them come over in one exchange rather than one a chunk (js/mobs.js)
+function drops(ops) {
+  const cells = [];
+  for (const [, k] of ops) { const c = world.chunks.get(k); if (c) cells.push([c.cx, c.cz]); }
+  const ends = [];
+  for (const fn of dropL) { const e = fn(cells); if (e) ends.push(e); }
+  try { for (const [op, k] of ops) (op === "u" ? unload : purge)(k); }
+  finally { for (const e of ends) e(); }
+}
+// fn(cells) before streaming drops those chunks ([cx, cz] each; their unload hooks run next, one a chunk); it may return a function, called after
+const dropL = [];
+world.onChunkDrops = fn => dropL.push(fn);
 // the region workers' journal (js/rworkers.js): a chunk streaming dropped, for the followers to drop too
 function jrec(op, key) { const RJ = BF.rworkers; if (RJ && RJ.journal) RJ.rec([op, key]); }
 // The followers' side of the journal (js/rplay.js): what the leader's streaming did, done the same way
 world.replay = {
   create: (cx, cz) => (world.chunks.has(ckey(cx, cz)) ? world.chunks.get(ckey(cx, cz)) : createChunk(cx, cz)),
   extendDown: (cx, cz, lo) => { const c = world.chunks.get(ckey(cx, cz)); if (c && c.lo > lo) extendDown(c, lo); },
-  unload, purge,
+  drops,
 };
 
 function disposeMeshes(c) {
@@ -837,19 +850,20 @@ function plan(pcx, pcz) {
   };
   const RU = world.high ? -1 : R;
   let dropped = 0;
-  const hold = heldNow();   // (clusters: chunks go at the next meeting, the plan runs again then)
+  const hold = heldNow(), ops = [];   // (clusters: chunks go at the next meeting, the plan runs again then)
   for (const k of [...world.chunks.keys()]) {
     if (hold) { heldUnloads = true; break; }
     const c = world.chunks.get(k);
     const vk = BF.villageSim && BF.villageSim.keepKeys.has(k);
-    if (!keep.has(k) && far(c.cx, c.cz, RU + 3)) { jrec("u", k); unload(k); continue; }
+    if (!keep.has(k) && far(c.cx, c.cz, RU + 3)) { ops.push(["u", k]); continue; }
     // a chunk past the view distance (a border chunk, or one just left behind) that no chunk still to be meshed needs: the purge never
     // takes it (it has no mesh), so it would stay loaded, with its mobs, as a thin ring outside the view distance
-    if ((border.has(k) || !keep.has(k)) && !data.has(k) && c.mesh === undefined && !vk) { jrec("u", k); unload(k); dropped++; continue; }
+    if ((border.has(k) || !keep.has(k)) && !data.has(k) && c.mesh === undefined && !vk) { ops.push(["u", k]); dropped++; continue; }
     // (chunks just left behind, kept for the hysteresis, keep only their meshes too)
     if (!data.has(k) && c.mesh === true && !c.meshJob && !world._dirty.has(k) && !world.edits.has(k) && !vk &&
-      far(c.cx, c.cz, Math.min(R, KEEP) + 3)) { jrec("g", k); purge(k); }
+      far(c.cx, c.cz, Math.min(R, KEEP) + 3)) ops.push(["g", k]);
   }
+  if (ops.length) { jrec("ug", ops); drops(ops); }
   if (dropped && BF.glog) BF.glog.log("DEBUG", "chunks", "Unloaded " + dropped + " border chunk" + (dropped > 1 ? "s" : "") + " past the view distance once their neighbours were drawn");
   for (const k of [...world.farMeshes.keys()]) {
     if (keep.has(k)) continue;

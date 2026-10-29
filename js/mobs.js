@@ -3524,18 +3524,27 @@ BF.mobs = {
   init(sceneRef) {
     ready = true;   // (mobs, arrows and effects are drawn by js/mobview.js and js/entityview.js)
     if (BF.mobView) BF.mobView.init(sceneRef);
+    const cellOf = m => {
+      let mx = m.position.x, mz = m.position.z;   // (by its canonical cell: it may be kept in another face's frame)
+      { const c = BF.planet.canon(mx, mz, GC); if (!c.off) { mx = c.x; mz = c.z; } }
+      return Math.floor(mx / BF.CS) + "," + Math.floor(mz / BF.CS);
+    };
+    // (partial copies: the mobs in the chunks streaming drops, stored and saved as they are now; which they are, their current copies say,
+    // since a stale copy may be somewhere else, so every worker takes the same ones: fetched for all those chunks in one exchange)
+    const partial = () => BF.cworkers && BF.cworkers.partial;
+    let dropping = null;
+    BF.world.onChunkDrops(cells => {
+      if (!partial() || !cells.length) return;
+      const ks = new Set(cells.map(([x, z]) => x + "," + z));
+      dropping = { ks, cur: BF.cworkers.fetch(list, m => !m.removed && ks.has(cellOf(m))) };
+      return () => { dropping = null; };
+    });
     BF.world.onChunkUnload((cx, cz) => {
-      const inChunk = m => {
-        let mx = m.position.x, mz = m.position.z;   // (by its canonical cell: it may be kept in another face's frame)
-        { const c = BF.planet.canon(mx, mz, GC); if (!c.off) { mx = c.x; mz = c.z; } }
-        return Math.floor(mx / BF.CS) === cx && Math.floor(mz / BF.CS) === cz;
-      };
-      // (partial copies: the mobs in it, stored and saved as they are now; which they are, their current copies say, since a stale copy
-      // may be somewhere else, so every worker takes the same ones)
-      const cur = BF.cworkers && BF.cworkers.partial ? BF.cworkers.fetch(list, m => !m.removed && inChunk(m)) : null;
+      const k = cx + "," + cz, inChunk = m => cellOf(m) === k;
+      const cur = dropping && dropping.ks.has(k) ? dropping.cur : partial() ? BF.cworkers.fetch(list, m => !m.removed && inChunk(m)) : null;
       for (let i = list.length - 1; i >= 0; i--) {
         const m = list[i];
-        if (cur ? cur.has(m) : inChunk(m)) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
+        if (cur ? cur.has(m) && inChunk(m) : inChunk(m)) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
       }
       for (let i = arrows.length - 1; i >= 0; i--) {
         const a = arrows[i];
