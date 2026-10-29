@@ -39,7 +39,7 @@ function render() {
   if (!ff) { now.textContent = "no game"; return; }
   if (ff.speed === 0) { now.textContent = "❚❚ 0x (frozen)"; now.classList.add("frozen"); return; }
   // as the game's indicator: the speed reached in brackets when it is under 90% of the speed asked for (at 1x too: the game falling behind)
-  const slow = ff.speed >= 1 && ff.real < ff.speed * 0.9;
+  const slow = ff.speed >= 1 && ff.real < ff.speed * (ff.speed === 1 ? 0.8 : 0.9);   // (0.8 at 1x: js/timewarp.js SLOW_1X)
   now.textContent = (ff.speed === 1 ? "▶ " : "▶▶ ") + ff.speed + "x" + (slow ? " (" + (ff.real < 10 ? ff.real.toFixed(1) : Math.round(ff.real)) + "x)" : "");
   if (slow) now.classList.add("slow");
 }
