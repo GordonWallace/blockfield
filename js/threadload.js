@@ -9,6 +9,7 @@
 // The page also counts its frames (frame(drawMs) once a frame, with the ms its renderer.render call took): the report's frame field has
 // the frames a second, the busy ms a frame and the drawing call's share of them (the debug screen's Threads card, bug-098).
 // API: BF.tload = { begin(), end(), wrap(fn) -> fn, frame(drawMs), report() -> {busy (0..1, the last sample), avg (0..1, the last minute), hist: [0..100], frame: {fps, ms, draw} | null},
+//                   total() -> ms,
 //                   ELU (true in Node: the event loop's measure, not the timed entry points) }
 (() => {
 "use strict";
@@ -54,5 +55,13 @@ function report() {
   return { busy: cur, avg, hist: hist.slice(), frame: frameRep };
 }
 
-BF.tload = { begin, end, wrap, report, frame, ELU, SAMPLE, HIST };
+// The busy ms so far, the barrier's waits taken off: the simulation budget's measure where the simulation has a thread of its own
+// (js/boot.js simFrame, js/active.js), so streaming chunks, the page's messages and everything else the thread does count, not only the
+// ticks. (Node's measure counts a loop turn once it ends: the caller takes differences over many turns.)
+function total() {
+  const b = ELU ? P.eventLoopUtilization().active : busyMs + (depth ? now() - t0 : 0);
+  return Math.max(0, b - waitNow());
+}
+
+BF.tload = { begin, end, wrap, report, frame, total, ELU, SAMPLE, HIST };
 })();

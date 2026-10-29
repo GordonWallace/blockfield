@@ -81,7 +81,7 @@ function begin(world) {
   const n = L.want, epoch = ++L.epoch;
   if (!world.rivers && BF.worldgen.riverState) world.rivers = BF.worldgen.riverState();   // (the followers don't solve them again)
   world.viewDist = BF.world.viewDist;
-  world.active = BF.active ? BF.active.opts() : null;   // (the simulation budget's settings: the leader's may differ from a fresh copy's, js/active.js)
+  world.active = BF.active ? (BF.active.state ? BF.active.state() : BF.active.opts()) : null;   // (the simulation budget's state: the leader's differs from a fresh copy's, js/active.js)
   world.testEval = !!BF.testEval;
   world.coarse = BF.gameOpts ? BF.gameOpts.overridden() : null;   // (a run's ?coarse= / --coarse: js/gameopts.js)
   world.dyn = BF.dynItems ? BF.dynItems() : [];   // (map items made in earlier worlds keep their ids: the follower makes them alike)
@@ -313,7 +313,7 @@ function follower(post) {
       case "d": BF.world.replay.extendDown(o[1], o[2], o[3]); break;
       case "v": RW.clock = o[3]; BF.villageSim.update(o[1], o[2]); break;
       case "a": if (BF.active) BF.active.frame(o[1], o[2]); break;
-      case "b": if (BF.active) BF.active.set(o[1], true); break;   // (the player changed the distant-village settings: the leader's simworker.js journals them)
+      case "b": if (BF.active) BF.active.set(o[1], true); if (o.length > 2 && BF.gameOpts) BF.gameOpts.override(o[2]); break;   // (the player changed the distant-village settings: the leader's simworker.js journals them)
       case "f": BF.inventory.simFrame(o[1]); BF.maps.simFrame(); BF.player.simRide(o[1]); break;
       case "s": BF.save.snapshot(); break;
       case "feed": if (BF.debugFeed && BF.debugFeed.simPart) BF.debugFeed.simPart(o[1]); break;   // (the world server's debug screen: reading it works out things lazily, as F3 does)
@@ -376,12 +376,13 @@ function follower(post) {
     if (w.clock) BF.warp.advance(w.clock - BF.simNow());
     for (const [name, id] of w.dyn || []) BF.dynItemAs(name, id);
     if (w.viewDist > 0) BF.world.setViewDist(w.viewDist);
-    if (w.active && BF.active) BF.active.set(w.active);
+    if (w.active && BF.active) BF.active.set(w.active.opt || w.active);
     if (BF.gameOpts) BF.gameOpts.override(w.coarse);
     if (w.beesHooked && BF.bees && BF.bees.hook) BF.bees.hook();   // (homes found as chunks load, as the leader does after an earlier world)
     if (w.op === "load") BF.save.restore(w.data, w.meta);
     else BF.newWorld(w.seed, w.opts || {});
     if (w.player) setPlayer(w.player);
+    if (w.active && w.active.opt && BF.active && BF.active.load) BF.active.load(w.active);   // (after the world: starting it resets the budget's state)
     BF.world.trail = verify ? new Map() : null;   // (tests: who wrote each cell, as on the leader)
     // a protocol host whose output goes nowhere: the client's packets do here what they did on the leader
     host = BF.proto.host(() => {}, { replica: true, world: () => new Promise(() => {}), onView: v => { if (v.dist > 0 && v.dist !== BF.world.viewDist) BF.world.setViewDist(v.dist); } });

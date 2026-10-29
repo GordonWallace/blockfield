@@ -164,6 +164,8 @@ const css = `
 .bfp-card .bfp-optgrid button{margin:0;padding:8px 10px;font-size:12px;background:rgba(0,0,0,.3);color:var(--muted);border-bottom:3px solid transparent}
 .bfp-card .bfp-optgrid button.on{background:#3b4a35;color:var(--ink);border-bottom-color:var(--accent)}
 .bfp-opts .bfp-hint{display:block;margin-top:4px;font-size:11px;opacity:.8}
+.bfp-card .bfp-distant button{margin:3px 0;padding:8px 10px;font-size:12px;background:rgba(0,0,0,.3);color:var(--ink);text-align:left}
+.bfp-card .bfp-distant button:disabled{opacity:.55;cursor:default}
 .bfp-empty{font:12px var(--mono);color:var(--muted);padding:16px 12px;margin:0;text-align:center}
 .bfp-savenote{font:12px var(--mono);color:var(--muted);margin:8px 0 0;min-height:0}
 .bfp-savenote:empty{display:none}
@@ -197,7 +199,7 @@ const css = `
 const BIOME_SIZES = [[1, "Small (classic)"], [2, "Large"], [3, "Larger"], [4.5, "Huge"], [6, "Vast"]], BIOME_DEF = 1;   // biomeScale, label
 const biomeLabel = s => (BIOME_SIZES.find(b => b[0] === s) || [0, "Large"])[1];
 let savedEl, worldsEl, createForm, createMode = null, worldsCache = [], saveOk = null;
-let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, touchEl, knobEl, pauseNote, viewBtn, budgetBtn, hostBtn, helpEl;
+let ui, crossEl, hudCanvas, hudCtx, tintEl, flashEl, startEl, pauseEl, deathEl, touchEl, knobEl, pauseNote, viewBtn, budgetBtn, distantEl, hostBtn, helpEl;
 const HELP_HTML = isTouch
   ? `<div><b>Stick</b> move</div><div><b>Drag</b> look</div><div><b>Tap</b> place / use / hit</div><div><b>Hold</b> break</div><div><b>Jump x2</b> fly</div><div><b>INV</b> inventory</div>`
   : `<div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump / swim</div><div><b>Space x2</b> fly</div>
@@ -251,7 +253,8 @@ function buildDOM() {
     <h2 class="bfp-title" style="font-size:30px">Paused</h2>
     <button class="primary" data-act="resume">Resume</button>
     <button data-act="view">Render distance: 6</button>
-    <button data-act="budget" title="Villages beyond the nearest four stay simulated while the simulation uses less than this share of each second">Simulated villages</button>
+    <button data-act="budget" title="How many villages beyond the nearest four are simulated, and the limits on time, distance, memory and workers">Distant villages</button>
+    <div class="bfp-distant" hidden></div>
     <button data-act="host" title="Where the world's simulation runs: Automatic takes the world server (./run.sh) when there is one, else a background worker in the browser, else this page. Applies the next time the game starts.">Simulation</button>
     ${modeRow}
     <button data-act="opts">Game options</button>
@@ -266,6 +269,7 @@ function buildDOM() {
   for (const e of [startEl, pauseEl, deathEl]) ui.appendChild(e);
   viewBtn = pauseEl.querySelector('[data-act="view"]');
   budgetBtn = pauseEl.querySelector('[data-act="budget"]');
+  distantEl = pauseEl.querySelector(".bfp-distant");
   hostBtn = pauseEl.querySelector('[data-act="host"]');
   pauseNote = pauseEl.querySelector(".bfp-note");
   helpEl = pauseEl.querySelector(".bfp-help");
@@ -315,10 +319,16 @@ function buildDOM() {
     else if (a === "view") {
       const i = VIEW_OPTS.indexOf(BF.world.viewDist);
       setViewDist(i < 0 ? VIEW_OPTS.find(v => v > BF.world.viewDist) || VIEW_OPTS[0] : VIEW_OPTS[(i + 1) % VIEW_OPTS.length]);
-    } else if (a === "budget") {   // 20, 40, 60, 80% or off (js/active.js); where the simulation is elsewhere, there too (bug-081)
-      const away = !!(BF.simHost && BF.simHost.worker);
-      if (BF.active) { BF.active.cycle(away); if (away) BF.simHost.budget(); }
+    } else if (a === "budget") { distantEl.hidden = !distantEl.hidden; updateBudgetBtn(); }   // the Distant villages panel
+    else if (a === "dv") {   // a Distant villages setting (js/active.js); where the simulation is elsewhere, there too (bug-081)
+      const away = !!(BF.simHost && BF.simHost.worker), f = act.dataset.f;
+      if (BF.active) { BF.active.choose(f, BF.active.next(f), away); if (away) BF.simHost.budget(); }
       updateBudgetBtn();
+    } else if (a === "workers") {   // the Cluster workers setting (js/simhost.js): from the next world started
+      const H = BF.simHost, c = H.WORKER_CHOICES;
+      H.setWorkersPref(c[(c.indexOf(H.workersPref()) + 1) % c.length]);
+      updateBudgetBtn();
+      pauseNote.textContent = "Cluster workers apply from the next world started: save and quit, then play again.";
     }
     else if (a === "host") cycleHost();
     else if (a === "mode") setGameMode(act.dataset.mode);
@@ -345,8 +355,25 @@ function buildDOM() {
 // budget query, answered after the setting it was just sent: bug-081)
 function updateBudgetBtn() {
   if (!budgetBtn || !BF.active) return;
-  if (!(BF.simHost && BF.simHost.worker && BF.client)) { budgetBtn.textContent = BF.active.text(); return; }
-  BF.client.query("budget", {}, r => { if (r && r.ok) budgetBtn.textContent = r.text; });
+  const show = r => { budgetBtn.textContent = r.text; if (!distantEl.hidden) distantEl.innerHTML = distantHTML(r.settings, r.auto); };
+  if (!(BF.simHost && BF.simHost.worker && BF.client)) { show({ text: BF.active.text(), settings: BF.active.settings(), auto: BF.active.auto() }); return; }
+  BF.client.query("budget", {}, r => { if (r && r.ok) show(r.settings ? r : Object.assign(r, { settings: BF.active.settings(), auto: BF.active.auto() })); });
+}
+// The Distant villages panel (Gordon, 2026-10-28): the settings (js/active.js; auto: the automatic values where the simulation is) and the
+// Cluster workers setting (js/simhost.js). A click moves a line to its next choice.
+function distantHTML(s, auto) {
+  const pc = f => Math.round(f * 100) + "%", H = BF.simHost, nearest = s.villages === "nearest";
+  const line = (f, text, title) => `<button type="button" data-act="dv" data-f="${f}"${nearest && f !== "villages" ? " disabled" : ""} title="${title}">${text}</button>`;
+  let h = `<div class="bfp-opts">` +
+    line("villages", "Villages: " + (nearest ? "Nearest only" : "Automatic (as many as run at 1x, nearest first)"), "Automatic adds villages beyond the nearest four, nearest first, while the simulation keeps up at normal speed within the limits below; Nearest only keeps the nearest four") +
+    line("share", "Time limit: " + (s.share === "auto" ? "Automatic (" + pc(auto.share) + " of each second)" : pc(s.share) + " of each second"), "The most of each real second the simulation may take at normal speed. Automatic: 80% where it has a thread of its own (a worker or the world server), 40% in this page") +
+    line("reach", "Distance limit: " + (s.reach > 0 ? s.reach + " blocks" : "None"), "How far away a simulated village may be") +
+    line("mem", "Memory limit: " + (s.mem === "auto" ? "Automatic (" + auto.memMB + " MB)" : s.mem + " MB"), "The most memory the distant villages' chunks may take. Automatic: a quarter of the machine's memory");
+  if (H && H.workersPref) {
+    const now = H.workersNow(), why = now.why;
+    h += `<button type="button" data-act="workers"${why ? " disabled" : ""} title="How many workers a world's simulation splits its villages over, from the next world started. Automatic: one per performance core">Cluster workers: ${why ? now.n + " (" + why + ")" : H.workersLabel(H.workersPref())}</button>`;
+  }
+  return h + `<span class="bfp-hint">Cluster workers apply from the next world started; the rest at once.</span></div>`;
 }
 // "Simulation: World server (1 thread)", and the setting when it forces a host (spec r15-43, js/simhost.js); a click cycles the setting
 // (Automatic, World server, Browser (worker), Browser (this page)), which applies from the next start

@@ -52,17 +52,18 @@ function show() {
   e.textContent = (s === 1 ? "▶ " : "▶▶ ") + s + "×" + (slow ? " (" + (eff < 10 ? eff.toFixed(1) : Math.round(eff)) + "×)" : "");
 }
 
-// Game log (js/gamelog.js): up to 10x the sim should keep up, so ticks dropped there (the frame budget ran out) are a WARN,
-// summed over a minute of real time and logged at most once a minute. Above 10x dropping is expected and the indicator shows the
-// speed achieved.
-let lost = 0, lostSec = 0, lostSince = 0, droppedAll = 0;   // (droppedAll: every tick dropped this session, BF.warp.dropped)
+// Game log (js/gamelog.js): at 1x the sim should keep up, so ticks dropped there (the frame budget ran out) are a WARN: at once the
+// first time, then summed and logged at most once a minute while it goes on (Gordon, 2026-10-28). Fast-forward short of its speed is
+// expected (only under 1x matters) and the indicator shows the speed achieved.
+let lost = 0, lostSec = 0, lastWarn = -Infinity, droppedAll = 0;   // (droppedAll: every tick dropped this session, BF.warp.dropped)
 function noteDropped(n) {
   const now = performance.now();
   if (n > 0) droppedAll += n;
-  if (n > 0 && SPEEDS[idx] <= 10 && !frozen) { if (!lost) lostSince = now; lost += n; lostSec += n * TICK; }
-  if (lost && now - lostSince >= 60000 && BF.glog) {
-    BF.glog.log("WARN", "tick", "The simulation fell behind: " + lost + " ticks (" + lostSec.toFixed(2) + " s of game time) dropped in the last minute");
-    lost = 0; lostSec = 0;
+  if (n > 0 && SPEEDS[idx] === 1 && !frozen) { lost += n; lostSec += n * TICK; }
+  if (lost && now - lastWarn >= 60000 && BF.glog) {
+    const first = lastWarn === -Infinity;
+    BF.glog.log("WARN", "tick", "The simulation fell behind at 1x: " + lost + " ticks (" + lostSec.toFixed(2) + " s of game time) dropped" + (first ? "" : " in the last minute"));
+    lost = 0; lostSec = 0; lastWarn = now;
   }
 }
 

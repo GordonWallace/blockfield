@@ -39,6 +39,7 @@ Object.assign(globalThis, {
 // region workers (spec r15-39, js/rplay.js): followers in worker_threads of their own (server/regionthread.js), as many as the server says
 Object.assign(globalThis, {
   BF_WORKERS: workerData.workers || undefined, BF_SPLIT: workerData.split || undefined,
+  BF_MEM_MB: workerData.memMB || undefined,   // (the machine's memory: the Distant villages' automatic memory limit, js/active.js)
   BF_CORES: require("os").availableParallelism ? require("os").availableParallelism() : require("os").cpus().length,
   BF_REGION_SPAWN: (me, n) => {
     const { Worker } = require("worker_threads");

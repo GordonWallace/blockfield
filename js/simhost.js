@@ -23,7 +23,16 @@
 //   sky(drawnDt), crashed (text or null), wanted() -> "server" | "worker" | "auto" | null, saves(q) -> Promise (the server's worlds), post(m),
 //   refused (why the world server turned this page away: another page plays on it; else undefined),
 //   budget() (the page's simulation budget to the simulation, bug-081), label() -> the host as the player sees it, threads (the world server's), CHOICES, pref() / setPref(v) / prefLabel(v) (the setting),
+//   workersPref() / setWorkersPref(v) / workersLabel(v) / autoWorkers() / workersNow() (the Cluster workers setting, below), WORKER_CHOICES,
 //   eval(src, arg) -> Promise (tests only: test/bft.js BFT.sim) }
+// Cluster workers (Gordon, 2026-10-28; the pause menu's Distant villages panel, js/player.js): how many workers a world's simulation
+// splits its clusters over (spec r15-39b, js/cworkers.js), from the next world started. localStorage blockfield.workers: 1 (clusters off),
+// "auto" (one a performance core: the world server works it out for its machine, server/cores.js; a browser guesses half of
+// navigator.hardwareConcurrency, its logical CPUs) or a number. The world server gets {workers: {n}} before the page's boot and again on a
+// change (server/world.js: --workers on its command line wins); a Web Worker gets it in its boot ({workers, split: "always", kind:
+// "clusters"}, js/rplay.js), where the page needs cross-origin isolation (./run.sh) for more than one. ?workers=N in the address wins.
+// The default is 1 until clusters in play are ready (the clusters thread says when; then WORKERS_DEFAULT becomes "auto").
+// Game log: INFO "worker" when the setting changes.
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -54,6 +63,42 @@ H.label = function () {
   if (H.server) { const n = H.threads || 1; return "World server (" + n + " thread" + (n === 1 ? "" : "s") + ")"; }
   return H.worker ? "Browser (worker)" : "Browser (this page)";
 };
+// ---- the Cluster workers setting (the header)
+const WORKERS_DEFAULT = 1;
+H.WORKER_CHOICES = [1, "auto", 2, 3, 4, 6, 8, 12, 16];
+H.workersPref = function () {
+  try { const v = localStorage.getItem("blockfield.workers"); if (v === "auto") return v; if (v != null && H.WORKER_CHOICES.includes(+v)) return +v; } catch (_) { /* none */ }
+  return WORKERS_DEFAULT;
+};
+// the Automatic count: the world server's machine's (its hello), else this browser's guess
+H.autoWorkers = function () {
+  if (H.hello && H.hello.cores && H.hello.cores.n > 0) return H.hello.cores.n;
+  const hc = (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 2;
+  return Math.max(1, Math.min(16, Math.floor(hc / 2)));
+};
+const resolveWorkers = v => (v === "auto" ? H.autoWorkers() : Math.max(1, +v || 1));
+H.workersLabel = v => (v === "auto" ? "Automatic (" + H.autoWorkers() + ")" : +v === 1 ? "1 (clusters off)" : String(v));
+// what a world started now would get, and why: {n, why}
+H.workersNow = function () {
+  const u = urlWorkers().workers;
+  if (u) return { n: u, why: "?workers= in the address" };
+  if (H.server && H.hello && H.hello.fixed) return { n: H.hello.fixed, why: "the world server's --workers" };
+  return { n: resolveWorkers(H.workersPref()), why: "" };
+};
+H.setWorkersPref = function (v) {
+  if (!H.WORKER_CHOICES.includes(v)) return;
+  try { if (v === WORKERS_DEFAULT) localStorage.removeItem("blockfield.workers"); else localStorage.setItem("blockfield.workers", String(v)); } catch (_) { /* not kept */ }
+  glog("INFO", "Cluster workers setting: " + H.workersLabel(v) + " (from the next world started)");
+  if (H.server && BF.proto.worker.w) BF.proto.worker.w.postMessage({ workers: { n: v, changed: true } });
+};
+// the boot's region-worker fields: the address's, else the setting's (a Web Worker; the world server takes {workers} instead)
+function bootWorkers(server) {
+  const u = urlWorkers();
+  if (u.workers || server) return u;
+  const n = resolveWorkers(H.workersPref());
+  return n > 1 ? Object.assign({}, u, { workers: n, split: u.split || "always", kind: "clusters" }) : u;
+}
+
 const cannot = () => typeof Worker === "undefined" ? "this browser has no Web Workers" :
   !/^https?:$/.test(location.protocol) ? "the page was opened as a file, so a worker can't load the game's scripts" : "";
 
@@ -125,12 +170,13 @@ function run(w, via) {
         settled = true; clearTimeout(timer);
         H.mode = server ? "server" : "worker"; H.worker = true; H.server = server; H.why = "";
         H.threads = server ? (w.hello && w.hello.threads) || 1 : 1;
+        if (server && !urlWorkers().workers && !(w.hello && w.hello.fixed)) H.threads = resolveWorkers(H.workersPref());   // (the setting, sent before the boot)
         if (globalThis.BF_TEST) w.postMessage({ test: "eval" });
         // the page's simulation budget (js/active.js: the remembered setting, ?budget=, off in an automated browser), which the worker's
         // or the world server's copy can't know (no localStorage there, and the world server's Node has a navigator that never says webdriver)
         H.budget();
         // an automated browser plays on one region worker unless the URL asks for more (the world server's Node has a navigator of its own that never says so)
-        if (navigator.webdriver && !/(?:^|[?&])budget=/.test(location.search.slice(1))) { w.postMessage({ auto: true, workers: urlWorkers().workers }); if (!urlWorkers().workers) H.threads = 1; }   // (tests: BFT.sim runs code where the simulation is, protocol query eval)
+        if (navigator.webdriver && !/(?:^|[?&])budget=/.test(location.search.slice(1))) { const bw = bootWorkers(false).workers > 1 ? bootWorkers(false).workers : undefined; w.postMessage({ auto: true, workers: urlWorkers().workers || bw }); if (!urlWorkers().workers && !bw) H.threads = 1; }   // (a test that set the Cluster workers setting keeps it)   // (tests: BFT.sim runs code where the simulation is, protocol query eval)
         BF.world.replica = true;
         BF.glog.remote(list => client.log(list));
         glog("INFO", server ? "The simulation runs on the world server (" + location.host + ", ready in " + Math.round(performance.now() - t0) + " ms)" + (w.hello.held ? "; it holds world \"" + w.hello.held.name + "\", paused since its page closed" : "")
@@ -146,7 +192,8 @@ function run(w, via) {
     });
     w.onerror = ev => { if (ev && ev.preventDefault) ev.preventDefault(); if (!settled) fail(ev && ev.message || "it could not load"); else crashed(ev && ev.message || "the " + what + " failed"); };
     const three = document.querySelector('script[src*="three"]');
-    w.postMessage({ boot: Object.assign({ three: three ? three.src : null, build: window.BF_BUILD || null }, urlWorkers()) });   // (build: the checkout's commit, for the game log's header)
+    if (server) { H.hello = w.hello; if (!urlWorkers().workers) w.postMessage({ workers: { n: H.workersPref() } }); }   // the Cluster workers setting, before the boot (server/world.js)
+    w.postMessage({ boot: Object.assign({ three: three ? three.src : null, build: window.BF_BUILD || null }, bootWorkers(server)) });   // (build: the checkout's commit, for the game log's header)
   });
 }
 
@@ -216,12 +263,13 @@ H.eval = function (src, arg) {
   if (!H.worker) return Promise.resolve().then(() => (0, eval)("(" + src + ")")(arg));
   return new Promise((resolve, reject) => BF.client.query("eval", { src, arg }, r => (r && r.ok ? resolve(r.value) : reject(new Error("in the simulation: " + (r && (r.error || r.why)))))));
 };
-// The pause menu's Simulated villages setting to where the simulation is (bug-081): {budget: {on, budget}} outside the protocol, as a
-// worker's page posts {test}; the world server keeps it for the threads this page plays on next (server/world.js)
+// The pause menu's Distant villages settings to where the simulation is (bug-081): {budget: {on, settings}} outside the protocol, as a
+// worker's page posts {test}; the world server keeps it for the threads this page plays on next (server/world.js). The simulation works
+// out the automatic values for its own thread and machine (js/active.js).
 H.budget = function () {
   if (!H.worker || !BF.active || !BF.proto.worker.w) return;
   const o = BF.active.opts();
-  BF.proto.worker.w.postMessage({ budget: { on: o.on, budget: o.budget }, coarse: BF.gameOpts ? BF.gameOpts.overridden() : null });   // (and ?coarse=, spec r15-64)
+  BF.proto.worker.w.postMessage({ budget: { on: o.on, settings: BF.active.settings() }, coarse: BF.gameOpts ? BF.gameOpts.overridden() : null });   // (and ?coarse=, spec r15-64)
 };
 // to the world server, outside the protocol (the debug feed's page part, js/debugfeed.js)
 H.post = m => { if (H.server && BF.proto.worker.w) BF.proto.worker.w.postMessage(m); };

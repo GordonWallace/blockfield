@@ -631,7 +631,7 @@ const QUERIES = {
   // the world state hash and its parts (js/statehash.js)
   hash() { return BF.stateHash ? Object.assign({ ok: true, tick: BF.rand ? BF.rand.tick : null }, BF.stateHash.full()) : { ok: false, why: "no state hash" }; },   // (tick: r15-41's test compares with a headless run of as many ticks)
   // the pause menu's Simulated villages line, where the simulation is (bug-081: js/player.js updateBudgetBtn)
-  budget() { return BF.active ? { ok: true, text: BF.active.text(), on: BF.active.opts().on, budget: BF.active.opts().budget } : { ok: false, why: "no budget" }; },
+  budget() { return BF.active ? { ok: true, text: BF.active.text(), on: BF.active.opts().on, budget: BF.active.opts().budget, settings: BF.active.settings(), auto: BF.active.auto(), villages: BF.villageSim ? BF.villageSim.count() : 0 } : { ok: false, why: "no budget" }; },   // (auto: the automatic values where the simulation is, for the pause menu's Distant villages panel)
   // the protocol's own figures
   stats() { return Object.assign({ ok: true }, stats()); },
   // a hash of the blocks of chunks {keys} and which of them aren't loaded (a client keeping its own copy checks it against this, r15-38)

@@ -167,9 +167,9 @@ function edgeDist(v, px, pz) {
 const ending = new Map();        // village key -> {t0, until (game day), est: [{who, task, secs}], max}
 const errors = [];               // loading errors, newest last (shown on the debug screen)
 const nowDay = () => dayNow();
-function logError(kind, data) {
-  errors.push(Object.assign({ kind, t: +nowDay().toFixed(3) }, data)); if (errors.length > 100) errors.shift();
-  if (BF.glog) BF.glog.log("ERROR", "loading", kind === "task-running" ? data.who + "'s task was cut off when the village unloaded: " + data.task + " (estimate " + data.estimate + " s, ran " + data.ran + " s; " + data.why + ")"
+function logError(kind, data, lvl) {
+  if (!lvl) { errors.push(Object.assign({ kind, t: +nowDay().toFixed(3) }, data)); if (errors.length > 100) errors.shift(); }   // (a WARN is no loading error)
+  if (BF.glog) BF.glog.log(lvl || "ERROR", "loading", kind === "task-running" ? data.who + "'s task was cut off when the village unloaded: " + data.task + " (estimate " + data.estimate + " s, ran " + data.ran + " s; " + data.why + ")"
     : data.who + " was stopped mid-task: " + data.task + " (" + data.action + "; " + data.why + ")", { village: data.village });   // js/gamelog.js
 }
 // At leisure: no task begun (begin) and doing one of the leisure things in js/villagerstatus.js. A task that runs past its estimate still counts.
@@ -425,7 +425,10 @@ function check(px, pz, clk, now) {
       fetchVillage(k);
       const est = estimates(k);
       if (!(est.max > 0)) continue;                                  // nothing out on a task: it unloads now
-      en = { t0: nd, until: nd + est.max / DAY_S, est: est.list, max: est.max };
+      // an extra the budget let go (too slow, or past the player's distance limit) waits a short while only (js/active.js waitCap)
+      const cap = BF.active && BF.active.waitCap ? BF.active.waitCap(k) : null;
+      if (cap != null && est.max > cap) est.max = cap;
+      en = { t0: nd, until: nd + est.max / DAY_S, est: est.list, max: est.max, cap: cap != null ? BF.active.waitWhy(k) : null };
       ending.set(k, en);
       const top = est.list[0];
       vlogLine(BF.mobs.villages.get(k), "Unloading in " + Math.round(est.max) + " s: waiting for " + est.list.length + " task" + (est.list.length === 1 ? "" : "s") + (top ? ", longest " + top.who + " (" + top.task + ")" : ""));
@@ -433,7 +436,8 @@ function check(px, pz, clk, now) {
     if (nd < en.until || nd < en.t0) { next.set(k, e); if (e.extra) extra.add(k); continue; }   // still counting down
     const rec = BF.mobs.villages.get(k);
     fetchVillage(k);
-    for (const x of estimates(k).list) if (x.errand) logError("task-running", { village: rec ? rec.key : k, who: x.who, task: x.task, estimate: x.est != null ? x.est : x.secs, ran: x.ran != null ? x.ran : Math.round((nd - en.t0) * DAY_S), why: "the unload timer ended" });
+    // (cut short on purpose when the budget let it go: a WARN, not an error)
+    for (const x of estimates(k).list) if (x.errand) logError("task-running", { village: rec ? rec.key : k, who: x.who, task: x.task, estimate: x.est != null ? x.est : x.secs, ran: x.ran != null ? x.ran : Math.round((nd - en.t0) * DAY_S), why: en.cap ? "the unload timer ended early: " + en.cap : "the unload timer ended" }, en.cap ? "WARN" : undefined);
     ending.delete(k);
   }
   // over a limit: stop villages in priority order until it is fine (never one within ALWAYS of the player)
