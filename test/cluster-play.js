@@ -7,7 +7,7 @@
 //   - the clusters are split over the 3 (F3's "Cluster workers 3"), every worker runs some, the copies' gathered hashes agree at every
 //     fifth meeting and never differ;
 //   - a save while split waits for a meeting and is written;
-//   - back to one (BF.rplay.testSolo): every worker takes the whole world at the next meeting, the cluster tick goes off, then (split
+//   - back to one (BF.rplay.testSolo): every worker takes the whole world at the next meeting, the leader runs every cluster, then (split
 //     always) they split again; still no difference; no ERROR in the workers' game log lines.
 // Usage: NODE_PATH=$(npm root -g) node test/cluster-play.js [seed=3]
 const { chromium } = require('playwright');
@@ -123,8 +123,9 @@ let S = null, PG = null;
   const m0 = await mark();
   await sim(pg, () => { BF.rplay.testSolo(); return true; });
   let t1 = Date.now();
-  const one = (await logUntil(/back to one with the whole world/, m0)) && (await logUntil(/^Cluster tick off/, m0));
-  check(one, `back to one: the workers took the whole world at a meeting and the cluster tick went off (${Math.round((Date.now() - t1) / 1000)} s)`);
+  const one = await logUntil(/back to one with the whole world/, m0);
+  const kept = one && await sim(pg, () => BF.ctick.on);   // (the cluster tick goes off only with the followers: js/rplay.js toSolo)
+  check(one && kept, `back to one: the workers took the whole world at a meeting and the leader runs every cluster (${Math.round((Date.now() - t1) / 1000)} s)`);
   t1 = Date.now();
   const again = (await logUntil(/clusters are split over/, m0, 600000)) && (await until(pg, () => BF.rplay.status().split && BF.cworkers.active, 300000));   // (splitting again boots the followers' copies again: minutes on a busy machine)
   if (!again) console.log('  server output (last 3000):\n' + S.srv.out.replace(/^\[(builder|breeding)\].*\n/gm, '').slice(-3000));

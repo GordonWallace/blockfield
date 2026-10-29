@@ -21,8 +21,10 @@
 // Clusters (spec r15-39b, settings.kind "clusters": the page's ?clusters=1, the world server's --clusters): the split is the cluster tick on
 // every copy, each worker running its own clusters with partial copies (js/cworkers.js), meeting every 20 ticks; the journal still
 // brings every copy the client's packets and the chunks, and goes out every tick while they meet. Back to one: at the next meeting every
-// worker takes the whole world (cworkers.leave), then the cluster tick goes off. A save waits for the next meeting (js/save.js). With
-// ?verify=N the copies' gathered hashes are compared every N / 20 meetings; a difference goes back to one after the next meeting.
+// worker takes the whole world (cworkers.leave) and the leader goes on running every cluster, the followers replaying it; the cluster
+// tick goes off only when the followers go (end: the copies' tables are in different orders after a split, which only the plain tick
+// reads). A save waits for the next meeting (js/save.js). With ?verify=N the copies' gathered hashes are compared every N / 20 meetings;
+// a difference goes back to one after the next meeting.
 // API: BF.rplay = { setup({workers, cores, spawn, split, kind}), begin(world), end(why), frame(raw), flush(), status(), text(), follower(post) }
 //   spawn(me, n) -> {post(msg), on(fn(msg)), terminate()}: a follower (js/regionworker.js in a browser, server/regionthread.js in Node)
 (() => {
@@ -189,14 +191,9 @@ function frame() {
     return;
   }
   if (RW.mismatch) { log("ERROR", "Region workers: the copies no longer match (" + RW.mismatch.parts.join(", ") + " at tick " + RW.mismatch.tick + "); going on with one"); end("the copies differ"); return; }
-  if (L.ctickOff && !clustered()) {   // (clusters: back to one with the whole world at the last meeting; the cluster tick off now, alike)
-    L.ctickOff = false;
-    RW.rec(["ctoff"]);
-    BF.ctick.on = false;
-  }
   if (!L.split) {
     const behind = Math.max(0, ...L.list.map(f => L.ticks - f.ticks));
-    const ready = L.ready === L.list.length && behind <= LAG && !clustered() && !L.ctickOff;
+    const ready = L.ready === L.list.length && behind <= LAG && !clustered();
     const want = L.policy === "always" || (L.policy === "auto" && L.busySince != null && t - L.busySince >= BUSY_MS && L.ticks >= L.retryAt);
     if (ready && want && L.policy !== "never") startSplit();
   } else if (L.trial && L.ticks >= L.trial.end) {
@@ -216,7 +213,7 @@ function startSplit() {
     RW.rec(["csplit", L.shared, n]);
     flush();
     clusterOn(L.shared, 0, n, L.link || (L.link = RW.attach(L.shared, 0, n)), L.verify);
-    L.split = true; L.splitMs = null;
+    L.split = true; L.splitMs = null; L.ctick = true;
     L.trial = { end: L.ticks + TRIAL_CLUSTERS, solo: L.soloMs };
     log("INFO", "Region workers: the clusters are split over " + n + " workers (ticks took " + (L.soloMs != null ? L.soloMs.toFixed(1) + " ms" : "?") + " on one)");
     return;
@@ -233,8 +230,12 @@ function toSolo(why) {
   if (L.kind === "clusters") {
     RW.rec(["csolo"]);
     flush();
-    BF.cworkers.leave();   // (at the next meeting: every worker takes the whole world, then the cluster tick goes off: frame)
-    L.split = false; L.soloMs = null; L.ctickOff = true;
+    // (at the next meeting every worker takes the whole world. The cluster tick stays on while there are followers: under it each copy
+    // put its own clusters' table entries and mobs first and the others' at meetings, so the copies' tables and lists are in different
+    // orders, which the cluster tick never reads across clusters but the plain tick does (Gordon's 2026-10-29 run: the followers drifted
+    // and were stopped). end() turns it off once the followers are gone)
+    BF.cworkers.leave();
+    L.split = false; L.soloMs = null;
     log("INFO", "Region workers: back to one running the clusters (" + why + ")");
     return;
   }
@@ -249,8 +250,8 @@ function end(why) {
   L.epoch++;   // (anything the old followers still say is ignored)
   if (RW.active) RW.pause();
   if (clustered()) BF.cworkers.stop(why ? "the followers go: " + why : "");
-  if ((L.kind === "clusters" && L.split || L.ctickOff) && BF.ctick && BF.ctick.on) BF.ctick.on = false;
-  L.ctickOff = false; L.endAfter = false;
+  if (L.ctick && BF.ctick && BF.ctick.on) BF.ctick.on = false;   // (the clusters' split turned it on: off once no copy has to stay in step)
+  L.ctick = false; L.endAfter = false;
   RW.journal = null; RW.clock = null; RW.onTick = null; RW.verify = 0; RW.mismatch = null;
   if (L.list.length) {
     for (const f of L.list) { try { f.h.post({ end: true }); } catch (e) { /* gone */ } try { f.h.terminate(); } catch (e) { /* gone */ } }
@@ -318,7 +319,6 @@ function follower(post) {
       case "solo": RW.pause(); break;
       case "csplit": clusterOn(o[1], me, o[2], link || (link = RW.attach(o[1], me, o[2])), verify); break;
       case "csolo": BF.cworkers.leave(); break;
-      case "ctoff": BF.ctick.on = false; break;
       case "sm": BF.cworkers.whenMet(ok => { if (ok) BF.cworkers.gathered(() => BF.save.snapshot({ quiet: true })); }); break;   // (a save at the next meeting, js/save.js)
       case "crash": if (o[1] === me) throw new Error("a test crash (test/multi-worker-play.js)"); break;
       default: throw new Error("region worker: unknown journal op " + o[0]);
