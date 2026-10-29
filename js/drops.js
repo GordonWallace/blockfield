@@ -99,6 +99,10 @@ const drops = {
   },
 
   clear() { for (const d of drops.list.slice()) drops.remove(d); },
+  // A world starting (js/boot.js): its drops' keys from d1 again, so every copy of it names them alike (a region worker booting a loaded
+  // world named its drops from d1 and the leader went on from its earlier world's, test/workers-load.js 2026-10-29: a forester's task
+  // holds the key)
+  reset() { drops.clear(); nextKey = 1; },
 
   // -> [[name, count, x, y, z, age, wear, pickupDelay]] for the save (js/save.js). Items are saved by name, like the
   // inventory: filled and auto map ids are handed out fresh each session, so an id would come back as another map.
