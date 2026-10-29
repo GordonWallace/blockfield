@@ -15,7 +15,7 @@
 // SOLO_MS of thinking a tick everything goes to one worker (the exchange isn't free).
 // The transport is synchronous, so a tick needs no event loop: SharedArrayBuffer mailboxes (one per worker, two halves used in turn)
 // and a barrier on Atomics (makeShared / attach below). The workers are Node worker_threads (server/regionthread.js: the world server
-// and tools/headless.js --workers) or Web Workers (js/regionworker.js, from the simulation worker, js/simworker.js).
+// and tools/headless.js --workers); r15-77 dropped the browser's Web Workers.
 // The first worker (me 0, the leader) is the simulation the client talks to; the others are followers: they replay the leader's
 // journal (journal / replay below: protocol packets, chunk loads and unloads, how many ticks a loop ran) so their copies stay the same.
 // The followers' game log lines and effects go to the leader in the exchange.

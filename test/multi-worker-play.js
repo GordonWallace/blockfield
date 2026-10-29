@@ -1,13 +1,10 @@
 // @ci integration suite=world,village timeout=1800
-// Region workers while the game is played (spec r15-39, js/rplay.js): the simulation worker leads, its followers (Web Workers from
-// js/regionworker.js, Node worker threads from server/regionthread.js on the world server) hold copies of the world made from the
-// leader's journal. Served over http (debug/server.js on free ports, as ./run.sh serves the game), seed 3:
-//   - ?sim=worker&workers=3&split=always&verify=20: a new world at the village nearest the spawn, half a game hour at 100x. The two
-//     followers boot the leader's world (the same hash), the regions are split over the three, the copies are compared every 20
-//     ticks and never differ; F3 says "Workers 3", the game log has the workers' lines;
-//   - paused, the leader's state hash matches a follower's (the journal brought it the player's packets, commands, chunk loads);
-//   - a follower that crashes while split stops the simulation: the page shows the crash, naming the region worker;
-//   - the world server (--workers 3 --split always --verify 20) splits the same way with Node threads, 20 game minutes.
+// Region workers while the game is played (spec r15-39, js/rplay.js): on the world server (debug/server.js on free ports, as ./run.sh
+// serves the game, --workers 3 --split always --verify 20), the simulation thread leads and its followers (Node worker threads from
+// server/regionthread.js) hold copies of the world made from the leader's journal. Seed 3, a new world at the village nearest the spawn,
+// 20 game minutes at 100x: the regions are split over the three threads and the copies never differ; F3 says "Workers 3", the game
+// log has the workers' lines; a follower that crashes while split stops the simulation and the page names the region worker. (The browser's Web Worker
+// followers, js/regionworker.js, were dropped in r15-77: they needed cross-origin isolation, which only debug/server.js gives.)
 // Every copy is also compared every 20 ticks while one worker thinks, before the split (js/rplay.js soloCheck).
 // Usage: NODE_PATH=$(npm root -g) node test/multi-worker-play.js [seed=3]
 const path = require('path'), cp = require('child_process'), net = require('net'), fs = require('fs'), os = require('os');
@@ -84,33 +81,6 @@ async function play(pg, label, minutes) {
 
 (async () => {
   const b = await chromium.launch();
-  // ---- the browser: Web Workers
-  const { srv, url } = await server();
-  const pg = await open(b, url + '?sim=worker&workers=3&split=always&verify=20');
-  const mode = await pg.evaluate(() => BF.simHost.mode);
-  check(/worker/.test(mode), `the simulation runs in a worker (${mode})`);
-  const s = await play(pg, 'browser', 30);
-  check(s.split && s.followers === 2, `browser: still split over 3 workers after the half hour (${s.text})`);
-  check(s.checks > 0 && !s.mismatch, `browser: the copies were compared ${s.checks} times and never differed${s.mismatch ? ' (' + JSON.stringify(s.mismatch).slice(0, 300) + ')' : ''}`);
-  const mobs = s.stats && s.stats.workers ? s.stats.workers.map(w => w.mobs) : [];
-  check(mobs.length === 3 && mobs.every(n => n > 0), `browser: every worker thinks for some of the mobs (${mobs.join('/')})`);
-  const f3 = await pg.evaluate(() => new Promise(r => BF.client.query('f3', {}, r)));
-  const wt = f3 && (f3.workersText || (f3.f3 && f3.f3.workersText));
-  check(/^Workers 3/.test(wt || ''), `browser: F3 says ${JSON.stringify(wt)}`);
-  const lines = await pg.evaluate(() => BF.glog.entries().filter(e => e.k === 'workers').map(e => e.l + ' ' + e.x));   // (the worker's entries come to the page's log)
-  check(lines.some(l => /split/i.test(l)) && !lines.some(l => /^ERROR/.test(l)), `browser: the game log has the workers' lines, no errors (${lines.slice(-3).join(' | ').slice(0, 300)})`);
-  for (const l of lines) if (/^ERROR/.test(l)) console.log('  ' + l.slice(0, 1200));   // in full: the first says which mob and field the copies differ in
-  // paused: a follower's copy is the leader's (the hash checks compare whole states; one more on demand)
-  const same = await sim(pg, () => { const RW = BF.rworkers; return { checks: RW.checks, mismatch: RW.mismatch }; });
-  check(!same.mismatch, `browser: paused, the leader and the followers agree`);
-  // the crash path: a follower throws while split
-  await pg.evaluate(() => { BF.state.paused = false; BF.warp.set(2); });
-  await sim(pg, () => BF.rplay.testCrash(1));
-  const crashed = await pg.waitForFunction(() => BF.simHost.crashed, null, { timeout: 120000, polling: 500 }).then(h => h.jsonValue(), () => null);
-  check(/region worker|worker 1/i.test(String(crashed || '')), `browser: a follower's crash stops the simulation and says so (${String(crashed).split('\n')[0].slice(0, 200)})`);
-  await pg.context().close();
-  srv.kill();
-
   // ---- the world server: Node worker threads
   const saves = fs.mkdtempSync(path.join(os.tmpdir(), 'bf-mw-'));
   const S = await server(['--test', '--saves', saves, '--workers', '3', '--split', 'always', '--verify', '20']);
@@ -118,6 +88,18 @@ async function play(pg, label, minutes) {
   check(await sp.evaluate(() => BF.simHost.mode === 'server'), 'server: the page is the world server\'s client');
   const ss = await play(sp, 'server', 20);
   check(ss.split && ss.followers === 2 && !ss.mismatch, `server: split over 3 threads, the copies agree (${ss.text})`);
+  check(ss.checks > 0, `server: the copies were compared ${ss.checks} times`);
+  const f3 = await sp.evaluate(() => new Promise(r => BF.client.query('f3', {}, r)));
+  const wt = f3 && (f3.workersText || (f3.f3 && f3.f3.workersText));
+  check(/^Workers 3/.test(wt || ''), `server: F3 says ${JSON.stringify(wt)}`);
+  const lines = await sim(sp, () => BF.glog.entries().filter(e => e.k === 'workers').map(e => e.l + ' ' + e.x));
+  check(lines.some(l => /split/i.test(l)) && !lines.some(l => /^ERROR/.test(l)), `server: the game log has the workers' lines, no errors (${lines.slice(-3).join(' | ').slice(0, 300)})`);
+  for (const l of lines) if (/^ERROR/.test(l)) console.log('  ' + l.slice(0, 1200));   // in full: the first says which mob and field the copies differ in
+  // the crash path: a follower throws while split
+  await sp.evaluate(() => { BF.state.paused = false; BF.warp.set(2); });
+  await sim(sp, () => BF.rplay.testCrash(1));
+  const crashed = await sp.waitForFunction(() => BF.simHost.crashed, null, { timeout: 120000, polling: 500 }).then(h => h.jsonValue(), () => null);
+  check(/region worker|worker 1/i.test(String(crashed || '')), `server: a follower's crash stops the simulation and says so (${String(crashed).split('\n')[0].slice(0, 200)})`);
   await sp.context().close();
   S.srv.kill();
   await b.close();
