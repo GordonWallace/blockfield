@@ -32,7 +32,7 @@ BF.newWorld = function (seed, opts) {
   BF.rand.reset();   // seeded random streams start over with the world (js/rand.js); a save restores its own counters afterwards
   BF.mobs.clear && BF.mobs.clear();
   if (BF.gameOpts) BF.gameOpts.setAll(opts && opts.monsters);   // which monsters spawn in this world (js/gameopts.js); none given: the defaults
-  BF.drops.clear();
+  BF.drops.reset();   // (the drops' keys start over too)
   if (BF.boats) BF.boats.clear();
   if (BF.horses) BF.horses.reset();
   BF.world.reset();

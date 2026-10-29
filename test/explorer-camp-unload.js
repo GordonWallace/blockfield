@@ -101,7 +101,7 @@ module.exports = async (pg, out) => {
     const find = () => BF.mobs.list.find(m => m.type === "villager" && !m.dead && !m.removed && m.village && m.village.key + "#" + (m.slot && m.slot.idx) === X.key);
     BF.mobs.unloadVillage(X.vkey);
     BF.sky.setTime(0.99);
-    BF.explorer.tick(5); BF.req.apply(); BF.req.deliver();
+    BF.explorer.sweep(); BF.req.apply(); BF.req.deliver();
     res.tentGone = W.getBlock(c.x, c.y, c.z) !== BF.tentId(c.f, 0, 1);
     res.glog = (BF.glog ? BF.glog.recent(200) : []).some(e => /tent at .* is taken down/.test(e.x || e.text || JSON.stringify(e)));
     BF.sky.setTime(0.1);

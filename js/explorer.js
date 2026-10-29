@@ -432,11 +432,12 @@ const dayNow = () => (BF.sky ? (BF.sky.day || 0) + skyT() : 0);
 // When the coming (or current) night ends, as a game day + time.
 function nightEnd() { const d = BF.sky ? BF.sky.day || 0 : 0, t = skyT(); return d + (t < 0.985 ? 0.985 : 1.985); }
 const tentAt = c => BF.world.isLoaded(c.x, c.z) && BF.world.getBlock(c.x, c.y, c.z) === BF.tentId(c.f, 0, 1);
-let tickT = 0;
-function tick(dt) {
-  const C = BF.ctick && BF.ctick.filter ? BF.ctick : null;   // (clusters: every 2 game seconds on the tick counter, each cluster its camps)
-  if (C) { if (!camps.size || BF.rand.tick % 40 !== 8) return; }
-  else { if (!camps.size || (tickT -= dt) > 0) return; tickT = 2; }
+// Every 2 game seconds on the tick counter, so every copy of the world looks on the same ticks: a timer of its own here started again at
+// 0 on a region worker booting a loaded world, and the worker took a tent down ticks before the leader did (test/workers-load.js, 2026-10-29).
+function tick() { if (camps.size && BF.rand.tick % 40 === 8) sweep(); }
+// The camps' look (tests call it directly).
+function sweep() {
+  const C = BF.ctick && BF.ctick.filter ? BF.ctick : null;   // (clusters: each cluster its camps)
   const here = new Set();
   for (const m of BF.mobs.list) if (CAMPERS.has(m.profession) && !m.dead && !m.removed && (!C || C.filter(m))) { const k = keyOf(m); if (k) here.add(k); }
   const now = dayNow();
@@ -567,5 +568,5 @@ function unpack(m, o) {
   if (o && o.camp && Number.isFinite(+o.camp.x) && Number.isFinite(+o.camp.f)) X.camp = { x: +o.camp.x, y: +o.camp.y, z: +o.camp.z, f: +o.camp.f & 3 };   // despawned while camping: struck on the next morning
 }
 
-BF.explorer = { offerFor, pitch, strike, away, tick, onSpawn, exportAll, importAll, camps, atHome, PRICE_BLANK, SELL_PRICE, FILLED, cellPx, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, shelve, LOG };
+BF.explorer = { offerFor, pitch, strike, away, tick, sweep, onSpawn, exportAll, importAll, camps, atHome, PRICE_BLANK, SELL_PRICE, FILLED, cellPx, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, shelve, LOG };
 })();
