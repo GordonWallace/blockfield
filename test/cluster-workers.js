@@ -21,12 +21,13 @@
 // --rejoin s (with --leave): split again at second s, the cluster tick still on (js/rplay.js startSplit after toSolo, which the automatic
 //   split does after every trial that doesn't pay): the change-only tables start from what every worker has then, so what the first
 //   interval drops goes as gone (before, farmland stamps an owner dropped stayed on the others).
+// --cycle p: back to one for p seconds, split again for p, and so on (the automatic split's trials over and over).
 // --drop s: at second s the fixed set of extra villages shrinks by 3 (BF.active fixed): the farthest leave and unload while split, their
 // chunks' wild mobs stored (a chunk dropping fetched only the mobs some worker ran: one current everywhere was left out of the set, so no
 // copy unloaded it and its owner stored it a tick later, where it had walked off to).
 // --restored: items on the ground before the tick starts, as from a save (with --plan: see restoredDrops). --load file: boot from a save
 // (tools/headless.js --save) instead of the seed.
-// Usage: node test/cluster-workers.js [--workers 2] [--seed 3] [--extra 3] [--seconds 30] [--shuffle k | --plan] [--order tick|cluster] [--pull] [--partial] [--bees] [--restored] [--leave s [--rejoin s]] [--drop s] [--load save.json]
+// Usage: node test/cluster-workers.js [--workers 2] [--seed 3] [--extra 3] [--seconds 30] [--shuffle k | --plan] [--order tick|cluster] [--pull] [--partial] [--bees] [--restored] [--leave s [--rejoin s]] [--cycle p] [--drop s] [--load save.json]
 //                                    [--profile converted|a,b,c]
 const path = require('path'), crypto = require('crypto');
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
@@ -163,7 +164,8 @@ function beeEdits(BF) {
 // ---------------------------------------------------------------- the parent
 async function main() {
   const n = +arg('workers', 2), seed = +arg('seed', 3), extra = +arg('extra', 3), seconds = +arg('seconds', 30);
-  const leaveAt = +arg('leave', 0), dropAt = +arg('drop', 0), rejoinAt = +arg('rejoin', 0);
+  const leaveAt = +arg('leave', 0), dropAt = +arg('drop', 0), rejoinAt = +arg('rejoin', 0), cycle = +arg('cycle', 0);
+  const away = s => cycle > 0 && Math.floor(s / cycle) % 2 === 1;   // (--cycle p: back to one for p seconds every 2p, as the automatic split's trials)
   const partial = process.argv.includes('--partial'), bees = process.argv.includes('--bees'), save = arg('load', null), restored = process.argv.includes('--restored');
   const order = arg('order', 'tick'), pull = order === 'cluster' && process.argv.includes('--pull') && arg('shuffle') == null;
   const profile = arg('profile', 'converted'), plan = process.argv.includes('--plan'), fixed = !plan && !pull && arg('shuffle') == null;
@@ -186,7 +188,7 @@ async function main() {
   let fails = 0, errs = 0;
   const all = [ref, ...ws];
   for (let s = 1; s <= seconds; s++) {
-    const out = await Promise.all(all.map(x => x.ask({ do: 'interval', s, leave: s === leaveAt, rejoin: s === rejoinAt, drop: s === dropAt ? Math.max(0, extra - 3) : null })));
+    const out = await Promise.all(all.map(x => x.ask({ do: 'interval', s, leave: s === leaveAt || (away(s) && !away(s - 1)), rejoin: s === rejoinAt || (s > 1 && !away(s) && away(s - 1)), drop: s === dropAt ? Math.max(0, extra - 3) : null })));
     const bad = out.find(o => o.error);
     if (bad) { console.error('a worker failed:\n' + bad.error); process.exit(1); }
     const r = out[0];
@@ -201,7 +203,7 @@ async function main() {
       const objs = [...keys].filter(k => r.objs[k] !== o.objs[k]).sort();
       diffs.push({ w: w - 1, parts, objs });
     }
-    if (!(leaveAt > 0 && s >= leaveAt && !(rejoinAt > leaveAt && s > rejoinAt))) {   // the bees that are out: every worker's (full copies), or all of them put together (partial copies), as the reference's (back to one: every worker has them all)
+    if (!(leaveAt > 0 && s >= leaveAt && !(rejoinAt > leaveAt && s > rejoinAt)) && !(cycle > 0 && (away(s) || away(s - 1)))) {   // the bees that are out: every worker's (full copies), or all of them put together (partial copies), as the reference's (back to one: every worker has them all)
       const lists = partial ? [Object.assign({}, ...out.slice(1).map(o => o.beesOut))] : out.slice(1).map(o => o.beesOut);
       if (partial) { const seen = new Set(); for (let w = 1; w < out.length; w++) for (const k in out[w].beesOut) { if (seen.has(k)) diffs.push({ w: w - 1, parts: ['bees out (two workers have cluster ' + k + "'s)"], objs: [] }); seen.add(k); } }
       lists.forEach((l, i) => {
