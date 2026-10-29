@@ -227,7 +227,7 @@ function sync() {
     const p = ps[w];
     if (!p) continue;
     for (const [name, id] of p.dyn) if (!BF.dynRange.adopt(name, id)) err("worker " + w + " made item " + name + " as " + id + ", which is another item here");
-    for (const [k, e] of p.reg) BF.ids.put(R.dec(e, null), k);   // (new, or put again: a newborn's bed claimed anew is a new object under its key)
+    for (const [k, e] of p.reg) if (BF.ids.find(k) === undefined) BF.ids.put(R.dec(e, null), k, true);   // (new, or put again: a newborn's bed claimed anew is a new object under its key; quiet, as the other worker's copy of a place this worker has too. A place a record here holds (js/ids.js finder) stays that object)
     for (const [id, type] of p.born) if (BF.ids.live(id) === undefined) { BF.mobs.blank(type, id); fresh.add(id); }
   }
   for (let w = 0; w < ps.length; w++) {

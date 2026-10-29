@@ -68,12 +68,12 @@ function find(id) {
   const o = f ? f(id.slice(i + 1)) : undefined;
   return o === null ? undefined : o;
 }
-function put(obj, id) {
+function put(obj, id, quiet) {
   if (!obj) return obj;
   if (id == null) id = obj.id;
   if (id == null) { id = alloc(); obj.id = id; }
   const had = reg.get(id);
-  if (had && had !== obj) {   // two objects claim one place key (or id): the newer is what links read now
+  if (had && had !== obj && !quiet) {   // (quiet: a copy of a place another cluster worker sent, or one its record holds, js/cworkers.js)   // two objects claim one place key (or id): the newer is what links read now
     stats.collisions++; stats.last = id;
     if (stats.collisions <= 20 && BF.glog) BF.glog.log("WARN", "ids", "Entity id " + id + " was taken over by another object" + (obj.type ? " (" + obj.type + ")" : ""));
   }
@@ -127,7 +127,7 @@ function place(proto, name, field, keyOf) {
       if (v == null) { this[field] = v; return; }
       let k = keyOf(v, this);
       if (k == null || k.includes("undefined")) k = idOf(v);   // (a record without a key or cell, as tests make: known by an id of its own)
-      if (reg.get(k) !== v) put(v, k);
+      if (reg.get(k) !== v) put(v, k, finders.size > 0 && find(k) === v);
       this[field] = k;
     },
     enumerable: false, configurable: true,
@@ -231,6 +231,7 @@ const isRefs = o => { const p = o && typeof o === "object" ? Object.getPrototype
 
 BF.ids = {
   alloc, get, put, remove, idOf, placeKey, link, place, Refs, refs, MobRef, mobRef, isRefs, REF, stats, hooks, CACHE_FIELDS,
+  find: id => finders.size ? find(id) : undefined,
   finder(kind, fn) { finders.set(kind, fn); finderFirst.add(kind.charCodeAt(0)); },
   get next() { return next; },
   get size() { return reg.size; },
