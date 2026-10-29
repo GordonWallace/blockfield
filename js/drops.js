@@ -26,6 +26,19 @@ const CL = () => BF.mobs && BF.mobs.cl;
 const clOn = () => !!(BF.ctick && BF.ctick.on);
 const inPass = () => !!(CL() && CL().owned());
 const mineD = d => !inPass() || CL().ownsThing(d, d.pos);
+// The running cluster's drops, in list order (update's pass): sorted out by group once an interval and again when the list changes,
+// rather than every drop tested in every group's pass (Gordon's test4, 2026-10-29: 299 drops, two thirds in unloaded chunks, 18 passes a
+// tick). A drop's base is fixed from the first look of an interval (BF.mobs.cl thingBase), so its group is too: ownsThing's answer.
+let ver = 0, byG = null;
+function ownDrops() {
+  const C = BF.ctick, gs = C.groups();
+  if (!C.filter) return drops.list.slice();
+  if (!byG || byG.gs !== gs || byG.ver !== ver) {
+    byG = { gs, ver, by: new Map() };
+    for (const d of drops.list) { const k = CL().groupFor(CL().thingBase(d, d.pos)), a = byG.by.get(k); if (a) a.push(d); else byG.by.set(k, [d]); }
+  }
+  return byG.by.get(C.cur.key) || [];
+}
 
 // An identical stack within a block of d, the first in the list (spec r15-31: from the region index's drops around d; in tests with
 // BF.regions.verifyQueries also by the scan of the whole list it replaced).
@@ -59,7 +72,7 @@ const drops = {
     const d = { key: "d" + n, id, count, pos: new THREE.Vector3(x, y, z), prev: new THREE.Vector3(x, y, z), prevAge: 0, vel, age: 0, phase: Math.random() * 6.28, pulled: false,   // visual (the bob)
       pickupDelay: opts && opts.pickupDelay != null ? opts.pickupDelay : PICKUP_DELAY, wear: (opts && opts.wear) || 0 };
     if (cl) CL().placeThing(d, d.pos);
-    drops.list.push(d);
+    drops.list.push(d); ver++;
     byKey.set(d.key, d);
     if (BF.regions) BF.regions.dropAdded(d);   // the region index (js/regions.js)
     return d;
@@ -80,7 +93,7 @@ const drops = {
 
   remove(d) {
     const i = drops.list.indexOf(d);
-    if (i >= 0) drops.list.splice(i, 1);
+    if (i >= 0) { drops.list.splice(i, 1); ver++; }
     byKey.delete(d.key);
     if (BF.regions) BF.regions.dropRemoved(d);
   },
@@ -113,8 +126,7 @@ const drops = {
 
   update(dt) {
     const P = BF.player, c = inPass(), pp = c ? CL().playerPos() : P && P.position, alive = c ? CL().playerLives() : P && !P.dead;   // (clusters: the player as the running cluster sees it)
-    for (const d of drops.list.slice()) {
-      if (c && !CL().ownsThing(d, d.pos)) continue;   // (clusters: the running cluster's drops)
+    for (const d of c ? ownDrops() : drops.list.slice()) {   // (clusters: the running cluster's drops)
       d.prev.copy(d.pos); d.prevAge = d.age; d.pulled = false;   // drawn between this and where the tick leaves it (js/entityview.js)
       // in an unloaded chunk an item neither ages nor falls (it would drop out of the world); it waits for the chunk
       if (!BF.world.isLoaded(d.pos.x, d.pos.z)) continue;
