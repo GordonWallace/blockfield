@@ -52,20 +52,21 @@ function alloc() {
 const bump = n => { if (n >= top) top = n + 1; if (!lim && n >= next) next = n + 1; };
 function get(id) {
   if (id == null) return undefined;
-  let o = reg.get(id);
-  if (o === undefined && finders.size) o = find(id);
+  let o = finders.size ? find(id) : undefined;
+  if (o === undefined) o = reg.get(id);
   if (o === undefined && ghosts.size) { const g = ghosts.get(id); o = g && g.o; }
   return hide !== null && o !== undefined && hide(o) ? undefined : o;
 }
-// Place keys whose object lives in a record (finder(kind, fn): fn(rest of the key) -> the object or undefined): one not registered here is
-// found there and registered. Clusters on several workers (js/cworkers.js): a record that came from another worker at a meeting holds
-// objects nobody put here, so a link to one (a newborn's bredEntry, js/breeding.js) would not resolve on this copy.
-const finders = new Map();
+// Place keys whose object lives in a record (finder(kind, fn): fn(rest of the key) -> the object or undefined): read there first, the
+// registry only when it has none. Clusters on several workers (js/cworkers.js): a record that came from another worker at a meeting holds
+// objects nobody put here, or new ones in place of those that were, so a link to one (a newborn's bredEntry, js/breeding.js) would not
+// resolve on this copy, or would reach an object the record no longer holds.
+const finders = new Map(), finderFirst = new Set();   // (the kinds' first characters: most keys are passed over without a slice)
 function find(id) {
-  const i = typeof id === "string" ? id.indexOf(":") : -1, f = i > 0 ? finders.get(id.slice(0, i)) : undefined;
+  if (typeof id !== "string" || !finderFirst.has(id.charCodeAt(0))) return undefined;
+  const i = id.indexOf(":"), f = i > 0 ? finders.get(id.slice(0, i)) : undefined;
   const o = f ? f(id.slice(i + 1)) : undefined;
-  if (o !== undefined && o !== null) { reg.set(id, o); gen++; vgen++; return o; }
-  return undefined;
+  return o === null ? undefined : o;
 }
 function put(obj, id) {
   if (!obj) return obj;
@@ -121,7 +122,7 @@ function link(proto, name, field) {
 function place(proto, name, field, keyOf) {
   REF.add(field);
   Object.defineProperty(proto, name, {
-    get() { const k = this[field]; return k == null ? k : reg.get(k); },
+    get() { const k = this[field]; if (k == null) return k; const o = finders.size ? find(k) : undefined; return o !== undefined ? o : reg.get(k); },
     set(v) {
       if (v == null) { this[field] = v; return; }
       let k = keyOf(v, this);
@@ -230,7 +231,7 @@ const isRefs = o => { const p = o && typeof o === "object" ? Object.getPrototype
 
 BF.ids = {
   alloc, get, put, remove, idOf, placeKey, link, place, Refs, refs, MobRef, mobRef, isRefs, REF, stats, hooks, CACHE_FIELDS,
-  finder(kind, fn) { finders.set(kind, fn); },
+  finder(kind, fn) { finders.set(kind, fn); finderFirst.add(kind.charCodeAt(0)); },
   get next() { return next; },
   get size() { return reg.size; },
   live: id => reg.get(id),   // the registered object only (no removed mob)
