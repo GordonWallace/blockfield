@@ -765,10 +765,22 @@ function shootArrow(m, target, victim) {
   dir.x += rnd(R(m), -0.03, 0.03); dir.y += rnd(R(m), -0.03, 0.03); dir.z += rnd(R(m), -0.03, 0.03);
   dir.normalize();
   from.addScaledVector(dir, 0.5);
-  arrows.push(placeThing({ pos: from.clone(), prev: from.clone(), vel: dir.multiplyScalar(speed), look: null, life: 6, stuck: false, owner: m, victim: victim || null }, from));
+  dir.multiplyScalar(speed);
+  if (inThink()) { BF.req.send("arrow", m.id, { from: [from.x, from.y, from.z], vel: [dir.x, dir.y, dir.z], victim: victim ? victim.id : null }, m); return; }
+  loose(m, from, dir, victim);
+}
+function loose(m, from, vel, victim) {
+  arrows.push(placeThing({ pos: from.clone(), prev: from.clone(), vel, look: null, life: 6, stuck: false, owner: m, victim: victim || null }, from));
   noiseSound(0.15, 2500, 0.25, from);
   if (BF.emit) BF.emit("arrowShot", m, from);
 }
+// A skeleton's arrow loosed while it thinks is a request (as a hit is): it flies on every copy of a world split over region workers, not
+// only on the worker that ran the skeleton (spec r15-39: an arrow on one copy hit a golem there only), and in requester order on one.
+BF.req.on("arrow", req => {
+  const d = req.data, m = BF.ids.get(req.target), V = a => new THREE.Vector3(a[0], a[1], a[2]);
+  loose(m && !m.removed ? m : null, V(d.from), V(d.vel), d.victim ? BF.ids.get(d.victim) || null : null);
+  return { ok: true };
+});
 // Player arrows (js/player.js bow): `vel` in blocks/s, `o` = { damage, crit, pickup } where pickup is 1 (walking over the stuck
 // arrow gives it back), 2 (fired in creative: it is just removed) or 0. They hit any living mob as a player attack (BF.mobs.hit:
 // knockback, hostiles turn on the player, a hurt villager or golem angers the village's golems), never the player, and stick in
