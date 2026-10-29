@@ -41,6 +41,16 @@ const THIN = [0, 0, 0, 1, 2, 3];   // ring by ring: one tree cell kept in each s
                                    // one in 4, 16 and 64 per ring, as the prototype (the ground's canopy colour stands in for the rest)
 const HOUSE_LEVELS = 5;        // rings with village buildings, out to 8 km (beyond, a building is under a pixel before the ring starts)
 const pxScale = { value: 900 };   // pixels per radian at the middle of the screen: drawing-buffer height / (2 tan(fov / 2))
+// The chunk mask: one texel per chunk in a square of MASK_N x MASK_N chunks round the player's, 255 where the chunk has a mesh (loaded
+// chunks and far meshes, js/world.js), 0 elsewhere. Stand-in boxes aren't drawn over the chunks it marks (STAND_FRAG). Meshes reach 35
+// chunks from the player at most (view distance 32, dropped 3 past it), well inside its 64.
+const MASK_N = 128;
+const maskData = new Uint8Array(MASK_N * MASK_N), maskNext = new Uint8Array(MASK_N * MASK_N);
+const chunkMask = { value: new THREE.DataTexture(maskData, MASK_N, MASK_N, THREE.LuminanceFormat, THREE.UnsignedByteType) };
+chunkMask.value.magFilter = chunkMask.value.minFilter = THREE.NearestFilter;
+chunkMask.value.generateMipmaps = false;
+chunkMask.value.needsUpdate = true;
+const maskO = { value: new THREE.Vector2() };   // its corner in the view face's grid
 
 const lod = (BF.lod = { EXT, THIN, levels: [], active: false, eyeHole: 0, ribbon: null, scene: null, view: { f: 0, u: 0, v: 0 }, standIns: true });
 
@@ -158,6 +168,11 @@ function material(morph) {
 // the ring's grid relative to its centre; sph: round, relative to its anchor) and built out along the grid axes there (frame: grid u, up
 // and grid v as planet-space vectors at the ring's centre, close enough across a ring). Cut like the ring's ground (whole stand-ins: by
 // their foot), so they never show over the loaded chunks or the finer ring.
+// While chunks stream in, chunks past the loaded chunks' disc already have meshes (the disc only reaches the nearest chunk without one),
+// so a stand-in there would show over its real building or tree. Boxes are also cut per pixel by the chunk mask (chunkMask below): no
+// part of a stand-in shows over a chunk that has a mesh, and the part still over chunks without one keeps showing, so a building that
+// loads in pieces is never drawn twice and never leaves a gap. Points (rings 2 on, from about 780 blocks) are past every chunk mesh: meshes
+// are dropped 3 chunks past the view distance (35 chunks at most).
 const STAND_VERT = `
 attribute vec3 base;
 attribute vec3 sph;
@@ -182,8 +197,11 @@ uniform vec2 centre;   // the ring's centre in its face's grid
 uniform mat3 toHole;   // the ring's face grid into the view face's (the loaded chunks' disc)
 uniform mat3 toHole2;  // into the finer ring's face
 uniform float seam2;
+uniform vec2 maskO;    // the chunk mask's corner in the view face's grid
 varying vec3 vColor;
-#ifndef BOXES
+#ifdef BOXES
+varying vec2 vMask;    // the point's place in the chunk mask, in chunks from its corner
+#else
 varying vec3 vSide;    // the crown's (or roof's) sides, and the trunk's (or walls')
 varying vec3 vLow;
 varying vec4 vRows;    // where the top face, crown sides and trunk end, down the point (0 at its top)
@@ -219,6 +237,7 @@ void main() {
   vec2 wd = up ? b.xy * mix(1.0, a.w / 255.0, position.y) : a.xy;
   vec3 l = vec3(position.x * wd.x, up ? c + position.y * b.z : position.y * a.z, position.z * wd.y);
   vColor = (up ? top : low) * shade;
+  vMask = ((toHole * vec3(g.xy + l.xz, 1.0)).xy - maskO) / CHUNK;
 #else
   // a point drawn like the two boxes seen from here: the crown's (or roof's) top face, its sides below, then the trunk (or walls), each
   // shaded as the boxes' faces are. sn is how steeply the view looks down on it.
@@ -251,8 +270,11 @@ void main() {
 }`;
 const STAND_FRAG = `
 uniform float uDay;
+uniform sampler2D chunkMask;
 varying vec3 vColor;
-#ifndef BOXES
+#ifdef BOXES
+varying vec2 vMask;
+#else
 varying vec3 vSide;
 varying vec3 vLow;
 varying vec4 vRows;
@@ -261,7 +283,9 @@ varying vec2 vHalf;
 #include <fog_pars_fragment>
 void main() {
   vec3 col = vColor;
-#ifndef BOXES
+#ifdef BOXES
+  if (all(greaterThanEqual(vMask, vec2(0.0))) && all(lessThan(vMask, vec2(MASK_N))) && texture2D(chunkMask, (floor(vMask) + 0.5) / MASK_N).r > 0.5) discard;
+#else
   if (vRows.w > vRows.x) {
     vec2 q = gl_PointCoord;
     float x = abs(q.x - 0.5);
@@ -277,12 +301,12 @@ function standMaterial(boxes) {
   const sphM = new THREE.Matrix4();
   const m = new THREE.ShaderMaterial({
     vertexShader: STAND_VERT, fragmentShader: STAND_FRAG, fog: true,
-    defines: Object.assign({ FACE_N: P().N.toFixed(1) }, boxes ? { BOXES: 1 } : {}),
+    defines: Object.assign({ FACE_N: P().N.toFixed(1), MASK_N: MASK_N.toFixed(1), CHUNK: BF.CS.toFixed(1) }, boxes ? { BOXES: 1 } : {}),
     uniforms: Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), {
       sphM: { value: sphM }, uK: BF.world.roundK, uDay: BF.world.dayUniform, pxScale, frame: { value: new THREE.Matrix3() },
       edge: { value: new THREE.Vector2(1e30, 2e30) }, hole: { value: new THREE.Vector3() }, hole2: { value: new THREE.Vector3() },
       outer: { value: new THREE.Vector3() }, centre: { value: new THREE.Vector2() }, toHole: { value: new THREE.Matrix3() },
-      toHole2: { value: new THREE.Matrix3() }, seam2: { value: 0 },
+      toHole2: { value: new THREE.Matrix3() }, seam2: { value: 0 }, chunkMask, maskO,
     }),
   });
   m.userData.sphM = sphM;
@@ -659,6 +683,7 @@ function update(budgetMs) {
   if (above < RIBBON_HIDE && !(ff && lod.ribbon)) ribbons(V, top);
   // cut each ring to its disc, minus the next finer ring's disc and the loaded chunks
   lod.eyeHole = Math.min(BF.world.viewDist * BF.CS, BF.world.covered || 0) * 0.95;
+  markChunks(pp, V);
   let prev = null;
   const lastStand = lod.levels[STAND_LEVELS - 1];
   for (const L of lod.levels) {
@@ -694,6 +719,39 @@ function update(budgetMs) {
   }
 }
 const tmpV2 = new THREE.Vector2();
+// Fills the chunk mask round the player's chunk (atlas position pp, view face V) and places it in the view face's grid; uploads it only
+// when it changed. A chunk with a mesh outside it would show its stand-ins over it again: logged once (it can't happen at view
+// distances up to 32).
+let maskWarned = false;
+function markChunks(pp, V) {
+  const W = BF.world, CS = BF.CS, H = MASK_N / 2;
+  const ox = Math.floor(pp.x / CS) - H, oz = Math.floor(pp.z / CS) - H;
+  maskNext.fill(0);
+  let outside = 0;
+  const mark = (cx, cz) => {
+    const i = cx - ox, j = cz - oz;
+    if (i < 0 || j < 0 || i >= MASK_N || j >= MASK_N) { outside++; return; }
+    maskNext[j * MASK_N + i] = 255;
+  };
+  for (const c of W.chunks.values()) if (c.mesh === true && c.meshes && c.meshes.length) mark(c.cx, c.cz);
+  for (const k of W.farMeshes.keys()) { const i = k.indexOf(","); mark(+k.slice(0, i), +k.slice(i + 1)); }
+  if (outside && !maskWarned && BF.glog) {
+    maskWarned = true;
+    BF.glog.log("ERROR", "terrain", outside + " drawn chunk" + (outside > 1 ? "s lie" : " lies") + " outside the distant terrain's chunk mask: village and tree stand-ins may show over them");
+  }
+  // the mask's corner in the view face's grid (atlas x = W f + N + u, z = N + v; js/planet.js)
+  const Pl = P();
+  maskO.value.set(ox * CS - Pl.W * V.f - Pl.N, oz * CS - Pl.N);
+  if (lod.maskOff) maskO.value.set(1e9, 1e9);   // (tests: stand-ins drawn as before the mask)
+  let same = true;
+  for (let i = 0; i < maskData.length; i++) if (maskData[i] !== maskNext[i]) { same = false; break; }
+  if (!same) { maskData.set(maskNext); chunkMask.value.needsUpdate = true; lod.maskChanges = (lod.maskChanges || 0) + 1; }
+}
+// (tests) whether the chunk mask marks chunk (cx, cz) as drawn
+lod.masked = (cx, cz) => {
+  const pp = BF.player.position, H = MASK_N / 2, i = cx - Math.floor(pp.x / BF.CS) + H, j = cz - Math.floor(pp.z / BF.CS) + H;
+  return i >= 0 && j >= 0 && i < MASK_N && j < MASK_N && maskData[j * MASK_N + i] > 0;
+};
 // How far from ring L's centre it is certainly covered by the loaded chunks or the finer ring (blocks; 0 if unsure): measured only within
 // one face's grid, and not near a cube corner, where the finer ring leaves a strip along its wedge and unfolding depends on the route.
 function covered(L, V, fine) {
