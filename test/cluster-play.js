@@ -52,10 +52,20 @@ async function open(b, url) {
 // (a simulation that stopped answering fails the call after 200 s (past the workers' 120 s barrier timeout, js/rworkers.js) instead of hanging the test)
 const sim = (pg, fn, arg) => Promise.race([pg.evaluate(([f, a]) => BF.simHost.eval(f, a), [String(fn), arg === undefined ? null : arg]),
   new Promise((_, rej) => setTimeout(() => rej(new Error('the simulation did not answer in 200 s')), 200000))]);
-async function until(pg, fn, ms) {
+async function until(pg, fn, ms, trace) {
   const t0 = Date.now();
+  let told = t0;
   const late = () => new Promise(r => setTimeout(() => r('late'), 30000));   // (a simulation that stopped answering)
-  while (Date.now() - t0 < ms) { if ((await Promise.race([sim(pg, fn).catch(() => false), late()])) === true) return true; await new Promise(r => setTimeout(r, 2000)); }
+  while (Date.now() - t0 < ms) {
+    const r = await Promise.race([sim(pg, fn).catch(() => false), late()]);
+    if (r === true) return true;
+    if (trace && Date.now() - told >= 30000) {   // (where it is while waiting: a slow host's log says which step takes the time)
+      told = Date.now();
+      const s = await Promise.race([sim(pg, () => BF.rplay.text()).catch(e => 'no answer: ' + e.message), late()]);
+      console.log(`  ${trace} ${((told - t0) / 1000).toFixed(0)} s: ${r === 'late' ? '(the simulation was slow to answer) ' : ''}${s}`);
+    }
+    await new Promise(r => setTimeout(r, 2000));
+  }
   return false;
 }
 const status = pg => sim(pg, () => Object.assign(BF.rplay.status(), { text: BF.rplay.text(), checks: BF.rworkers.checks || 0, mismatch: BF.rworkers.mismatch,
@@ -87,9 +97,10 @@ let S = null, PG = null;
   }, seed);
   check(r.village, 'the player is at the village nearest the spawn');
   await sim(pg, () => { BF.active.set({ on: true, fixed: 4, reach: 4000 }); return true; });
-  const ready = await until(pg, () => { const s = BF.rplay.status(); return s.followers > 0 && s.ready === s.followers && s.split && BF.cworkers.active; }, 300000);
+  const tr = Date.now();
+  const ready = await until(pg, () => { const s = BF.rplay.status(); return s.followers > 0 && s.ready === s.followers && s.split && BF.cworkers.active; }, 300000, 'first split');
   const s0 = await status(pg);
-  check(ready, `2 followers booted the leader's world and the clusters are split (${s0.text})`);
+  check(ready, `2 followers booted the leader's world and the clusters are split (${((Date.now() - tr) / 1000).toFixed(0)} s; ${s0.text})`);
   await run(pg, +(process.env.CP_MINUTES || 10));
   const crashed = await pg.evaluate(() => BF.simHost.crashed);
   check(!crashed, `no crash${crashed ? ' (' + String(crashed).slice(0, 300) + ')' : ''}`);
@@ -127,7 +138,7 @@ let S = null, PG = null;
   const kept = one && await sim(pg, () => BF.ctick.on);   // (the cluster tick goes off only with the followers: js/rplay.js toSolo)
   check(one && kept, `back to one: the workers took the whole world at a meeting and the leader runs every cluster (${Math.round((Date.now() - t1) / 1000)} s)`);
   t1 = Date.now();
-  const again = (await logUntil(/clusters are split over/, m0, 600000)) && (await until(pg, () => BF.rplay.status().split && BF.cworkers.active, 300000));   // (splitting again boots the followers' copies again: minutes on a busy machine)
+  const again = (await logUntil(/clusters are split over/, m0, 600000)) && (await until(pg, () => BF.rplay.status().split && BF.cworkers.active, 300000, 'split again'));   // (splitting again boots the followers' copies again: minutes on a busy machine)
   if (!again) console.log('  server output (last 3000):\n' + S.srv.out.replace(/^\[(builder|breeding)\].*\n/gm, '').slice(-3000));
   if (!again) console.log('  status: ' + JSON.stringify(Object.assign(await status(pg), { loads: undefined })).slice(0, 900) + '\n  marks: ' + m0 + ' ' + JSON.stringify(await sim(pg, () => [BF.glog.base(), BF.glog.entries().length, !!(BF.cworkers && BF.cworkers.active)])) + '\n  log: ' + (await sim(pg, () => BF.glog.entries().filter(e => e.k === 'workers' || e.k === 'clusters').slice(-8).map(e => e.l + ' ' + e.x).join(' | '))).slice(0, 1500));
   check(again, `split=always: split again (${Math.round((Date.now() - t1) / 1000)} s)`);
