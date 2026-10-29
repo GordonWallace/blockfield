@@ -77,7 +77,7 @@ function bredList(rec) {
 function villagerCount(rec) {
   const live = (rec.members || []).filter(m => m.type === "villager" && !m.dead && !m.removed && !m.bred).length;
   const roster = rec.roster ? Math.max(0, rec.roster.length - ((rec.killed && rec.killed.villager) || 0)) : live;
-  return Math.max(roster, live) + bredList(rec).filter(e => !e.dead).length;
+  return Math.max(roster, live) + (rec.bred || S.pending.get(rec.key) || []).filter(e => !e.dead).length;   // (bredList's list without taking it: F3 and the debug screen count too, and reading must change nothing)
 }
 
 // Beds of the village: every bed foot block inside the village box (+8) or a builder's structure, found by
@@ -98,9 +98,10 @@ function areaRects(rec) {
   return out;
 }
 const inRects = (rects, x, z) => rects.some(r => x >= r[0] && x <= r[2] && z >= r[1] && z <= r[3]);
-function scanBeds(rec) {
+// keep false (a reader's look, bedsSeen): the same beds, nothing stored (no cache entry, rec.beds as it was)
+function scanBeds(rec, keep = true) {
   const CS = BF.CS, W = BF.world, rects = areaRects(rec), F = footTable();
-  const cache = rec.bedCache || (rec.bedCache = new Map());
+  const cache = rec.bedCache || (keep ? (rec.bedCache = new Map()) : new Map());
   const chunks = new Set(), sig = rects.join(";");
   for (const r of rects) for (let cx = Math.floor(r[0] / CS); cx <= Math.floor(r[2] / CS); cx++)
     for (let cz = Math.floor(r[1] / CS); cz <= Math.floor(r[3] / CS); cz++) chunks.add(cx + "," + cz);
@@ -118,7 +119,7 @@ function scanBeds(rec) {
           if (inRects(rects, x, z)) scan.push({ x, y, z, f: F[id] });
         }, -1, BF.MIN_Y + 1);
         if (found) BF.dcmp.check("village beds", scan, found.slice(), [c.cx * CS, 0, c.cz * CS]);
-        else { found = scan; found.c = c; found.ver = c.ver; found.sig = sig; cache.set(ck, found); }
+        else { found = scan; found.c = c; found.ver = c.ver; found.sig = sig; if (keep) cache.set(ck, found); }
       }
       beds.push(...found);
     } else if (cache.has(ck)) beds.push(...cache.get(ck));
@@ -128,10 +129,14 @@ function scanBeds(rec) {
         if (Math.floor(b.x / CS) === cx && Math.floor(b.z / CS) === cz) beds.push({ x: b.x, y: b.y, z: b.z, f: b.f });
     }
   }
-  rec.beds = beds; rec.bedScanAt = BF.simNow() * 1000;
+  if (keep) { rec.beds = beds; rec.bedScanAt = BF.simNow() * 1000; }
   return beds;
 }
 function bedCount(rec) { if (!rec.beds || rec.bedDirty) { rec.bedDirty = false; scanBeds(rec); } return rec.beds.length; }
+// The beds F3 and the debug screen show (js/villagelog.js tally): bedCount's number, but reading changes nothing. bedCount scanned and
+// kept the beds on the record, so the moment a reader first looked decided when the village's beds were scanned, and the region workers'
+// copies, which read the debug feed for themselves (js/rplay.js "feed"), each looked at other moments: their records differed (2026-10-29)
+const bedsSeen = rec => (rec.beds && !rec.bedDirty ? rec.beds : scanBeds(rec, false)).length;
 // beds >= villagers + 1, counting the children of pairs already in love (born in a moment) as villagers
 const lovesIn = rec => S.loves.filter(L => L.rec === rec).length;
 const maxTotal = rec => rec && rec.pop ? Math.max(MAX_TOTAL, Math.ceil(rec.pop * 1.5)) : MAX_TOTAL;   // sized villages (2-100 villagers) may grow by half
@@ -599,7 +604,7 @@ BF.breeding = {
   RADIUS, CHANCE, NEED, PAY, CHILD_BREAD, CHILD_RATE, COOLDOWN, LOVE_T, MAX_TOTAL, KEY_BASE,
   tick, ai, childMove, exportAll, importAll, reset,
   onRemoved(m) { const e = m.bredEntry; if (e && e.mob === m && !e.dead) keepState(e, m); },   // js/mobs.js removeMob (js/ids.js: links to a removed mob go)
-  eligible, bedsOK, bedCount, villagerCount, scanBeds, freeBed, bedFree, breadEq,
+  eligible, bedsOK, bedCount, bedsSeen, villagerCount, scanBeds, freeBed, bedFree, breadEq,
   forceBreed, birth, growUp, makeChild, info, stats: S.stats, log: S.log, state: S,
   // instant variants for tests
   forceBirth(a, b) { const rec = villageOf(a) || villageOf(b); return rec ? birth(a, b, rec, true) : null; },

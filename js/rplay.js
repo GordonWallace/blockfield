@@ -88,6 +88,7 @@ function begin(world) {
   world.beesHooked = !!(BF.bees && BF.bees.hooked && BF.bees.hooked());
   world.player = player();   // (the look and the rest the title world left: a new world keeps them)
   world.clock = BF.simNow();   // the simulation clock goes on from world to world (js/timewarp.js): a fresh follower starts where the leader is
+  world.villageSim = BF.villageSim && BF.villageSim.state ? BF.villageSim.state() : null;   // (when it last checked the simulated set: js/villagesim.js)
   BF.world.trail = L.verify ? new Map() : null;   // (tests: who wrote each cell, for a cell that differs: js/world.js)
   L.world = world; L.ticks = 0; L.solo = new Map(); L.diff = null; L.recent = []; L.ready = 0; L.split = false; L.trial = null; L.backoff = BACKOFF; L.retryAt = 0; L.busySince = null;
   L.soloMs = null; L.splitMs = null; L.loopT0 = null; L.loopTicks = 0;
@@ -383,6 +384,7 @@ function follower(post) {
     else BF.newWorld(w.seed, w.opts || {});
     if (w.player) setPlayer(w.player);
     if (w.active && w.active.opt && BF.active && BF.active.load) BF.active.load(w.active);   // (after the world: starting it resets the budget's state)
+    if (w.villageSim && BF.villageSim && BF.villageSim.load) BF.villageSim.load(w.villageSim);   // (after the world too)
     BF.world.trail = verify ? new Map() : null;   // (tests: who wrote each cell, as on the leader)
     // a protocol host whose output goes nowhere: the client's packets do here what they did on the leader
     host = BF.proto.host(() => {}, { replica: true, world: () => new Promise(() => {}), onView: v => { if (v.dist > 0 && v.dist !== BF.world.viewDist) BF.world.setViewDist(v.dist); } });
