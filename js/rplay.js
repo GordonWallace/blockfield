@@ -317,7 +317,7 @@ function follower(post) {
       case "b": if (BF.active) BF.active.set(o[1], true); if (o.length > 2 && BF.gameOpts) BF.gameOpts.override(o[2]); break;   // (the player changed the distant-village settings: the leader's simworker.js journals them)
       case "f": BF.inventory.simFrame(o[1]); BF.maps.simFrame(); BF.player.simRide(o[1]); break;
       case "s": BF.save.snapshot(); break;
-      case "feed": if (BF.debugFeed && BF.debugFeed.simPart) BF.debugFeed.simPart(o[1]); break;   // (the world server's debug screen: reading it works out things lazily, as F3 does)
+      case "feed": if (BF.debugFeed && BF.debugFeed.simPart) BF.debugFeed.simPart(o[1], true); break;   // (the world server's debug screen: reading it works out things lazily, as F3 does)
       case "split": RW.verify = verify; RW.setup({ n: o[2], me, link: link || (link = RW.attach(o[1], me, o[2])) }); break;
       case "solo": RW.pause(); break;
       case "csplit": clusterOn(o[1], me, o[2], link || (link = RW.attach(o[1], me, o[2])), verify); break;
@@ -387,7 +387,7 @@ function follower(post) {
     if (w.villageSim && BF.villageSim && BF.villageSim.load) BF.villageSim.load(w.villageSim);   // (after the world too)
     BF.world.trail = verify ? new Map() : null;   // (tests: who wrote each cell, as on the leader)
     // a protocol host whose output goes nowhere: the client's packets do here what they did on the leader
-    host = BF.proto.host(() => {}, { replica: true, world: () => new Promise(() => {}), onView: v => { if (v.dist > 0 && v.dist !== BF.world.viewDist) BF.world.setViewDist(v.dist); } });
+    host = BF.proto.host(() => {}, { replica: true, follower: true, world: () => new Promise(() => {}), onView: v => { if (v.dist > 0 && v.dist !== BF.world.viewDist) BF.world.setViewDist(v.dist); } });
     { const h = BF.stateHash.full(); post({ booted: h.hash, parts: h.parts, texts: verify ? texts() : null }); }
   }
   return d => { queue.push(d); pump(); };
