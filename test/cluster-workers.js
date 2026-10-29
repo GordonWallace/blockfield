@@ -18,9 +18,12 @@
 // --leave s: back to one at second s (js/cworkers.js leave, as js/rplay.js toSolo): every worker takes the whole world and goes on
 // running every cluster on its own copy, as the leader does and its followers replaying it; the copies must stay the same as the
 // reference (the plain tick read the copies' tables in their different orders and they drifted: Gordon's run, 2026-10-29).
+// --drop s: at second s the fixed set of extra villages shrinks by 3 (BF.active fixed): the farthest leave and unload while split, their
+// chunks' wild mobs stored (a chunk dropping fetched only the mobs some worker ran: one current everywhere was left out of the set, so no
+// copy unloaded it and its owner stored it a tick later, where it had walked off to).
 // --restored: items on the ground before the tick starts, as from a save (with --plan: see restoredDrops). --load file: boot from a save
 // (tools/headless.js --save) instead of the seed.
-// Usage: node test/cluster-workers.js [--workers 2] [--seed 3] [--extra 3] [--seconds 30] [--shuffle k | --plan] [--order tick|cluster] [--pull] [--partial] [--bees] [--restored] [--leave s] [--load save.json]
+// Usage: node test/cluster-workers.js [--workers 2] [--seed 3] [--extra 3] [--seconds 30] [--shuffle k | --plan] [--order tick|cluster] [--pull] [--partial] [--bees] [--restored] [--leave s] [--drop s] [--load save.json]
 //                                    [--profile converted|a,b,c]
 const path = require('path'), crypto = require('crypto');
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
@@ -80,6 +83,7 @@ function child() {
         BF.boot.stream();
         if (homeEdits) homeEdits(msg.s);
         if (msg.leave && shared) BF.cworkers.leave();   // (--leave: back to one at this interval's meeting)
+        if (msg.drop != null) BF.active.set({ fixed: msg.drop }, true);   // (--drop: the farthest extras leave the simulated set and unload)
         C.interval(BF.warp.TICK);
         const s = C.stats();
         const [parts, os] = all(() => [BF.stateHash.parts(), objs()]);
@@ -153,7 +157,7 @@ function beeEdits(BF) {
 // ---------------------------------------------------------------- the parent
 async function main() {
   const n = +arg('workers', 2), seed = +arg('seed', 3), extra = +arg('extra', 3), seconds = +arg('seconds', 30);
-  const leaveAt = +arg('leave', 0);
+  const leaveAt = +arg('leave', 0), dropAt = +arg('drop', 0);
   const partial = process.argv.includes('--partial'), bees = process.argv.includes('--bees'), save = arg('load', null), restored = process.argv.includes('--restored');
   const order = arg('order', 'tick'), pull = order === 'cluster' && process.argv.includes('--pull') && arg('shuffle') == null;
   const profile = arg('profile', 'converted'), plan = process.argv.includes('--plan'), fixed = !plan && !pull && arg('shuffle') == null;
@@ -176,7 +180,7 @@ async function main() {
   let fails = 0, errs = 0;
   const all = [ref, ...ws];
   for (let s = 1; s <= seconds; s++) {
-    const out = await Promise.all(all.map(x => x.ask({ do: 'interval', s, leave: s === leaveAt })));
+    const out = await Promise.all(all.map(x => x.ask({ do: 'interval', s, leave: s === leaveAt, drop: s === dropAt ? Math.max(0, extra - 3) : null })));
     const bad = out.find(o => o.error);
     if (bad) { console.error('a worker failed:\n' + bad.error); process.exit(1); }
     const r = out[0];

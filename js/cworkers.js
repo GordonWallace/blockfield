@@ -729,18 +729,19 @@ function gathered(fn) {
 // waited apply, js/villagesim.js before it reads or changes a village's mobs, js/mobs.js before a chunk unloads its mobs): those mobs' current copies here, sent whole by the workers that ran
 // them; from then on current everywhere (the meeting changes every copy alike), so none is handed over for them. Elsewhere: nothing.
 // fetch(ms, pred): those of them for which pred is true of the current copy (only its holder can tell: a stale copy may not have the
-// field yet, or be somewhere else), so every worker exchanges, whatever it finds; returns them (the same set on every worker).
+// field yet, or be somewhere else), so every worker exchanges, whatever it finds; returns them (the same set on every worker), with those
+// whose every copy is current already (nobody holds them: pred is read here, alike everywhere).
 function fetch(ms, pred) {
   if (!CW.partial) return;
   // who has each current copy: at a meeting, the last swap says; between the ticks of an interval (a chunk unloading), its group's owner
   const holderOf = m => (atMeeting ? holder.get(m.id) : CW.owners.has(groupOf(m)) ? CW.owners.get(groupOf(m)) : 0);
-  const out = [], seen = new Set();
+  const out = [], seen = new Set(), here = [];
   let need = 0;
   for (const m of ms) {
     if (!m || m.removed || seen.has(m)) continue;
     seen.add(m);
     const h = holderOf(m);
-    if (h === undefined) continue;
+    if (h === undefined) { if (pred && pred(m)) here.push(m); continue; }   // (every copy is current: pred reads the same everywhere)
     need++;
     if (h === CW.me && (!pred || pred(m))) out.push(m);
   }
@@ -758,7 +759,7 @@ function fetch(ms, pred) {
   T.fetched += out.length + got.reduce((n, [ids]) => n + ids.length, 0);
   if (BF.regions) BF.regions.tick();
   if (!pred) return;
-  const sent = new Set(out);
+  const sent = new Set(out.concat(here));
   for (const [ids] of got) for (const id of ids) { const m = BF.ids.live(id); if (m) sent.add(m); }
   return sent;
 }
