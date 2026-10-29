@@ -53,8 +53,19 @@ const bump = n => { if (n >= top) top = n + 1; if (!lim && n >= next) next = n +
 function get(id) {
   if (id == null) return undefined;
   let o = reg.get(id);
+  if (o === undefined && finders.size) o = find(id);
   if (o === undefined && ghosts.size) { const g = ghosts.get(id); o = g && g.o; }
   return hide !== null && o !== undefined && hide(o) ? undefined : o;
+}
+// Place keys whose object lives in a record (finder(kind, fn): fn(rest of the key) -> the object or undefined): one not registered here is
+// found there and registered. Clusters on several workers (js/cworkers.js): a record that came from another worker at a meeting holds
+// objects nobody put here, so a link to one (a newborn's bredEntry, js/breeding.js) would not resolve on this copy.
+const finders = new Map();
+function find(id) {
+  const i = typeof id === "string" ? id.indexOf(":") : -1, f = i > 0 ? finders.get(id.slice(0, i)) : undefined;
+  const o = f ? f(id.slice(i + 1)) : undefined;
+  if (o !== undefined && o !== null) { reg.set(id, o); gen++; vgen++; return o; }
+  return undefined;
 }
 function put(obj, id) {
   if (!obj) return obj;
@@ -219,6 +230,7 @@ const isRefs = o => { const p = o && typeof o === "object" ? Object.getPrototype
 
 BF.ids = {
   alloc, get, put, remove, idOf, placeKey, link, place, Refs, refs, MobRef, mobRef, isRefs, REF, stats, hooks, CACHE_FIELDS,
+  finder(kind, fn) { finders.set(kind, fn); },
   get next() { return next; },
   get size() { return reg.size; },
   live: id => reg.get(id),   // the registered object only (no removed mob)

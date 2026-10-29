@@ -593,6 +593,8 @@ BF.onLoad(() => {
 // main.js defines BF.on after this file loads: hook up as soon as the page has loaded (or on the first tick)
 BF.onLoad(hookEvents);
 
+// a newborn's entry by its key "bred:<village key>#<k>" (js/ids.js finder: a village record from another cluster worker)
+if (BF.ids && BF.ids.finder) BF.ids.finder("bred", rest => { const j = rest.lastIndexOf("#"), rec = BF.mobs && BF.mobs.villages ? BF.mobs.villages.get(rest.slice(0, j)) : null; return rec && rec.bred ? rec.bred.find(e => e && String(e.k) === rest.slice(j + 1)) : undefined; });
 BF.breeding = {
   RADIUS, CHANCE, NEED, PAY, CHILD_BREAD, CHILD_RATE, COOLDOWN, LOVE_T, MAX_TOTAL, KEY_BASE,
   tick, ai, childMove, exportAll, importAll, reset,
