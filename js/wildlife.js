@@ -389,7 +389,15 @@ function ownTables() {
   });
   C.owned("wildlife.stored", {
     snap: g => C.keysOf(stored, g, G).map(k => [k, stored.get(k)]),
-    apply: (g, a) => { for (const k of C.keysOf(stored, g, G)) stored.delete(k); for (const [k, v] of a || []) stored.set(k, v); C.applied(stored, g); },
+    apply: (g, a) => {
+      for (const k of C.keysOf(stored, g, G)) stored.delete(k);
+      for (const [k, v] of a || []) stored.set(k, v);
+      C.applied(stored, g);
+      // (a chunk its group's worker brought back still waits here: dropped, as there, so when it loads again it waits in the same place
+      // in the order as there; left, back on one worker every copy brought its chunks back in its own order and their mobs took one
+      // another's ids)
+      if (toRestore.size) for (const k of [...toRestore]) if (!stored.has(k) && G(k) === g) toRestore.delete(k);
+    },
   });
   C.owned("wildlife.nights", {
     snap: g => C.keysOf(nights, g, GV).map(k => [k, [...nights.get(k)]]),

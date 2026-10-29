@@ -36,7 +36,8 @@ const now = () => performance.now();
 // (_res: a villager's reserve, js/market.js), the tick's previous position (keepPrev: every replica sets it), a request's callbacks.
 const SKIP = new Set(["def", "root", "model", "meshes", "material", "mesh", "geo", "geometry", "walkPhase", "walkAmt", "headYaw", "headPitch",
   "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg", "_ri", "_rs", "_res", "prev", "cbs", "_r", "_tm",
-  "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN"]);   // (and each replica's own caches on mobs: js/ids.js links, js/regiontick.js ids, r15-61)
+  "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN",   // (and each replica's own caches on mobs: js/ids.js links, js/regiontick.js ids, r15-61)
+  "bedCache"]);   // (a village record's beds by chunk, js/breeding.js scanBeds: each copy's own, from the chunks it scanned; the beds go as rec.beds)
 const skipKey = k => SKIP.has(k) || (k.charCodeAt(0) === 95 && k.startsWith("_snd"));
 let mobSet = null, recSet = null, dropSet = null, hiveSet = null, self = null;
 function refsOn() {
