@@ -37,8 +37,9 @@ const TRIAL = 200;        // ticks of a split trial
 const BACKOFF = 2000;     // ticks before trying a split again after one that didn't pay (doubles each time, up to 16x)
 const BUSY_MS = 2000;     // real ms of dropped ticks before a split is tried
 const VERIFY = 6000;      // split ticks between the copies' hash checks (5 game minutes)
-const LAG = 10;           // ticks a follower may be behind for the split to start, or LAG_S game seconds of ticks at the speed now if more (a loaded
-const LAG_S = 2;         // machine's followers run a second or two behind at 1x, and many more ticks at 100x: the first meeting waits for them, no more)
+const LAG = 10;           // ticks a follower may be behind for the split to start, or more if replaying them takes at most LAG_MS at the leader's
+const LAG_MS = 2000;      // ms a tick (soloMs): the first meeting waits while they catch up (game seconds at the speed set were far too many on a slow
+                          // machine at 100x: 4000 ticks, minutes of replay before the first meeting)
 
 // ---------------------------------------------------------------- the leader
 const L = {
@@ -194,7 +195,7 @@ function frame() {
   if (RW.mismatch) { log("ERROR", "Region workers: the copies no longer match (" + RW.mismatch.parts.join(", ") + " at tick " + RW.mismatch.tick + "); going on with one"); end("the copies differ"); return; }
   if (!L.split) {
     const behind = Math.max(0, ...L.list.map(f => L.ticks - f.ticks));
-    const ready = L.ready === L.list.length && behind <= Math.max(LAG, LAG_S * 20 * (W && W.speed > 1 ? W.speed : 1)) && !clustered();
+    const ready = L.ready === L.list.length && (behind <= LAG || (L.soloMs != null && behind * L.soloMs <= LAG_MS)) && !clustered();
     const want = L.policy === "always" || (L.policy === "auto" && L.busySince != null && t - L.busySince >= BUSY_MS && L.ticks >= L.retryAt);
     if (ready && want && L.policy !== "never") startSplit();
   } else if (L.trial && L.ticks >= L.trial.end) {
