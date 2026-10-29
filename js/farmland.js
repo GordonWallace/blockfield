@@ -267,7 +267,7 @@ BF.farmland = farmland;
       // a group's part: the blocks tracked since the last meeting and the keys untracked (all: every block, the group's whole part)
       const goneOf = gk => { const out = []; for (const [k, p] of gone) if (cellOf(k, p) === gk) out.push(k); return out; };
       BF.ctick.owned("farmland.tracked", {
-        reset() { sent.clear(); gone.clear(); for (const k of tracked.keys()) sent.add(k); },   // (at setup every worker tracks the same blocks: one untracked in the first interval goes as gone)
+        reset() { sent.clear(); gone.clear(); },
         snap: (gk, all) => {
           const add = [], del = all ? [] : goneOf(gk);
           for (const k of BF.ctick.keysOf(tracked, gk, cellOf)) if (all || !sent.has(k)) { add.push(tracked.get(k)); sent.add(k); }

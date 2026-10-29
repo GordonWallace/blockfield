@@ -653,7 +653,7 @@ function tables() {
   const homeGroup = (k, h) => BF.clusters.groupOf(homeBase(h));
   const beeOf = gk => b => beeGroup(b) === gk;
   K.owned("bees", {
-    reset() { hadHome.clear(); dropped.clear(); for (const [k, h] of recs) hadHome.set(k, homeText(h)); },   // (at setup every worker has the same homes: one broken in the first interval goes as gone)
+    reset() { hadHome.clear(); dropped.clear(); },
     snap(gk, all) {
       const put = [], gone = [];
       for (const k of K.keysOf(recs, gk, homeGroup)) {
@@ -667,11 +667,12 @@ function tables() {
         if (hadHome.delete(k)) gone.push(k);
       }
       const out = partial() ? null : bees.filter(beeOf(gk)).map(beeOut);   // (partial copies: carried at handovers instead, below)
-      return { put, gone, out };
+      return all ? { put, gone, out, keys: K.keysOf(recs, gk, homeGroup).slice() } : { put, gone, out };   // (all: the group's whole part, its keys for those gone)
     },
     apply(gk, o) {
       if (!o) return;
-      for (const k of o.gone || []) {   // (broken on its group's worker)
+      const keep = o.keys ? new Set(o.keys) : null, gone = keep ? (o.gone || []).concat(K.keysOf(recs, gk, homeGroup).filter(k => !keep.has(k))) : o.gone || [];
+      for (const k of gone) {   // (broken on its group's worker)
         hadHome.delete(k); dropped.delete(k);
         recs.delete(k);
         if (loaded.delete(k)) { loadedVer++; BF.glog && BF.glog.log("INFO", "bees", "Cluster workers: the home at " + k + " was broken on its group's worker"); }

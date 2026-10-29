@@ -1388,10 +1388,7 @@ function ownCellsNow(name, coll, enc, dec) {
     coll.set(k, dec ? dec(j, coll.get(k)) : j); had.set(k, JSON.stringify(j));
   };
   C.owned(name, {
-    reset() {   // (at setup every worker has the same table: what is here now is what every worker has, so a key dropped in the first interval goes as gone)
-      had.clear(); gone = null;
-      if (isMap) for (const [k, v] of coll) had.set(k, JSON.stringify(enc ? enc(v) : v)); else for (const k of coll) had.set(k, 1);
-    },
+    reset() { had.clear(); gone = null; },
     snap(gk, all) {
       const put = [];
       for (const k of C.keysOf(coll, gk, of)) {

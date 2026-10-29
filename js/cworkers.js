@@ -167,7 +167,8 @@ function sync() {
   const gs = K.groups().filter(owns);
   I.tablesStep(true);   // (each table's keys by group made once for all the snaps)
   lap("edits");
-  for (const name of K.tables()) { const t = K.table(name); for (const g of gs) tables.push([name, g.key, t.snap(g.key)]); if (CW.prof) lap("snap." + name); }
+  for (const name of K.tables()) { const t = K.table(name); for (const g of gs) tables.push([name, g.key, t.snap(g.key, whole1)]); if (CW.prof) lap("snap." + name); }
+  whole1 = false;
   I.tablesStep(false);
   const chans = [];
   for (const [name, key] of touched.values()) { const ch = R.chan(name), o = ch.get(key); chans.push([name, key, o == null ? null : ch.state(o)]); }
@@ -362,6 +363,7 @@ function met(groups) {
 // next meeting every worker takes every mob's current copy (partial copies) and goes on as one with a whole world (js/rplay.js back to
 // one). CW.verify n (tests): every n meetings the workers compare their gathered state hashes; a difference sets rworkers.mismatch.
 let atMet = [], leaving = false;
+let whole1 = false;   // the first swap after setup: every owned table's whole parts (snap(g, true))
 function whenMet(fn) { atMet.push(fn); }
 function leave() { if (CW.active) leaving = true; }
 function afterMet() {
@@ -628,7 +630,11 @@ function setup(o) {
   if (o.n > 1 && !K.on) throw new Error("cluster workers need the cluster tick on (BF.ctick.on)");
   CW.n = o.n; CW.me = o.me; CW.link = o.link; CW.active = o.n > 1;
   if (CW.active && K.warmed) K.warmed();   // (started after the cluster tick's first meeting: every system set up here now, js/ctick.js warm)
-  for (const name of K.tables()) { const t = K.table(name); if (t.reset) t.reset(); }   // (the tables that send only changes start from nothing sent)
+  // (the tables that send only changes start from nothing sent, and the first swap sends each group's whole part, which the others take
+  // as it is, the keys it no longer has dropped too: a key dropped in the first interval was in no list of what was sent, so only the
+  // whole part tells the others it went; a copy that differs at setup is put right as well)
+  for (const name of K.tables()) { const t = K.table(name); if (t.reset) t.reset(); }
+  whole1 = true;
   // o.claims (a SharedArrayBuffer of two Int32, the same for every worker: makeShared): the workers pull groups (the cluster order)
   // (only on request, o.pull: with partial copies a group that changes worker is sent whole, so groups stay on their planned owners)
   CW.pull = !!(CW.active && o.pull && o.claims && K.order === "cluster" && !CW.shuffle);
