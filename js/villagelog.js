@@ -112,7 +112,7 @@ function villageAt(x, z) {
 }
 function tally(rec) {
   const B = BF.breeding;
-  return { villagers: rec && B ? B.villagerCount(rec) : 0, beds: rec && B ? B.bedCount(rec) : 0 };
+  return { villagers: rec && B ? B.villagerCount(rec) : 0, beds: rec && B ? (B.bedsSeen || B.bedCount)(rec) : 0 };   // (a look: js/breeding.js bedsSeen)
 }
 const entries = key => logs.get(key) || [];
 

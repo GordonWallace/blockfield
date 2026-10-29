@@ -10,7 +10,7 @@
 // countdowns that tasks read (mayStart, timeLeft) then hold for the whole interval in every cluster. Trips ask for their pin at the
 // meeting too (js/merchant.js meet, run first): pin and unpin are called only between ticks then.
 // API: BF.villageSim = { RADIUS, MAX, MAX_PINS, keepKeys, update(px, pz) -> changed, isActive(key), status(), count(), pin(id, a, b, keys) -> ok, unpin(id),
-//                        pins(), pinned() -> [worldgen villages], simulated() -> [worldgen villages], corridor(a, b) -> chunk keys, exportSeen(out), importSeen(o), reset() }
+//                        pins(), pinned() -> [worldgen villages], simulated() -> [worldgen villages], corridor(a, b) -> chunk keys, exportSeen(out), importSeen(o), state() / load(s) (the checks' clocks and focus: js/rplay.js), reset() }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -556,7 +556,17 @@ BF.villageSim = {
       }
     }
   },
-  reset() { if (BF.active) BF.active.reset(); simClock.win = simClock.last = realClock.win = realClock.last = -1e9; stepChanged = false; aiCoolUntil = 0; active.clear(); catchQ.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); pinDirty = false; areasV++; },
+  // the clocks of the checks, the focus and what waits for the next one: module state no save holds, handed to the region workers as they
+  // boot (js/rplay.js begin) so every copy checks the set on the same ticks
+  state: () => ({ sim: [simClock.win, simClock.last], real: [realClock.win, realClock.last], pinDirty, stepChanged, focus: [focusX, focusZ], aiCoolUntil }),
+  load(s) {
+    if (!s) return;
+    [simClock.win, simClock.last] = s.sim; [realClock.win, realClock.last] = s.real;
+    pinDirty = !!s.pinDirty; stepChanged = !!s.stepChanged; [focusX, focusZ] = s.focus; aiCoolUntil = s.aiCoolUntil || 0;
+  },
+  // (the focus too: the title world's, kept into a loaded world, made the first tick check the set there on the leader only, and its copies
+  // checked out of step from then on: villages joined a few ticks apart, Gordon's test4, 2026-10-29)
+  reset() { if (BF.active) BF.active.reset(); simClock.win = simClock.last = realClock.win = realClock.last = -1e9; stepChanged = false; focusX = focusZ = null; aiCoolUntil = 0; active.clear(); catchQ.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); pinDirty = false; areasV++; },
   init() {
     BF.world.onChunkLoad(onChunkLoad);
     BF.world.onThink(step, "villageSim");   // re-checks on the game clock (update), in the think phase (js/world.js tickSim)
