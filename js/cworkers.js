@@ -44,6 +44,16 @@ let groupMs = new Map(), lastMs = new Map(), meetings = 0;
 const T = { meetings: 0, collect: 0, exchange: 0, adopt: 0, snap: 0, bytes: 0, run: 0, moved: 0, fetched: 0 };
 let atMeeting = false;   // (partial copies: from the swap to the end of the meeting, when fetch may exchange)
 let peers = [], hourAt = null, hourT = null, tRun = 0, warned = 0;
+// This thread's busy ms so far, waits at the barrier and idle time taken off (js/threadload.js total; in Node the event loop's measure):
+// the plan's time outside the groups (base) must be work. A play-mode follower spends much of an interval waiting for the leader's
+// journal, and counted by the wall clock that read as load, so the plan kept the groups on the leader, which made them wait longer
+// still (Gordon's test4, 2026-10-29: 10 of 18 groups on the leader with 3 workers, the split slower than one thread).
+const busyNow = () => {
+  if (BF.tload) return BF.tload.total();
+  const P = performance, w = CW.link && CW.link.waitMs || 0;
+  return (typeof P.eventLoopUtilization === "function" ? P.eventLoopUtilization().active : now()) - w;
+};
+let busyRun = 0;   // (busyNow() when tRun was set)
 
 const C = () => BF.ctick;
 // every exchange by what it is for (stats().x): how many, ms in all, ms of it waiting at the barrier for the other workers
@@ -118,7 +128,7 @@ function reqIn(a) {
 // ---------------------------------------------------------------- the swap, at the end of each interval
 function sync() {
   if (!CW.active) return;
-  const t0 = now();
+  const t0 = now(), b0 = busyNow();
   T.run += t0 - tRun;
   lap(null);
   const R = RW(), K = C(), I = K.inner;
@@ -181,7 +191,7 @@ function sync() {
   const ms = gs.map(g => [g.key, +g.ms.toFixed(3)]);
   const counters = [I.R2.ids.j, I.R2.made.j, BF.ids.range.top, BF.rand.made, I.R2.dyn.j];
   const hand = CW.me === 0 && handOwn !== null ? +handOwn.toFixed(3) : null;
-  const other = tRun > 0 ? +Math.max(0, t0 - tRun - gs.reduce((a, g) => a + g.ms, 0)).toFixed(3) : null;   // (this interval's time outside its groups)
+  const other = tRun > 0 ? +Math.max(0, b0 - busyRun - gs.reduce((a, g) => a + g.ms, 0)).toFixed(3) : null;   // (this interval's work outside its groups)
   lap("rest");
   const dyn = BF.dynRange.fresh();
   const out = { born, mobs, sums, gone: goneE, rows, recs, edits, tables, chans, reg, dyn, waited, queued, ms, counters, hand, other };
@@ -337,7 +347,7 @@ function met(groups) {
     lap("met.recsnap");
     T.snap += now() - t0;
     afterMet();
-    tRun = now();
+    tRun = now(); busyRun = busyNow();
     hourly();
     return;
   }
@@ -353,7 +363,7 @@ function met(groups) {
   }
   T.snap += now() - t0;
   afterMet();
-  tRun = now();
+  tRun = now(); busyRun = busyNow();
   hourly();
 }
 // ---------------------------------------------------------------- in play (js/rplay.js): at the end of a meeting, every worker alike
@@ -657,7 +667,7 @@ function setup(o) {
   if (CW.active) { RW().SKIP.delete("prev"); for (const k of PENS) RW().SKIP.add(k); } else plainCopies();
   if (!hooked && BF.world && BF.world.onBlockSet) { BF.world.onBlockSet(onSet); hooked = true; }
   if (CW.active) carryKeep();   // (every worker has every group's carried parts: each keeps its own)
-  tRun = now();
+  tRun = now(); busyRun = busyNow();
   // the first interval's owners (guessed from each group's mobs: nothing is measured yet), its shadows and this worker's mobs, as after
   // any meeting (before, the first worker ran the whole first interval alone: seconds on a big world, while the others waited)
   if (CW.active && !CW.pull && K.groups().length) met(K.groups());
@@ -686,7 +696,7 @@ function stats() {
   const n = Math.max(1, T.meetings), per = new Array(CW.n).fill(0), groups = new Array(CW.n).fill(0);
   for (const g of C().groups()) { const w = workerOf(g.key); groups[w]++; per[w] += groupMs.get(g.key) || 0; }
   return { active: CW.active, n: CW.n, me: CW.me, solo: !!CW.solo, pull: CW.pull, meetings: T.meetings, groups, ms: per.map(v => v / C().MEET),
-    moved: T.moved / n, fetched: T.fetched / n, perMeeting: { run: T.run / n, collect: T.collect / n, exchange: T.exchange / n, adopt: T.adopt / n, snap: T.snap / n }, kbPerMeeting: T.bytes / n / 1024,
+    base: base.map(v => (v === undefined ? null : +(v / C().MEET).toFixed(2))), moved: T.moved / n, fetched: T.fetched / n, perMeeting: { run: T.run / n, collect: T.collect / n, exchange: T.exchange / n, adopt: T.adopt / n, snap: T.snap / n }, kbPerMeeting: T.bytes / n / 1024,
     x: Object.fromEntries(Object.entries(X).map(([k, x]) => [k, { n: x.n / n, ms: x.ms / n, wait: x.wait / n }])) };
 }
 // The F3 line: "Cluster workers 4: groups 2/3/2/2, ms a tick 1.20/1.10/0.90/1.30, swap 3.10 ms a meeting"

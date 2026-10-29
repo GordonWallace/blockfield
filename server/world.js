@@ -34,7 +34,7 @@ const { perfCores } = require("./cores.js");
 const path = require("path"), fs = require("fs"), v8 = require("v8");
 const WS = require("./ws.js"), IDB = require("./idb.js"), SaveFile = require("../js/savefile.js");
 
-const SIMTHREAD = path.join(__dirname, "simthread.js"), FEED_MS = 250, IMPORT_MAX = SaveFile.MAX;   // (bytes sent; unpacked it is held to SaveFile.MAX too: bug-071)
+const SIMTHREAD = path.join(__dirname, "simthread.js"), FEED_MS = 250, FEED_IDLE_MS = 2000, IMPORT_MAX = SaveFile.MAX;   // (bytes sent; unpacked it is held to SaveFile.MAX too: bug-071)
 const SAVE_VERSION = 3;   // (js/save.js VERSION: the worlds this release opens)
 const say = s => console.log("[world] " + s);
 
@@ -396,11 +396,16 @@ function start(o) {
   }
 
   // ---- the debug screen, read from the simulation here
-  let feedN = 0, feeding = false;
+  let feedN = 0, feeding = false, fedAt = 0;
   const SIM_ACK = ["glogAt", "build", "pick", "pv", "resync"];
   async function feed() {
     const s = srv.active && srv.active.ready && !srv.active.crashed ? srv.active : srv.held && srv.held.ready ? srv.held : null;
     if (!debug || feeding || !s) return;
+    // with no debug screen open, every FEED_IDLE_MS (the game log and the village history still reach the debug server): the simulation
+    // part works out every loaded village's detail, and each region worker reads it again (js/rplay.js "feed"), a fifth of a follower's
+    // time at 4 a second with 18 villages (2026-10-29 profile)
+    if (debug.screens && !debug.screens() && Date.now() - fedAt < FEED_IDLE_MS) return;
+    fedAt = Date.now();
     feeding = true;
     try {
       const r = await s.ask("feed", { ack: srv.feedAck }, 5000);
