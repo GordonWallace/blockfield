@@ -159,7 +159,9 @@ function onMessage(ev) {
     // same ?coarse=, here between frames as the leader did (js/rplay.js "b")
     if (BF && BF.active && BF.rworkers.journal) {
       const o = BF.active.opts();
-      BF.rworkers.rec(["b", { settings: BF.active.settings(), on: o.on, budget: o.budget, memMB: o.memMB, reach: o.reach }, BF.gameOpts ? BF.gameOpts.overridden() : null]);
+      const rec = ["b", { settings: BF.active.settings(), on: o.on, budget: o.budget, memMB: o.memMB, reach: o.reach }];
+      if (d.coarse != null && BF.gameOpts) rec.push(BF.gameOpts.overridden());   // (only when the page sent one, as the leader applied it)
+      BF.rworkers.rec(rec);
     }
     return;
   }
