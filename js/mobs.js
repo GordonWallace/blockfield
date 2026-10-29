@@ -3656,7 +3656,7 @@ BF.mobs = {
     if (BF.pigFarmer) sys("pigFarmer", () => BF.pigFarmer.tick(dt));   // piglets growing up, sty stock (js/pigfarmer.js)
     PF.lap(PC.vanimals);
     if (BF.baker) sys("baker", () => BF.baker.tick(dt));   // event hooks (js/baker.js)
-    if (BF.explorer && BF.explorer.tick) sys("explorer", () => BF.explorer.tick(dt));   // tents of explorers that unloaded while camping (js/explorer.js)
+    if (BF.explorer && BF.explorer.tick) sys("explorer", () => BF.explorer.tick());   // tents of explorers that unloaded while camping (js/explorer.js)
     PF.lap(PC.villagers);
     if (BF.mobs.spawning !== false) sys("spawn", () => spawnMonsters(dt));   // animals are never spawned around the player: chunks roll them once and they breed (js/wildlife.js)
     PF.lap(PC.monsters);
