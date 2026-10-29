@@ -296,6 +296,22 @@ BF.active = {
   feed: () => ({ on: opt.on, budget: opt.budget, used: used(), fps: Math.round(fps), villages: simulated(), extra: VS() && VS().extraCount ? VS().extraCount() : extras.size, extras: [...extras].map(([k, x]) => ({ key: k, name: vname(k), d: Math.round(x.d) })),
     under: Math.round(underMs / 1000), over: Math.round(overMs / 1000), memMB: opt.memMB, reach: opt.reach, settings: Object.assign({}, S), log: decisions.slice(-12) }),
   log: () => decisions.slice(),
+  // region workers (js/rplay.js): the leader's whole state for a follower's copy as it boots (opt alone isn't enough: the extras, the
+  // measure's windows, the clock it measures by and the villages being let go all decide what happens next, and the automatic figures
+  // are the leader's machine's)
+  state() {
+    return { opt: Object.assign({}, opt), S: Object.assign({}, S), extras: [...extras].map(([k, x]) => [k, { v: x.v, t: x.t, d: x.d }]), cooling: [...cooling], leaving: [...leaving],
+      lastLoad, lastN, slices: slices.map(x => Object.assign({}, x)), slice: Object.assign({}, slice), underMs, overMs, fps, lastClock, fixedAt, emptyAt, memTold: !!decide.memTold };
+  },
+  load(s) {
+    if (!s || !s.opt) return;
+    Object.assign(opt, s.opt); S = Object.assign({}, s.S);
+    extras.clear(); fp.clear(); for (const [k, x] of s.extras || []) extras.set(k, Object.assign({}, x));
+    cooling.clear(); for (const [k, u] of s.cooling || []) cooling.set(k, u);
+    leaving.clear(); for (const [k, w] of s.leaving || []) leaving.set(k, w);
+    lastLoad = s.lastLoad; lastN = s.lastN; slices = (s.slices || []).map(x => Object.assign({}, x)); slice = Object.assign({}, s.slice);
+    underMs = s.underMs; overMs = s.overMs; fps = s.fps; lastClock = s.lastClock; fixedAt = s.fixedAt; emptyAt = s.emptyAt; decide.memTold = !!s.memTold;
+  },
   reset() { leaving.clear(); fixedAt = null; emptyAt = null; lastClock = null; extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, game: 0, frames: 0 }; fps = 60; decide.memTold = false; },
 };
 })();

@@ -153,11 +153,14 @@ function onMessage(ev) {
   if (d && d.budget) {   // the page's Distant villages settings (js/simhost.js budget, js/active.js), and its ?coarse= (js/gameopts.js)
     if (BF && BF.active) {
       BF.active.set(d.budget);
-      // region workers: the followers take the same figures (the leader's automatic values: a follower's thread may work out others), here
-      // between frames as the leader did (js/rplay.js "b")
-      if (BF.rworkers.journal) { const o = BF.active.opts(); BF.rworkers.rec(["b", { settings: BF.active.settings(), on: o.on, budget: o.budget, memMB: o.memMB, reach: o.reach }]); }
     }
     if (BF && BF.gameOpts && d.coarse != null) BF.gameOpts.override(d.coarse);
+    // region workers: the followers take the same figures (the leader's automatic values: a follower's thread may work out others) and the
+    // same ?coarse=, here between frames as the leader did (js/rplay.js "b")
+    if (BF && BF.active && BF.rworkers.journal) {
+      const o = BF.active.opts();
+      BF.rworkers.rec(["b", { settings: BF.active.settings(), on: o.on, budget: o.budget, memMB: o.memMB, reach: o.reach }, BF.gameOpts ? BF.gameOpts.overridden() : null]);
+    }
     return;
   }
   if (d && d.auto) { if (BF && BF.rplay && !d.workers) { BF.rplay.end(); BF.rplay.setup({ workers: 1 }); } return; }   // (an automated browser's page: one region worker unless the URL asks for more, ?workers= on the world server's page too; its budget comes as {budget})
