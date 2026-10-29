@@ -653,7 +653,7 @@ function tables() {
   const homeGroup = (k, h) => BF.clusters.groupOf(homeBase(h));
   const beeOf = gk => b => beeGroup(b) === gk;
   K.owned("bees", {
-    reset() { hadHome.clear(); dropped.clear(); },
+    reset() { hadHome.clear(); dropped.clear(); for (const [k, h] of recs) hadHome.set(k, homeText(h)); },   // (at setup every worker has the same homes: one broken in the first interval goes as gone)
     snap(gk, all) {
       const put = [], gone = [];
       for (const k of K.keysOf(recs, gk, homeGroup)) {

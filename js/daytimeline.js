@@ -53,7 +53,10 @@ BF.onLoad(() => {
   const groupOf = k => C.ofVillage(k.slice(0, k.lastIndexOf("#")));
   const lastText = (texts, L) => { if (texts && texts.length && L.s.length) texts[texts.length - 1] = JSON.stringify(L.s[L.s.length - 1]); };
   C.owned("daytimeline.lines", {
-    reset() { had.clear(); gone.clear(); },
+    reset() {   // (at setup every worker has the same lines: those are what every worker has, so one dropped in the first interval goes as gone)
+      had.clear(); gone.clear();
+      for (const [k, L] of lines) had.set(k, { ver: verOf(L), s: L.s.map(x => JSON.stringify(x)), e: L.e.map(x => JSON.stringify(x)), end: endOf(L) });
+    },
     snap(g, all) {
       const put = [], ends = [], del = [], endsDue = Math.floor(BF.rand.tick / C.MEET) % ENDS_EVERY === 0;
       for (const k of C.keysOf(lines, g, groupOf)) {
