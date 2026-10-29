@@ -42,6 +42,7 @@ let journal = new Map();          // chunk key -> Map(cell -> block id): what th
 let regNew = [];
 let groupMs = new Map(), lastMs = new Map(), meetings = 0;
 const T = { meetings: 0, collect: 0, exchange: 0, adopt: 0, snap: 0, bytes: 0, run: 0, moved: 0, fetched: 0 };
+let mcSwapped = false;   // (partial copies: the merchants came whole in this meeting's swap, current everywhere: merchantsCurrent)
 let atMeeting = false;   // (partial copies: from the swap to the end of the meeting, when fetch may exchange)
 let peers = [], hourAt = null, hourT = null, tRun = 0, warned = 0;
 
@@ -145,9 +146,14 @@ function sync() {
     born.push([m.id, m.type, R.enc(o, m)]);
   }
   lap("born");
+  // partial copies: the merchants this worker ran go whole (not as changes), for the meeting's trips (js/villagesim.js meet): current
+  // everywhere from the swap on, so the meeting doesn't fetch them, a round trip of its own (a fifth of the barriers' time in Gordon's
+  // test4, 2026-10-29). (m.mc is made by the merchant's own tick: what the holder sees here is what the meeting would ask)
+  const mcs = CW.partial ? new Set([...mine].filter(m => !m.removed && m.mc)) : new Set();
   const mobs = [], sums = [];
   for (const [m, s] of shadows) {
     if (m.removed) { mobs.push([m.id, null, 1]); continue; }
+    if (mcs.has(m)) continue;
     const ops = R.diff(m, s);
     if (ops) mobs.push([m.id, ops]);
   }
@@ -156,6 +162,7 @@ function sync() {
   const gone = [];
   if (CW.partial) for (const m of mine) if (m.removed) gone.push(m); else sums.push([m.id, BF.clusters.summary(m)]);
   const goneE = gone.length ? [gone.map(m => m.id), R.encMany(gone.map(whole))] : null;
+  const mcE = mcs.size ? [[...mcs].map(m => m.id), R.encMany([...mcs].map(whole))] : null;
   lap("mobs");
   const recs = [];
   for (const [rec, s] of recShadows) { const ops = R.diff(rec, s); if (ops) recs.push([rec.key, ops]); }
@@ -184,7 +191,7 @@ function sync() {
   const other = tRun > 0 ? +Math.max(0, t0 - tRun - gs.reduce((a, g) => a + g.ms, 0)).toFixed(3) : null;   // (this interval's time outside its groups)
   lap("rest");
   const dyn = BF.dynRange.fresh();
-  const out = { born, mobs, sums, gone: goneE, rows, recs, edits, tables, chans, reg, dyn, waited, queued, ms, counters, hand, other };
+  const out = { born, mobs, sums, gone: goneE, mc: mcE, rows, recs, edits, tables, chans, reg, dyn, waited, queued, ms, counters, hand, other };
   const msg = JSON.stringify(out);
   lap("json");
   if (CW.sizes) {   // (tests: what the bytes are, by part and by the mobs' and records' fields)
@@ -293,6 +300,19 @@ function sync() {
     for (const [name, key, data] of p.chans) { const ch = R.chan(name); if (ch) ch.set(ch.get(key), data, key); }
   } }); } finally { I.tablesStep(false); }
   lap("in.atLater");
+  if (CW.partial) {   // (the others' merchants, whole, once every change is in: after their mobs' changes)
+    const pairs = [], fresh = new Set();
+    R.atLater(() => { for (const p of ps) if (p && p.mc) {
+      const [os, made] = R.decAll(p.mc[1]);
+      for (const x of made) fresh.add(x);
+      p.mc[0].forEach((id, i) => { const m = BF.ids.live(id); if (m) pairs.push([m, os[i]]); else err("a worker ran merchant " + id + ", which this worker doesn't have"); holder.delete(id); });
+    } });
+    refillAll(pairs, fresh);
+    for (const m of mcs) holder.delete(m.id);
+    T.fetched += mcs.size + pairs.length;
+    mcSwapped = true;
+    lap("in.mc");
+  }
   // requests: the crossing ones join the meeting's list (it sorts them by due tick, sending group and order); the queued ones go back
   // into their groups' queues, in their order there, for the meeting to file again
   const byKey = new Map(K.groups().map(g => [g.key, g]));
@@ -327,7 +347,7 @@ function met(groups) {
   shadows = new Map(); recShadows = new Map(); known = new Set(BF.mobs.list);
   meetings++;
   if (CW.partial) {
-    atMeeting = false;
+    atMeeting = false; mcSwapped = false;
     handover();
     lap("met.handover");
     mine = new Set();
@@ -769,8 +789,10 @@ function fetch(ms, pred) {
   for (const [ids] of got) for (const id of ids) { const m = BF.ids.live(id); if (m) sent.add(m); }
   return sent;
 }
+// merchantsCurrent(): every merchant's copy is current here, sent whole at this meeting's swap (js/villagesim.js meet skips its fetch)
+const merchantsCurrent = () => mcSwapped && atMeeting;
 // current(m): this worker's copy of m is current (partial copies: it runs m, or every copy is current)
 const current = m => !CW.partial || mine.has(m) || (atMeeting && !holder.has(m.id));
-Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, current, gathered, fetch, whenMet, leave, carry, pull: false, partial: false, verify: 0 });
+Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, current, merchantsCurrent, gathered, fetch, whenMet, leave, carry, pull: false, partial: false, verify: 0 });
 BF.cworkers = CW;
 })();

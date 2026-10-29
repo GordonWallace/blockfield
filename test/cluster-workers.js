@@ -238,7 +238,8 @@ async function main() {
   const st = await Promise.all(ws.map(x => x.ask({ do: 'stats' })));
   const f2 = v => v.toFixed(2);
   for (const [w, o] of st.entries()) { const p = o.stats.perMeeting; console.log(`worker ${w}: ms a meeting: run ${f2(p.run)}, collect ${f2(p.collect)}, exchange ${f2(p.exchange)}, adopt ${f2(p.adopt)}, shadows ${f2(p.snap)}; ${f2(o.stats.kbPerMeeting)} KB sent a meeting (` +
-    Object.entries(o.sizes).filter(e => e[1] > 200 * o.stats.meetings).sort((a, b) => b[1] - a[1]).map(([k, v]) => k + ' ' + f2(v / o.stats.meetings / 1024)).join(', ') + ')'); }
+    Object.entries(o.sizes).filter(e => e[1] > 200 * o.stats.meetings).sort((a, b) => b[1] - a[1]).map(([k, v]) => k + ' ' + f2(v / o.stats.meetings / 1024)).join(', ') + ')' +
+    '; round trips a meeting: ' + Object.entries(o.stats.x || {}).map(([k, x]) => `${k} ${f2(x.n)} (${f2(x.ms)} ms)`).join(', ')); }
   for (const x of all) x.w.postMessage({ do: 'stop' });
   const ok = !fails;
   console.log(ok ? `PASS: ${n} cluster workers match one worker for ${seconds} s` : 'FAIL: the cluster workers\' world differs from one worker\'s');

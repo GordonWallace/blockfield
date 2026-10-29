@@ -374,7 +374,7 @@ function fetchVillages(keys) {
 }
 const fetchVillage = key => fetchVillages([key]);
 function meet() {
-  if (BF.merchant && BF.merchant.meet) { fetch(m => m.mc); BF.merchant.meet(); }
+  if (BF.merchant && BF.merchant.meet) { if (!(BF.cworkers && BF.cworkers.merchantsCurrent && BF.cworkers.merchantsCurrent())) fetch(m => m.mc); BF.merchant.meet(); }   // (sent whole at the swap: js/cworkers.js)
   if (focusX == null) return;
   fetched = new Set();
   try { if (check(focusX, focusZ, simClock, BF.simNow())) stepChanged = true; } finally { fetched = null; }
