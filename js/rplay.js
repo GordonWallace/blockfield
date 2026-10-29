@@ -45,7 +45,7 @@ const LAG_MS = 2000;      // ms a tick (soloMs): the first meeting waits while t
 const L = {
   want: 1, spawn: null, policy: "auto", verify: VERIFY,
   list: [], world: null, epoch: 0, ticks: 0, ready: 0, split: false, trial: null, backoff: BACKOFF, retryAt: 0,
-  busySince: null, soloMs: null, splitMs: null, loopT0: null, loopTicks: 0, shared: null, why: "", lastText: "",
+  busySince: null, soloMs: null, plainMs: null, splitMs: null, loopT0: null, loopTicks: 0, shared: null, why: "", lastText: "",
 };
 const log = (l, x) => { if (BF.glog) BF.glog.log(l, "workers", x); };
 const TRIAL_CLUSTERS = 400;   // ticks of a clusters' split trial (the first meetings hand over whole clusters)
@@ -91,7 +91,7 @@ function begin(world) {
   world.villageSim = BF.villageSim && BF.villageSim.state ? BF.villageSim.state() : null;   // (when it last checked the simulated set: js/villagesim.js)
   BF.world.trail = L.verify ? new Map() : null;   // (tests: who wrote each cell, for a cell that differs: js/world.js)
   L.world = world; L.ticks = 0; L.solo = new Map(); L.diff = null; L.recent = []; L.ready = 0; L.split = false; L.trial = null; L.backoff = BACKOFF; L.retryAt = 0; L.busySince = null;
-  L.soloMs = null; L.splitMs = null; L.loopT0 = null; L.loopTicks = 0;
+  L.soloMs = null; L.plainMs = null; L.splitMs = null; L.loopT0 = null; L.loopTicks = 0;
   { const h = BF.stateHash.full(); L.hash = h.hash; L.bootParts = h.parts; L.bootText = L.verify ? texts() : null; }   // (the followers must boot the same world)
   RW.journal = []; RW.clock = null;
   RW.onTick = onTick;
@@ -182,6 +182,9 @@ function frame() {
     const ms = (t - L.loopT0) / L.loopTicks, k = Math.min(1, L.loopTicks / 50);
     if (L.split) L.splitMs = L.splitMs == null ? ms : L.splitMs + (ms - L.splitMs) * k * 0.5;
     else L.soloMs = L.soloMs == null ? ms : L.soloMs + (ms - L.soloMs) * k * 0.5;
+    // (the plain tick's, kept from before the first clusters' split: after a trial the cluster tick stays on, js/rplay.js toSolo, and a
+    // split must beat one thread as it plays without workers, not the cluster tick on one, which was 1.65 times slower on test4)
+    if (!L.split && !(BF.ctick && BF.ctick.on)) L.plainMs = L.plainMs == null ? ms : L.plainMs + (ms - L.plainMs) * k * 0.5;
   }
   const dropped = W && !BF.state.paused && W.speed > 1 && W.last < W.speed * 0.9;
   L.busySince = dropped ? (L.busySince == null ? t : L.busySince) : null;
@@ -217,8 +220,10 @@ function startSplit() {
     flush();
     clusterOn(L.shared, 0, n, L.link || (L.link = RW.attach(L.shared, 0, n)), L.verify);
     L.split = true; L.splitMs = null; L.ctick = true;
-    L.trial = { end: L.ticks + TRIAL_CLUSTERS, solo: L.soloMs };
-    log("INFO", "Region workers: the clusters are split over " + n + " workers (ticks took " + (L.soloMs != null ? L.soloMs.toFixed(1) + " ms" : "?") + " on one)");
+    const one = L.plainMs != null ? L.plainMs : L.soloMs;
+    L.trial = { end: L.ticks + TRIAL_CLUSTERS, solo: one };
+    log("INFO", "Region workers: the clusters are split over " + n + " workers (ticks took " + (one != null ? one.toFixed(1) + " ms" : "?") + " on one" +
+      (one !== L.soloMs && L.soloMs != null ? ", " + L.soloMs.toFixed(1) + " ms with the cluster tick" : "") + ")");
     return;
   }
   RW.rec(["split", L.shared, n]);
