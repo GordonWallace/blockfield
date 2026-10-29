@@ -110,6 +110,8 @@
   .wild td.hit { color: var(--warn); } .wild td.dead { color: var(--danger); }
   .ptog { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; } .ptog kbd { font: 10px var(--mono, monospace); opacity: 0.6; margin-left: 4px; }
   #mmap { display: block; width: 100%; height: 460px; cursor: grab; touch-action: none; } #mmap.drag { cursor: grabbing; }
+  #mpanel.pop { position: fixed; z-index: 7; inset: 3vh 3vw; display: flex; flex-direction: column; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.6), 0 20px 60px rgba(0, 0, 0, 0.6); }
+  #mpanel.pop .mapwrap { flex: 1; min-height: 0; } #mpanel.pop #mmap { height: 100%; }
   .mleg { display: flex; flex-wrap: wrap; gap: 4px 6px; padding: 8px 16px 12px; font-size: 11px; align-items: center; }
   .mleg .item { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--edge2); background: none; color: var(--muted); cursor: pointer; font-size: 11px; }
   .mleg .item b { color: var(--ink); font-weight: 500; } .mleg .item i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
@@ -409,7 +411,7 @@
       <div class="panel" id="hpanel"></div>
       <div class="panel" id="mpanel">
         <div class="ph"><h2>Mobs map</h2><span class="sub" id="m-count"></span><div class="grow"></div>
-          <div class="seg"><button id="m-zout" title="Zoom out (or the mouse wheel)">−</button><button id="m-zin" title="Zoom in (or the mouse wheel)">+</button><button id="m-center" title="Centre the map on you again">Centre</button></div><div class="seg"><button id="m-regions" title="Shade the simulation regions (64 x 64 blocks) by how many mobs each holds, coloured by the worker that thinks them">Regions</button></div></div>
+          <div class="seg"><button id="m-zout" title="Zoom out (or the mouse wheel)">−</button><button id="m-zin" title="Zoom in (or the mouse wheel)">+</button><button id="m-center" title="Centre the map on you again">Centre</button></div><div class="seg"><button id="m-pop" title="Open the map across nearly the whole screen (Esc closes)">Pop out</button></div><div class="seg"><button id="m-regions" title="Shade the simulation regions (64 x 64 blocks) by how many mobs each holds, coloured by the worker that thinks them">Regions</button></div></div>
         <div class="mapwrap"><canvas id="mmap"></canvas><div class="tip" id="mtip"></div></div>
         <div class="mleg" id="m-rlegend" hidden title="With Regions on: each region coloured by the worker its mobs think on, striped when they think on several (a village's mobs go with their village wherever they stand, the wild ones with their region); each village is outlined in its worker's colour. The busy share is the worker's thread, as on the Threads card"></div>
         <div class="mleg"><div class="seg"><button id="m-all" title="Show every type">All</button><button id="m-none" title="Hide every type">None</button></div><span id="m-legend"></span></div>
@@ -1140,7 +1142,8 @@ mapCv.addEventListener("click", () => { hlName = hoverName && hoverName !== hlNa
 
 // ---------------------------------------------------------------- Mobs map (js/debugfeed.js mobMap, once a second)
 // Every loaded mob as a dot over the loaded land: hostiles warm, animals cool, village stock ringed. Click a legend entry to hide a type
-// (remembered in this browser); wheel or + / - zooms, dragging pans, Centre follows the player again.
+// (remembered in this browser); wheel or + / - zooms (out to a few times the loaded area), dragging pans, Centre follows the player
+// again, Pop out opens it over nearly the whole screen (Esc or the button closes it).
 const MOB_COLORS = { zombie: "#e8583c", skeleton: "#f2c66d", creeper: "#ff9a3d", spider: "#d6477e", pig: "#a796f2", cow: "#4f9be8", sheep: "#a8dcf2",
   chicken: "#5fd6c2", horse: "#4f6fd0", villager: "#e6dfc8", merchant: "#c98a4b", iron_golem: "#b9c6ce" };
 const MOB_ORDER = ["zombie", "skeleton", "creeper", "spider", "cow", "sheep", "chicken", "pig", "horse", "villager", "merchant", "iron_golem"];
@@ -1166,7 +1169,9 @@ function mobBounds() {
   if (!isFinite(x0)) { x0 = mm.player[0] - 64; x1 = mm.player[0] + 64; z0 = mm.player[1] - 64; z1 = mm.player[1] + 64; }
   return [x0, z0, x1, z1];
 }
-const mZoomMin = (w, h) => { const [x0, z0, x1, z1] = mobBounds(); return Math.min((w - 20) / (x1 - x0), (h - 20) / (z1 - z0)); };   // the whole loaded area
+const mZoomFit = (w, h) => { const [x0, z0, x1, z1] = mobBounds(); return Math.min((w - 20) / (x1 - x0), (h - 20) / (z1 - z0)); };   // the whole loaded area
+const MZOOM_OUT = 4;                                                                                                                  // how far past that it zooms out
+const mZoomMin = (w, h) => mZoomFit(w, h) / MZOOM_OUT;
 const mZoomMax = w => w / (3 * (mm.cs || 16));                                                                                     // about 3 chunks across
 function clampZoom(w, h) { const lo = mZoomMin(w, h), hi = Math.max(lo, mZoomMax(w)); mview.sc = Math.max(lo, Math.min(hi, mview.sc)); }
 function renderMobMap() {
@@ -1174,7 +1179,7 @@ function renderMobMap() {
   if (!mm || !w) { $("m-count").textContent = mm ? "" : "waiting for the game"; return; }
   if (mCv.width !== w * r || mCv.height !== h * r) { mCv.width = w * r; mCv.height = h * r; }
   const g = mCv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0);
-  if (!mview.sc) { mview.sc = mZoomMin(w, h); const [x0, z0, x1, z1] = mobBounds(); mview.x = (x0 + x1) / 2; mview.z = (z0 + z1) / 2; mview.follow = false; mview.fitted = true; }
+  if (!mview.sc) { mview.sc = mZoomFit(w, h); const [x0, z0, x1, z1] = mobBounds(); mview.x = (x0 + x1) / 2; mview.z = (z0 + z1) / 2; mview.follow = false; mview.fitted = true; }
   if (mview.follow) { mview.x = mm.player[0]; mview.z = mm.player[1]; }
   clampZoom(w, h);
   const sc = mview.sc, X = x => w / 2 + (x - mview.x) * sc, Z = z => h / 2 + (z - mview.z) * sc, cs = mm.cs || 16;
@@ -1261,7 +1266,7 @@ function renderMobMap() {
   g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 6); g.lineTo(0, 3); g.lineTo(-6, 6); g.closePath();
   g.fillStyle = "#a6dc72"; g.fill(); g.lineWidth = 1.5; g.strokeStyle = "#0b0f0d"; g.stroke(); g.restore();
   // scale bar
-  const blocks = [8, 16, 32, 64, 128, 256, 512].find(b => b * sc >= 60) || 512;
+  const blocks = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096].find(b => b * sc >= 60) || 4096;
   g.fillStyle = "rgba(238,243,234,0.7)"; g.fillRect(12, h - 14, blocks * sc, 2); g.fillText(blocks + " blocks", 12, h - 20);
   northMark(g, w, mm);
   $("m-count").textContent = `${fmt(mm.mobs.length)} mobs · ${fmt(c.length / 2)} chunks loaded` + (mm.face != null ? ` · face ${mm.face}` : "");
@@ -1296,6 +1301,15 @@ function mZoom(f, mx, my) {
 $("m-zin").addEventListener("click", () => mZoom(1.5));
 $("m-zout").addEventListener("click", () => mZoom(1 / 1.5));
 $("m-center").addEventListener("click", () => { mview.follow = true; renderMobMap(); });
+// Pop out: the panel over nearly the whole screen, keeping the zoom, so more of the world fits
+let mPop = false;
+function setMapPop(on) {
+  mPop = on; $("mpanel").classList.toggle("pop", on); $("m-pop").classList.toggle("on", on); $("m-pop").textContent = on ? "Close" : "Pop out";
+  mHover = null; mTip.style.display = "none";
+  if (mm) renderMobMap();
+}
+$("m-pop").addEventListener("click", () => setMapPop(!mPop));
+addEventListener("keydown", e => { if (e.key === "Escape" && mPop) { setMapPop(false); e.stopImmediatePropagation(); } }, true);   // (before the Compare table's Esc)
 // Regions overlay on / off (remembered in this browser)
 const RSTORE = "bf-debug-mobmap-regions";
 let mRegions = false;
@@ -1338,7 +1352,7 @@ function mobWhere(m) {
   const b = (Math.atan2(n[0] * dz - n[1] * dx, n[0] * dx + n[1] * dz) * 180 / Math.PI + 360) % 360;   // clockwise from north (the grid's x right, z down)
   return `${fmt(Math.round(d))} blocks ${dirName(b)}, y ${fmt(m[3])}`;
 }
-window.BFMobMap = { dots: () => mdots.length, dotXY: i => mdots[i] && [mdots[i][0], mdots[i][1]], dotData: () => mdots.map(d => [d[0], d[1], d[2][1], d[2][2]]), scale: () => mview.sc, data: () => mm, hidden: () => [...mobHidden] };   // for tests (test/debug-mobmap.js)
+window.BFMobMap = { dots: () => mdots.length, dotXY: i => mdots[i] && [mdots[i][0], mdots[i][1]], dotData: () => mdots.map(d => [d[0], d[1], d[2][1], d[2][2]]), scale: () => mview.sc, fit: () => mm && mZoomFit(mCv.clientWidth, mCv.clientHeight), popped: () => mPop, data: () => mm, hidden: () => [...mobHidden] };   // for tests (test/debug-mobmap.js)
 window.BFPlanet = { me: key => snap && meOn(snap, key) };
 window.BFThreads = { snap: () => snap && { page: snap.page, threads: snap.threads, host: snap.host } };   // for tests (test/debug-threads.js)   // for tests (test/debug-planet.js): the player as a village's map draws them
 

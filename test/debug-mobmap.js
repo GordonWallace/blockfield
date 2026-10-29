@@ -46,6 +46,19 @@ const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/debug
   });
   const dist = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
   ok('loaded and unloaded land are drawn differently', dist(px.corner, px.mid) > 12 || dist(px.corner2, px.mid) > 12, px);
+  const far = await dbg.evaluate(() => ({ sc: BFMobMap.scale(), fit: BFMobMap.fit() }));
+  ok('zooms out past the whole loaded area', far.sc < far.fit * 0.5, far);
+  // Pop out: the map over nearly the whole screen, Esc closes it
+  const h0 = await dbg.evaluate(() => document.getElementById('mmap').clientHeight);
+  await dbg.click('#m-pop');
+  await dbg.waitForTimeout(200);
+  const pop = await dbg.evaluate(() => { const r = document.getElementById('mmap').getBoundingClientRect(); return { popped: BFMobMap.popped(), w: r.width, h: r.height, vw: innerWidth, vh: innerHeight, sc: BFMobMap.scale(), fit: BFMobMap.fit() }; });
+  ok('Pop out covers nearly the whole screen', pop.popped && pop.w > pop.vw * 0.9 && pop.h > Math.max(h0 * 1.5, pop.vh * 0.7) && pop.sc < pop.fit, { h0, pop });
+  await dbg.keyboard.press('Escape');
+  await dbg.waitForTimeout(200);
+  const back = await dbg.evaluate(() => ({ popped: BFMobMap.popped(), h: document.getElementById('mmap').clientHeight }));
+  ok('Esc closes the pop-out', !back.popped && back.h === h0, { h0, back });
+  await dbg.locator('#mpanel').scrollIntoViewIfNeeded();
   const s0 = await dbg.evaluate(() => BFMobMap.scale());
   await dbg.click('#m-zin'); await dbg.click('#m-zin');
   const s1 = await dbg.evaluate(() => BFMobMap.scale());
