@@ -231,6 +231,8 @@ function villageTable(name, get) {
 // the record at all. o = {field ("_pastures"), list ("cows": the animal states), mob ("cow": the mob's state field), pen ("pasture": the
 // mob's pen link), of(rec) -> the record's pens}.
 function penTable(name, o) {
+  // a pen by its key "<kind>:<village key>|<idx>" (js/ids.js finder: the pens of a village record from another cluster worker are new objects)
+  if (BF.ids && BF.ids.finder) BF.ids.finder(o.pen, rest => { const j = rest.lastIndexOf("|"), rec = BF.mobs && BF.mobs.villages ? BF.mobs.villages.get(rest.slice(0, j)) : null, ps = rec ? rec[o.field] : null; return ps ? ps.find(p => p.key === rest) : undefined; });
   if (!BF.ctick || !BF.ctick.owned) return;
   BF.ctick.owned(name, {
     snap(gk) {
