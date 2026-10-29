@@ -20,13 +20,14 @@
 const BF = (globalThis.BF = globalThis.BF || {});
 
 const SPEEDS = [1, 3, 5, 10, 100, 1000];
+const SLOW_1X = 0.8;   // at 1x the indicator shows only below this share of 1x (the measure wobbles a little: no flicker)
 const TICK = 0.05, MAX_STEPS = 1000, MAX_FRAME = 0.25;   // one tick is 0.05 s of game time; never more than 1000 ticks in a frame; a frame counts at most 0.25 real s
 let idx = 0, clock = 0, eff = 1, last = 1, shown = null, frozen = false;
 let acc = 0, acc0 = 0, planned = 0;   // game seconds collected but not yet ticked (and before the latest plan()); ticks that plan() asked for
 
 BF.simNow = () => clock;
 
-// Indicator (hidden at 1x).
+// Indicator (hidden at 1x, unless the simulation runs well short of it).
 let el = null;
 function ui() {
   if (el || !BF.page || !document.body) return el;   // (headless: no badge)
@@ -43,11 +44,12 @@ function show() {
   if (!e) return;
   if (frozen) { e.hidden = false; e.textContent = "❚❚ 0× (frozen)"; return; }
   const s = SPEEDS[idx];
-  e.hidden = s === 1;
-  if (s === 1) return;
-  // when the frame can't fit all the steps, also show the speed actually achieved
-  const slow = eff < s * 0.9;
-  e.textContent = "▶▶ " + s + "×" + (slow ? " (" + (eff < 10 ? eff.toFixed(1) : Math.round(eff)) + "×)" : "");
+  // when the frame can't fit all the steps, also show the speed actually achieved; at 1x only when well short (Gordon 2026-10-29: at 1x
+  // the villagers crawled with nothing on screen saying the simulation ran at a fraction of 1x)
+  const slow = eff < s * (s === 1 ? SLOW_1X : 0.9);
+  e.hidden = s === 1 && !slow;
+  if (e.hidden) return;
+  e.textContent = (s === 1 ? "▶ " : "▶▶ ") + s + "×" + (slow ? " (" + (eff < 10 ? eff.toFixed(1) : Math.round(eff)) + "×)" : "");
 }
 
 // Game log (js/gamelog.js): up to 10x the sim should keep up, so ticks dropped there (the frame budget ran out) are a WARN,
@@ -94,7 +96,7 @@ BF.warp = {
     noteDropped(planned - run);
     dt = Math.min(MAX_FRAME, dt);
     last = ach != null ? ach : dt > 0 ? Math.max(0, run * TICK + acc - acc0) / dt : 1;   // the speed this frame achieved: game seconds simulated (and carried) per real second
-    eff = frozen ? 0 : idx === 0 ? 1 : eff + (last - eff) * 0.2;   // smoothed game seconds per real second = achieved speed
+    eff = frozen ? 0 : eff + (last - eff) * 0.2;   // smoothed game seconds per real second = achieved speed
     const key = (frozen ? "f" : idx) + ":" + Math.round(eff * 10);
     if (key !== shown) { shown = key; show(); }
   },
