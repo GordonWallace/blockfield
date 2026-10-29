@@ -53,18 +53,27 @@ async function open(b, url) {
 const sim = (pg, fn, arg) => Promise.race([pg.evaluate(([f, a]) => BF.simHost.eval(f, a), [String(fn), arg === undefined ? null : arg]),
   new Promise((_, rej) => setTimeout(() => rej(new Error('the simulation did not answer in 200 s')), 200000))]);
 async function until(pg, fn, ms, trace) {
+  // One question at a time, each waited for however late it answers (within sim's 200 s): a busy simulation answers in order, so asking
+  // again every 30 s only queued more questions and threw away answers that came back after 30 s (CI: "slow to answer" for minutes
+  // while the clusters were in fact split).
   const t0 = Date.now();
-  let told = t0;
-  const late = () => new Promise(r => setTimeout(() => r('late'), 30000));   // (a simulation that stopped answering)
+  let told = t0, pend = null, asked = 0, slowest = 0;
+  const late = () => new Promise(r => setTimeout(() => r('late'), 30000));
   while (Date.now() - t0 < ms) {
-    const r = await Promise.race([sim(pg, fn).catch(() => false), late()]);
-    if (r === true) return true;
+    if (!pend) { asked = Date.now(); pend = sim(pg, fn).catch(() => false); }
+    const r = await Promise.race([pend, late()]);
+    if (r !== 'late') { pend = null; slowest = Math.max(slowest, Date.now() - asked); if (r === true) return true; }
     if (trace && Date.now() - told >= 30000) {   // (where it is while waiting: a slow host's log says which step takes the time)
       told = Date.now();
-      const s = await Promise.race([sim(pg, () => BF.rplay.text()).catch(e => 'no answer: ' + e.message), late()]);
-      console.log(`  ${trace} ${((told - t0) / 1000).toFixed(0)} s: ${r === 'late' ? '(the simulation was slow to answer) ' : ''}${s}`);
+      const s = r === 'late' ? '(the simulation has not answered for ' + ((Date.now() - asked) / 1000).toFixed(0) + ' s)' : await sim(pg, () => BF.rplay.text()).catch(e => 'no answer: ' + e.message);
+      console.log(`  ${trace} ${((told - t0) / 1000).toFixed(0)} s: ${s}${slowest > 5000 ? ' (slowest answer ' + (slowest / 1000).toFixed(0) + ' s)' : ''}`);
+      if (r === 'late' && S) {   // (what the server printed meanwhile: a simulation busy for minutes says what with)
+        const out = S.srv.out.slice(S.srv.seen || 0).replace(/^\[(builder|breeding)\].*\n/gm, '');
+        S.srv.seen = S.srv.out.length;
+        if (out.trim()) console.log('    server: ' + out.slice(-1200).trim().replace(/\n/g, '\n    server: '));
+      }
     }
-    await new Promise(r => setTimeout(r, 2000));
+    if (r !== 'late') await new Promise(r => setTimeout(r, 2000));
   }
   return false;
 }
@@ -127,9 +136,10 @@ let S = null, PG = null;
     dp.on('console', m => { if (m.type() === 'error' && /debug screen/.test(m.text())) errs.push(m.text().slice(0, 200)); });
     await dp.route('https://fonts.**', r => r.abort());
     await dp.goto(S.debug);
-    const drawn = await dp.waitForFunction(() => typeof mm !== 'undefined' && mm && mm.workers === 3 && document.querySelectorAll('#c-wk-per span').length === 3, null, { timeout: 120000, polling: 1000 }).then(() => true, () => false);
-    const seen = await dp.evaluate(() => ({ workers: typeof mm !== 'undefined' && mm ? mm.workers : null, other: typeof mm !== 'undefined' && mm ? (mm.regions || []).filter(r => r[5] > 0).length : 0, per: [...document.querySelectorAll('#c-wk-per span')].map(e => e.textContent) }));
-    check(drawn && !errs.length && seen.other > 0, `the debug screen draws the split: map of ${seen.workers} workers, ${seen.other} regions on the followers, Workers card ${JSON.stringify(seen.per)}${errs.length ? '; errors: ' + errs.slice(0, 3).join(' | ') : ''}`);
+    // (the screen's state is inside its script: its test hooks, BFMobMap.data() the map it drew last and BFWorld.snap() the snapshot)
+    const drawn = await dp.waitForFunction(() => { const m = BFMobMap.data(); return m && m.workers === 3 && (m.regions || []).some(r => r[5] > 0) && document.querySelectorAll('#c-wk-per span').length === 3; }, null, { timeout: 120000, polling: 1000 }).then(() => true, () => false);
+    const seen = await dp.evaluate(() => { const m = BFMobMap.data(), sn = BFWorld.snap(); return { snaps: sn ? sn.n : null, workers: m ? m.workers : null, other: m ? (m.regions || []).filter(r => r[5] > 0).length : 0, per: [...document.querySelectorAll('#c-wk-per span')].map(e => e.textContent) }; });
+    check(drawn && !errs.length, `the debug screen draws the split: snapshot ${seen.snaps}, map of ${seen.workers} workers, ${seen.other} regions on the followers, Workers card ${JSON.stringify(seen.per)}${errs.length ? '; errors: ' + errs.slice(0, 3).join(' | ') : ''}`);
     await dp.context().close();
   }
   // a save while split (at the next meeting)
