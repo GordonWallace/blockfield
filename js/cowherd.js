@@ -260,8 +260,10 @@ function seeded(str) {
   };
 }
 const fix3 = v => (v == null ? null : +(+v).toFixed(3));
+// a living animal's place to 1/100 (its runner's, with clusters on workers: js/mobs.js row "spot"), else where its state last had it
+const spotOf = (s, i) => { const p = s.mob ? BF.cworkers.row("spot", s.mob) : null; return p ? p[i] : i ? s.z : s.x; };
 const packSt = s => [fix3(s.fed), fix3(s.cd || 0), fix3(s.growAt), s.milkDay == null ? null : s.milkDay | 0,
-  s.mob && live(s.mob) ? +s.mob.position.x.toFixed(2) : s.x, s.mob && live(s.mob) ? +s.mob.position.z.toFixed(2) : s.z];
+  spotOf(s, 0), spotOf(s, 1)];
 function unpackSt(a) {
   const num = (x, d) => (x != null && Number.isFinite(+x) ? +x : d);
   if (!Array.isArray(a)) return null;

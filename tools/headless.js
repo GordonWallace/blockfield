@@ -166,7 +166,7 @@ async function main(argv) {
   if (pool) {
     await Promise.all(done);
     const asked = Promise.all(pool.list.map(f => f.ask({ hash: true })));
-    H = BF.cworkers.partial ? BF.cworkers.gathered(() => h.stateHash()) : h.stateHash();   // (partial copies: every worker sends what it runs, at once)
+    H = BF.cworkers.partial ? BF.cworkers.gathered(() => h.stateHash(), "hash") : h.stateHash();   // (partial copies: every worker sends what it runs, at once)
     const hs = await asked;
     const same = hs.every(x => x.hash.hash === H.hash);
     workers = { n: pool.list.length + 1, same, hashes: [H.hash].concat(hs.map(x => x.hash.hash)), mismatch: BF.rworkers.mismatch || hs.map(x => x.mismatch).find(Boolean) || null, stats: BF.rworkers.stats() };
