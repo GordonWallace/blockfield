@@ -349,8 +349,9 @@ function update(px, pz) {
   let changed = stepChanged;
   stepChanged = false;
   // (a trip pinned or unpinned since the last step is taken at once: nothing has stepped since, so it is the same moment the next step would see;
-  // with the cluster tick on, at the next meeting)
-  if ((!stepping() || (pinDirty && !clustered())) && check(px, pz, realClock, BF.rworkers.realNow() / 1000)) changed = true;
+  // with the cluster tick on, at the next meeting. Not while the cluster workers' followers may be ahead (js/cworkers.js open: paused
+  // mid-interval while fast-forwarding): at the next meeting then too)
+  if ((!stepping() || (pinDirty && !clustered())) && !(BF.cworkers && BF.cworkers.open) && check(px, pz, realClock, BF.rworkers.realNow() / 1000)) changed = true;
   return changed;
 }
 // Called every game step (world.tickSim); cheap (re-evaluates every 1.5 game seconds, the villager windows every 0.5). With the cluster

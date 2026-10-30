@@ -32,7 +32,7 @@
 //                   meet(), groups(), SYSTEMS, converted() -> [names], only (a Set of system names, or null: all), system (the running one),
 //                   trace, traced() -> [["system file:line", count]], owned(name, {snap, apply}), ownedMap(name, map, groupOfKey, enc, dec, ver), ownedSet(name, set, groupOfKey),
 //                   ofVillage(key), ofCell(x, z), ofMob(m), mineVillage(key), mineCell(x, z), tables(), table(name), onMeet(fn, name, when), tickOf(base), clocks() -> Map base -> tick, stats(), text(), hourly(),
-//                   reset() }
+//                   view() -> a tick's clock, setView(v), reset() }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -613,6 +613,7 @@ BF.ctick = {
   owned, tables: () => [...tables.keys()], table: name => tables.get(name), onMeet, warm, warmed,
   ownedMap, ownedSet, tailDiff, tailApply, ofVillage, ofCell, ofMob, mineVillage, mineCell,
   tickOf: b => clocks.get(b), clocks: () => new Map(clocks),   // each cluster's own tick (one clock for now)
+  view, setView,   // what a tick's clock reads, and put back (js/rplay.js: a follower running ahead takes the leader's ops at the leader's tick)
   mine, hidden, sys, local, step, interval, meet: meetNow, groups: () => groups, converted, stats, text, hourly, reset,
   get only() { return only; }, set only(v) { only = v ? new Set(v) : null; },
   get system() { return running; },

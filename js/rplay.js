@@ -28,7 +28,16 @@
 // the cluster tick on one with followers attached was 3.2 times slower than the plain tick on test4 (2026-10-29), and only their going
 // turns it off. The first split waits until the plain tick has been measured for PLAIN_TICKS (not while the world loads: a trial on
 // test4 was judged against 46.9 ms a tick measured then, against 8.6 once loaded).
-// API: BF.rplay = { setup({workers, cores, spawn, split, kind}), begin(world), end(why), frame(raw), flush(), status(), text(), follower(post) }
+// Running ahead (2026-10-30): while the clusters are split and the game fast-forwards, each interval opens at its meeting (an "open" op
+// before the meeting tick's "t"), and the followers run their own clusters' ticks up to the interval's last without waiting for the
+// leader's: clusters don't reach each other between meetings (js/clusters.js), so their ticks don't need the leader's, and neither the
+// leader's slow ticks nor its time between frames (chunks, the client) hold them up any more (about 120 ms an interval of 640 locally,
+// 2026-10-30). A follower ahead takes the leader's ops when they come, at the leader's tick (BF.ctick.setView), and the interval's last
+// tick, with the swap, only once it has them all. What would reach the followers' clusters (the clock, the rules) can't come late, so
+// while an interval is open the leader holds it for the next meeting (at most MEET ticks): a slash command, waking up (the next
+// morning), the monster options, the Distant villages settings, a test's eval (hold, js/simworker.js).
+// API: BF.rplay = { setup({workers, cores, spawn, split, kind}), begin(world), end(why), frame(raw), flush(), hold(fn, packet) -> true when it waits for the
+//   next meeting, status(), text(), follower(post) }
 //   spawn(me, n) -> {post(msg), on(fn(msg)), terminate()}: a follower (server/regionthread.js, the world server's Node threads; r15-77 dropped the browser's)
 (() => {
 "use strict";
@@ -104,7 +113,7 @@ function begin(world) {
   L.soloMs = null; L.plainMs = null; L.plainTicks = 0; L.splitMs = null; L.loopT0 = null; L.loopTicks = 0;
   { const h = BF.stateHash.full(); L.hash = h.hash; L.bootParts = h.parts; L.bootText = L.verify ? texts() : null; }   // (the followers must boot the same world)
   RW.journal = []; RW.clock = null;
-  RW.onTick = onTick;
+  RW.onTick = onTick; RW.beforeTick = beforeTick;
   L.shared = L.kind === "clusters" ? BF.cworkers.makeShared(n) : RW.makeShared(n);
   L.list = [];
   for (let me = 1; me < n; me++) {
@@ -276,7 +285,8 @@ function end(why, level) {
   if (clustered()) BF.cworkers.stop(why ? "the followers go: " + why : "");
   if (L.ctick && BF.ctick && BF.ctick.on) BF.ctick.on = false;   // (the clusters' split turned it on: off once no copy has to stay in step)
   L.ctick = false; L.endAfter = false;
-  RW.journal = null; RW.clock = null; RW.onTick = null; RW.verify = 0; RW.mismatch = null;
+  RW.journal = null; RW.clock = null; RW.onTick = null; RW.beforeTick = null; RW.verify = 0; RW.mismatch = null;
+  release();   // (alone now: what waited for a meeting goes in at once)
   if (L.list.length) {
     for (const f of L.list) { try { f.h.post({ end: true }); } catch (e) { /* gone */ } try { f.h.terminate(); } catch (e) { /* gone */ } }
     log(level || (why ? "ERROR" : "INFO"), "Region workers stopped" + (why ? ": " + why + "; the world goes on with one" : ""));
@@ -315,20 +325,61 @@ function setPlayer(a) {
   if (BF.inventory && BF.inventory.selectedIndex !== a[11]) BF.inventory.select(a[11]);
 }
 
+// ---------------------------------------------------------------- holding for the meeting (running ahead)
+// The client's packets that reach every cluster: the monster options, a slash command, waking up (moves the clock on), a test's eval
+const GLOBAL = /^\{"t":"(?:meta"|request","rid":\d+,"tick":[^,]*,"kind":"(?:command|player\.wake)"|query","qid":\d+,"what":"eval")/;
+let held = [];
+// (js/simworker.js) true when fn waits for the next meeting: d, a packet that reaches every cluster, or with no packet (the Distant
+// villages settings) anything, while an interval is open
+function hold(fn, d) {
+  if (!(BF.cworkers && BF.cworkers.open) || (d && !GLOBAL.test(d.h))) return false;
+  held.push(fn);
+  return true;
+}
+const release = () => { for (const fn of held.splice(0)) fn(); };
+// RW.beforeTick, before each tick's "t" on the leader: what waited goes in first (the swap is over: the followers are with the leader
+// again), then a tick that meets opens the next interval, when it fast-forwards
+function beforeTick() {
+  if (held.length && !(BF.cworkers && BF.cworkers.open)) release();
+  if (L.split && clustered() && BF.rand.tick % BF.ctick.MEET === 0 && BF.warp.speed > 1 && !BF.state.paused) { RW.rec(["open"]); BF.cworkers.open = true; }
+}
+
 // ---------------------------------------------------------------- a follower
 // follower(post) -> the message handler: {boot: {world, me, n, verify, trail}}, {ops: [...]}, {end}. Answers {booted: hash}, {ticks: n} after each
 // batch, {error} (and stops the barrier, so a split tick on the leader fails at once rather than waiting).
 function follower(post) {
   let me = 0, n = 1, ticks = 0, host = null, link = null, verify = 0, trail = false;
   const kept = new Map();   // (tests) the texts of the copy at the last few solo checks
+  // running ahead: ahead, the ticks run before the leader's "t" for them came; views, this interval's clock after each tick; h, a tick's length
+  let ahead = 0, h = null;
+  const views = new Map();
+  const K = () => BF.ctick, CWk = () => BF.cworkers;
+  const MEETk = () => K().MEET;
+  // another tick of its own clusters before the leader's: in an open interval, short of its last tick (that one swaps: it waits for all the leader's ops first)
+  const canRunAhead = () => h != null && CWk() && CWk().open && BF.rand.tick % MEETk() !== 0 && BF.rand.tick % MEETk() !== MEETk() - 1;
+  function runAhead() { BF.simStep(h); ahead++; views.set(BF.rand.tick, K().view()); }
   const op = o => {
+    // (an op the leader journaled at its tick, behind this one's: taken at the leader's clock, then this one's back)
+    if (ahead > 0 && o[0] !== "t") {
+      const mine = BF.rand.tick, at = views.get(mine - ahead);
+      K().setView(at);
+      try { op1(o); } finally { K().setView(views.get(mine)); }
+      return;
+    }
+    op1(o);
+  };
+  const op1 = o => {
     switch (o[0]) {
       case "t":
+        if (ahead > 0) { ahead--; RW.clock = o[2]; ticks++; break; }   // (run already)
         if (verify && !RW.active && !clustered() && (ticks + 1) % verify === 0) {   // (tests: the leader compares, js/rplay.js soloCheck)
           kept.set(ticks + 1, texts()); if (kept.size > Math.max(32, Math.ceil(400 / verify))) kept.delete(kept.keys().next().value);
           post({ hashAt: ticks + 1, parts: BF.stateHash.full().parts });
         }
-        RW.clock = o[2]; BF.simStep(o[1]); ticks++; break;
+        RW.clock = o[2]; BF.simStep((h = o[1])); ticks++;
+        if (CWk() && CWk().open) views.set(BF.rand.tick, K().view());
+        break;
+      case "open": CWk().open = true; views.clear(); break;   // (the leader's meeting tick follows: then this one may run ahead)
       case "p": host.receive(o[1]);   /* (queries too: answering F3 or the debug screen works out things lazily that the world keeps, a poultry keeper's task state with a roll of its own) */ if (o[2]) setPlayer(o[2]); break;
       case "c": BF.world.replay.create(o[1], o[2]); break;
       case "ug": BF.world.replay.drops(o[1]); break;
@@ -359,10 +410,13 @@ function follower(post) {
   let busy = false, loadT = 0;
   const TL = BF.tload || { begin() {}, end() {}, report: () => null, SAMPLE: 1000 };   // (this thread's busy share for the debug screen)
   const EVAL = /^\{"t":"query","qid":\d+,"what":"eval"/;
+  // (between ticks run ahead, a turn of the event loop: the leader's ops that came meanwhile go first)
+  const soon = typeof setImmediate === "function" ? setImmediate : fn => setTimeout(fn, 0);
   async function pump() {
     if (busy) return;
     busy = true;
     TL.begin();
+    let again = false;
     try {
       while (queue.length) {
         const d = queue.shift();
@@ -380,9 +434,11 @@ function follower(post) {
         else if (d.trailOf) post({ trail: BF.world.trailOf(d.trailOf) });
         else if (d.end) { if (RW.active) RW.pause(); if (clustered()) BF.cworkers.stop(); queue.length = 0; }
       }
+      if (canRunAhead()) { runAhead(); again = true; }
     } catch (e) { queue.length = 0; fail(e); }
     TL.end();
     busy = false;
+    if (again) soon(pump);
   }
   function boot(b) {
     const w = b.world;
@@ -419,5 +475,5 @@ const testCrash = me => { RW.rec(["crash", me | 0]); flush(); };
 // (tests) back to one now (split=always splits again once the followers are ready)
 const testSolo = () => { if (L.split) toSolo("a test"); };
 
-BF.rplay = { setup, begin, end, frame, flush, status, text, follower, player, testCrash, testSolo, MAX, TRIAL, VERIFY };
+BF.rplay = { setup, begin, end, frame, flush, hold, status, text, follower, player, testCrash, testSolo, MAX, TRIAL, VERIFY };
 })();
