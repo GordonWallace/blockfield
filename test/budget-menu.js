@@ -3,7 +3,8 @@
 // (bug-081): in a Web Worker or on the world server the page's copy holds the settings and sends them on (js/simhost.js budget), the
 // button shows the simulation's own line (the protocol's budget query, so its village count is the simulation's, not 0), Automatic's time
 // limit is the simulation's own (80% on a thread of its own, 40% in the page), and remembered settings (and 1.5's first setting, a share
-// alone) reach the simulation when the game starts again. The Cluster workers line cycles the setting (js/simhost.js) and logs it.
+// alone) reach the simulation when the game starts again. The Cluster workers line cycles the setting (js/simhost.js) and logs it on
+// the world server; elsewhere it is disabled (only the world server has workers, r15-77).
 // Usage: node test/run.js /tmp/bm test/budget-menu.js [--host page|worker|server]
 module.exports = async (pg) => {
   const ok = (name, cond, extra) => console.log((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
@@ -26,7 +27,7 @@ module.exports = async (pg) => {
   const autoShare = inPage ? 40 : 80;
   ok("the panel shows the defaults: Automatic villages, the simulation's automatic time limit, no distance limit, automatic memory, 1 worker",
     /Villages: Automatic/.test(lines.villages.text) && new RegExp("Time limit: Automatic \\(" + autoShare + "% of each second\\)").test(lines.share.text) &&
-    lines.reach.text === "Distance limit: None" && /Memory limit: Automatic \(\d+ MB\)/.test(lines.mem.text) && lines.workers.text === "Cluster workers: 1 (clusters off)", { where, lines });
+    lines.reach.text === "Distance limit: None" && /Memory limit: Automatic \(\d+ MB\)/.test(lines.mem.text) && lines.workers.text === (lib.host() === "server" ? "Cluster workers: 1 (clusters off)" : "Cluster workers: 1 (world server only)"), { where, lines });
   // the time limit: 20%, 40%, 60%; each reaches the simulation
   const steps = [];
   for (let i = 0; i < 3; i++) {
@@ -53,12 +54,17 @@ module.exports = async (pg) => {
   await pg.waitForTimeout(8000);
   const ex = await lib.sim(pg, () => BF.active.extras());
   ok("no extra village joins with nearest only", ex.length === 0, ex);
-  // Cluster workers: Automatic shows its count; logged; remembered
-  await click("workers");
-  const wl = await waitFor(() => line("workers"), /Automatic/);
-  const wst = await pg.evaluate(() => ({ pref: BF.simHost.workersPref(), auto: BF.simHost.autoWorkers(), stored: localStorage.getItem("blockfield.workers"), log: BF.glog.recent(5000).filter(e => /Cluster workers setting/.test(e.x)).map(e => e.l + " " + e.x) }));
-  ok("Cluster workers: Automatic shows its count and is remembered and logged", wl.text === "Cluster workers: Automatic (" + wst.auto + ")" && wst.pref === "auto" && wst.stored === "auto" && wst.auto >= 1 && wst.log.some(l => /^INFO Cluster workers setting: Automatic/.test(l)), { wl, wst });
-  await pg.evaluate(() => localStorage.removeItem("blockfield.workers"));
+  // Cluster workers: on the world server Automatic shows its count, logged, remembered; elsewhere the line says only the world server has them (r15-77)
+  if (lib.host() === "server") {
+    await click("workers");
+    const wl = await waitFor(() => line("workers"), /Automatic/);
+    const wst = await pg.evaluate(() => ({ pref: BF.simHost.workersPref(), auto: BF.simHost.autoWorkers(), stored: localStorage.getItem("blockfield.workers"), log: BF.glog.recent(5000).filter(e => /Cluster workers setting/.test(e.x)).map(e => e.l + " " + e.x) }));
+    ok("Cluster workers: Automatic shows its count and is remembered and logged", wl.text === "Cluster workers: Automatic (" + wst.auto + ")" && wst.pref === "auto" && wst.stored === "auto" && wst.auto >= 1 && wst.log.some(l => /^INFO Cluster workers setting: Automatic/.test(l)), { wl, wst });
+    await pg.evaluate(() => localStorage.removeItem("blockfield.workers"));
+  } else {
+    const wl = await line("workers");
+    ok("Cluster workers: off the world server the line is disabled and says world server only", wl && wl.disabled && wl.text === "Cluster workers: 1 (world server only)", wl);
+  }
   // remembered settings reach the simulation the next time the game starts (the worker's and the server's copies have no localStorage)
   await pg.evaluate(() => { localStorage.setItem("blockfield.distant", JSON.stringify({ villages: "auto", share: 0.6, reach: 2000, mem: "auto" })); });
   await pg.reload(); await lib.reloaded(pg);

@@ -8,8 +8,9 @@
 // Worlds start by the protocol's world message: demo (the title screen's world), create (a new saved world, its meta made by the page)
 // or load (a saved world by id). Each takes the page's solved river network (js/worldgen.js riverState), so it isn't solved twice.
 // The page's menus pause it (speed message with pause); a hidden tab pauses it too, as 1.4 stopped with the page's frames.
-// Region workers (spec r15-39, js/rplay.js): for each saved world it plays, this worker starts followers that keep copies of the world
-// from its journal, and splits the regions' thinking over them when that pays (?workers=N and ?split=always|never on the page's URL).
+// Region workers (spec r15-39, js/rplay.js): on the world server (server/simthread.js), for each saved world it plays, this worker starts
+// followers (Node threads) that keep copies of the world from its journal, and splits the work over them when that pays. In a browser
+// it has none (r15-77): it simulates on one thread.
 // A crash (an error out of the loop, a follower's while split) stops the loop, goes to the game log and to the page as {crash}; the page offers a reload.
 // Game log: INFO "worker" when the worker has loaded (files, time) and when each world starts here; ERROR for a crash.
 (() => {
@@ -34,17 +35,14 @@ function boot(o) {
   importScripts("debugfeed.js" + Q);   // (its snapshot only: the page sends it to the debug server)
   importScripts("coords.js" + Q);      // (the planet's positions, for the commands: /tp corner, latitude / longitude, face / u / v)
   importScripts("commands.js" + Q);    // (the slash commands: the page's command line sends them as "command" requests)
-  importScripts("rplay.js" + Q);       // (region workers, spec r15-39: the followers this worker starts for each world)
+  importScripts("rplay.js" + Q);       // (region workers, spec r15-39: the followers the world server's copy starts for each world)
   BF.boot.initSim();
   BF.glog.setSink(e => { if (e.l === "ERROR") post({ errorLine: e.x }); });   // (the page shows the latest error with a crash)
   BF.worker = { feed: o.feed || null };
   sim = BF.proto.host(p => post(p, p.b ? [p.b] : []), { replica: true, world: worldOp, onView: v => { if (v.dist > 0 && v.dist !== BF.world.viewDist) BF.world.setViewDist(v.dist); } });
-  // region workers (spec r15-39): followers in Web Workers of their own (js/regionworker.js), or the world server's threads
-  // (server/simthread.js gives BF_REGION_SPAWN); how many from the page (?workers=, ?split=) or the server's environment
-  const spawn = self.BF_REGION_SPAWN || (typeof Worker === "function" ? (me, n) => {
-    const w = new Worker("regionworker.js" + Q);
-    return { post: m => w.postMessage(m), on: fn => { w.onmessage = e => fn(e.data); w.onerror = e => { e.preventDefault(); fn({ error: e.message || "the worker failed" }); }; }, terminate: () => w.terminate() };
-  } : null);
+  // region workers (spec r15-39): only the world server's threads (server/simthread.js gives BF_REGION_SPAWN); how many from its
+  // environment or the page's ?workers=. A browser's worker has none (r15-77)
+  const spawn = self.BF_REGION_SPAWN || null;
   const nw = BF.rplay.setup({ workers: o.workers || self.BF_WORKERS, split: o.split || self.BF_SPLIT, kind: o.kind, verify: o.verify, cores: self.BF_CORES || (self.navigator && navigator.hardwareConcurrency), spawn, three: o.three });
   BF.on("worldRestored", (data, meta) => { if (loadingWorld) BF.rplay.begin({ op: "load", data, meta, rivers: riverSt }); });   // (a saved world: right as it is restored)
   BF.glog.log("INFO", "worker", "Simulation worker loaded: " + BF.SIM_FILES.length + " files in " + Math.round(performance.now() - t0) + " ms" + (nw > 1 ? "; " + nw + " region workers per world" : ""));
