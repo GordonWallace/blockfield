@@ -681,32 +681,41 @@ function tick(dt) {
 // trips, roads given up, path wear and its path blocks); then the pins: one whose merchant is here without that trip is dropped,
 // one nobody has carried for a game day too (the merchant unloaded or died), and the asks are granted while fewer than
 // MAX_PINS are on the road.
-const idNum = m => +String(m.id).slice(1) || 0;
+// With partial copies (js/cworkers.js) the merchants other workers run are read by what their holders send of them (views: notes, walk,
+// trip, alive, key, place), not fetched whole; what the meeting changes goes on every copy alike (on a stale one, thrown away at its next refill).
+const idNum = id => +String(id).slice(1) || 0;
+function view(m) {
+  if (m.profession !== PROF || !m.mc) return null;
+  const st = m.mc, tr = st.trip;
+  return { notes: st.notes || null, walk: st.walk || null, trip: tr ? { id: tr.id, pin: tr.pin, home: tr.home, dest: tr.dest } : null, wg: st.destWg || null, dead: m.dead ? 1 : 0, key: keyOf(m), at: [m.position.x, m.position.y, m.position.z] };
+}
 function meet() {
   const VS = BF.villageSim;
   if (!VS) return;
-  const ms = BF.regions.ofType("villager").filter(m => m.profession === PROF && !m.removed && m.mc).sort((a, b) => idNum(a) - idNum(b));
-  for (const m of ms) {
-    const st = m.mc;
-    if (st.notes) {
-      for (const e of st.notes) {
+  const CW = BF.cworkers, vs = CW && CW.active ? CW.views(BF.regions.ofType("villager"), view) : null;
+  const ms = vs ? [...vs].map(([id, v]) => [BF.ids.live(id), v]).filter(([m]) => m).sort((a, b) => idNum(a[0].id) - idNum(b[0].id))
+    : BF.regions.ofType("villager").filter(m => !m.removed).map(m => [m, view(m)]).filter(([, v]) => v).sort((a, b) => idNum(a[0].id) - idNum(b[0].id));
+  const stOf = m => m.mc || {};   // (a stale copy that isn't a merchant yet here: its change is thrown away)
+  for (const [m, v] of ms) {
+    if (v.notes) {
+      for (const e of v.notes) {
         if (e[0] === "trip") addTrip(e[1], e[2], e[3], e[4], e[5]);
         else if (e[0] === "noroad") noRoad.set(e[1], e[2]);
       }
-      st.notes = st.notes.filter(e => e[0] === "vlog");
-      if (!st.notes.length) st.notes = null;
+      const keep = v.notes.filter(e => e[0] === "vlog");
+      stOf(m).notes = keep.length ? keep : null;
     }
-    if (st.walk) {
-      const w = st.walk;
+    if (v.walk) {
+      const w = v.walk, st = stOf(m);
       st.walk = null;
       for (let i = 0; i < w.length; i += 3) wearCell(m, st, w[i], w[i + 1], w[i + 2], w[i] + "," + w[i + 1] + "," + w[i + 2]);
     }
   }
   const now = dayNow(), carried = new Set(), here = new Set();
-  for (const m of ms) {
-    const tr = m.mc.trip, k = keyOf(m);
-    if (k) here.add(k);   // (a dead one too: its trip ended with it, js/merchant.js onKilled)
-    if (!m.dead && tr && tr.pin !== "ask" && tr.pin !== "no") carried.add(tr.id);
+  for (const [, v] of ms) {
+    const tr = v.trip;
+    if (v.key) here.add(v.key);   // (a dead one too: its trip ended with it, js/merchant.js onKilled)
+    if (!v.dead && tr && tr.pin !== "ask" && tr.pin !== "no") carried.add(tr.id);
   }
   for (const id of [...VS.pins().keys()]) {
     if (carried.has(id)) { lastSeen.set(id, now); continue; }
@@ -714,14 +723,15 @@ function meet() {
     if (!lastSeen.has(id)) lastSeen.set(id, now);
     if (now - lastSeen.get(id) > 1) { VS.unpin(id); lastSeen.delete(id); }
   }
-  for (const m of ms) {
-    const st = m.mc, tr = st.trip;
+  for (const [m, v] of ms) {
+    const tr = v.trip;
     if (!tr || tr.pin !== "ask") continue;
-    if (m.dead) { st.trip = null; st.stage = null; continue; }
-    const ok = pinTrip(m, st);
-    tr.pin = ok ? "ok" : "no";
+    const st = stOf(m), mine = st.trip && st.trip.id === tr.id ? st.trip : null;
+    if (v.dead) { if (mine) { st.trip = null; st.stage = null; } continue; }
+    const ok = pinTrip(m, { trip: tr, destWg: v.wg });
+    if (mine) mine.pin = ok ? "ok" : "no";
     if (ok) lastSeen.set(tr.id, now);
-    if (BF.glog) BF.glog.log("INFO", "merchant", who(m) + (ok ? " may set out for the village at " + tr.dest + " (pinned at the meeting)" : " waits: " + VS.MAX_PINS + " trips are already on the road"), { village: m.village || undefined, at: m });
+    if (BF.glog) BF.glog.log("INFO", "merchant", who(m) + (ok ? " may set out for the village at " + tr.dest + " (pinned at the meeting)" : " waits: " + VS.MAX_PINS + " trips are already on the road"), { village: m.village || undefined, at: v.at });
   }
 }
 

@@ -360,8 +360,7 @@ function step() {
   if (check(focusX, focusZ, simClock, BF.simNow())) stepChanged = true;
 }
 // A meeting of the cluster tick: the trips' pin asks first (js/merchant.js), then the set (the clock check as step() does it).
-// With partial copies (js/cworkers.js) the merchants come current first (merchant.meet reads and clears what they noted), and a
-// village's mobs before the set reads their tasks or stops them (fetchVillage).
+// With partial copies (js/cworkers.js) a village's mobs come current before the set reads their tasks or stops them (fetchVillage).
 // (which mobs is asked of each one's current copy: a stale copy may not show yet that it joined the village or became a merchant)
 const fetch = pred => { if (BF.cworkers && BF.cworkers.partial) BF.cworkers.fetch(BF.mobs.list, pred); };
 // (at a meeting each village's mobs come over once, those of every village the set may stop in one exchange: fetched)
@@ -374,7 +373,7 @@ function fetchVillages(keys) {
 }
 const fetchVillage = key => fetchVillages([key]);
 function meet() {
-  if (BF.merchant && BF.merchant.meet) { fetch(m => m.mc); BF.merchant.meet(); }
+  if (BF.merchant && BF.merchant.meet) BF.merchant.meet();   // (it reads the merchants other workers run by their views: js/cworkers.js)
   if (focusX == null) return;
   fetched = new Set();
   try { if (check(focusX, focusZ, simClock, BF.simNow())) stepChanged = true; } finally { fetched = null; }
