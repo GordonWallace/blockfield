@@ -1408,6 +1408,11 @@ function ownCellsNow(name, coll, enc, dec) {
       }
       for (const k of o.gone) { coll.delete(k); had.delete(k); }
       for (const it of o.put) if (isMap) put1(it[0], it[1]); else put1(it);
+      // a Set's keys of the group that only this worker added (its own chunk loads add the others' groups' keys too: farmland's blocks
+      // due, a fluid cell queued) and its owner never had or has dealt with: dropped, or this worker would deal with them again the day
+      // the group comes to it, as the group's owner never did (farmland stamped there and nowhere else: cluster-play at meetings every
+      // 80 ticks, when the workers went back to one)
+      if (!isMap) for (const k of C.keysOf(coll, gk, of)) if (!had.has(k)) coll.delete(k);
       C.applied(coll, gk);
     },
   });
