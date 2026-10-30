@@ -267,6 +267,11 @@ function encData(req) {
 // encMany(list): several entities' own fields (plain copies) in one call, for another worker to take whole (clusters with partial
 // copies, js/cworkers.js handovers): an object two of them share stays one object, and one that lives inside a village record (every
 // worker's records are current) is sent as where it is there, so it stays the record's object too. Decode with dec inside atLater.
+// encWhole(o, m): a mob made since the last meeting (o: a plain copy of its own fields), with the objects that live in a village record
+// or another mob (a builder's entry in its village's list, a pen sheep's state) sent as where they are, so they stay one object on the
+// other workers (decode inside atLater); its own objects written in full. Encoded without paths, a builder that came out mid-interval
+// had a copy of its entry on the other workers, and the one that ran it next built on that copy, which never reached the record.
+function encWhole(o, m) { const prev = self, pk = topKey; self = m; topKey = null; try { return withPaths([], () => encV(o, new Map()), m); } finally { self = prev; topKey = pk; } }
 function encMany(list) {
   const prev = self, ps = RW.indexScope;
   self = null; RW.indexScope = { mobs: new Set(), recs: recSet }; shared = null;
@@ -1046,6 +1051,6 @@ function hourly() {
 Object.assign(RW, { journal: null, clock: null, onTick: null, onTouch: null, chan: name => channels.get(name), rec, stamp, realNow, tick, pause, channel, touch, writes, dynItem, setup, stop, beginThink, thinking, afterThink, beforeDeliver, afterDeliver, stats, text, hourly, replan,
   enc, dec, Shadow, snap, diff, patch, makeShared, attach, SKIP, REBALANCE, SOLO_MS, refsOn,
   ownerOf, unitOf,   // (read only: the debug screen's Regions map colours each region by the worker its mobs think on, js/debugfeed.js)
-  refs: refsOn, encData, encMany, decAll, atLater });
+  refs: refsOn, encData, encMany, encWhole, decAll, atLater });
 BF.rworkers = RW;
 })();
