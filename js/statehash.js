@@ -47,6 +47,11 @@ const SKIP = new Set(["def", "root", "model", "meshes", "material", "mesh", "geo
 // beds by chunk (js/breeding.js scanBeds), each copy's own from the chunks it scanned; what they give is rec.beds.
 // Fields named _snd...: mobs' sound timers (js/audio.js), heard only.
 const skipKey = k => SKIP.has(k) || k.startsWith("_snd");
+// A village record's coops and pens (js/poultry.js coopsOf, js/shepherd.js pensOf): a list each copy fills in when it first asks, and
+// again when a builder finishes one, so a copy that hasn't asked since lacks the empty ones. Only those with stock are state, as the
+// tables that send them count it (js/herd.js penTable: Gordon's test4, 2026-10-29, the owner of a village it never asked about had
+// _coops=[] where the others had its two built coops, empty, and the copies were stopped as different).
+const PENS = { _coops: p => p.hens || p.eggs, _pens: p => p.sheep };
 let mobSet = new Set(), dropSet = new Set();
 const mobRef = m => m.id != null ? "#" + m.id : m.type + (m.name ? ":" + m.name : "");
 const isMob = v => mobSet.has(v) || (v.def && v.position && v.type && v.ai);   // (a mob: js/mobs.js createMob)
@@ -84,8 +89,8 @@ function canon(v, out, d, seen) {
     out.push("{");
     const keys = Object.keys(v).filter(k => !skipKey(k)).sort();
     for (const k of keys) {
-      const x = v[k];
-      if (x === undefined || typeof x === "function") continue;
+      const pens = PENS[k] && Array.isArray(v[k]) && v.members, x = pens ? v[k].filter(PENS[k]) : v[k];
+      if (x === undefined || typeof x === "function" || (pens && !x.length)) continue;
       out.push(k, "=");
       canon(x, out, d + 1, seen);
       out.push(";");

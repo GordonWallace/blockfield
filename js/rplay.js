@@ -29,7 +29,7 @@
 // turns it off. The first split waits until the plain tick has been measured for PLAIN_TICKS (not while the world loads: a trial on
 // test4 was judged against 46.9 ms a tick measured then, against 8.6 once loaded).
 // API: BF.rplay = { setup({workers, cores, spawn, split, kind}), begin(world), end(why), frame(raw), flush(), status(), text(), follower(post) }
-//   spawn(me, n) -> {post(msg), on(fn(msg)), terminate()}: a follower (js/regionworker.js in a browser, server/regionthread.js in Node)
+//   spawn(me, n) -> {post(msg), on(fn(msg)), terminate()}: a follower (server/regionthread.js, the world server's Node threads; r15-77 dropped the browser's)
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -73,8 +73,8 @@ function setup(o) {
   L.policy = o.split === "always" || o.split === "never" ? o.split : "auto";
   L.kind = o.kind === "clusters" ? "clusters" : "regions";   // (what a split shares: the regions' thinking each tick, or the clusters, js/cworkers.js)
   L.verify = o.verify > 0 ? o.verify | 0 : VERIFY;   // (tests: ?verify=N compares the copies every N split ticks)
-  if (L.want > 1 && typeof SharedArrayBuffer !== "function") { L.why = "no SharedArrayBuffer here (the page needs cross-origin isolation: ./run.sh)"; L.want = 1; }
-  if (L.want > 1 && !L.spawn) { L.why = "no way to start workers here"; L.want = 1; }
+  if (L.want > 1 && !L.spawn) { L.why = "region workers run only on the world server (./run.sh)"; L.want = 1; }
+  if (L.want > 1 && typeof SharedArrayBuffer !== "function") { L.why = "no SharedArrayBuffer here"; L.want = 1; }
   return L.want;
 }
 // A world starts on the leader (js/simworker.js worldOp): the followers for it. world: {op: "create", seed, opts, rivers} or {op:
