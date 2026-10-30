@@ -19,7 +19,8 @@
 // It runs only when every system that runs is converted (BF.ctick.SYSTEMS, or BF.ctick.only within them): a system not converted yet
 // sees the whole world from one group's pass, which another worker skips.
 // The transport is js/rworkers.js's (shared-memory mailboxes and a barrier: makeShared, attach), one exchange a meeting.
-// Game log: INFO "workers" when they start and stop and once a game hour while the debug overlay or debug screen is on; ERROR when two
+// Game log: INFO "workers" when they start and stop, at each copy check that agrees (with the ms it took), and once a game hour while
+// the debug overlay or debug screen is on; ERROR when a mob's save or hash row fails on its worker, when two
 // workers set the same cell, a request with callbacks changes worker, or a mob or record arrives that this worker doesn't have.
 // API: BF.cworkers = { active, n, me, setup({n, me, link}), stop(why), owns(group), owners (group key -> worker), workerOf(group key) -> worker, sync(), met(groups),
 //   fetch(ms, pred), views(ms, fn) (partial copies, at a meeting: the current copies whole, or a few fields of them),
@@ -404,8 +405,9 @@ function afterMet() {
   note("back to one with the whole world, after " + meetings + " meetings");
 }
 function check() {
-  const h = gathered(() => BF.stateHash.full());
+  const t0 = now(), h = gathered(() => BF.stateHash.full(), "hash");
   const all = xchange("verify", JSON.stringify([h.hash, h.parts]));
+  if (all.every(x => JSON.parse(x)[0] === h.hash)) note("the copies of the world agree at tick " + BF.rand.tick + " (hash " + h.hash + ", checked in " + Math.round(now() - t0) + " ms)");
   const [h0, p0] = JSON.parse(all[0]);
   RW().checks = (RW().checks || 0) + 1;
   for (let w = 1; w < all.length; w++) {
@@ -735,9 +737,16 @@ function hourly() {
 // The shared memory every worker attaches to: js/rworkers.js's mailboxes and barrier, and the claim counters
 function makeShared(n, bytes) { return Object.assign(RW().makeShared(n, bytes || 128 << 20), { claims: new SharedArrayBuffer(8) }); }
 // gathered(fn) (every worker at once, between intervals): fn() with every mob's current copy here (each worker sends the ones it runs),
-// then the stale copies put back as they were; for the state hash and the tests (test/cluster-workers.js)
-function gathered(fn) {
+// then the stale copies put back as they were; for the tests (test/cluster-workers.js) and the copies' texts (CW_DUMP).
+// gathered(fn, use) (use "save": js/save.js snapshot; "hash": the copy check, BF.stateHash.full): no mob is sent whole. Each worker works
+// out the rows registered for that use (BF.mobRows) of the mobs it runs, sends them, and fn reads every mob's through row(kind, m): its own
+// worked out here, a stale copy's as its runner sent it. Sending a mob whole cost about 4.6 KB and decoding, filling in and putting it
+// back on every worker (Gordon's test4 with 8 workers: about 1 s at each autosave and 1.5 s at each copy check, every worker waiting);
+// its rows are what fn would read of it, and every worker works out its own mobs' at once. So whatever fn reads of a mob must go through
+// row() (test/cluster-rows.js compares both ways).
+function gathered(fn, use) {
   if (!CW.partial) return fn();
+  if (use) return withRows(fn, use);
   const R = RW();
   R.refs();
   const list = [...mine].filter(m => !m.removed);
@@ -750,6 +759,48 @@ function gathered(fn) {
   refillAll(pairs, NONE);   // (nothing but vectors merged in place: put back after)
   try { return fn(); }
   finally { for (const [m, o, vs] of keep) { for (const k of Object.keys(m)) if (!(k in o)) delete m[k]; Object.assign(m, o); for (const [v, x, y, z] of vs) v.set(x, y, z); } }
+}
+// Rows: BF.mobRows (kind -> { fn(m) -> plain JSON value, null for none; uses: ["save", "hash"]; around(go): runs go inside its setup },
+// filled in by the modules as they load, before this file): what a gathered fn for those uses reads of a mob, worked out where the mob's copy is current. row(kind, m): inside
+// gathered(fn, use), for a mob another worker runs, its row as that worker sent it; otherwise (its copy here is current, or no clusters)
+// fn(m) here.
+const ROWS = BF.mobRows || (BF.mobRows = new Map());
+let rowsIn = null;        // inside withRows: mob id -> [row of each kind in kinds]
+let rowsKinds = null;
+function row(kind, m) {
+  if (rowsIn !== null && m) {
+    const r = rowsIn.get(m.id);
+    if (r !== undefined) {
+      const i = rowsKinds.indexOf(kind), v = i >= 0 ? r[i] : undefined;
+      if (v !== null && typeof v === "object" && v[FAILED] !== undefined) throw new Error("mob " + m.id + "'s " + kind + " row failed on its worker (" + v[FAILED] + ")");
+      if (i >= 0) return v;
+    }
+  }
+  return ROWS.get(kind).fn(m);
+}
+// A row that throws on its runner goes as {FAILED: why}, so every worker still meets (a throw before the exchange would leave the
+// others waiting at the barrier) and the gathered fn fails where it reads it: a save fails and the previous one is kept.
+const FAILED = "!rowFailed";
+function rowOf(f, kind, m) {
+  try { const v = f(m); return v === undefined ? null : v; }
+  catch (e) { err("working out mob " + m.id + "'s " + kind + " row failed (" + (e && e.message || e) + ")"); return { [FAILED]: String(e && e.message || e) }; }
+}
+function withRows(fn, use) {
+  const kinds = [...ROWS.keys()].filter(k => ROWS.get(k).uses.includes(use)).sort(), fns = kinds.map(k => ROWS.get(k).fn);
+  const out = [];
+  let go = () => { for (const m of mine) if (!m.removed) out.push(m.id, fns.map((f, i) => rowOf(f, kinds[i], m))); };
+  for (const k of kinds) { const a = ROWS.get(k).around, inner = go; if (a) go = () => a(inner); }   // (a kind's setup: js/statehash.js refs)
+  go();
+  const all = xchange("rows." + use, JSON.stringify(out));
+  const got = new Map();
+  for (let w = 0; w < all.length; w++) {
+    if (w === CW.me) continue;
+    const a = JSON.parse(all[w]);
+    for (let i = 0; i < a.length; i += 2) got.set(a[i], a[i + 1]);
+  }
+  for (const m of mine) got.delete(m.id);   // (a mob this worker runs: its own copy is current)
+  rowsIn = got; rowsKinds = kinds;
+  try { return fn(); } finally { rowsIn = null; rowsKinds = null; }
 }
 // fetch(ms) (partial copies; every worker alike, with the same list, between ticks: js/ctick.js at a meeting before the requests that
 // waited apply, js/villagesim.js before it reads or changes a village's mobs, js/mobs.js before a chunk unloads its mobs): those mobs' current copies here, sent whole by the workers that ran
@@ -812,6 +863,6 @@ function views(ms, fn) {
 }
 // current(m): this worker's copy of m is current (partial copies: it runs m, or every copy is current)
 const current = m => !CW.partial || mine.has(m) || (atMeeting && !holder.has(m.id));
-Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, current, gathered, fetch, views, whenMet, leave, carry, pull: false, partial: false, verify: 0 });
+Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, current, gathered, row, fetch, views, whenMet, leave, carry, pull: false, partial: false, verify: 0 });
 BF.cworkers = CW;
 })();

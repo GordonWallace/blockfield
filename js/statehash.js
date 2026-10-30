@@ -115,12 +115,15 @@ function editsText() {
 }
 function mobsText() {
   const L = BF.mobs ? BF.mobs.list : [];
-  return L.filter(m => !m.removed).map(m => {
-    const o = [m.type, "@", num(m.position.x), ",", num(m.position.y), ",", num(m.position.z)];
-    canon(m.horse ? Object.assign({}, m, { horse: "H" + m.horse.hid }) : m, o, 0, new Set());   // a horse's record is in the horses part
-    return o.join("");
-  }).sort().join("\n");
+  return L.filter(m => !m.removed).map(m => BF.cworkers.row("hash", m)).sort().join("\n");
 }
+// A mob's line of the mobs part. A row (js/cworkers.js gathered): with clusters on workers, worked out by its runner, refs on there too.
+function mobLine(m) {
+  const o = [m.type, "@", num(m.position.x), ",", num(m.position.y), ",", num(m.position.z)];
+  canon(m.horse ? Object.assign({}, m, { horse: "H" + m.horse.hid }) : m, o, 0, new Set());   // a horse's record is in the horses part
+  return o.join("");
+}
+(BF.mobRows || (BF.mobRows = new Map())).set("hash", { fn: mobLine, uses: ["hash"], around: go => { refsOn(); try { return go(); } finally { refsOff(); } } });
 function villagesText() {
   const V = BF.mobs && BF.mobs.villages, o = [];
   if (V) for (const k of [...V.keys()].sort()) o.push(k + ":" + text(V.get(k)));
@@ -132,8 +135,8 @@ function horsesText() {
   const H = BF.horses;
   if (!H || !H.records) return "";
   const recs = [...H.records.values()].sort((a, b) => a.hid - b.hid).map(r => {
-    const m = r.mob, c = Object.assign({}, r);
-    if (m) Object.assign(c, { x: m.position.x, y: m.position.y, z: m.position.z, yaw: m.yaw, hp: m.hp });
+    const h = r.mob ? BF.cworkers.row("horse", r.mob) : null, c = Object.assign({}, r);   // (js/horses.js: its runner's, with clusters on workers)
+    if (h) Object.assign(c, { x: h[0], y: h[1], z: h[2], yaw: h[3], hp: h[4] });
     return c;
   });
   return text({ recs, herds: H.herds });

@@ -2970,6 +2970,14 @@ let villageT = 0;
 const villagerSaves = new Map();
 let villagesV = 0;   // (counts the records made or dropped: js/regions.js syncVillages)
 function villagerKey(m) { return m.villageId && m.slot ? m.villageId + "#" + m.slot.idx : null; }
+// Rows a save or the copy check reads of a mob (js/cworkers.js gathered: with clusters on workers, worked out where its copy is current):
+//   trades  [the roster key of a living villager or null, its trading state (BF.trades.pack)] for a mob with an inventory, else null
+//   spot    [x, z] to 1/100 of a living mob (a pen animal's place in its pen's save, js/shepherd.js...), null for a dead or removed one
+{
+  const rows = BF.mobRows || (BF.mobRows = new Map());
+  rows.set("trades", { fn: m => (m.inv ? [m.type === "villager" && !m.dead ? villagerKey(m) : null, BF.trades.pack(m)] : null), uses: ["save", "hash"] });
+  rows.set("spot", { fn: m => (!m.dead && !m.removed ? [+m.position.x.toFixed(2), +m.position.z.toFixed(2)] : null), uses: ["save", "hash"] });
+}
 let restockT = 0;
 // With the cluster tick on (spec r15-39b, js/ctick.js) a module timer would count down once per cluster: every cluster runs its own on
 // the tick counter instead (the same ticks in every order and on every worker), every `s` game seconds at tick phase `at`.
@@ -3739,7 +3747,7 @@ BF.mobs = {
   exportVillagers() {
     const out = {};
     for (const [k, v] of villagerSaves) out[k] = v;
-    for (const m of list) if (m.type === "villager" && !m.dead && m.inv) { const k = villagerKey(m); if (k) out[k] = BF.trades.pack(m); }
+    for (const m of list) { const r = BF.cworkers.row("trades", m); if (r && r[0]) out[r[0]] = r[1]; }
     if (BF.bridges) BF.bridges.exportAll(out);   // "cross:<village key>" -> river crossings counted in the last 3 days (js/bridges.js)
     if (BF.builder) BF.builder.exportAll(out);   // "built:<village key>" -> structures the builders have placed (progress included)
     if (BF.villageLife) BF.villageLife.exportAll(out);   // "farmbeds:<village key>" -> beds the farmers are making or growing
