@@ -81,7 +81,7 @@ class Sim {
   constructor(srv) {
     this.n = nextSim++; this.srv = srv; this.id = null; this.name = null; this.ready = false; this.dead = false; this.crashed = false;
     this.waits = {}; this.onReady = []; this.early = []; this.played = false;
-    this.w = new Worker(SIMTHREAD, { workerData: { saves: srv.saves, build: srv.build, coarse: srv.coarse, memMB: Math.round(os.totalmem() / 1048576) } });   // (coarse: --coarse on|off, js/gameopts.js; memMB: the Distant villages' automatic memory limit, js/active.js)
+    this.w = new Worker(SIMTHREAD, { workerData: { saves: srv.saves, build: srv.build, coarse: srv.coarse, pin: srv.pin, memMB: Math.round(os.totalmem() / 1048576) } });   // (coarse: --coarse on|off, js/gameopts.js; memMB: the Distant villages' automatic memory limit, js/active.js)
     this.w.on("message", m => srv.fromSim(this, m));
     this.w.on("error", e => srv.simStopped(this, "it failed: " + (e && e.stack || e)));
     this.w.on("exit", code => srv.simStopped(this, "it exited (code " + code + ")"));
@@ -114,7 +114,7 @@ function start(o) {
   // region workers per world (spec r15-39, js/rplay.js): --workers N, else one, the simulation thread alone (while one thinks, every
   // follower still replays every tick on its own copy, about a core each, and the split hasn't paid; clusters, r15-39b, take over)
   const workers = o.workers > 0 ? Math.floor(o.workers) : 1;
-  const srv = { saves: o.saves, build: o.build || null, coarse: o.coarse === "on" || o.coarse === "off" ? o.coarse : null, workers, split: o.split || null, kind: o.kind === "clusters" ? "clusters" : null, verify: o.verify || 0, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
+  const srv = { saves: o.saves, build: o.build || null, coarse: o.coarse === "on" || o.coarse === "off" ? o.coarse : null, pin: o.pin !== false, workers, split: o.split || null, kind: o.kind === "clusters" ? "clusters" : null, verify: o.verify || 0, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
   // The page's Cluster workers setting (js/simhost.js workers: {workers: {n: "auto" | N}} before its boot, and again when the player changes
   // it): the worker count for the worlds started from then on, clusters split over them (spec r15-39b) when more than one. --workers on
   // the command line wins (benchmarks and tests).

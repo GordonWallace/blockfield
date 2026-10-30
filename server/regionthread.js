@@ -82,6 +82,7 @@ if (!isMainThread && workerData && workerData.me != null && !workerData.saves &&
 // context with the thread's navigator and location (so js/active.js and the rest set themselves up as the leader's did), the slash
 // commands (the client's command requests replay here too) and js/rplay.js, whose follower takes the leader's messages.
 if (!isMainThread && workerData && workerData.play) {
+  if (workerData.pin) require("./cores.js").pin(workerData.pin);   // (the slower cores: server/simthread.js, server/cores.js place)
   const { load } = require(path.join(__dirname, "..", "tools", "headless.js"));
   const { BF } = load({ globals: { navigator: globalThis.navigator, location: { search: "", hostname: "localhost", protocol: "node:", href: "node:server/regionthread.js" } },
     files: ["js/coords.js", "js/commands.js", "js/threadload.js", "js/debugfeed.js", "js/rplay.js"] });
