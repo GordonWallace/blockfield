@@ -22,6 +22,7 @@
 // Game log: INFO "workers" when they start and stop and once a game hour while the debug overlay or debug screen is on; ERROR when two
 // workers set the same cell, a request with callbacks changes worker, or a mob or record arrives that this worker doesn't have.
 // API: BF.cworkers = { active, n, me, setup({n, me, link}), stop(why), owns(group), owners (group key -> worker), workerOf(group key) -> worker, sync(), met(groups),
+//   fetch(ms, pred), views(ms, fn) (partial copies, at a meeting: the current copies whole, or a few fields of them),
 //   shuffle (tests: owners by a hash of it at every meeting), fixed (tests, with shuffle: the same owners at every meeting), stats() (with x:
 //   each kind of exchange's count, ms and ms waiting a meeting), text() }
 (() => {
@@ -779,8 +780,29 @@ function fetch(ms, pred) {
   for (const [ids] of got) for (const id of ids) { const m = BF.ids.live(id); if (m) sent.add(m); }
   return sent;
 }
+// views(ms, fn) (partial copies; every worker alike, with the same list, at a meeting): fn(m) of those of ms whose current copy is here,
+// as JSON (null: none), and of those whose every copy is current already; returns id -> view, the same on every worker. For a meeting
+// that reads a few fields of mobs other workers run (js/merchant.js meet): far less than fetching them whole, and the holders keep them
+// (what it changes goes on every copy alike, a stale one's change thrown away at its next refill). Elsewhere: fn of each, here.
+function views(ms, fn) {
+  const out = new Map();
+  if (!CW.partial || !atMeeting) { for (const m of ms) if (m && !m.removed) { const v = fn(m); if (v != null) out.set(m.id, v); } return out; }
+  const mineV = [], seen = new Set();
+  for (const m of ms) {
+    if (!m || m.removed || seen.has(m)) continue;
+    seen.add(m);
+    const h = holder.get(m.id);
+    if (h !== undefined && h !== CW.me) continue;
+    const v = fn(m);
+    if (v == null) continue;
+    if (h === undefined) out.set(m.id, v); else mineV.push([m.id, v]);
+  }
+  const all = xchange("views", JSON.stringify(mineV));
+  for (let w = 0; w < all.length; w++) for (const [id, v] of w === CW.me ? mineV : JSON.parse(all[w])) out.set(id, v);
+  return out;
+}
 // current(m): this worker's copy of m is current (partial copies: it runs m, or every copy is current)
 const current = m => !CW.partial || mine.has(m) || (atMeeting && !holder.has(m.id));
-Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, current, gathered, fetch, whenMet, leave, carry, pull: false, partial: false, verify: 0 });
+Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, current, gathered, fetch, views, whenMet, leave, carry, pull: false, partial: false, verify: 0 });
 BF.cworkers = CW;
 })();
