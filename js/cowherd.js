@@ -420,13 +420,16 @@ function hireKit(m) { return !!(m && Array.isArray(m.inv) && kitInto(m.inv, m));
 // ---------------------------------------------------------------- the cowherd
 const cwk = m => m.cwk || (m.cwk = BF.ids.refs({ task: null, stage: null, t: 0, actT: 0, cd: rnd(RS(m), 0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 }));
 // The pasture this cowherd works: the one its milk churn stands beside (fence within 4.5 blocks).
-function pastureOf(m) {
-  const S = cwk(m);
+// peek (the debug screen's read, js/debugfeed.js): changes nothing. Making the keeper's state there drew from its stream, and keeping the
+// pasture there decided when it was looked for: a world with a screen watching played differently (2026-10-30), and the region workers had
+// to read the screen too to stay the same.
+function pastureOf(m, peek) {
+  const S = peek ? m.cwk : cwk(m);
   if (!m.jobsite || !m.village) return null;
-  if (S.pFor === m.jobsite && S.pasture && pasturesOf(m.village).includes(S.pasture)) return S.pasture;
+  if (S && S.pFor === m.jobsite && S.pasture && pasturesOf(m.village).includes(S.pasture)) return S.pasture;
   let best = null, bd = 4.5;
   for (const p of pasturesOf(m.village)) { const d = fenceDist(p, m.jobsite.x + 0.5, m.jobsite.z + 0.5); if (d < bd) { bd = d; best = p; } }
-  S.pFor = m.jobsite; S.pasture = best;
+  if (!peek) { S.pFor = m.jobsite; S.pasture = best; }
   return best;
 }
 // What the cowherd looks after: {pasture, herd (live pasture cows, counted for culling), cows (live cows to feed and milk: the herd and strays
@@ -438,8 +441,8 @@ function reach(home, p, r) {
   const c = { x: (p.fx0 + p.fx1) / 2, z: (p.fz0 + p.fz1) / 2 };   // (the fence's box, as fenceDist)
   return [c, Math.max(Math.hypot(home.x - c.x, home.z - c.z) + r, Math.hypot(p.fx1 - p.fx0, p.fz1 - p.fz0) / 2 + TEND_R) + 1];
 }
-function tended(m) {
-  const p = pastureOf(m);
+function tended(m, peek) {
+  const p = pastureOf(m, peek);
   const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position;
   const free = o => o.type === "cow" && live(o) && !o.ledBy && !o.pasture && Math.abs(o.position.y - m.position.y) < 6;
   const near = o => free(o) && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= (p ? TEND_R : FREE_RADIUS);
@@ -849,7 +852,7 @@ function statusText(m) {
 }
 // For the debug screen (js/debugfeed.js flockOf): the herd of a cowherd.
 function holdings(m) {
-  const T = tended(m), p = T.pasture;
+  const T = tended(m, true), p = T.pasture;
   const states = p && p.cows ? p.cows : [];
   return { kind: "cows", n: p ? T.size : T.cows.length, young: p ? states.filter(s => s.growAt != null).length : T.cows.filter(o => o.calf).length,
     milked: p ? states.filter(milkedToday).length : T.cows.filter(o => milkedToday(o.cow)).length, culls: p ? p.culls | 0 : 0, limit: T.limit, coop: !!p };

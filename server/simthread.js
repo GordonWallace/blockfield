@@ -123,7 +123,7 @@ parentPort.on("message", d => {
       else if (d.server === "detach") detach();
       else if (d.server === "state") post(Object.assign({ server: "state", id: d.id }, BF.save.current && BF.save.current.id === d.id ? state() : { meta: null }));
       else if (d.server === "feed") {
-        if (BF.rworkers && BF.rworkers.journal) BF.rworkers.rec(["feed", d.ack == null ? null : d.ack]);   // (region workers: the followers read it too, js/rplay.js)
+        if (BF.rworkers && BF.rworkers.journal) BF.rworkers.rec(["feed", d.ack == null ? null : d.ack]);   // (region workers: the followers take the server's answer too, js/rplay.js)
         post({ server: "feed", part: BF.debugFeed && BF.debugFeed.simPart ? BF.debugFeed.simPart(d.ack) : null });
       }
       else if (d.server === "save") {   // (an export of the world being played or held: saved first)

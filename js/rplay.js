@@ -330,7 +330,7 @@ function follower(post) {
       case "b": if (BF.active) BF.active.set(o[1], true); if (o.length > 2 && BF.gameOpts) BF.gameOpts.override(o[2]); break;   // (the player changed the distant-village settings: the leader's simworker.js journals them)
       case "f": BF.inventory.simFrame(o[1]); BF.maps.simFrame(); BF.player.simRide(o[1]); break;
       case "s": BF.save.snapshot(); break;
-      case "feed": if (BF.debugFeed && BF.debugFeed.simPart) BF.debugFeed.simPart(o[1], true); break;   // (the world server's debug screen: reading it works out things lazily, as F3 does)
+      case "feed": if (BF.debugFeed && BF.debugFeed.ack) BF.debugFeed.ack(o[1]); break;   // (the world server's debug screen: only what the server answered, how many screens watch. Reading the feed changes nothing (test/feed-pure.js), so the followers don't read it: about 35 ms each time, 2026-10-30)
       case "split": RW.verify = verify; RW.setup({ n: o[2], me, link: link || (link = RW.attach(o[1], me, o[2])) }); break;
       case "solo": RW.pause(); break;
       case "csplit": clusterOn(o[1], me, o[2], link || (link = RW.attach(o[1], me, o[2])), verify); break;

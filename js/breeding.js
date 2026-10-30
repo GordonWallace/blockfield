@@ -135,7 +135,7 @@ function scanBeds(rec, keep = true) {
 function bedCount(rec) { if (!rec.beds || rec.bedDirty) { rec.bedDirty = false; scanBeds(rec); } return rec.beds.length; }
 // The beds F3 and the debug screen show (js/villagelog.js tally): bedCount's number, but reading changes nothing. bedCount scanned and
 // kept the beds on the record, so the moment a reader first looked decided when the village's beds were scanned, and the region workers'
-// copies, which read the debug feed for themselves (js/rplay.js "feed"), each looked at other moments: their records differed (2026-10-29)
+// copies, which then read the debug feed for themselves (js/rplay.js "feed"), each looked at other moments: their records differed (2026-10-29)
 const bedsSeen = rec => (rec.beds && !rec.bedDirty ? rec.beds : scanBeds(rec, false)).length;
 // beds >= villagers + 1, counting the children of pairs already in love (born in a moment) as villagers
 const lovesIn = rec => S.loves.filter(L => L.rec === rec).length;

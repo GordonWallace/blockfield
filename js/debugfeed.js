@@ -83,12 +83,12 @@ function invOf(inv) {
 function flockOf(m) {
   try {
     if (m.profession === "poultry_keeper" && BF.poultry) {
-      const T = BF.poultry.tended(m), c = T.coop;
+      const T = BF.poultry.tended(m, true), c = T.coop;   // (true: a peek, which changes nothing)
       return { kind: "chickens", n: T.size, young: T.flock.filter(o => o.chick).length, eggs: c ? c.eggs | 0 : null, coop: !!c };
     }
     if (m.profession === "cowherd" && BF.cowherd) return BF.cowherd.holdings(m);   // {kind: "cows", n, young, milked (today), culls, limit, coop: has a pasture} (js/cowherd.js)
     if (m.profession === "pig_farmer" && BF.pigFarmer) return BF.pigFarmer.holdings(m);   // {kind: "pigs", n, young, culls, limit, coop: has a sty} (js/pigfarmer.js)
-    if (m.profession === "shepherd" && BF.shepherd) { const T = BF.shepherd.tended(m); return { kind: "sheep", n: T.pen && T.pen.sheep ? T.pen.sheep.length : T.flock.length, young: T.flock.filter(o => o.lamb).length, eggs: null, coop: !!T.pen }; }
+    if (m.profession === "shepherd" && BF.shepherd) { const T = BF.shepherd.tended(m, true); return { kind: "sheep", n: T.pen && T.pen.sheep ? T.pen.sheep.length : T.flock.length, young: T.flock.filter(o => o.lamb).length, eggs: null, coop: !!T.pen }; }
   } catch (e) { /* not loaded yet */ }
   return null;
 }
@@ -455,7 +455,7 @@ function applyAck(o) {
 }
 if (!BF.page) {   // in the simulation worker: only the feed query (js/simworker.js)
   if (BF.proto) BF.proto.queries.feed = a => Object.assign({ ok: true }, simPart(a && a.ack));
-  BF.debugFeed = { simPart, live: () => simScreens > 0 };
+  BF.debugFeed = { simPart, ack: o => { if (o) applyAck(o); }, live: () => simScreens > 0 };
   return;
 }
 // With the simulation in a worker: its latest part (asked for once a snapshot; it comes back before the next one) and the answer to pass on

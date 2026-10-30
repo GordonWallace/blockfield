@@ -413,18 +413,21 @@ function reset() { pending = new Map(); activeCoops.length = 0; toShut.length = 
 // ---------------------------------------------------------------- the poultry keeper
 const pkp = m => m.pkp || (m.pkp = BF.ids.refs({ task: null, stage: null, t: 0, actT: 0, cd: rnd(RS(m), 0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 }));
 // The coop this keeper works: the one its nesting box stands beside (footprint within 4.5 blocks).
-function coopOf(m) {
-  const S = pkp(m);
+// peek (the debug screen's read, js/debugfeed.js): changes nothing. Making the keeper's state there drew from its stream, and keeping the
+// coop there decided when it was looked for: a world with a screen watching played differently (2026-10-30), and the region workers had
+// to read the screen too to stay the same.
+function coopOf(m, peek) {
+  const S = peek ? m.pkp : pkp(m);
   if (!m.jobsite || !m.village) return null;
-  if (S.coopFor === m.jobsite && S.coop) return S.coop;
+  if (S && S.coopFor === m.jobsite && S.coop) return S.coop;
   let best = null, bd = 4.5;
   for (const p of coopsOf(m.village)) { const d = coopDist(p, m.jobsite.x + 0.5, m.jobsite.z + 0.5); if (d < bd) { bd = d; best = p; } }
-  S.coopFor = m.jobsite; S.coop = best;
+  if (!peek) { S.coopFor = m.jobsite; S.coop = best; }
   return best;
 }
 // What the keeper looks after: {coop, hens (live chickens to feed), flock (live chickens counted for culling), size (the flock, unloaded ones too)}.
-function tended(m) {
-  const coop = coopOf(m);
+function tended(m, peek) {
+  const coop = coopOf(m, peek);
   const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position, R = coop ? TEND_R : FREE_RADIUS;
   const near = o => o.type === "chicken" && live(o) && !o.ledBy && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= R && Math.abs(o.position.y - m.position.y) < 6;
   const M = BF.mobs, list = M.checkScan("poultry.tended", M.near(home, R).filter(near), L => L.filter(near));
