@@ -441,19 +441,25 @@ function recsOf(C) {
     let i = 0;
     for (const r of recs.values()) {
       const m = r.mobId != null ? BF.ids.live(r.mobId) : undefined, k = m && m.cl !== undefined ? groupNow(C, m.cl) : null;
-      if (k == null) { byRec.loose.push(i++, r); continue; }
+      if (k == null) { byRec.loose.push(i++, r, m === undefined ? recGroup(C, r) : null); continue; }
       const kc = r.cl !== undefined ? groupNow(C, r.cl) : null;
       const fb = kc != null ? kc : BF.clusters.groupOf(BF.clusters.ofRegion(BF.regions.keyOf(r.x, 0, r.z)));
-      if (fb !== k) { byRec.loose.push(i++, r); continue; }
+      if (fb !== k) { byRec.loose.push(i++, r, null); continue; }
       const a = byRec.by.get(k);
       if (a) a.push(i++, r); else byRec.by.set(k, [i++, r]);
     }
   }
   const own = byRec.by.get(C.cur.key) || [], L = byRec.loose, out = [];
   if (!L.length) { for (let i = 1; i < own.length; i += 2) out.push(own[i]); return out; }
+  // (a loose record with no live horse when sorted keeps the group it had then while it still has none: its spot and r.cl change only
+  // with recsV. Test4, 2026-10-29: 448 of 546 records, each tested in all 18 groups' passes, were most of the cluster tick's horses cost)
   for (let i = 0, j = 0; i < own.length || j < L.length;) {
     if (j >= L.length || (i < own.length && own[i] < L[j])) { out.push(own[i + 1]); i += 2; }
-    else { if (recGroup(C, L[j + 1]) === C.cur.key) out.push(L[j + 1]); j += 2; }
+    else {
+      const r = L[j + 1], k0 = L[j + 2];
+      if ((k0 !== null && (r.mobId == null || BF.ids.live(r.mobId) === undefined) ? k0 : recGroup(C, r)) === C.cur.key) out.push(r);
+      j += 3;
+    }
   }
   return out;
 }
