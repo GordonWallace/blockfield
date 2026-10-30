@@ -35,9 +35,12 @@ function child() {
   C.on = true;
   // the merchant's deals (js/trading.js finish -> js/villagelog.js trade): [buyer, seller, gave [[id, n]], got [id, n]]
   const deals = [];
+  // and, for its deals with the other village's villagers, whether it was in that village's cluster when it dealt (the handover came first)
+  const inBdeals = { inB: 0, out: 0 };
   const trade0 = BF.vlog.trade;
   BF.vlog.trade = (buyer, seller, o, times) => {
     if (buyer && buyer.profession === 'merchant' && o && o.buy) deals.push([buyer.id, seller.id, o.buy.map(b => [b.id, b.n * times]), [o.sell.id, o.sell.n * times]]);
+    if (buyer && buyer === m && B && seller && seller.village === B) { if (BF.clusters.groupOf(m.cl) === BF.clusters.groupOf('v:' + B.key)) inBdeals.inB++; else inBdeals.out++; }
     return trade0(buyer, seller, o, times);
   };
   let m = null, A = null, B = null, inv0 = null, tripId = null, homed = false;
@@ -134,7 +137,7 @@ function child() {
       const off = [...ids].filter(id => (now[id] || 0) - (inv0[id] || 0) !== (moved[id] || 0)).map(id => BF.itemName(+id) + ' ' + ((now[id] || 0) - (inv0[id] || 0)) + ' vs ' + (moved[id] || 0));
       const at = { A: 0, B: 0 };
       for (const d of deals) { const v = BF.ids.live(d[1]); if (v && v.village === A) at.A++; else if (v && v.village === B) at.B++; }
-      process.send({ deals, off, at, routes: M.routes().map(r => r.a + '|' + r.b + ' ' + r.trips), log: M.LOG.filter(l => l.who === tripId).map(l => l.kind),
+      process.send({ deals, off, at, inBdeals, routes: M.routes().map(r => r.a + '|' + r.b + ' ' + r.trips), log: M.LOG.filter(l => l.who === tripId).map(l => l.kind),
         census: crypto.createHash('md5').update(JSON.stringify(BF.perf.census())).digest('hex').slice(0, 16) }, () => process.exit(0));
     }
   });
@@ -195,7 +198,8 @@ async function parent() {
   ORDERS.forEach((o, i) => {
     const s = seen[i], e = end[i];
     console.log(`${o} order: stages ${s.stages.map(x => x || 'done').join(' > ')}; deals ${e.deals.length} (${e.at.B} there, ${e.at.A} at home); log ${e.log.join(', ')}`);
-    check(s.stages.includes('sell') && s.sellInB === true, `${o} order: it dealt in the other village's cluster (handed over at a meeting; ${s.waited} s at the edge of it first)`);
+    // (each deal there checked when it was made: with a long interval the whole sell stage can fall inside one)
+    check(e.inBdeals.inB > 0 && e.inBdeals.out === 0 && s.sellInB !== false, `${o} order: it dealt in the other village's cluster (handed over at a meeting; ${s.waited} intervals at the edge of it first; ${e.inBdeals.inB} deals there in its cluster, ${e.inBdeals.out} before)`);
     check(e.at.B > 0, `${o} order: it sold there (${e.at.B} deals)`);
     check(s.stages.includes('back'), `${o} order: it headed home`);
     check(e.log.includes('home') && s.unloadInA === true, `${o} order: it came home and ended the trip in its home's cluster`);
