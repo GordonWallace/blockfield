@@ -230,6 +230,8 @@ const kb = n => (n >= 1024 ? (n / 1024).toFixed(1) + " KB" : Math.round(n) + " B
 // opts.replica (r15-38): the client keeps its own copy of the world and owns the player's body: every block edit is sent (not only those in
 // chunks the client has), all of them (edits) at the first flush after each hello, its player messages move the player here, and what the
 // simulation does to the player goes back in self messages. opts.world(op, args) -> Promise: the world message's handler (the host's).
+// opts.follower (a region worker's copy, js/rplay.js: its packets go nowhere): no entity messages, only what working them out does to
+// the world (touchEntities).
 const ckey = (cx, cz) => cx + "," + cz;
 const sectionsOf = c => c.secs.map(s => (typeof s === "number" ? s : s.slice()));
 let liveSim = null;   // the sim end the world's block hook reports to
@@ -356,6 +358,13 @@ function serve(send, opts) {
     if (BF.mobs && BF.mobs.arrowList) for (const a of BF.mobs.arrowList()) fn("arrow", a, a.pos.x, a.pos.z);
     if (BF.boats) for (const b of BF.boats.list) fn("boat", b, b.pos.x, b.pos.z);
     if (BF.bees && BF.bees.list) for (const b of BF.bees.list) fn("bee", b, b.x, b.z);
+  }
+  // A follower's flush (opts.follower): what flushEntities does to the entities themselves, as the leader's does, and nothing else: a
+  // villager in view gets its name (js/villagelog.js nameOf keeps it), a boat in view its id (BF.ids.idOf). The whole entity feed was
+  // about 1.6 ms a tick on every follower of Gordon's test4 with 8 workers (2026-10-29), for messages that go nowhere.
+  function touchEntities() {
+    if (BF.mobs && BF.vlog) for (const m of BF.mobs.list) if (!m.removed && m.type === "villager" && !m.vname && inView(m.position.x, m.position.z)) BF.vlog.nameOf(m);
+    if (BF.boats && BF.ids) for (const b of BF.boats.list) if (inView(b.pos.x, b.pos.z)) BF.ids.idOf(b);
   }
   function flushEntities(ticked) {
     const add = [], set = [], seen = new Set();
@@ -499,7 +508,7 @@ function serve(send, opts) {
     // entities: after a tick; after a request applied (changed); and every flush while the world is frozen or paused, when nothing ticks
     // but a request, a command or a test can still move things (no ticks then, so the diff is the only cost)
     const still = !!((BF.warp && BF.warp.frozen) || (BF.state && BF.state.paused));
-    if ((ticked || force || S.changed || still) && (!S.behind || force || now() - S.entsAt >= PACE_MS)) { flushEntities(ticked); S.entsAt = now(); S.changed = false; }
+    if ((ticked || force || S.changed || still) && (!S.behind || force || now() - S.entsAt >= PACE_MS)) { if (opts.follower) touchEntities(); else flushEntities(ticked); S.entsAt = now(); S.changed = false; }
     // replica (r15-43): the sign text store whenever it changed (a few entries; the page draws sign texts from it)
     if (R && BF.signs && BF.signs.ver !== S.signsVer) { S.signsVer = BF.signs.ver; S.fx.push({ kind: "signs", store: BF.signs.serialize() }); }
     if (S.fx.length) {

@@ -415,7 +415,9 @@ function stateHash() {
 // server and screen drop what they hold from the last world.
 let feedWid = null;
 const worldId = () => (BF.glog && BF.glog.world()) || (BF.state && BF.state.seed != null ? "seed-" + BF.state.seed : null);
-function simPart(ack) {
+// copy (a region worker replaying it, js/rplay.js "feed"): the same reads, for what they work out lazily; the state hash, which changes
+// nothing, is left out.
+function simPart(ack, copy) {
   if (ack) applyAck(ack);
   const wid = worldId();
   if (wid !== feedWid) { if (feedWid !== null) resync(); feedWid = wid; }
@@ -438,7 +440,7 @@ function simPart(ack) {
     regionTick: BF.rtick ? BF.rtick.stats() : undefined,   // regions ticked, ms per phase, the busiest regions (js/regiontick.js, spec r15-33)
     workers: BF.rplay ? Object.assign(BF.rplay.status(), { text: BF.rplay.text() }) : undefined,   // region workers (js/rplay.js, spec r15-39)
     threads: BF.page ? threads().slice(1) : threads(),   // the simulation's threads, how busy (on the page: its followers; the page's entry is its own)
-    hash: stateHash(),   // the world state hash and its parts (js/statehash.js)
+    hash: copy ? undefined : stateHash(),   // the world state hash and its parts (js/statehash.js)
     glog: BF.glog ? BF.glog.feed() : undefined, build: BF.glog ? BF.glog.build.commit : undefined };   // the game log's new entries; the commit running
 }
 // The server's answer, the simulation's part of it. screens: how many debug screens are open (the villager-seconds meter runs while any

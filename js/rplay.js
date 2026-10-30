@@ -24,7 +24,10 @@
 // worker takes the whole world (cworkers.leave) and the leader goes on running every cluster, the followers replaying it; the cluster
 // tick goes off only when the followers go (end: the copies' tables are in different orders after a split, which only the plain tick
 // reads). A save waits for the next meeting (js/save.js). With ?verify=N the copies' gathered hashes are compared every N / 20 meetings;
-// a difference goes back to one after the next meeting.
+// a difference goes back to one after the next meeting. A split that doesn't pay (auto) goes back to one, and then the followers go:
+// the cluster tick on one with followers attached was 3.2 times slower than the plain tick on test4 (2026-10-29), and only their going
+// turns it off. The first split waits until the plain tick has been measured for PLAIN_TICKS (not while the world loads: a trial on
+// test4 was judged against 46.9 ms a tick measured then, against 8.6 once loaded).
 // API: BF.rplay = { setup({workers, cores, spawn, split, kind}), begin(world), end(why), frame(raw), flush(), status(), text(), follower(post) }
 //   spawn(me, n) -> {post(msg), on(fn(msg)), terminate()}: a follower (server/regionthread.js, the world server's Node threads; r15-77 dropped the browser's)
 (() => {
@@ -45,10 +48,11 @@ const LAG_MS = 2000;      // ms a tick (soloMs): the first meeting waits while t
 const L = {
   want: 1, spawn: null, policy: "auto", verify: VERIFY,
   list: [], world: null, epoch: 0, ticks: 0, ready: 0, split: false, trial: null, backoff: BACKOFF, retryAt: 0,
-  busySince: null, soloMs: null, splitMs: null, loopT0: null, loopTicks: 0, shared: null, why: "", lastText: "",
+  busySince: null, soloMs: null, plainMs: null, splitMs: null, loopT0: null, loopTicks: 0, shared: null, why: "", lastText: "",
 };
 const log = (l, x) => { if (BF.glog) BF.glog.log(l, "workers", x); };
 const TRIAL_CLUSTERS = 400;   // ticks of a clusters' split trial (the first meetings hand over whole clusters)
+const PLAIN_TICKS = 1200;     // plain ticks measured before the first clusters' split (auto)
 const clustered = () => !!(BF.cworkers && BF.cworkers.active);
 // The clusters split over n workers, at this point of the journal on every worker alike: the cluster tick on (every system, the tick
 // order), then this one joins as cluster worker me with partial copies. verify (ticks): the copies are compared every verify / 20 meetings.
@@ -69,6 +73,7 @@ function setup(o) {
   L.policy = o.split === "always" || o.split === "never" ? o.split : "auto";
   L.kind = o.kind === "clusters" ? "clusters" : "regions";   // (what a split shares: the regions' thinking each tick, or the clusters, js/cworkers.js)
   L.verify = o.verify > 0 ? o.verify | 0 : VERIFY;   // (tests: ?verify=N compares the copies every N split ticks)
+  L.trail = o.verify > 0;   // (the cells' trail only when ?verify= asks: noting the calls behind every block edit cost about 0.3 ms a tick on test4, for the rest of the session)
   if (L.want > 1 && !L.spawn) { L.why = "region workers run only on the world server (./run.sh)"; L.want = 1; }
   if (L.want > 1 && typeof SharedArrayBuffer !== "function") { L.why = "no SharedArrayBuffer here"; L.want = 1; }
   return L.want;
@@ -89,9 +94,9 @@ function begin(world) {
   world.player = player();   // (the look and the rest the title world left: a new world keeps them)
   world.clock = BF.simNow();   // the simulation clock goes on from world to world (js/timewarp.js): a fresh follower starts where the leader is
   world.villageSim = BF.villageSim && BF.villageSim.state ? BF.villageSim.state() : null;   // (when it last checked the simulated set: js/villagesim.js)
-  BF.world.trail = L.verify ? new Map() : null;   // (tests: who wrote each cell, for a cell that differs: js/world.js)
+  BF.world.trail = L.trail ? new Map() : null;   // (tests, ?verify=: who wrote each cell, for a cell that differs: js/world.js)
   L.world = world; L.ticks = 0; L.solo = new Map(); L.diff = null; L.recent = []; L.ready = 0; L.split = false; L.trial = null; L.backoff = BACKOFF; L.retryAt = 0; L.busySince = null;
-  L.soloMs = null; L.splitMs = null; L.loopT0 = null; L.loopTicks = 0;
+  L.soloMs = null; L.plainMs = null; L.plainTicks = 0; L.splitMs = null; L.loopT0 = null; L.loopTicks = 0;
   { const h = BF.stateHash.full(); L.hash = h.hash; L.bootParts = h.parts; L.bootText = L.verify ? texts() : null; }   // (the followers must boot the same world)
   RW.journal = []; RW.clock = null;
   RW.onTick = onTick;
@@ -100,7 +105,7 @@ function begin(world) {
   for (let me = 1; me < n; me++) {
     const f = { me, booted: false, ticks: 0, h: L.spawn(me, n) };
     f.h.on(m => onFollower(f, epoch, m));
-    f.h.post({ boot: { world, me, n, verify: L.verify, three: L.three } });
+    f.h.post({ boot: { world, me, n, verify: L.verify, trail: L.trail, three: L.three } });
     L.list.push(f);
   }
   log("INFO", "Region workers: " + n + " for this world (" + (n - 1) + " followers starting; " + (L.kind === "clusters" ? "the clusters are" : "the regions' thinking is") + " split when it pays)");
@@ -182,14 +187,17 @@ function frame() {
     const ms = (t - L.loopT0) / L.loopTicks, k = Math.min(1, L.loopTicks / 50);
     if (L.split) L.splitMs = L.splitMs == null ? ms : L.splitMs + (ms - L.splitMs) * k * 0.5;
     else L.soloMs = L.soloMs == null ? ms : L.soloMs + (ms - L.soloMs) * k * 0.5;
+    // (the plain tick's, kept from before the first clusters' split: after a trial the cluster tick stays on, js/rplay.js toSolo, and a
+    // split must beat one thread as it plays without workers, not the cluster tick on one, which was 1.65 times slower on test4)
+    if (!L.split && !(BF.ctick && BF.ctick.on)) { L.plainMs = L.plainMs == null ? ms : L.plainMs + (ms - L.plainMs) * k * 0.5; L.plainTicks += L.loopTicks; }
   }
   const dropped = W && !BF.state.paused && W.speed > 1 && W.last < W.speed * 0.9;
   L.busySince = dropped ? (L.busySince == null ? t : L.busySince) : null;
   L.loopT0 = null; L.loopTicks = 0;
   if (RW.mismatch && L.diff && !L.diff.told && t - L.diff.at < 5000) return;   // (its text of the parts that differ first: soloText)
-  if (L.endAfter && !clustered()) { L.endAfter = false; end("the copies differ"); return; }
+  if (L.endAfter && !clustered()) { const e = L.endAfter; L.endAfter = false; end(e.why, e.level); return; }
   if (RW.mismatch && L.kind === "clusters" && clustered()) {   // (each worker's own clusters are current only on it: back to one whole world at the next meeting first)
-    if (!L.endAfter) { log("ERROR", "Region workers: the copies no longer match (" + RW.mismatch.parts.join(", ") + " at tick " + RW.mismatch.tick + "); going on with one after the next meeting"); toSolo("the copies differ"); L.endAfter = true; }
+    if (!L.endAfter) { log("ERROR", "Region workers: the copies no longer match (" + RW.mismatch.parts.join(", ") + " at tick " + RW.mismatch.tick + "); going on with one after the next meeting"); toSolo("the copies differ"); L.endAfter = { why: "the copies differ" }; }
     flush();
     return;
   }
@@ -197,14 +205,16 @@ function frame() {
   if (!L.split) {
     const behind = Math.max(0, ...L.list.map(f => L.ticks - f.ticks));
     const ready = L.ready === L.list.length && (behind <= LAG || (L.soloMs != null && behind * L.soloMs <= LAG_MS)) && !clustered();
-    const want = L.policy === "always" || (L.policy === "auto" && L.busySince != null && t - L.busySince >= BUSY_MS && L.ticks >= L.retryAt);
+    const want = L.policy === "always" || (L.policy === "auto" && L.busySince != null && t - L.busySince >= BUSY_MS && L.ticks >= L.retryAt &&
+      (L.kind !== "clusters" || L.plainTicks >= PLAIN_TICKS));
     if (ready && want && L.policy !== "never") startSplit();
   } else if (L.trial && L.ticks >= L.trial.end) {
     const before = L.trial.solo, after = L.splitMs;
     L.trial = null;
     if (L.policy === "auto" && before != null && after != null && after > before * 0.9) {
       toSolo("ticks took " + after.toFixed(1) + " ms split against " + before.toFixed(1) + " ms on one: not worth it");
-      L.retryAt = L.ticks + L.backoff; L.backoff = Math.min(BACKOFF * 16, L.backoff * 2);
+      if (L.kind === "clusters") L.endAfter = { why: "a split doesn't pay on this world", level: "INFO" };   // (and the cluster tick goes off with them)
+      else { L.retryAt = L.ticks + L.backoff; L.backoff = Math.min(BACKOFF * 16, L.backoff * 2); }
     } else if (L.policy !== "auto") log("INFO", "Region workers: split kept (split=" + L.policy + "; " + (after != null ? after.toFixed(1) : "?") + " ms a tick split, " + (before != null ? before.toFixed(1) : "?") + " ms on one)");
     else log("INFO", "Region workers: the split pays (" + (after != null ? after.toFixed(1) : "?") + " ms a tick split, " + (before != null ? before.toFixed(1) : "?") + " ms on one): kept");
   }
@@ -217,8 +227,10 @@ function startSplit() {
     flush();
     clusterOn(L.shared, 0, n, L.link || (L.link = RW.attach(L.shared, 0, n)), L.verify);
     L.split = true; L.splitMs = null; L.ctick = true;
-    L.trial = { end: L.ticks + TRIAL_CLUSTERS, solo: L.soloMs };
-    log("INFO", "Region workers: the clusters are split over " + n + " workers (ticks took " + (L.soloMs != null ? L.soloMs.toFixed(1) + " ms" : "?") + " on one)");
+    const one = L.plainMs != null ? L.plainMs : L.soloMs;
+    L.trial = { end: L.ticks + TRIAL_CLUSTERS, solo: one };
+    log("INFO", "Region workers: the clusters are split over " + n + " workers (ticks took " + (one != null ? one.toFixed(1) + " ms" : "?") + " on one" +
+      (one !== L.soloMs && L.soloMs != null ? ", " + L.soloMs.toFixed(1) + " ms with the cluster tick" : "") + ")");
     return;
   }
   RW.rec(["split", L.shared, n]);
@@ -249,7 +261,8 @@ function toSolo(why) {
   log("INFO", "Region workers: back to one thinking (" + why + ")");
 }
 // The followers go: a new world, a crash, a difference, or the page's own end.
-function end(why) {
+// level: the game log line's (an ERROR when there is a why, unless given)
+function end(why, level) {
   L.epoch++;   // (anything the old followers still say is ignored)
   if (RW.active) RW.pause();
   if (clustered()) BF.cworkers.stop(why ? "the followers go: " + why : "");
@@ -258,7 +271,7 @@ function end(why) {
   RW.journal = null; RW.clock = null; RW.onTick = null; RW.verify = 0; RW.mismatch = null;
   if (L.list.length) {
     for (const f of L.list) { try { f.h.post({ end: true }); } catch (e) { /* gone */ } try { f.h.terminate(); } catch (e) { /* gone */ } }
-    log(why ? "ERROR" : "INFO", "Region workers stopped" + (why ? ": " + why + "; the world goes on with one" : ""));
+    log(level || (why ? "ERROR" : "INFO"), "Region workers stopped" + (why ? ": " + why + "; the world goes on with one" : ""));
   }
   L.list = []; L.split = false; L.link = null; L.shared = null; L.world = null; L.crashed = null;
 }
@@ -295,10 +308,10 @@ function setPlayer(a) {
 }
 
 // ---------------------------------------------------------------- a follower
-// follower(post) -> the message handler: {boot: {world, me, n, verify}}, {ops: [...]}, {end}. Answers {booted: hash}, {ticks: n} after each
+// follower(post) -> the message handler: {boot: {world, me, n, verify, trail}}, {ops: [...]}, {end}. Answers {booted: hash}, {ticks: n} after each
 // batch, {error} (and stops the barrier, so a split tick on the leader fails at once rather than waiting).
 function follower(post) {
-  let me = 0, n = 1, ticks = 0, host = null, link = null, verify = 0;
+  let me = 0, n = 1, ticks = 0, host = null, link = null, verify = 0, trail = false;
   const kept = new Map();   // (tests) the texts of the copy at the last few solo checks
   const op = o => {
     switch (o[0]) {
@@ -317,7 +330,7 @@ function follower(post) {
       case "b": if (BF.active) BF.active.set(o[1], true); if (o.length > 2 && BF.gameOpts) BF.gameOpts.override(o[2]); break;   // (the player changed the distant-village settings: the leader's simworker.js journals them)
       case "f": BF.inventory.simFrame(o[1]); BF.maps.simFrame(); BF.player.simRide(o[1]); break;
       case "s": BF.save.snapshot(); break;
-      case "feed": if (BF.debugFeed && BF.debugFeed.simPart) BF.debugFeed.simPart(o[1]); break;   // (the world server's debug screen: reading it works out things lazily, as F3 does)
+      case "feed": if (BF.debugFeed && BF.debugFeed.simPart) BF.debugFeed.simPart(o[1], true); break;   // (the world server's debug screen: reading it works out things lazily, as F3 does)
       case "split": RW.verify = verify; RW.setup({ n: o[2], me, link: link || (link = RW.attach(o[1], me, o[2])) }); break;
       case "solo": RW.pause(); break;
       case "csplit": clusterOn(o[1], me, o[2], link || (link = RW.attach(o[1], me, o[2])), verify); break;
@@ -365,7 +378,7 @@ function follower(post) {
   }
   function boot(b) {
     const w = b.world;
-    me = b.me; n = b.n; verify = b.verify || 0;
+    me = b.me; n = b.n; verify = b.verify || 0; trail = !!b.trail;
     BF.glog.setSink(null);
     BF.boot.initSim();
     if (w.rivers) {
@@ -385,9 +398,9 @@ function follower(post) {
     if (w.player) setPlayer(w.player);
     if (w.active && w.active.opt && BF.active && BF.active.load) BF.active.load(w.active);   // (after the world: starting it resets the budget's state)
     if (w.villageSim && BF.villageSim && BF.villageSim.load) BF.villageSim.load(w.villageSim);   // (after the world too)
-    BF.world.trail = verify ? new Map() : null;   // (tests: who wrote each cell, as on the leader)
+    BF.world.trail = trail ? new Map() : null;   // (tests: who wrote each cell, as on the leader)
     // a protocol host whose output goes nowhere: the client's packets do here what they did on the leader
-    host = BF.proto.host(() => {}, { replica: true, world: () => new Promise(() => {}), onView: v => { if (v.dist > 0 && v.dist !== BF.world.viewDist) BF.world.setViewDist(v.dist); } });
+    host = BF.proto.host(() => {}, { replica: true, follower: true, world: () => new Promise(() => {}), onView: v => { if (v.dist > 0 && v.dist !== BF.world.viewDist) BF.world.setViewDist(v.dist); } });
     { const h = BF.stateHash.full(); post({ booted: h.hash, parts: h.parts, texts: verify ? texts() : null }); }
   }
   return d => { queue.push(d); pump(); };
