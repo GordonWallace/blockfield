@@ -37,6 +37,9 @@
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
 let MEET = 40;         // ticks between meetings (js/clusters.js MEET; setMeet: benchmarks)
+// (BF_MEET=n in the environment, Node only: every copy of a world server's simulation, its region workers too, meets every n ticks.
+// A benchmark knob, 2026-10-29: what longer intervals save in play)
+{ const e = globalThis.process && process.env ? +process.env.BF_MEET : 0; if (e > 0) { MEET = e | 0; if (BF.onLoad) BF.onLoad(() => { if (BF.clusters) BF.clusters.setMeet(MEET); }); } }
 const RANGE = 256;     // ids (and creation numbers) in one range
 const DYN_RANGE = 4;   // dynamic item ids (map items, js/blocks.js) in one range: rare, and the item list skips the unused ones
 const HOUR = 1200 / 24;
