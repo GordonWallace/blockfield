@@ -386,7 +386,7 @@ function follower(post) {
       case "solo": RW.pause(); break;
       case "csplit": clusterOn(o[1], me, o[2], link || (link = RW.attach(o[1], me, o[2])), verify); break;
       case "csolo": BF.cworkers.leave(); break;
-      case "sm": BF.cworkers.whenMet(ok => { if (ok) BF.cworkers.gathered(() => BF.save.snapshot({ quiet: true })); }); break;   // (a save at the next meeting, js/save.js)
+      case "sm": BF.cworkers.whenMet(ok => { if (ok) BF.cworkers.gathered(() => BF.save.snapshot({ quiet: true }), "save"); }); break;   // (a save at the next meeting, js/save.js)
       case "crash": if (o[1] === me) throw new Error("a test crash (test/multi-worker-play.js)"); break;
       default: throw new Error("region worker: unknown journal op " + o[0]);
     }

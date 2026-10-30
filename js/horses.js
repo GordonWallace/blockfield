@@ -146,6 +146,11 @@ function store(r) {
   if (!m) return;
   r.x = m.position.x; r.y = m.position.y; r.z = m.position.z; r.yaw = m.yaw; r.hp = m.hp; recsV++;
 }
+// A loaded horse's place, facing, health and rider, as the save and the copy check read them: [x, y, z, yaw, hp, rider (0/1)]. A row
+// (js/cworkers.js gathered): with clusters on workers, its runner's.
+const spotRow = m => [m.position.x, m.position.y, m.position.z, m.yaw, m.hp, m.rider ? 1 : 0];
+(BF.mobRows || (BF.mobRows = new Map())).set("horse", { fn: spotRow, uses: ["save", "hash"] });
+const spotNow = r => (r.mob ? BF.cworkers.row("horse", r.mob) : null);
 function fx(m, color, n) { const V = BF.villageLife; if (V && V.particles && m.position) V.particles(m.position.x, m.position.y + m.height + 0.3, m.position.z, color, n, 0.6); }
 const isFoal = r => r.growAt != null;
 
@@ -742,12 +747,13 @@ function wildNear(x, z, rad) {
 function serialize() {
   const out = [];
   for (const r of recs.values()) {
-    store(r);
+    const h = spotNow(r);
+    if (h) { r.x = h[0]; r.y = h[1]; r.z = h[2]; r.yaw = h[3]; r.hp = h[4]; recsV++; }   // (store(r), from its runner's copy)
     const q = v => Math.round(v * 100) / 100;
     out.push({ hid: r.hid, x: q(r.x), y: q(r.y), z: q(r.z), yaw: q(r.yaw), coat: r.coat, mark: r.mark, maxHp: r.maxHp, hp: q(r.hp), speed: r.speed, jump: r.jump,
       tamed: r.tamed ? 1 : 0, owner: r.owner, saddle: r.saddle ? 1 : 0, temper: r.temper, growAt: r.growAt, cd: r.cd, fed: r.fed, herd: r.herd, t: r.mob ? null : r.t,
       post: r.lead && r.lead.kind === "post" ? [r.lead.x, r.lead.y, r.lead.z] : null, led: r.lead && r.lead.kind === "player" ? 1 : 0, pen: r.pen,
-      rider: r.mob && r.mob.rider ? 1 : 0, avoid: r.avoid || null });
+      rider: h && h[5] ? 1 : 0, avoid: r.avoid || null });
   }
   if (BF.ctick && BF.ctick.on) out.sort((a, b) => a.hid - b.hid);   // cluster groups make records in either order
   return { recs: out, herds: [...herds.values()].sort((a, b) => BF.ctick && BF.ctick.on ? a.id - b.id : 0).map(h => [h.id, Math.round(h.cx), Math.round(h.cz), Math.round(h.dir * 100) / 100]), next: nextId, nextHerd };

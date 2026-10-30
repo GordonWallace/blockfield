@@ -4,7 +4,8 @@
 // button shows the simulation's own line (the protocol's budget query, so its village count is the simulation's, not 0), Automatic's time
 // limit is the simulation's own (80% on a thread of its own, 40% in the page), and remembered settings (and 1.5's first setting, a share
 // alone) reach the simulation when the game starts again. The Cluster workers line cycles the setting (js/simhost.js) and logs it on
-// the world server; elsewhere it is disabled (only the world server has workers, r15-77).
+// the world server; elsewhere it is disabled (only the world server has workers, r15-77). The settings take effect when the menu closes
+// and the game resumes (Gordon, 2026-10-30: js/player.js distantApply), so clicking through "Nearest only" and back changes nothing.
 // Usage: node test/run.js /tmp/bm test/budget-menu.js [--host page|worker|server]
 module.exports = async (pg) => {
   const ok = (name, cond, extra) => console.log((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
@@ -15,6 +16,18 @@ module.exports = async (pg) => {
   // the button's text once it has the simulation's answer (a query in a worker or on the world server)
   const waitFor = async (get, re) => { let t = ""; for (let i = 0; i < 40; i++) { t = await get(); if (re.test(typeof t === "string" ? t : t && t.text)) return t; await pg.waitForTimeout(100); } return t; };
   const simOpts = () => lib.sim(pg, () => Object.assign(BF.active.opts(), { settings: BF.active.settings(), n: BF.villageSim.count() }));
+  // the pause menu with its Distant villages panel, and closed again with Resume, which applies what was chosen (the tests' game wasn't
+  // started from the title screen, so Escape doesn't open it: BF.player.showMenu)
+  const menu = async () => {
+    await pg.evaluate(() => BF.player.showMenu("pause"));
+    if (await pg.evaluate(() => document.querySelector('.bfp-distant').hidden)) await pg.evaluate(() => document.querySelector('[data-act="budget"]').click());
+  };
+  const resume = async () => {
+    await pg.evaluate(() => document.querySelector('.bfp-pause [data-act="resume"]').click());
+    await pg.waitForFunction(() => !document.querySelector('.bfp-pause.on'), null, { timeout: 10000 }).catch(() => {});
+    await menu();
+  };
+  const budgetLog = () => lib.sim(pg, () => BF.glog.recent(5000).filter(e => e.k === "budget").map(e => e.l + " " + e.x));
   await pg.evaluate(() => { try { localStorage.removeItem("blockfield.simBudget"); localStorage.removeItem("blockfield.distant"); localStorage.removeItem("blockfield.workers"); } catch (_) {} });
   await lib.toVillage(pg);
   const where = await lib.where(pg), inPage = where.mode === "in page";
@@ -22,17 +35,22 @@ module.exports = async (pg) => {
   const start = { page: await pg.evaluate(() => BF.active.opts().on), sim: await lib.sim(pg, () => BF.active.opts().on) };
   ok("automated browser: distant villages start off where the simulation is", start.page === false && start.sim === false, Object.assign({ where }, start));
   // the panel opens with its lines: the defaults
-  await pg.evaluate(() => document.querySelector('[data-act="budget"]').click());
+  await menu();
   const lines = { villages: await waitFor(() => line("villages"), /Automatic/), share: await line("share"), reach: await line("reach"), mem: await line("mem"), workers: await line("workers") };
   const autoShare = inPage ? 40 : 80;
   ok("the panel shows the defaults: Automatic villages, the simulation's automatic time limit, no distance limit, automatic memory, 1 worker",
     /Villages: Automatic/.test(lines.villages.text) && new RegExp("Time limit: Automatic \\(" + autoShare + "% of each second\\)").test(lines.share.text) &&
     lines.reach.text === "Distance limit: None" && /Memory limit: Automatic \(\d+ MB\)/.test(lines.mem.text) && lines.workers.text === (lib.host() === "server" ? "Cluster workers: 1 (clusters off)" : "Cluster workers: 1 (world server only)"), { where, lines });
-  // the time limit: 20%, 40%, 60%; each reaches the simulation
+  // the time limit: 20%, 40%, 60%; each reaches the simulation when the game resumes
   const steps = [];
   for (let i = 0; i < 3; i++) {
     await click("share");
     const want = [0.2, 0.4, 0.6][i];
+    if (i === 0) {
+      const held = { line: await waitFor(() => line("share"), /20%/), sim: await simOpts() };
+      ok("a setting chosen in the menu shows there and waits for the game to resume", /20% of each second/.test(held.line.text) && held.sim.settings.share === "auto", { line: held.line.text, share: held.sim.settings.share });
+    }
+    await resume();
     const text = await waitFor(btn, new RegExp("up to " + Math.round(want * 100) + "% of each second\\)$"));
     const sim = await simOpts();
     steps.push({ want, sim: { on: sim.on, budget: sim.budget, share: sim.settings.share, n: sim.n }, text });
@@ -40,14 +58,18 @@ module.exports = async (pg) => {
   ok("each time limit reaches the simulation", steps.every(s => s.sim.on && Math.abs(s.sim.budget - s.want) < 1e-9 && s.sim.share === s.want), steps);
   ok("the button shows the simulation's village count and limit", steps.every(s => s.sim.n > 0 && s.text === "Distant villages: " + s.sim.n + " simulated (up to " + Math.round(s.want * 100) + "% of each second)"), steps.map(s => s.text));
   // the distance and memory limits
-  await click("reach"); await click("mem");
+  await click("reach"); await click("mem"); await resume();
   const lim = await waitFor(async () => (await simOpts()).reach + "", /^500$/);
   const lo = await simOpts();
   ok("the distance and memory limits reach the simulation", lo.reach === 500 && lo.settings.reach === 500 && lo.memMB === 250 && lo.settings.mem === 250, { lim, reach: lo.reach, memMB: lo.memMB, settings: lo.settings });
-  const log = await lib.sim(pg, () => BF.glog.recent(5000).filter(e => e.k === "budget").map(e => e.l + " " + e.x));
-  ok("the simulation's game log has an INFO line for each change, once", log.filter(l => /^INFO Distant villages: Automatic/.test(l)).length === 5 && log.some(l => /within 500 blocks, memory 250 MB$/.test(l)), log);
+  const log = await budgetLog();
+  ok("the simulation's game log has an INFO line for each time the menu closed with changes, once", log.filter(l => /^INFO Distant villages: Automatic/.test(l)).length === 4 && log.some(l => /within 500 blocks, memory 250 MB$/.test(l)), log);
+  // "Nearest only" and straight back to Automatic before resuming: nothing changes and nothing is logged
+  await click("villages"); await click("villages"); await resume();
+  const flip = { sim: await simOpts(), log: await budgetLog() };
+  ok("Nearest only and back again in the menu changes nothing", flip.sim.budget === 0.6 && flip.sim.settings.villages === "auto" && flip.log.length === log.length, { budget: flip.sim.budget, settings: flip.sim.settings, log: flip.log.slice(log.length) });
   // nearest only: the other lines disable, no extra village joins though the windows are short
-  await click("villages");
+  await click("villages"); await resume();
   const off = { text: await waitFor(btn, /\(nearest only\)$/), sim: await simOpts(), share: await waitFor(() => line("share"), /./) };
   ok("nearest only reaches the simulation", off.sim.on === true && off.sim.budget === 0 && /\(nearest only\)$/.test(off.text) && off.share.disabled, { text: off.text, budget: off.sim.budget, share: off.share });
   await lib.sim(pg, () => BF.active.set({ win: 1, hold: 2, minFps: 0 }));

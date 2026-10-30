@@ -4,13 +4,18 @@
 //  - Measuring: main.js simFrame reports each frame's simulation ms and real length (frame()); a frame at 0x or paused doesn't count.
 //    This is the same time the villager-seconds meter (js/perf.js) charges to the steps, measured once a frame so it costs nothing extra
 //    and runs whether or not the meter is on.
+//  - (Under and over below are against the limit less and plus MARGIN of it: 75% and 85% at 80%; between them nothing changes.)
 //  - Under budget for WIN real seconds (and, at 1x, at least MIN_FPS frames a second): the next nearest village not yet simulated, within
 //    REACH blocks of the player, joins the set, if the time it is expected to take still fits (the current share per running village)
 //    and its chunk data fits the memory budget (memMB of section arrays for the extras). It loads through the normal path: villageSim adds
 //    it to the kept set, world.update generates its chunks, the villagers come out as they do for any village.
-//  - Over budget for WIN seconds, and no load in the last HOLD seconds: the farthest extra leaves the set, and villageSim unloads it with the
-//    unload countdown (its villagers finish their tasks first, as for any village the player walks away from). It isn't picked again
-//    for COOL seconds.
+//  - Over budget for WIN seconds, and no load in the last HOLD seconds: the farthest extras leave the set, as many as the measure is over by
+//    at the current share per running village (up to ADD_MAX, as they join), counting those still unloading as gone already; villageSim
+//    unloads each with the unload countdown (its villagers finish their tasks first, as for any village the player walks away from). It
+//    isn't picked again for COOL seconds. Still over after the next WIN seconds, more go (Gordon, 2026-10-30: step down in increments the
+//    way it steps up; it used to wait for each one to unload, about a minute at 95% of each second).
+//  - "Nearest only" lets the extras go the same way, ADD_MAX of the farthest each WIN seconds (Gordon, 2026-10-30: it dropped 27 at
+//    once, and switching straight back loaded them all again); switching back keeps the rest. The budget off (tests) drops them at once.
 //  - An extra past REACH (the player went away) leaves the same way; one that became part of the minimum stops being an extra.
 // Where the simulation runs in a worker or on the world server (bug-081), the page's copy holds the setting (localStorage, ?budget=,
 // off in automated browsers) and sends it there ({budget: {on, budget}}, js/simhost.js budget), where the decisions are made and logged;
@@ -31,8 +36,8 @@
 //             8000 MB (2000 MB in a browser) | MB
 // Under budget with room for several more villages, up to ADD_MAX join in one decision (nearest first), so a fast machine fills up in
 // minutes rather than one village every WIN seconds.
-// API: BF.active = { frame(simMs, raw), decide(px, pz, base) -> [{key, v}], isExtra(key), extras(), set({on, budget, memMB, win, hold,
-//                    cool, reach, minFps, settings}, quiet), opts(), settings(), choose(field, value, quiet) -> settings, next(field) ->
+// API: BF.active = { frame(simMs, raw), decide(px, pz, base) -> [{key, v}], isExtra(key), extras(), set({on, budget, memMB, win, hold, morning,
+//                    cool, reach, minFps, settings}, quiet), opts(), settings(), choose(field, value, quiet) -> settings, adopt(settings, quiet) -> settings, next(field) ->
 //                    the value after the current one, auto() -> {share, memMB}, describe(settings) -> text, text(), feed(), log(), reset(),
 //                    BUDGETS, CHOICES, DEFAULT }
 (() => {
@@ -43,7 +48,15 @@ const BUDGETS = [0, 0.2, 0.4, 0.6, 0.8, 1];   // the time shares to choose from 
 const CHOICES = { villages: ["auto", "nearest"], share: ["auto", 0.2, 0.4, 0.6, 0.8, 1], reach: [0, 500, 1000, 2000, 4000, 8000], mem: ["auto", 250, 500, 1000, 2000, 4000, 8000] };
 const DEFAULT = { villages: "auto", share: "auto", reach: 0, mem: "auto" };
 const SEARCH_MIN = 1000, SEARCH_MAX = 12000, ADD_MAX = 3;
-const opt = { on: true, budget: 0.4, memMB: 500, win: 10, hold: 60, cool: 300, reach: 0, minFps: 30, fixed: 0 };   // fixed: see decide; reach 0: no limit
+// The margins round the limit (Gordon, 2026-10-30): villages join only while the measure stays under the limit less a sixteenth of it
+// (and one more village's share still fits under the limit) and leave only once it is over the limit plus a sixteenth (75% and 85% at
+// 80%), so the set doesn't swing either way
+const MARGIN = 1 / 16;
+// A village's cost shows over a minute or more after it joins (its chunks, its villagers coming out and starting their day: 56% at the
+// last join, 77% a minute later with none joining, Gordon's session 2026-10-30), so after a join the next waits HOLD seconds, and none
+// joins in the day's first opt.morning (a fraction of the day) either
+const joinAt = () => opt.budget * (1 - MARGIN), leaveAt = () => opt.budget * (1 + MARGIN);
+const opt = { on: true, budget: 0.4, memMB: 500, win: 10, hold: 60, cool: 300, reach: 0, minFps: 30, fixed: 0, morning: 0.1 };   // fixed: see decide; reach 0: no limit
 let S = Object.assign({}, DEFAULT);   // the player's settings (the header)
 // automatic values, where the simulation is
 const autoShare = () => (BF.page ? 0.4 : 0.8);
@@ -91,7 +104,7 @@ function frame(simMs, raw) {
   const frac = slice.game > 0 ? slice.sim / slice.game : slice.sim / slice.real;
   fps = slice.frames * 1000 / slice.real;
   slices.push({ frac, fps }); if (slices.length > 10) slices.shift();
-  if (frac < opt.budget) { underMs += slice.real; overMs = 0; } else { overMs += slice.real; underMs = 0; }
+  if (frac < joinAt()) { underMs += slice.real; overMs = 0; } else if (frac >= leaveAt()) { overMs += slice.real; underMs = 0; } else underMs = overMs = 0;
   slice = { sim: 0, real: 0, game: 0, frames: 0 };
 }
 const used = () => slices.length ? slices.reduce((s, x) => s + x.frac, 0) / slices.length : 0;
@@ -100,7 +113,7 @@ const used = () => slices.length ? slices.reduce((s, x) => s + x.frac, 0) / slic
 const extras = new Map();      // village key -> { v, t (real ms when it joined), d (edge distance at the last decision) }
 const cooling = new Map();     // village key -> real ms until it may be picked again (it left for the budget)
 const decisions = [];          // newest last: { day, text }
-let lastLoad = -1e12, lastN = 0;
+let lastLoad = -1e12, lastN = 0, stepAt = -1e12;   // (stepAt: real ms of the last "nearest only" step down)
 const VS = () => BF.villageSim;
 const vKey = v => Math.round(v.x) + "," + Math.round(v.z);
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
@@ -134,7 +147,7 @@ function footprintOf(key) {
 }
 // Extras let go, until they have unloaded (key -> why): their unload countdown is capped at WAIT_CAP game seconds (villageSim asks waitCap),
 // so a village past a new distance limit, or one the time limit can't afford, goes in a minute rather than when its longest task ends
-// (up to 40 minutes for a caravan trip), and while one is still going no other leaves for the time limit (its cost is still in the measure).
+// (up to 40 minutes for a caravan trip). Their cost is still in the measure meanwhile: the time limit counts them as gone already.
 const leaving = new Map();
 const WAIT_CAP = 60;
 const leavingNow = () => { for (const k of [...leaving.keys()]) if (extras.has(k) || !VS().isActive(k)) leaving.delete(k); return leaving.size; };
@@ -150,30 +163,44 @@ function drop(key, why) {
 function decide(px, pz, base) {
   const t = now(), ed = VS()._edgeDist;
   for (const [k, until] of cooling) if (t >= until) cooling.delete(k);
-  if (!opt.on || !(opt.budget > 0)) { for (const k of [...extras.keys()]) drop(k, opt.on ? "distant villages set to the nearest only" : "budget turned off"); return []; }
+  if (!opt.on) { for (const k of [...extras.keys()]) drop(k, "budget turned off"); return []; }
   for (const [k, x] of [...extras]) {
     if (base.has(k)) { extras.delete(k); fp.delete(k); continue; }   // part of the minimum now: nothing extra about it
     x.d = ed(x.v, px, pz);
     if (x.d > lim()) drop(k, `over ${opt.reach} blocks away`);
   }
+  const listed = () => { lastN = base.size + extras.size; return [...extras].map(([key, x]) => ({ key, v: x.v })); };
+  if (!(opt.budget > 0)) {   // nearest only: the farthest one each window
+    if (extras.size && t - stepAt >= opt.win * 1000) { stepAt = t; drop(farthest(1)[0], "distant villages set to the nearest only"); }
+    return listed();
+  }
+  stepAt = -1e12;
   if (opt.fixed > 0) return fixedSet(px, pz, base, t, ed);
   const f = used(), slow = BF.warp && BF.warp.speed === 1 && fps < opt.minFps;
   // at night the villagers sleep and the measure is low: no village joins for the time limit then (Gordon, 2026-10-28), and the day starts a
   // fresh window (villages still join the minimum set when the player comes near)
-  const night = !!(BF.sky && BF.sky.isNight && BF.sky.isNight());
+  // and in the first tenth of the day, while the villagers get up and the load climbs to the day's (Gordon's test4 session, 2026-10-30:
+  // villages joined at 68% at 0.08 and the measure was 95% by 0.17; a fixed set took twice the night's time from about 0.1 to 0.5)
+  const night = !!(BF.sky && BF.sky.isNight && BF.sky.isNight()) || !!(BF.sky && BF.sky.time < opt.morning);
   if (night) underMs = 0;
-  if (leavingNow()) overMs = 0;   // (a village let go still counts in the measure: a fresh window once it has unloaded)
+  // the measure's share per running village (those let go and still unloading are in the measure too)
+  const going = leavingNow(), running = base.size + extras.size + going, share = running ? f / running : 0;
   if (overMs >= opt.win * 1000 && t - lastLoad >= opt.hold * 1000 && extras.size) {
-    let far = null;
-    for (const [k, x] of extras) if (!far || x.d > far[1].d) far = [k, x];
     overMs = 0;
-    cooling.set(far[0], t + opt.cool * 1000);
-    drop(far[0], `over budget: the simulation needed ${pct(f)} of each second at 1x for ${opt.win} s, limit ${pct(opt.budget)}`);
-  } else if (underMs >= opt.win * 1000 && !slow && !night) {
+    const after = f - going * share;   // (the measure once those still unloading have gone)
+    if (after >= leaveAt()) {   // as many as bring it back to the limit
+      const n = share > 0 ? Math.min(ADD_MAX, Math.max(1, Math.ceil((after - opt.budget) / share))) : 1;
+      for (const k of farthest(n)) {
+        cooling.set(k, t + opt.cool * 1000);
+        drop(k, `over budget: the simulation needed ${pct(f)} of each second at 1x for ${opt.win} s, limit ${pct(opt.budget)} (leaving from ${pct(leaveAt())})`);
+      }
+    }
+  } else if (underMs >= opt.win * 1000 && !slow && !night && t - lastLoad >= opt.hold * 1000) {   // (the last ones' cost shown first)
     underMs = 0;
-    const running = base.size + extras.size, share = running ? f / running : 0;
-    if (f + share <= opt.budget) {
-      // room for this many more at the current share per village (the newcomers' cost shows in the next windows)
+    if (f < joinAt() && f + share <= opt.budget) {
+      // room for this many more at the current share per village, within the limit (the newcomers' cost shows in the next windows). Both:
+      // under the margin, and a village's share still fitting under the limit, which is the one that holds on a small machine, where a
+      // village takes more than the margin (Gordon, 2026-10-30)
       const room = share > 0 ? Math.min(ADD_MAX, Math.floor((opt.budget - f) / share)) : ADD_MAX;
       const cand = candidates(px, pz, base, t, ed);
       let added = 0;
@@ -183,13 +210,14 @@ function decide(px, pz, base) {
         if (mb > opt.memMB) { if (!decide.memTold) { decide.memTold = true; note(`No more villages: the extra villages' chunk data would pass ${opt.memMB} MB`); } break; }
         extras.set(c.k, { v: c.v, t, d: c.d }); fp.set(c.k, keys);
         lastLoad = t; added++;
-        note(`${vname(c.k)} joins the simulated set, ${Math.round(c.d)} blocks away: the simulation needed ${pct(f)} of each second at 1x for ${opt.win} s, limit ${pct(opt.budget)}`, c.k);
+        note(`${vname(c.k)} joins the simulated set, ${Math.round(c.d)} blocks away: the simulation needed ${pct(f)} of each second at 1x for ${opt.win} s, limit ${pct(opt.budget)} (joining up to ${pct(joinAt())})`, c.k);
       }
     }
   }
-  lastN = base.size + extras.size;
-  return [...extras].map(([key, x]) => ({ key, v: x.v }));
+  return listed();
 }
+// the n farthest extras, farthest first (by their distance at this decision)
+const farthest = n => [...extras].sort((a, b) => b[1].d - a[1].d || (a[0] < b[0] ? -1 : 1)).slice(0, n).map(e => e[0]);
 
 // The villages that may join, nearest first: searched within a radius just past the farthest extra (at least SEARCH_MIN), widened
 // (doubling) while none is found, up to the distance limit or SEARCH_MAX. A search that found nothing out to its end isn't repeated for
@@ -283,7 +311,10 @@ BF.active = {
   // the pause menu: a setting changed (remembered here; the page sends it where the simulation is with quiet, js/simhost.js budget)
   choose(field, value, quiet) {
     if (!(field in DEFAULT)) return this.settings();
-    const s = Object.assign({}, S, { [field]: value });
+    return this.adopt(Object.assign({}, S, { [field]: value }), quiet);
+  },
+  // the pause menu's settings as it closes (js/player.js distantApply): all of them at once, one INFO line when they changed
+  adopt(s, quiet) {
     store.set(clean(s));
     this.set({ on: true, settings: s }, quiet);
     return this.settings();

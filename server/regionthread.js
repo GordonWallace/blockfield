@@ -71,7 +71,7 @@ if (!isMainThread && workerData && workerData.me != null && !workerData.saves &&
       } else if (d.ticks) {
         h.tick(d.ticks);
         parentPort.postMessage({ ticked: h.ticks });
-      } else if (d.hash) parentPort.postMessage({ hash: BF.cworkers.partial ? BF.cworkers.gathered(() => BF.stateHash.full()) : BF.stateHash.full(), mismatch: BF.rworkers.mismatch || null, mismatchText: d.text ? BF.rworkers.mismatchText || null : null, audits: BF.rworkers.audits || null, stats: BF.cworkers.active ? BF.cworkers.stats() : BF.rworkers.stats() });
+      } else if (d.hash) parentPort.postMessage({ hash: BF.cworkers.partial ? BF.cworkers.gathered(() => BF.stateHash.full(), "hash") : BF.stateHash.full(), mismatch: BF.rworkers.mismatch || null, mismatchText: d.text ? BF.rworkers.mismatchText || null : null, audits: BF.rworkers.audits || null, stats: BF.cworkers.active ? BF.cworkers.stats() : BF.rworkers.stats() });
       else if (d.stop) process.exit(0);
     } catch (e) { fail(e); }
   });

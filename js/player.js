@@ -320,9 +320,9 @@ function buildDOM() {
       const i = VIEW_OPTS.indexOf(BF.world.viewDist);
       setViewDist(i < 0 ? VIEW_OPTS.find(v => v > BF.world.viewDist) || VIEW_OPTS[0] : VIEW_OPTS[(i + 1) % VIEW_OPTS.length]);
     } else if (a === "budget") { distantEl.hidden = !distantEl.hidden; updateBudgetBtn(); }   // the Distant villages panel
-    else if (a === "dv") {   // a Distant villages setting (js/active.js); where the simulation is elsewhere, there too (bug-081)
-      const away = !!(BF.simHost && BF.simHost.worker), f = act.dataset.f;
-      if (BF.active) { BF.active.choose(f, BF.active.next(f), away); if (away) BF.simHost.budget(); }
+    else if (a === "dv") {   // a Distant villages setting (js/active.js): held until the game resumes (distantApply)
+      const f = act.dataset.f, s = distantPending || (BF.active && BF.active.settings());
+      if (s && f in s) { const c = BF.active.CHOICES[f]; distantPending = Object.assign({}, s, { [f]: c[(c.indexOf(s[f]) + 1) % c.length] }); }
       updateBudgetBtn();
     } else if (a === "workers") {   // the Cluster workers setting (js/simhost.js): from the next world started
       const H = BF.simHost, c = H.WORKER_CHOICES;
@@ -351,11 +351,23 @@ function buildDOM() {
   knobEl = touchEl.querySelector(".bfp-knob");
 }
 
+// The Distant villages settings chosen in the open pause menu: they take effect when the menu closes and the game resumes, so clicking
+// through the choices doesn't act on each one on the way (Gordon, 2026-10-30: passing "Nearest only" let 27 villages go, and the next
+// click loaded them all again). Then the page keeps them, and where the simulation is elsewhere it gets them too (bug-081).
+let distantPending = null;
+function distantApply() {
+  const s = distantPending;
+  distantPending = null;
+  if (!s || !BF.active) return;
+  const away = !!(BF.simHost && BF.simHost.worker);
+  BF.active.adopt(s, away);
+  if (away) BF.simHost.budget();
+}
 // "Simulated villages: 6 (budget 40%)" (spec r15-34, js/active.js); in a worker or on the world server the simulation's own line (the
-// budget query, answered after the setting it was just sent: bug-081)
+// budget query, answered after the setting it was just sent: bug-081). The panel shows the settings chosen, applied or not.
 function updateBudgetBtn() {
   if (!budgetBtn || !BF.active) return;
-  const show = r => { budgetBtn.textContent = r.text; if (!distantEl.hidden) distantEl.innerHTML = distantHTML(r.settings, r.auto); };
+  const show = r => { budgetBtn.textContent = r.text; if (!distantEl.hidden) distantEl.innerHTML = distantHTML(distantPending || r.settings, r.auto); };
   if (!(BF.simHost && BF.simHost.worker && BF.client)) { show({ text: BF.active.text(), settings: BF.active.settings(), auto: BF.active.auto() }); return; }
   BF.client.query("budget", {}, r => { if (r && r.ok) show(r.settings ? r : Object.assign(r, { settings: BF.active.settings(), auto: BF.active.auto() })); });
 }
@@ -373,7 +385,7 @@ function distantHTML(s, auto) {
     const now = H.workersNow(), why = now.why;
     h += `<button type="button" data-act="workers"${why ? " disabled" : ""} title="How many workers a world's simulation splits its villages over, from the next world started. Automatic: one per performance core">Cluster workers: ${why ? now.n + " (" + why + ")" : H.workersLabel(H.workersPref())}</button>`;
   }
-  return h + `<span class="bfp-hint">Cluster workers apply from the next world started; the rest at once.</span></div>`;
+  return h + `<span class="bfp-hint">Cluster workers apply from the next world started; the rest when you resume the game.</span></div>`;
 }
 // "Simulation: World server (1 thread)", and the setting when it forces a host (spec r15-43, js/simhost.js); a click cycles the setting
 // (Automatic, World server, Browser (worker), Browser (this page)), which applies from the next start
@@ -450,6 +462,7 @@ function newWorldFrom(inputId) {
 }
 
 function showScreen(name) {
+  if (menuOpen === "pause" && name !== "pause") distantApply();   // (the pause menu closing: its Distant villages settings take effect)
   menuOpen = name;
   startEl.classList.toggle("on", name === "start");
   pauseEl.classList.toggle("on", name === "pause");
@@ -2525,6 +2538,7 @@ function turnPlanet(dx, dy) {
   faceNorth();
 }
 P.turnPlanet = turnPlanet;   // tests
+P.showMenu = name => showScreen(name || null);   // tests: a menu shown or closed as a player would, without starting play (test/budget-menu.js)
 
 // ---------- camera ----------
 function syncCamera(dt) {
