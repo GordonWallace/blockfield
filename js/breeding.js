@@ -482,8 +482,8 @@ function exportAll(out) {
   for (const [vk, list] of recs) for (const e of list) {
     if (e.dead) { delete out[vk + "#" + (KEY_BASE + e.k)]; continue; }
     const key = vk + "#" + (KEY_BASE + e.k);
-    const m = e.mob && !e.mob.removed ? e.mob : null;
-    const base = m && m.inv ? BF.trades.pack(m) : (out[key] && out[key].inv ? out[key] : e.save || { inv: [], level: 1, xp: 0 });
+    const r = e.mob && !e.mob.removed ? BF.cworkers.row("trades", e.mob) : null;   // (js/mobs.js: its runner's, with clusters on workers)
+    const base = r ? r[1] : (out[key] && out[key].inv ? out[key] : e.save || { inv: [], level: 1, xp: 0 });
     out[key] = Object.assign({}, base, { bred: metaOf(e) });
   }
   for (const k of S.deadKeys) delete out[k];

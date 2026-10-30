@@ -370,7 +370,7 @@ const save = {
       return new Promise(res => CW.whenMet(ok => {
         if (!ok) { slog("ERROR", "Saving world \"" + name + "\" failed (the cluster workers stopped first); the previous save is kept"); res(false); return; }
         let data;
-        try { data = CW.gathered(() => snapshot({ quiet: true })); } catch (e) { console.error(e); res(false); return; }
+        try { data = CW.gathered(() => snapshot({ quiet: true }), "save"); } catch (e) { console.error(e); res(false); return; }
         res(save.current ? write(data, performance.now()) : false);
       }));
     }

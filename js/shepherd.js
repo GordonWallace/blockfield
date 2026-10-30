@@ -256,8 +256,10 @@ function seeded(str) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+// a living animal's place to 1/100 (its runner's, with clusters on workers: js/mobs.js row "spot"), else where its state last had it
+const spotOf = (s, i) => { const p = s.mob ? BF.cworkers.row("spot", s.mob) : null; return p ? p[i] : i ? s.z : s.x; };
 const packSt = s => [s.fed == null ? null : +s.fed.toFixed(3), s.shorn ? +(s.woolAt || 0).toFixed(3) : null, s.growAt == null ? null : +s.growAt.toFixed(3),
-  +(s.cd || 0).toFixed(3), s.mob && live(s.mob) ? +s.mob.position.x.toFixed(2) : s.x, s.mob && live(s.mob) ? +s.mob.position.z.toFixed(2) : s.z];
+  +(s.cd || 0).toFixed(3), spotOf(s, 0), spotOf(s, 1)];
 function unpackSt(a) {
   const num = (x, d) => (x != null && Number.isFinite(+x) ? +x : d);
   if (!Array.isArray(a)) return null;

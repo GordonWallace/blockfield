@@ -145,17 +145,28 @@ function serialize() {
   if (!L || !BF.player || !BF.player.position) return undefined;
   const o = { t: dayNow(), v: {}, g: {}, w: [] }, cand = [];
   for (const m of L) {
-    if (!m.position || owned(m)) continue;
-    if (m.type === "villager" && m.village && m.slot) { o.v[m.village.key + "#" + m.slot.idx] = snapOf(m); continue; }
-    if (m.type === "iron_golem" && m.village) { (o.g[m.village.key] || (o.g[m.village.key] = [])).push(snapOf(m)); continue; }
-    if (m.village || m.type === "villager") continue;
-    cand.push(m);
+    const r = BF.cworkers.row("mobsave", m);
+    if (!r) continue;
+    if (r[0] === "v") o.v[r[1]] = r[2];
+    else if (r[0] === "g") (o.g[r[1]] || (o.g[r[1]] = [])).push(r[2]);
+    else cand.push(r[2]);
   }
   for (const [k, s] of villagers) if (!o.v[k] && fresh(s)) o.v[k] = s;   // unloaded villages' villagers still waiting to come back
   for (const [k, a] of golems) for (const s of a) if (fresh(s)) (o.g[k] || (o.g[k] = [])).push(s);
-  for (const m of cand) o.w.push(packWild(m));   // every loaded wild mob (idea-037: no cap)
+  for (const e of cand) o.w.push(e);   // every loaded wild mob (idea-037: no cap)
   return o;
 }
+// A loaded mob's part of the save: ["v", "<village key>#<slot>", snapshot] (a roster villager), ["g", village key, snapshot] (a village
+// golem), ["w", 0, packWild] (a wild mob), or null (a pen's, a horse, a rider... or a villager without a slot). A row (js/cworkers.js
+// gathered): with clusters on workers, worked out where the mob's copy is current.
+function saveRow(m) {
+  if (!m.position || owned(m)) return null;
+  if (m.type === "villager" && m.village && m.slot) return ["v", m.village.key + "#" + m.slot.idx, snapOf(m)];
+  if (m.type === "iron_golem" && m.village) return ["g", m.village.key, snapOf(m)];
+  if (m.village || m.type === "villager") return null;
+  return ["w", 0, packWild(m)];
+}
+(BF.mobRows || (BF.mobRows = new Map())).set("mobsave", { fn: saveRow, uses: ["save"] });
 function deserialize(o) {
   reset();
   if (!o || typeof o !== "object" || !Number.isFinite(o.t)) return;

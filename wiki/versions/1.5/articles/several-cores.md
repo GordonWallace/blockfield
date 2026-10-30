@@ -58,6 +58,8 @@ To try clusters while you play, add `--clusters` to `./run.sh` along with a numb
 
 When the clusters are split over several workers, a worker keeps only its own clusters' mobs up to date. It sees every other mob where it was at the last meeting, and at a meeting it is sent whole only the mobs that change worker (or that something on it is about to read, like a merchant arriving or a chunk being unloaded). So a meeting sends a short summary of each mob instead of every change to every mob.
 
+A save while the clusters are split waits for the next meeting. There each worker writes down its own mobs' part of the save (where each one is and what it is doing, a villager's trades, a horse's place) and sends just that to the others, so no worker has to be sent every mob whole. The periodic check that the workers' copies of the world still agree (every five game minutes) works the same way: each worker hashes its own mobs. Both take a fraction of a second, where they used to pause the game for about a second with many villages.
+
 ## What it costs
 
 Each worker holds a full copy of the world, so each one takes about as much memory as the simulation does on its own. On a machine with little memory, `--workers 1` or a small number is the better choice.
