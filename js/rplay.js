@@ -6,7 +6,7 @@
 //   solo   (the start) the leader runs whole ticks alone; each follower runs the same ticks on its own copy when it gets to them;
 //   split  the ticks run in lockstep and each worker thinks only its share of the regions (js/rworkers.js): the work of a tick is spread.
 // Splitting isn't free (each worker sends what its mobs changed every tick), so the leader splits only when the simulation can't keep up
-// (ticks dropped for a while) and the followers have caught up, then keeps the split only if ticks got faster (a trial of TRIAL ticks
+// (ticks dropped for a while while fast-forwarding, or at 1x its thread busy for LOAD_MS: js/active.js pressed) and the followers have caught up, then keeps the split only if ticks got faster (a trial of TRIAL ticks
 // against the ticks before it); otherwise back to solo, and it tries again later (BACKOFF ticks, doubling). ?split=always splits as soon as
 // the followers are ready, ?split=never never does. The followers' copies are compared now and then while split (VERIFY ticks): a
 // difference logs an ERROR and the leader goes on alone. A follower that crashes while split stops the simulation (the page offers a
@@ -39,6 +39,8 @@ const MAX = 8;            // the most worth asking for: each follower holds a wh
 const TRIAL = 200;        // ticks of a split trial
 const BACKOFF = 2000;     // ticks before trying a split again after one that didn't pay (doubles each time, up to 16x)
 const BUSY_MS = 2000;     // real ms of dropped ticks before a split is tried
+const LOAD_MS = 30000;    // real ms at 1x with the simulation's thread busy (js/active.js pressed: 65% of each second, or the Distant villages
+                          // limit holding villages back) before a split is tried (Gordon, 2026-10-30: at 1x the workers never split)
 const VERIFY = 6000;      // split ticks between the copies' hash checks (5 game minutes)
 const LAG = 10;           // ticks a follower may be behind for the split to start, or more if replaying them takes at most LAG_MS at the leader's
 const LAG_MS = 2000;      // ms a tick (soloMs): the first meeting waits while they catch up (game seconds at the speed set were far too many on a slow
@@ -48,7 +50,7 @@ const LAG_MS = 2000;      // ms a tick (soloMs): the first meeting waits while t
 const L = {
   want: 1, spawn: null, policy: "auto", verify: VERIFY,
   list: [], world: null, epoch: 0, ticks: 0, ready: 0, split: false, trial: null, backoff: BACKOFF, retryAt: 0,
-  busySince: null, soloMs: null, plainMs: null, splitMs: null, loopT0: null, loopTicks: 0, shared: null, why: "", lastText: "",
+  busySince: null, loadSince: null, soloMs: null, plainMs: null, splitMs: null, loopT0: null, loopTicks: 0, shared: null, why: "", lastText: "",
 };
 const log = (l, x) => { if (BF.glog) BF.glog.log(l, "workers", x); };
 const TRIAL_CLUSTERS = 400;   // ticks of a clusters' split trial (the first meetings hand over whole clusters)
@@ -63,6 +65,9 @@ function clusterOn(sh, me, n, link, verify) {
   // (an exchange between ticks, a chunk unloading with mobs in it: the leader's journal must be out first, or the followers never get
   // the op that brings them to it)
   BF.cworkers.preExchange = me === 0 ? flush : null;
+  // (no village joins for the budget while the trial runs: it compares the split with one on the same villages. Here, at the same point
+  // of the journal on every copy)
+  if (BF.active && BF.active.holdJoins) BF.active.holdJoins(BF.rand.tick + TRIAL_CLUSTERS);
 }
 function setup(o) {
   const cores = Math.max(1, o.cores | 0 || 2);
@@ -95,7 +100,7 @@ function begin(world) {
   world.clock = BF.simNow();   // the simulation clock goes on from world to world (js/timewarp.js): a fresh follower starts where the leader is
   world.villageSim = BF.villageSim && BF.villageSim.state ? BF.villageSim.state() : null;   // (when it last checked the simulated set: js/villagesim.js)
   BF.world.trail = L.trail ? new Map() : null;   // (tests, ?verify=: who wrote each cell, for a cell that differs: js/world.js)
-  L.world = world; L.ticks = 0; L.solo = new Map(); L.diff = null; L.recent = []; L.ready = 0; L.split = false; L.trial = null; L.backoff = BACKOFF; L.retryAt = 0; L.busySince = null;
+  L.world = world; L.ticks = 0; L.solo = new Map(); L.diff = null; L.recent = []; L.ready = 0; L.split = false; L.trial = null; L.backoff = BACKOFF; L.retryAt = 0; L.busySince = null; L.loadSince = null;
   L.soloMs = null; L.plainMs = null; L.plainTicks = 0; L.splitMs = null; L.loopT0 = null; L.loopTicks = 0;
   { const h = BF.stateHash.full(); L.hash = h.hash; L.bootParts = h.parts; L.bootText = L.verify ? texts() : null; }   // (the followers must boot the same world)
   RW.journal = []; RW.clock = null;
@@ -193,6 +198,8 @@ function frame() {
   }
   const dropped = W && !BF.state.paused && W.speed > 1 && W.last < W.speed * 0.9;
   L.busySince = dropped ? (L.busySince == null ? t : L.busySince) : null;
+  const loaded = W && !BF.state.paused && W.speed === 1 && !!(BF.active && BF.active.pressed && BF.active.pressed());
+  L.loadSince = loaded ? (L.loadSince == null ? t : L.loadSince) : null;
   L.loopT0 = null; L.loopTicks = 0;
   if (RW.mismatch && L.diff && !L.diff.told && t - L.diff.at < 5000) return;   // (its text of the parts that differ first: soloText)
   if (L.endAfter && !clustered()) { const e = L.endAfter; L.endAfter = false; end(e.why, e.level); return; }
@@ -205,7 +212,8 @@ function frame() {
   if (!L.split) {
     const behind = Math.max(0, ...L.list.map(f => L.ticks - f.ticks));
     const ready = L.ready === L.list.length && (behind <= LAG || (L.soloMs != null && behind * L.soloMs <= LAG_MS)) && !clustered();
-    const want = L.policy === "always" || (L.policy === "auto" && L.busySince != null && t - L.busySince >= BUSY_MS && L.ticks >= L.retryAt &&
+    const busy = (L.busySince != null && t - L.busySince >= BUSY_MS) || (L.loadSince != null && t - L.loadSince >= LOAD_MS);
+    const want = L.policy === "always" || (L.policy === "auto" && busy && L.ticks >= L.retryAt &&
       (L.kind !== "clusters" || L.plainTicks >= PLAIN_TICKS));
     if (ready && want && L.policy !== "never") startSplit();
   } else if (L.trial && L.ticks >= L.trial.end) {
@@ -287,7 +295,7 @@ function text() {
   if (L.split) return L.kind === "clusters" ? BF.cworkers.text() : RW.text();
   const f1 = v => (v == null ? "?" : v.toFixed(1));
   return "Workers " + (L.list.length + 1) + ": one thinks (" + L.ready + "/" + L.list.length + " followers ready, " + Math.max(0, ...L.list.map(f => L.ticks - f.ticks)) + " ticks behind; " +
-    f1(L.soloMs) + " ms a tick" + (L.policy === "auto" ? (L.retryAt > L.ticks ? ", split again in " + (L.retryAt - L.ticks) + " ticks" : ", splits when ticks drop") : L.policy === "never" ? ", never splits" : "") + ")";
+    f1(L.soloMs) + " ms a tick" + (L.policy === "auto" ? (L.retryAt > L.ticks ? ", split again in " + (L.retryAt - L.ticks) + " ticks" : ", splits when ticks drop or the load stays high") : L.policy === "never" ? ", never splits" : "") + ")";
 }
 
 // ---------------------------------------------------------------- the player, as a packet left it
