@@ -40,7 +40,8 @@
 // Under budget with room for several more villages, up to ADD_MAX join in one decision (nearest first), so a fast machine fills up in
 // minutes rather than one village every WIN seconds.
 // API: BF.active = { frame(simMs, raw), decide(px, pz, base) -> [{key, v}], isExtra(key), extras(), set({on, budget, memMB, win, hold, morning,
-//                    cool, reach, minFps, settings}, quiet), opts(), peak(), settings(), choose(field, value, quiet) -> settings, adopt(settings, quiet) -> settings, next(field) ->
+//                    cool, reach, minFps, settings}, quiet), opts(), peak(), used() -> the measure, pressed() -> the region workers
+//                    should split (PRESS), holdJoins(tick), settings(), choose(field, value, quiet) -> settings, adopt(settings, quiet) -> settings, next(field) ->
 //                    the value after the current one, auto() -> {share, memMB}, describe(settings) -> text, text(), feed(), log(), reset(),
 //                    BUDGETS, CHOICES, DEFAULT }
 (() => {
@@ -133,12 +134,17 @@ function frame(simMs, raw) {
   slice = { sim: 0, real: 0, game: 0, frames: 0 };
 }
 const used = () => slices.length ? slices.reduce((s, x) => s + x.frac, 0) / slices.length : 0;
+// The region workers' split at 1x (js/rplay.js, Gordon 2026-10-30: the workers must start when the simulation's thread gets busy): the
+// measure (the last 10 s) at or over PRESS of each second, or at the join line, where the limit holds villages back (a lower limit)
+const PRESS = 0.65;
+const pressed = () => slices.length >= 10 && used() >= (opt.on && opt.budget > 0 ? Math.min(PRESS, joinAt()) : PRESS);
 
 // ---- the extras
 const extras = new Map();      // village key -> { v, t (real ms when it joined), d (edge distance at the last decision) }
 const cooling = new Map();     // village key -> real ms until it may be picked again (it left for the budget)
 const decisions = [];          // newest last: { day, text }
 let lastLoad = -1e12, lastN = 0, stepAt = -1e12;   // (stepAt: real ms of the last "nearest only" step down)
+let joinHold = -1;   // no join before this tick: a split's trial runs (js/rplay.js clusterOn), judged on the villages it started with
 const VS = () => BF.villageSim;
 const vKey = v => Math.round(v.x) + "," + Math.round(v.z);
 const dayNow = () => (BF.sky ? (BF.sky.day || 0) + (BF.sky.time || 0) : 0);
@@ -224,7 +230,7 @@ function decide(px, pz, base) {
         drop(k, `over budget: the simulation needed ${pct(f)} of each second at 1x for ${opt.win} s, limit ${pct(opt.budget)} (leaving from ${pct(leaveAt())})`);
       }
     }
-  } else if (underMs >= opt.win * 1000 && !slow && !night && t - lastLoad >= opt.hold * 1000) {   // (the last ones' cost shown first)
+  } else if (underMs >= opt.win * 1000 && !slow && !night && t - lastLoad >= opt.hold * 1000 && !(BF.rand && BF.rand.tick < joinHold)) {   // (the last ones' cost shown first)
     underMs = 0;
     if (want < joinAt() && want + each <= opt.budget) {
       // room for this many more at the share per village, within the limit (the newcomers' cost shows in the next windows). Both: under
@@ -321,6 +327,8 @@ BF.active = {
   isExtra: key => extras.has(key),
   waitCap: key => (leaving.has(key) && !extras.has(key) ? WAIT_CAP : null), waitWhy: key => leaving.get(key) || null, leaving: () => (leavingNow(), [...leaving.keys()]),
   extras: () => [...extras.keys()],
+  used, pressed, PRESS,
+  holdJoins: tick => { joinHold = tick; },
   peak,
   opts: () => Object.assign({}, opt),
   // tests and the pause menu (a budget chosen there is remembered)
@@ -363,7 +371,7 @@ BF.active = {
   // are the leader's machine's)
   state() {
     return { opt: Object.assign({}, opt), S: Object.assign({}, S), extras: [...extras].map(([k, x]) => [k, { v: x.v, t: x.t, d: x.d }]), cooling: [...cooling], leaving: [...leaving],
-      lastLoad, lastN, slices: slices.map(x => Object.assign({}, x)), slice: Object.assign({}, slice), underMs, overMs, fps, lastClock, fixedAt, emptyAt, memTold: !!decide.memTold,
+      lastLoad, lastN, slices: slices.map(x => Object.assign({}, x)), slice: Object.assign({}, slice), underMs, overMs, fps, lastClock, fixedAt, emptyAt, memTold: !!decide.memTold, joinHold,
       hours: [...hours].map(([k, b]) => [k, Object.assign({}, b)]) };
   },
   load(s) {
@@ -373,9 +381,9 @@ BF.active = {
     cooling.clear(); for (const [k, u] of s.cooling || []) cooling.set(k, u);
     leaving.clear(); for (const [k, w] of s.leaving || []) leaving.set(k, w);
     lastLoad = s.lastLoad; lastN = s.lastN; slices = (s.slices || []).map(x => Object.assign({}, x)); slice = Object.assign({}, s.slice);
-    underMs = s.underMs; overMs = s.overMs; fps = s.fps; lastClock = s.lastClock; fixedAt = s.fixedAt; emptyAt = s.emptyAt; decide.memTold = !!s.memTold;
+    underMs = s.underMs; overMs = s.overMs; fps = s.fps; lastClock = s.lastClock; fixedAt = s.fixedAt; emptyAt = s.emptyAt; decide.memTold = !!s.memTold; joinHold = s.joinHold != null ? s.joinHold : -1;
     hours = new Map((s.hours || []).map(([k, b]) => [k, Object.assign({}, b)]));
   },
-  reset() { leaving.clear(); fixedAt = null; emptyAt = null; lastClock = null; extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, game: 0, frames: 0 }; fps = 60; decide.memTold = false; hours = new Map(); },
+  reset() { leaving.clear(); fixedAt = null; emptyAt = null; lastClock = null; extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, game: 0, frames: 0 }; fps = 60; decide.memTold = false; hours = new Map(); joinHold = -1; },
 };
 })();
