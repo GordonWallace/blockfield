@@ -34,7 +34,9 @@ const LEAD = 0.7;      // the share of a worker's load the first worker takes on
 const MOB_MS = 0.01;   // a group not measured yet: its guessed ms a tick for each of its mobs (about what a mob costs on one thread)
 const SOLO_MS = 0.6;   // below this many ms a tick in all, every group goes to the first worker (an exchange costs more than it saves)
 
-const CW = { active: false, n: 1, me: 0, link: null, owners: new Map(), shuffle: 0, fixed: false };
+// open: the followers may be running ahead of the leader in this interval (js/rplay.js "open", set at its meeting; every worker clears it
+// at the swap): what can't wait for the next meeting waits until then (js/villagesim.js update)
+const CW = { active: false, n: 1, me: 0, link: null, owners: new Map(), shuffle: 0, fixed: false, open: false };
 const RW = () => BF.rworkers;
 let shadows = new Map(), recShadows = new Map(), known = new Set();
 // Partial copies (CW.partial): only the mobs a worker runs are current on it. mine: the ones it runs this interval; holder: mob id ->
@@ -130,6 +132,7 @@ function reqIn(a) {
 // ---------------------------------------------------------------- the swap, at the end of each interval
 function sync() {
   if (!CW.active) return;
+  CW.open = false;
   const t0 = now(), b0 = busyNow();
   T.run += t0 - tRun;
   lap(null);
@@ -688,7 +691,7 @@ function setup(o) {
 let hooked = false;
 function stop(why) {
   if (!CW.active) return;
-  CW.active = false;
+  CW.active = false; CW.open = false;
   if (CW.link) try { CW.link.stop(); } catch (e) { /* already */ }
   if (BF.glog) BF.glog.log(why ? "ERROR" : "INFO", "workers", "Cluster workers stopped" + (why ? ": " + why : ""));
   shadows = new Map(); recShadows = new Map();
