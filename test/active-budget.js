@@ -35,9 +35,10 @@ module.exports = async (pg) => {
 
   // 1b. Nearest only: the extras go one a window, the farthest first (a long window here: one goes, the rest wait); switching back to
   // Automatic keeps the rest (Gordon, 2026-10-30: they all went at once)
+  // (the extras read and the setting made in one call: the budget is still forced high until then, and more join meanwhile)
   const was = await lib.sim(pg, () => { const p = BF.player.position, ed = BF.villageSim._edgeDist, near = BF.worldgen.villagesNear(p.x, p.z, 1400);
+    BF.active.set({ win: 30, settings: Object.assign(BF.active.settings(), { villages: "nearest" }) });
     return BF.active.extras().map(k => { const v = near.find(v => Math.round(v.x) + "," + Math.round(v.z) === k); return { k, d: v ? ed(v, p.x, p.z) : -1 }; }); });
-  await lib.sim(pg, () => BF.active.set({ win: 30, settings: Object.assign(BF.active.settings(), { villages: "nearest" }) }));
   const one = await wait(n => BF.active.extras().length < n, was.length, 30000);
   await pg.waitForTimeout(3000);
   const nr = await lib.sim(pg, () => ({ extras: BF.active.extras(), leaves: BF.active.log().filter(e => /nearest only/.test(e.text) && /leaves/.test(e.text)).map(e => e.text) }));
