@@ -24,8 +24,8 @@
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
 
-let MEET = 40;       // ticks between meetings (two game seconds, Gordon 2026-10-28: a meeting costs about the same however long the
-                     // interval; setMeet: benchmarks)
+let MEET = 80;       // ticks between meetings (four game seconds. A meeting costs about the same however long the interval: Gordon chose 40
+                     // on 2026-10-28, then 80 on 2026-10-30, when 8 workers on test4 went from 0.83 to 1.05 of one thread; setMeet: benchmarks)
 const REACH = 600;   // blocks from a village's centre that its cluster reaches at most (half the usual distance to the next, plus some)
 const CELL = 8;      // regions along a side of a wild cluster (512 blocks)
 const VIEW_PAD = 48; // blocks past the view distance that still go in the player's group (plus how far it moved since the last meeting)
