@@ -63,6 +63,7 @@ const chunkBase = k => { const i = k.indexOf(","), CS = BF.CS; return CL().baseA
 const ownChunk = k => CL().ownsBase(chunkBase(k));
 
 let rolled = new Set();        // chunk keys that had their first-generation roll
+let rolledNew = [];            // (clusters on workers: the keys rolled here since the last meeting, ownTables)
 const toRoll = new Set();      // loaded chunks still to roll
 let stored = new Map();        // chunk key -> [packed wild mob + {t, open}]
 const toRestore = new Set();   // loaded chunks with stored mobs waiting
@@ -158,6 +159,7 @@ function restore(k) {
 // ---------------------------------------------------------------- first-generation animals
 function roll(k) {
   rolled.add(k);
+  if (BF.cworkers && BF.cworkers.active) rolledNew.push(k);
   const [cx, cz] = k.split(",").map(Number), CS = BF.CS;
   let b = null;
   try { b = BF.worldgen.biomeAt(cx * CS + 8, cz * CS + 8); } catch (e) { return; }
@@ -383,9 +385,22 @@ function ownTables() {
   if (!C || ownTables.done) return;
   ownTables.done = true;
   const G = k => CL().groupFor(chunkBase(k)), GV = k => CL().groupFor("v:" + k);   // (each key's group: C.keysOf lists a group's keys in order)
+  // rolled only grows: a group's part is the keys its worker rolled since the last meeting (all of them, with all: the first swap). It
+  // was the group's whole part, every meeting, put back key by key: about 16 ms a meeting on every worker of test4 (2026-10-29 profile).
   C.owned("wildlife.rolled", {
-    snap: g => C.keysOf(rolled, g, G).slice(),
-    apply: (g, a) => { for (const k of C.keysOf(rolled, g, G)) rolled.delete(k); for (const k of a || []) rolled.add(k); C.applied(rolled, g); },
+    reset() { rolledNew = []; },
+    snap: (g, all) => {
+      if (all) return { all: C.keysOf(rolled, g, G).slice() };
+      const add = [], keep = [];
+      for (const k of rolledNew) (G(k) === g ? add : keep).push(k);
+      rolledNew = keep;
+      return { add };
+    },
+    apply: (g, o) => {
+      if (o && o.all) { for (const k of C.keysOf(rolled, g, G)) rolled.delete(k); for (const k of o.all) rolled.add(k); }
+      else if (o) for (const k of o.add) rolled.add(k);
+      C.applied(rolled, g);
+    },
   });
   C.owned("wildlife.stored", {
     snap: g => C.keysOf(stored, g, G).map(k => [k, stored.get(k)]),
@@ -424,7 +439,7 @@ function deserialize(o) {
   for (const k in o.nights || {}) if (Array.isArray(o.nights[k])) nights.set(k, new Map(o.nights[k].filter(Array.isArray).map(a => [+a[0], [+a[1] || 0, +a[2] || 0, +a[3] || 0]])));
 }
 function reset() {
-  rolled = new Set(); toRoll.clear(); stored = new Map(); toRestore.clear(); nights = new Map();
+  rolled = new Set(); rolledNew = []; toRoll.clear(); stored = new Map(); toRestore.clear(); nights = new Map();
   areaList = []; areaOf = new Map(); targets = new Map(); targetsDirty = true; LOG.length = 0; areasT = breedT = watchT = 0;
 }
 function counts() {
