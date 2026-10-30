@@ -60,16 +60,19 @@ function coverage(d) {
 }
 const isFilled = d => coverage(d) >= FILLED;
 // A map put aside today (blanks out of reach or not loaded, or worked too long): left alone until the next day, never sold.
-const isShelved = (m, it) => { const f = state(m).fin[nameOf(it)]; return f !== undefined && f >= today(); };
+const isShelved = (m, it, peek) => { const X = peek ? m.ex : state(m), f = X && X.fin[nameOf(it)]; return f !== undefined && f >= today(); };
 // Filled-map items in the inventory: [{slot, it, d, done, shelved}]
-function carried(m) {
+// peek (the status line, which F3 and the debug screen read): changes nothing (making the explorer's state drew from its stream: a world
+// with a screen watching played differently, 2026-10-30); a map whose data was never made is left out.
+function carried(m, peek) {
   const out = [];
   m.inv.forEach((s, slot) => {
     const it = s && BF.items[s.id];
     if (!it || !it.map) return;
-    const d = BF.maps.getData(it.map.size, it.map.zx, it.map.zz);
+    const d = BF.maps.getData(it.map.size, it.map.zx, it.map.zz, !peek);
+    if (!d) return;
     const done = isFilled(d);
-    out.push({ slot, it, d, done, shelved: !done && isShelved(m, it) });
+    out.push({ slot, it, d, done, shelved: !done && isShelved(m, it, peek) });
   });
   return out;
 }
@@ -552,8 +555,8 @@ function away(m) {
 // Trade-screen status line.
 function statusText(m) {
   if (!m || m.profession !== "explorer" || !BF.maps) return "";
-  if (state(m).camp) return "camping for the night";   // waiting at its tent from dusk, then asleep in it
-  const cs = carried(m), act = cs.find(c => !c.done && !c.shelved);
+  if (m.ex && m.ex.camp) return "camping for the night";   // waiting at its tent from dusk, then asleep in it
+  const cs = carried(m, true), act = cs.find(c => !c.done && !c.shelved);
   if (act) return "exploring, map " + Math.floor(coverage(act.d) * 100) + "% filled";
   if (cs.some(c => c.done)) return "has a filled map";
   const sh = cs.find(c => c.shelved);

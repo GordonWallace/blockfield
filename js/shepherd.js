@@ -421,20 +421,23 @@ const shp = m => m.shp || (m.shp = BF.ids.refs({ task: null, stage: null, t: 0, 
 // emeralds and buys its shears (js/villagelife.js toolAI) and wheat. Kept as a no-op for callers of the old API.
 function ensureKit() {}
 // The pen this shepherd works: the one its loom stands beside (its footprint within 4 blocks of the loom).
-function penOf(m) {
-  const S = shp(m);
-  if (S.penFor === m.jobsite && S.pen !== undefined) return S.pen;
+// peek (the debug screen's read, js/debugfeed.js): changes nothing. Making the keeper's state there drew from its stream, and keeping the
+// pen there decided when it was looked for: a world with a screen watching played differently (2026-10-30), and the region workers had
+// to read the screen too to stay the same.
+function penOf(m, peek) {
+  const S = peek ? m.shp : shp(m);
+  if (S && S.penFor === m.jobsite && S.pen !== undefined) return S.pen;
   let best = null;
   if (m.jobsite && m.village) {
     let bd = 4.5;
     for (const p of pensOf(m.village)) { const d = penDist(p, m.jobsite.x + 0.5, m.jobsite.z + 0.5); if (d < bd) { bd = d; best = p; } }
   }
-  S.penFor = m.jobsite; S.pen = best;
+  if (!peek) { S.penFor = m.jobsite; S.pen = best; }
   return best;
 }
 // What the shepherd looks after: {pen, sheep (live mobs to feed / shear), flock (live mobs counted for crowding and culling), threshold}.
-function tended(m) {
-  const pen = penOf(m);
+function tended(m, peek) {
+  const pen = penOf(m, peek);
   const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position, R = pen ? TEND_R : FREE_RADIUS;
   const near = o => o.type === "sheep" && live(o) && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= R && Math.abs(o.position.y - m.position.y) < 6;
   const M = BF.mobs, list = M.checkScan("shepherd.tended", M.near(home, R).filter(near), L => L.filter(near));
