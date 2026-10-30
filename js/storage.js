@@ -231,12 +231,14 @@ function chestSpot(m) {
   return scored[0] ? { x: scored[0].x, y: scored[0].y, z: scored[0].z } : null;
 }
 // Villagers of village rec waiting for a chest: [{m, spot}] (loaded, awake, with an emerald to pay and still no usable chest).
-function orders(rec) {
+// peek (a status line: js/furniture.js statusText, read by the debug screen and the trade screen at any moment): the same list, but an
+// order that no longer stands is only skipped, not cleared, so reading never changes the world (2026-10-30).
+function orders(rec, peek) {
   const out = [], now = dayNow();
   for (const m of (rec && rec.members) || []) {
     const o = m.store && m.store.order;
     if (!o || o.until < now || m.dead || m.removed || !Array.isArray(m.inv)) continue;
-    if (count(m.inv, BF.I.emerald) < 1 || pickChest(m, true)) { m.store.order = null; continue; }
+    if (count(m.inv, BF.I.emerald) < 1 || pickChest(m, true)) { if (!peek) m.store.order = null; continue; }
     out.push({ m, spot: o.spot });
   }
   return out;

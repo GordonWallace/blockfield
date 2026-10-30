@@ -32,13 +32,17 @@ function hash(str) { let h = 2166136261 >>> 0; for (let i = 0; i < str.length; i
 
 // ---------------------------------------------------------------- names
 let anon = 0;
-function nameOf(m) {
+// peek (the debug screen, js/debugfeed.js): the same name, but nothing is kept. The name is kept on the villager (vname, saved and hashed)
+// the first time it is asked for, so a debug screen asking first made the world differ from one without a screen (2026-10-30); and an
+// unnamed villager outside a village slot takes the next number of a counter, so a peek can't know its name yet: it shows "Villager".
+function nameOf(m, peek) {
   if (!m) return "Someone";
   if (m.vname) return m.vname;
+  if (peek && !(m.village && m.slot && m.slot.idx != null) && !m.vanon && !(BF.ctick && BF.ctick.on && m.id)) return "Villager";
   // (with the cluster tick on, by its id: a counter shared by every cluster would number them in the order clusters run, js/ctick.js)
-  const k = m.village && m.slot && m.slot.idx != null ? m.village.key + "#" + m.slot.idx : "anon" + (m.vanon || (m.vanon = BF.ctick && BF.ctick.on && m.id ? +m.id.slice(1) : ++anon));
-  const h = hash((BF.state ? BF.state.seed : 0) + ":" + k);
-  return (m.vname = FIRST[h % FIRST.length] + " " + LAST[(h >>> 8) % LAST.length]);
+  const k = m.village && m.slot && m.slot.idx != null ? m.village.key + "#" + m.slot.idx : "anon" + (m.vanon || (peek ? +m.id.slice(1) : (m.vanon = BF.ctick && BF.ctick.on && m.id ? +m.id.slice(1) : ++anon)));
+  const h = hash((BF.state ? BF.state.seed : 0) + ":" + k), name = FIRST[h % FIRST.length] + " " + LAST[(h >>> 8) % LAST.length];
+  return peek ? name : (m.vname = name);
 }
 
 // ---------------------------------------------------------------- logging
@@ -120,11 +124,13 @@ const entries = key => logs.get(key) || [];
 // The panel's numbers as data, for the second-screen debug feed (js/debugfeed.js) and the protocol's "vpanel" query, which the F3 panel
 // (js/villagepanel.js, spec r15-37) draws from.
 const byName = (x, y) => (x[0] === "Child") - (y[0] === "Child") || x[0].localeCompare(y[0]);   // alphabetical, children last
-function panelData(rec) {
+// un: the village's free job blocks, when the caller has them already (js/debugfeed.js detail: one search a snapshot, not two)
+function panelData(rec, un) {
   const t = tally(rec), name = (BF.signs && BF.signs.villageName && BF.signs.villageName(rec.key)) || "Village";
   const prof = {};
   for (const m of rec.members || []) if (m.type === "villager" && !m.dead && !m.removed) { const p = m.child ? "Child" : pretty(m.profession); prof[p] = (prof[p] || 0) + 1; }
-  const un = BF.jobs && BF.jobs.unclaimed ? BF.jobs.unclaimed(rec) : [], uc = {};
+  un = un || (BF.jobs && BF.jobs.unclaimed ? BF.jobs.unclaimed(rec, 0, null, true) : []);   // (a peek: reading changes nothing)
+  const uc = {};
   for (const s of un) { const p = pretty(s.prof); uc[p] = (uc[p] || 0) + 1; }
   return { key: rec.key, name, villagers: t.villagers, beds: t.beds, unclaimed: un.length,
     occupations: Object.entries(prof).sort(byName), free: Object.entries(uc).sort(byName),

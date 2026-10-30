@@ -380,7 +380,7 @@ function routesView() {
   const cut = dayNow() - 7, onRoad = new Map();
   for (const m of BF.regions.ofType("villager")) if (m.profession === PROF && !m.dead && m.mc && m.mc.trip) {
     const k = routeKey(m.mc.trip.home, m.mc.trip.dest);
-    onRoad.set(k, (onRoad.get(k) || []).concat([{ who: BF.vlog ? BF.vlog.nameOf(m) : "", stage: m.mc.stage }]));
+    onRoad.set(k, (onRoad.get(k) || []).concat([{ who: BF.vlog ? BF.vlog.nameOf(m, true) : "", stage: m.mc.stage }]));
   }
   const out = [];
   for (const [k, r] of routes) {

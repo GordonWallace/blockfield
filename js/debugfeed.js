@@ -41,7 +41,7 @@ const box = o => [o.x0, o.z0, o.x1, o.z1];
 function layout(rec) {
   const v = rec.wg || {};
   return {
-    key: rec.key, x: rec.x, z: rec.z, name: BF.vlog.panelData(rec).name, biome: rec.biome,
+    key: rec.key, x: rec.x, z: rec.z, name: nameOf(rec.key), biome: rec.biome,
     bounds: [v.minX, v.minZ, v.maxX, v.maxZ],
     roads: (v.roads || []).map(box), plaza: (v.pads || []).filter(p => p.path).map(box),
     buildings: (v.buildings || []).map(b => [b.x0, b.z0, b.x1, b.z1, b.type]),
@@ -49,7 +49,14 @@ function layout(rec) {
   };
 }
 
+// Each villager's status line once a snapshot (the village detail and the Mobs map both show it): statusMemo is cleared as simPart starts.
+const statusMemo = new Map();
 function status(m) {
+  let s = statusMemo.get(m);
+  if (s === undefined) statusMemo.set(m, s = status0(m));
+  return s;
+}
+function status0(m) {
   if (BF.villagerStatus) return BF.villagerStatus.text(m);   // trade-screen status line, when that module is loaded
   return (BF.villageLife && BF.villageLife.statusText(m)) || (BF.builder && BF.builder.statusText ? BF.builder.statusText(m) : "") ||
     (BF.explorer ? BF.explorer.statusText(m) : "") || (m.sleeping ? "Sleeping" : m.ai && m.ai.mode === "walk" ? "Walking" : "Idle");
@@ -105,22 +112,47 @@ function icons() {
 }
 // The tool each job works with (js/miner.js, forester.js, villagelife.js, shepherd.js): a villager without one can't do its job.
 const JOB_TOOL = { miner: /_pickaxe$/, forester: /(^|_)axe$/, farmer: /_hoe$/, shepherd: /^shears$/ };
-function detail(rec) {
-  const L = BF.vlog, d = L.panelData(rec);
-  const chestsOf = new Map();   // owner key -> chests
-  if (BF.inventory && BF.inventory.chests) for (const c of BF.inventory.chests.values()) if (c.owner) { const l = chestsOf.get(c.owner) || []; l.push(c); chestsOf.set(c.owner, l); }
-  d.villagerList = [];
+// Owner key -> chests, made once a snapshot for every village's detail (it was once a village: every chest in the world each time)
+let chestsMemo = null;
+function chestsOf() {
+  if (chestsMemo) return chestsMemo;
+  chestsMemo = new Map();
+  if (BF.inventory && BF.inventory.chests) for (const c of BF.inventory.chests.values()) if (c.owner) { const l = chestsMemo.get(c.owner) || []; l.push(c); chestsMemo.set(c.owner, l); }
+  return chestsMemo;
+}
+// What every village sends, light or full: the panel's numbers, last week's events, the population change, tool coverage, golems, the time
+function summary(rec, un) {
+  const L = BF.vlog, d = L.panelData(rec, un);
   d.golems = [];
+  for (const m of rec.members || []) if (m.type === "iron_golem" && !m.dead && !m.removed && m.position) d.golems.push({ x: r1(m.position.x), z: r1(m.position.z), hp: m.hp, maxHp: m.maxHp });
+  d.clock = L.stamp(BF.sky.day + BF.sky.time);   // when these numbers were taken, shown once the village unloads
+  d.day = +(BF.sky.day + BF.sky.time).toFixed(3);
+  // for the comparison table: last week's events (js/happiness.js), the population change (js/villagestats.js), tool coverage
+  const H = BF.happiness, wk = k => H && H.week ? H.week(rec.key, k) : null;
+  d.week = { trade: wk("trade"), birth: wk("birth"), death: wk("death") };
+  d.pop7 = BF.vstats ? BF.vstats.popChange(rec.key) : null;
+  const toolJobs = (rec.members || []).filter(m => m.type === "villager" && !m.dead && !m.removed && m.position && !m.child && JOB_TOOL[m.profession]);
+  d.noTools = [toolJobs.filter(m => !(m.inv || []).some(s => s && BF.items[s.id] && JOB_TOOL[m.profession].test(BF.items[s.id].name))).length, toolJobs.length];
+  return d;
+}
+// A village the debug screens aren't showing, between its full details (FULL_EVERY): the summary alone, marked lite. The server and the
+// screen lay it over the last full detail they hold, so the villager list, map and inventories stay as they were until the next full one.
+// Its free job blocks are the ones its last full detail found (the search is most of a summary's cost: every job block in reach, each
+// asking who could claim it).
+const unLast = new Map();   // village key -> free job blocks at its last full detail
+const lite = rec => Object.assign(summary(rec, unLast.get(rec.key)), { lite: 1 });
+function detail(rec) {
+  const L = BF.vlog, un = BF.jobs && BF.jobs.unclaimed ? BF.jobs.unclaimed(rec, 0, null, true) : [], d = summary(rec, un), chests = chestsOf();
+  unLast.set(rec.key, un);
+  d.villagerList = [];
   for (const m of rec.members || []) {
-    if (m.dead || m.removed || !m.position) continue;
-    if (m.type === "iron_golem") { d.golems.push({ x: r1(m.position.x), z: r1(m.position.z), hp: m.hp, maxHp: m.maxHp }); continue; }
-    if (m.type !== "villager") continue;
+    if (m.dead || m.removed || !m.position || m.type !== "villager") continue;
     d.villagerList.push({
       id: BF.dayTimeline ? BF.dayTimeline.keyOf(m) : null,   // village key#slot: how the debug screen names the villager it picked (js/daytimeline.js)
-      name: L.nameOf(m), prof: m.child ? "Child" : L.pretty(m.profession), child: !!m.child,
+      name: L.nameOf(m, true), prof: m.child ? "Child" : L.pretty(m.profession), child: !!m.child,
       status: status(m) || "", x: r1(m.position.x), y: r1(m.position.y), z: r1(m.position.z),
       hp: Math.round(m.hp), maxHp: m.maxHp, bed: !!(m.bed && !m.bed.tent ? m.bed : m.homeBed), tent: !!(m.bed && m.bed.tent), sleeping: !!m.sleeping,   // an explorer's pitched tent is not a bed: its own bed (homeBed) is
-      job: m.jobsite ? [m.jobsite.x, m.jobsite.z] : null, starving: !!m.starving, ...holdings(chestsOf, m),
+      job: m.jobsite ? [m.jobsite.x, m.jobsite.z] : null, starving: !!m.starving, ...holdings(chests, m),
       age: m.life ? Math.round((m.life.lived || 0) * 10) / 10 : null,   // game days it has been loaded and active
       inv: invOf(m.inv),
       flock: flockOf(m),
@@ -129,21 +161,13 @@ function detail(rec) {
     });
   }
   d.villagerList.sort((a, b) => a.name.localeCompare(b.name));
-  d.jobsites = BF.jobs && BF.jobs.unclaimed ? BF.jobs.unclaimed(rec).map(s => [s.x, s.z, L.pretty(s.prof)]) : [];
+  d.jobsites = un.map(s => [s.x, s.z, L.pretty(s.prof)]);
   // structures the village's builders planned (js/builder.js rec.built): [x0, z0, x1, z1, type, finished 0|1]
   d.built = (rec.built || []).filter(e => e.state !== "abandoned" && e.w && e.d).map(e => [e.ox, e.oz, e.ox + e.w - 1, e.oz + e.d - 1, e.type, e.state === "done" ? 1 : 0]);
   // river crossings counted in the last 3 days on an 8-block grid, [x, z, n] (js/bridges.js): the debug map draws them as a faint heat layer
   d.cross = BF.bridges ? BF.bridges.heat(rec) : [];
   // villagers who have died here (js/mobs.js rec.deadInfo, saved): name, job, cause, game day, age in days loaded and active
   d.dead = (rec.deadInfo || []).map(e => ({ name: e.name || "Someone", prof: L.pretty(e.prof || "unknown"), cause: e.cause || null, day: e.day, age: e.age == null ? null : Math.round(e.age * 10) / 10 }));
-  d.clock = BF.vlog.stamp(BF.sky.day + BF.sky.time);   // when these numbers were taken, shown once the village unloads
-  d.day = +(BF.sky.day + BF.sky.time).toFixed(3);
-  // for the comparison table: last week's events (js/happiness.js), the population change (js/villagestats.js), tool coverage
-  const H = BF.happiness, wk = k => H && H.week ? H.week(rec.key, k) : null;
-  d.week = { trade: wk("trade"), birth: wk("birth"), death: wk("death") };
-  d.pop7 = BF.vstats ? BF.vstats.popChange(rec.key) : null;
-  const toolJobs = d.villagerList.length ? (rec.members || []).filter(m => m.type === "villager" && !m.dead && !m.removed && m.position && !m.child && JOB_TOOL[m.profession]) : [];
-  d.noTools = [toolJobs.filter(m => !(m.inv || []).some(s => s && BF.items[s.id] && JOB_TOOL[m.profession].test(BF.items[s.id].name))).length, toolJobs.length];
   d.wild = BF.wildlife ? BF.wildlife.villageStats(rec) : null;   // hostiles in its area, wild animals within 128 blocks, the last 7 nights (js/wildlife.js)
   return d;
 }
@@ -172,8 +196,17 @@ function northAt(x, z) {
 
 // Every village this world has loaded: the ones the mob system knows this session, plus any with a saved log (earlier
 // sessions). Each snapshot carries the list with distances, full detail for the loaded ones, new layouts and changed logs.
+// The villages on the debug screens (debug/index.html viewKey; the server passes them on like the picked villager, view/vv) get their full
+// detail in every snapshot, the others a light one (js lite above) and their full detail every FULL_EVERY ms. Until a server has said
+// (viewKeys null: an older server or screen) every village gets its full detail, as before. A full detail of every village every
+// snapshot was most of the feed's cost: about 15 ms a read with 9 villages loaded, 4 reads a second (2026-10-30).
+const FULL_EVERY = 2000;
+let viewKeys = null, vv = "0", fullT = -Infinity;
+const fullSent = new Set();   // villages whose full detail has gone out since the last resync (the first is always full)
 function villages(pp) {
   const L = BF.vlog, E = BF.econ, recs = BF.mobs.villages || new Map(), out = { villages: [], detail: {}, layouts: {}, logs: {}, econ: {} };
+  const full = Date.now() - fullT >= FULL_EVERY;
+  if (full) fullT = Date.now();
   const keys = new Set(recs.keys());
   for (const k in L.serialize()) keys.add(k);
   if (E) for (const k of E.keys()) keys.add(k);
@@ -183,7 +216,7 @@ function villages(pp) {
     const va = BF.villageLife && BF.villageLife.villageAge ? BF.villageLife.villageAge(key) : null;   // game days loaded and active
     const H = BF.happiness, happy = H ? (loaded ? H.score(rec) : H.last(key)) : null;   // js/happiness.js; an unloaded village keeps its last score
     out.villages.push({ key, name: nameOf(key), x: Math.round(x), z: Math.round(z), ...seen(pp, x, z), me: meIn(x, z, pp), north: northAt(x, z), loaded, unload: BF.villageSim && BF.villageSim.countdown ? BF.villageSim.countdown(key) : null, age: va == null ? null : Math.round(va * 10) / 10, happy });
-    if (loaded) out.detail[key] = detail(rec);
+    if (loaded) out.detail[key] = !viewKeys || full || viewKeys.has(key) || !fullSent.has(key) ? (fullSent.add(key), detail(rec)) : lite(rec);
     if (rec && rec.wg && !sentLayouts.has(key)) { out.layouts[key] = layout(rec); sentLayouts.add(key); }
     const a = L.entries(key), last = a[a.length - 1], sig = a.length + "|" + (last ? last[0] + last[2] : "");
     if (logSigs.get(key) !== sig) { out.logs[key] = { key, cap: L.CAP, entries: a }; logSigs.set(key, sig); }
@@ -232,7 +265,7 @@ function vhMerge(a, b) {
   }
   return Object.assign({}, b, { full: a.full, v });
 }
-const resync = () => { vhVer = null; sentLayouts.clear(); logSigs.clear(); econSigs.clear(); sentIcons.clear(); daySig = null; if (BF.glog) BF.glog.feedReset(); };
+const resync = () => { vhVer = null; sentLayouts.clear(); logSigs.clear(); econSigs.clear(); sentIcons.clear(); fullSent.clear(); unLast.clear(); daySig = null; if (BF.glog) BF.glog.feedReset(); };
 // The day timeline of the villager picked on the debug screen (js/daytimeline.js), only when it changed; null once nothing is picked.
 // undefined (left out) when nothing changed, so the feed stays as light as before while nobody is picked.
 function dayline() {
@@ -401,7 +434,8 @@ function threads() {
 }
 
 // The world state hash (js/statehash.js) and its parts, for bug reports: worked out every HASH_EVERY ms (about 15 ms with a 55-villager village loaded), not on every snapshot.
-const HASH_EVERY = 10000;
+// Every minute (it was every 10 s): with 9 villages loaded the hash takes about 130 ms of the simulation thread, a pause each time.
+const HASH_EVERY = 60000;
 let hashT = -Infinity;
 function stateHash() {
   if (!BF.stateHash) return undefined;
@@ -422,14 +456,16 @@ function simPart(ack, copy) {
   const wid = worldId();
   if (wid !== feedWid) { if (feedWid !== null) resync(); feedWid = wid; }
   const pp = BF.player.position;
+  statusMemo.clear(); chestsMemo = null;   // (worked out once a snapshot)
   const mobs = {};
   for (const m of BF.mobs.list) if (!m.dead && !m.removed) { const k = m.type === "chicken" ? (m.coop ? "chicken (coop)" : "chicken (wild)") : m.type === "cow" ? (m.pasture ? "cow (pasture)" : "cow (wild)") : m.type === "pig" ? (m.sty ? "pig (sty)" : "pig (wild)") : m.type; mobs[k] = (mobs[k] || 0) + 1; }   // chickens: penned and wild (js/poultry.js)
   if (BF.boats) Object.assign(mobs, BF.boats.counts());   // boats by wood ("oak_boat": n) next to the mob types
-  return { wid, mobs, professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp), icons: icons(),
+  const part = { wid, mobs, professions: (BF.mobs.professions || []).map(BF.vlog.pretty), ...villages(pp), icons: icons(),
     gt: +(BF.sky.day + BF.sky.time).toFixed(5),   // game time now (days), for the day timeline's "now" edge
     vhist: vhist(),   // village history, new samples (js/villagestats.js): the History panel
     mobmap: Date.now() - mobMapT >= MOBMAP_EVERY ? (mobMapT = Date.now(), mobMap(pp)) : undefined,
     pick: BF.dayTimeline ? { pv: BF.dayTimeline.pv, key: BF.dayTimeline.picked } : null, day: dayline(),
+    view: { vv },   // the villages on the debug screens, as last told (the server sends them again when vv is out of date)
     loadLimits: BF.villageSim && BF.villageSim.LIMITS && BF.mobs.aiTime ? { aiMs: BF.mobs.aiTime(), aiWork: BF.mobs.aiWork ? BF.mobs.aiWork() : 0, maxAiWork: BF.villageSim.LIMITS.aiWork, villages: BF.villageSim.status().split(" ")[0] | 0, maxVillages: BF.villageSim.LIMITS.villages } : null,
     loadErrors: BF.villageSim && BF.villageSim.errors ? BF.villageSim.errors().slice(-30) : [],   // loading errors (js/villagesim.js)
     routes: BF.merchant ? BF.merchant.routes().map(r => Object.assign(r, { an: nameOf(r.a), bn: nameOf(r.b) })) : null,   // caravan routes (js/merchant.js)
@@ -442,6 +478,8 @@ function simPart(ack, copy) {
     threads: BF.page ? threads().slice(1) : threads(),   // the simulation's threads, how busy (on the page: its followers; the page's entry is its own)
     hash: copy ? undefined : stateHash(),   // the world state hash and its parts (js/statehash.js)
     glog: BF.glog ? BF.glog.feed() : undefined, build: BF.glog ? BF.glog.build.commit : undefined };   // the game log's new entries; the commit running
+  statusMemo.clear(); chestsMemo = null;   // (nothing held between snapshots)
+  return part;
 }
 // The server's answer, the simulation's part of it. screens: how many debug screens are open (the villager-seconds meter runs while any
 // is, js/perf.js); off the page the simulation hears it here (r15-43)
@@ -451,6 +489,12 @@ function applyAck(o) {
   if (o.glogAt != null && BF.glog) BF.glog.feedAt(o.glogAt);   // the server holds the game log up to there
   if (o.build && BF.glog) BF.glog.diskBuild(o.build);          // the commit on disk isn't the one running
   if ("pick" in o && BF.dayTimeline) BF.dayTimeline.pick(o.pick, o.pv);
+  if ("view" in o) {
+    const was = viewKeys ? [...viewKeys].sort().join("|") : null;
+    viewKeys = Array.isArray(o.view) ? new Set(o.view.filter(k => typeof k === "string")) : null; vv = String(o.vv || "0");
+    const now = viewKeys ? [...viewKeys].sort().join("|") : null;
+    if (now !== was && BF.glog) BF.glog.log("INFO", "debug feed", viewKeys && viewKeys.size ? "Debug screen shows " + [...viewKeys].map(nameOf).join(", ") + ": full detail for it 4 times a second, for the other villages every 2 s" : "No village on a debug screen: full detail for every village");
+  }
   if (o.resync) resync();
 }
 if (!BF.page) {   // in the simulation worker: only the feed query (js/simworker.js)
@@ -521,6 +565,7 @@ function update() {
         if (o.glogAt != null) a.glogAt = o.glogAt;
         if (o.build) a.build = o.build;
         if ("pick" in o) { a.pick = o.pick; a.pv = o.pv; }
+        if ("view" in o) { a.view = o.view; a.vv = o.vv; }
         passAck(a);
         if (o.alerts && BF.alerts) BF.alerts.set(o.alerts, o.av);
         if (o.pt && BF.view && BF.view.setDebug) { ptv = o.ptv; BF.view.setDebug(o.pt); }   // a toggle clicked on the debug screen

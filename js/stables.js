@@ -58,13 +58,15 @@ const stats = r => "speed " + r.speed.toFixed(1) + " blocks/s, jump " + r.jump.t
 const villageOK = R => !!(R && BF.horses);   // any village (idea-044: the horse-land rule gave way to builders' check for 2 wild horses within 80 blocks)
 // The village's finished stable: {e (builder entry), rec, owner, box (paddock inside, cells inclusive), gates [[x, z]], out [[x, z]] (in front of
 // the gate), y (floor level = the fence's level), rack {x, y, z}} or null. Read from the blueprint's marks (blueprints.js "stable").
-function stableOf(R) {
+// peek (the status line and holdings, which the debug screen and the trade screen read at any moment): the same stable, but nothing is
+// kept (the cached stable, the generated stable's entry, the blueprint's wood), so reading never changes the world (2026-10-30)
+function stableOf(R, peek) {
   if (!R || !BF.builder) return null;
-  const e = (R.built || BF.builder.builtOf(R) || []).find(x => x.type === "stable" && x.state === "done") || genStable(R);
+  const e = (R.built || BF.builder.builtOf(R) || []).find(x => x.type === "stable" && x.state === "done") || genStable(R, peek);
   if (!e) return null;
   const k = e.ox + "," + e.oy + "," + e.oz + "," + e.rot;
-  if (e._st && e._stKey === k) { e._st.rec = R; return e._st; }
-  const bp = BF.builder.bpOf(e), M = bp.marks || {};
+  if (e._st && e._stKey === k) { if (!peek) e._st.rec = R; return e._st; }
+  const bp = BF.builder.bpOf(e, peek), M = bp.marks || {};
   if (!M.paddock || !M.gate || !M.out) return null;
   const at = ([x, z]) => [e.ox + x, e.oz + z], P = M.paddock.map(at), rk = M.rack ? at(M.rack[0]) : [e.ox, e.oz];
   const st = { e, rec: R, owner: ownerOf(R), y: e.oy, box: { x0: Math.min(P[0][0], P[1][0]), z0: Math.min(P[0][1], P[1][1]), x1: Math.max(P[0][0], P[1][0]), z1: Math.max(P[0][1], P[1][1]) },
@@ -72,15 +74,17 @@ function stableOf(R) {
   st.box.fp = { x0: e.ox, z0: e.oz, x1: e.ox + bp.w, z1: e.oz + bp.d };   // the whole building: horses walk round it, not at its fence
   st.box.gx = st.gates.reduce((a, g) => a + g[0], 0) / st.gates.length + 0.5;   // the gate's middle: a penned horse outside lines up on it to walk in
   st.box.gz = st.gates.reduce((a, g) => a + g[1], 0) / st.gates.length + 0.5;
+  if (peek) return st;
   Object.defineProperty(e, "_st", { value: st, writable: true, enumerable: false, configurable: true });   // "_" keys are dropped from the save too (builder.js clean)
   e._stKey = k;
   return st;
 }
 // A generated stable (village generator 10, worldgen layoutVillage) as a finished builder entry, so the rest reads it the same way.
-function genStable(R) {
+function genStable(R, peek) {
   if (R._gst !== undefined) return R._gst;
   const b = R.wg && (R.wg.buildings || []).find(x => x.type === "stable" && x.rot != null);
   const e = b ? { id: 0, type: "stable", state: "done", gen: true, rot: b.rot, style: R.wg.style | 0, h: 0.5, wood: "oak", ox: b.ox, oy: b.y + 1, oz: b.oz } : null;
+  if (peek) return e;
   Object.defineProperty(R, "_gst", { value: e, writable: true, enumerable: false, configurable: true });
   return e;
 }
@@ -447,7 +451,7 @@ function statusText(m) {
   if (!m || m.profession !== PROF) return "";
   const S = m.stb, tk = S && S.task;
   if (!tk) {
-    if (S && S.waitWild > now() && skyT() < WORK_END) { const st = stableOf(m.village); if (st && horsesOf(st).length < MIN_HORSES) return "Waiting for wild horses to come by"; }
+    if (S && S.waitWild > now() && skyT() < WORK_END) { const st = stableOf(m.village, true); if (st && horsesOf(st).length < MIN_HORSES) return "Waiting for wild horses to come by"; }
     return "";
   }
   if (tk.kind === "catch") return S.stage === "tame" ? "Taming a wild horse" : "Going to catch a wild horse";
@@ -560,7 +564,7 @@ function tick(dt) {
 // What a villager holds besides its pack, for the debug screen (js/debugfeed.js): a stable hand's paddock horses.
 function holdings(m) {
   if (!m || m.profession !== PROF) return null;
-  const st = stableOf(m.village);
+  const st = stableOf(m.village, true);
   if (!st) return { horses: [], paddock: false };
   return { paddock: true, horses: horsesOf(st).map(r => ({ coat: r.coat, foal: isFoal(r) ? 1 : 0, speed: +r.speed.toFixed(1), jump: +r.jump.toFixed(1), hp: r.maxHp,
     price: BF.horses.price(r), penned: r.pen ? 1 : 0, led: r.lead ? 1 : 0, here: r.mob && live(r.mob) ? 1 : 0 })) };

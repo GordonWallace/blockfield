@@ -219,7 +219,13 @@ function startStock(v) {
 }
 
 // ---------------------------------------------------------------- entries (persisted) and their cells
-function bpOf(e) {
+// peek (a status line, a stable's paddock for the debug screen): the same blueprint, but nothing is kept on the entry (its wood, its
+// cached blueprint, a changed blueprint's cell count), so reading at any moment never changes the world (2026-10-30)
+function bpOf(e, peek) {
+  if (peek) {
+    const wood = !e.wood || !BP().woodsAvailable().includes(e.wood) ? BP().styleWood(e.style) : e.wood;
+    return e._bp && e._bpKey === e.rot + "|" + e.style + "|" + wood ? e._bp : BP().get(e.type, e.rot, e.style, e.h, e.opts, wood);
+  }
   if (!e.wood || !BP().woodsAvailable().includes(e.wood)) e.wood = BP().styleWood(e.style);   // planned before woods were chosen: the style's own wood
   const key = e.rot + "|" + e.style + "|" + e.wood;
   if (!e._bp || e._bpKey !== key) {
@@ -1237,7 +1243,7 @@ function statusText(m) {
   const bs = m.bs;
   if (m.sleeping || !allowed()) return "Resting";
   if (!bs) return "Planning";
-  if (bs.mode === "build" && bs.entry) return "Building: " + (bpOf(bs.entry).woody ? bpOf(bs.entry).wood.replace("_", " ") + " " : "") + bs.entry.label + " (" + Math.floor(100 * bs.entry.prog / Math.max(1, bs.entry.n)) + "%)";
+  if (bs.mode === "build" && bs.entry) return "Building: " + (bpOf(bs.entry, true).woody ? bpOf(bs.entry, true).wood.replace("_", " ") + " " : "") + bs.entry.label + " (" + Math.floor(100 * bs.entry.prog / Math.max(1, bs.entry.n)) + "%)";
   if (bs.mode === "fill") return "Fetching water";
   if (bs.mode === "shop" && bs.want) {
     const t = reqText(bs.want.short || {});
