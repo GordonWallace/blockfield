@@ -18,6 +18,11 @@ const { parentPort, workerData } = require("worker_threads");
 const fs = require("fs"), path = require("path"), vm = require("vm");
 const ROOT = path.resolve(__dirname, ".."), JS = path.join(ROOT, "js");
 const idb = require("./idb.js").open(workerData.saves);
+// on a machine with fast and slow cores, this thread on the fast ones and its region workers on the others (server/cores.js place;
+// ./run.sh --no-pin: wherever the system puts them)
+const cores = require("./cores.js");
+const placed = workerData.pin === false ? null : cores.place(1);
+const pinned = !!(placed && cores.pin(placed.leader));
 
 const listeners = { error: [], unhandledrejection: [] };
 Object.assign(globalThis, {
@@ -43,7 +48,9 @@ Object.assign(globalThis, {
   BF_CORES: require("os").availableParallelism ? require("os").availableParallelism() : require("os").cpus().length,
   BF_REGION_SPAWN: (me, n) => {
     const { Worker } = require("worker_threads");
-    const w = new Worker(path.join(__dirname, "regionthread.js"), { workerData: { me, n, play: true } });
+    const p = pinned ? cores.place(n) : null;
+    const w = new Worker(path.join(__dirname, "regionthread.js"), { workerData: { me, n, play: true, pin: p && p.followers } });
+    if (me === 1 && pinned && BFx() && BFx().glog) BFx().glog.log("INFO", "server", "Region workers: " + (p && p.followers ? "on the slower CPUs " + cores.cpuText(p.followers) : "wherever the system puts them (fewer slower cores than workers)"));
     let fn = null, done = false;
     w.on("message", m => { if (fn) fn(m); });
     w.on("error", e => { if (fn && !done) fn({ error: String(e && e.stack || e) }); });
@@ -62,6 +69,7 @@ const glog = text => BFx().glog.log("INFO", "server", text);
 let riversIn = null;
 function ready() {
   const BF = BFx();
+  if (pinned) glog("Simulation thread on the fastest CPUs " + cores.cpuText(placed.leader) + " (the machine's others are slower; ./run.sh --no-pin turns this off)");
   BF.state.paused = true;   // (a thread waiting for its page ticks nothing: the page's speed message starts it, after its world)
   BF.worker.rivers = () => { const st = riversIn; riversIn = null; return st; };
   // a network solved here goes to the server's cache, for the next world on this planet
