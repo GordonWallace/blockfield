@@ -9,6 +9,9 @@
 //    REACH blocks of the player, joins the set, if the time it is expected to take still fits (the current share per running village)
 //    and its chunk data fits the memory budget (memMB of section arrays for the extras). It loads through the normal path: villageSim adds
 //    it to the kept set, world.update generates its chunks, the villagers come out as they do for any village.
+//  - Once a whole game day has been measured, a join is judged by the busiest hour of the last day instead (peak below): the share per
+//    running village then, times the villages running, and one village's share then, so a set that fits at night still fits by day,
+//    and villages can join at night and in the morning too (Gordon, 2026-10-30)
 //  - Over budget for WIN seconds, and no load in the last HOLD seconds: the farthest extras leave the set, as many as the measure is over by
 //    at the current share per running village (up to ADD_MAX, as they join), counting those still unloading as gone already; villageSim
 //    unloads each with the unload countdown (its villagers finish their tasks first, as for any village the player walks away from). It
@@ -37,7 +40,7 @@
 // Under budget with room for several more villages, up to ADD_MAX join in one decision (nearest first), so a fast machine fills up in
 // minutes rather than one village every WIN seconds.
 // API: BF.active = { frame(simMs, raw), decide(px, pz, base) -> [{key, v}], isExtra(key), extras(), set({on, budget, memMB, win, hold, morning,
-//                    cool, reach, minFps, settings}, quiet), opts(), settings(), choose(field, value, quiet) -> settings, adopt(settings, quiet) -> settings, next(field) ->
+//                    cool, reach, minFps, settings}, quiet), opts(), peak(), settings(), choose(field, value, quiet) -> settings, adopt(settings, quiet) -> settings, next(field) ->
 //                    the value after the current one, auto() -> {share, memMB}, describe(settings) -> text, text(), feed(), log(), reset(),
 //                    BUDGETS, CHOICES, DEFAULT }
 (() => {
@@ -95,6 +98,27 @@ const now = () => BF.rworkers.realNow();   // (the wall clock; with region worke
 // frac: the share of each real second the simulation would take at 1x, its ms per game second (the simulation clock's advance: at 4x a
 // frame runs 4 times the ticks; where ticks were dropped the clock moved less and the share comes out over 100%)
 let slice = { sim: 0, real: 0, game: 0, frames: 0 }, slices = [], underMs = 0, overMs = 0, fps = 60, lastClock = null;
+// The day's busiest hour (Gordon, 2026-10-30): each game hour's mean share per running village (game hour index -> {s, n}), the last
+// day's kept. The load is about twice as high from a tenth of the day to the evening as at night (a fixed set of 18 villages on test4),
+// so once a whole day has been measured a join is judged against what the set will need in the day's busiest hour (peak), at any
+// time of day, rather than against the measure now; until then no village joins at night or in the morning (decide).
+let hours = new Map();
+const PEAK_HOURS = 21;   // of the last day's 23 whole hours before this one, at least this many measured before the peak is trusted
+function hourly(frac) {
+  const n = simulated();
+  if (!(n > 0)) return;
+  const hr = Math.floor(dayNow() * 24);
+  let b = hours.get(hr);
+  if (!b) { hours.set(hr, (b = { s: 0, n: 0 })); for (const k of [...hours.keys()]) if (k < hr - 24 || k > hr) hours.delete(k); }
+  b.s += frac / n; b.n++;
+}
+// the share per running village in the busiest whole game hour of the last day, or null until enough of the day was measured
+function peak() {
+  const hr = Math.floor(dayNow() * 24);
+  let best = 0, seen = 0;
+  for (const [k, b] of hours) if (k >= hr - 23 && k < hr && b.n >= 3) { seen++; best = Math.max(best, b.s / b.n); }
+  return seen >= PEAK_HOURS ? best : null;
+}
 function frame(simMs, raw) {
   const c = BF.simNow ? BF.simNow() : null, dg = c != null && lastClock != null ? Math.max(0, c - lastClock) : 0;
   lastClock = c;
@@ -104,6 +128,7 @@ function frame(simMs, raw) {
   const frac = slice.game > 0 ? slice.sim / slice.game : slice.sim / slice.real;
   fps = slice.frames * 1000 / slice.real;
   slices.push({ frac, fps }); if (slices.length > 10) slices.shift();
+  hourly(frac);
   if (frac < joinAt()) { underMs += slice.real; overMs = 0; } else if (frac >= leaveAt()) { overMs += slice.real; underMs = 0; } else underMs = overMs = 0;
   slice = { sim: 0, real: 0, game: 0, frames: 0 };
 }
@@ -181,10 +206,14 @@ function decide(px, pz, base) {
   // fresh window (villages still join the minimum set when the player comes near)
   // and in the first tenth of the day, while the villagers get up and the load climbs to the day's (Gordon's test4 session, 2026-10-30:
   // villages joined at 68% at 0.08 and the measure was 95% by 0.17; a fixed set took twice the night's time from about 0.1 to 0.5)
-  const night = !!(BF.sky && BF.sky.isNight && BF.sky.isNight()) || !!(BF.sky && BF.sky.time < opt.morning);
+  // Once the day's busiest hour is known (peak), joins go by it at any time of day instead.
+  const p = peak();
+  const night = p == null && (!!(BF.sky && BF.sky.isNight && BF.sky.isNight()) || !!(BF.sky && BF.sky.time < opt.morning));
   if (night) underMs = 0;
   // the measure's share per running village (those let go and still unloading are in the measure too)
   const going = leavingNow(), running = base.size + extras.size + going, share = running ? f / running : 0;
+  // what a join is judged by: the measure now, or what the set will need in the busiest hour if that's more (and a village's share then)
+  const want = p != null ? Math.max(f, running * p) : f, each = p != null ? Math.max(share, p) : share;
   if (overMs >= opt.win * 1000 && t - lastLoad >= opt.hold * 1000 && extras.size) {
     overMs = 0;
     const after = f - going * share;   // (the measure once those still unloading have gone)
@@ -197,11 +226,11 @@ function decide(px, pz, base) {
     }
   } else if (underMs >= opt.win * 1000 && !slow && !night && t - lastLoad >= opt.hold * 1000) {   // (the last ones' cost shown first)
     underMs = 0;
-    if (f < joinAt() && f + share <= opt.budget) {
-      // room for this many more at the current share per village, within the limit (the newcomers' cost shows in the next windows). Both:
-      // under the margin, and a village's share still fitting under the limit, which is the one that holds on a small machine, where a
-      // village takes more than the margin (Gordon, 2026-10-30)
-      const room = share > 0 ? Math.min(ADD_MAX, Math.floor((opt.budget - f) / share)) : ADD_MAX;
+    if (want < joinAt() && want + each <= opt.budget) {
+      // room for this many more at the share per village, within the limit (the newcomers' cost shows in the next windows). Both: under
+      // the margin, and a village's share still fitting under the limit, which is the one that holds on a small machine, where a village
+      // takes more than the margin (Gordon, 2026-10-30)
+      const room = each > 0 ? Math.min(ADD_MAX, Math.floor((opt.budget - want) / each)) : ADD_MAX;
       const cand = candidates(px, pz, base, t, ed);
       let added = 0;
       for (const c of cand) {
@@ -210,7 +239,8 @@ function decide(px, pz, base) {
         if (mb > opt.memMB) { if (!decide.memTold) { decide.memTold = true; note(`No more villages: the extra villages' chunk data would pass ${opt.memMB} MB`); } break; }
         extras.set(c.k, { v: c.v, t, d: c.d }); fp.set(c.k, keys);
         lastLoad = t; added++;
-        note(`${vname(c.k)} joins the simulated set, ${Math.round(c.d)} blocks away: the simulation needed ${pct(f)} of each second at 1x for ${opt.win} s, limit ${pct(opt.budget)} (joining up to ${pct(joinAt())})`, c.k);
+        note(`${vname(c.k)} joins the simulated set, ${Math.round(c.d)} blocks away: the simulation needed ${pct(f)} of each second at 1x for ${opt.win} s` +
+          (p != null ? `, ${pct(want)} expected in the day's busiest hour` : "") + `, limit ${pct(opt.budget)} (joining up to ${pct(joinAt())})`, c.k);
       }
     }
   }
@@ -291,6 +321,7 @@ BF.active = {
   isExtra: key => extras.has(key),
   waitCap: key => (leaving.has(key) && !extras.has(key) ? WAIT_CAP : null), waitWhy: key => leaving.get(key) || null, leaving: () => (leavingNow(), [...leaving.keys()]),
   extras: () => [...extras.keys()],
+  peak,
   opts: () => Object.assign({}, opt),
   // tests and the pause menu (a budget chosen there is remembered)
   // (quiet: the page's copy when the simulation is elsewhere; the simulation logs the change)
@@ -325,14 +356,15 @@ BF.active = {
   text,
   // the debug screen's Simulation budget card
   feed: () => ({ on: opt.on, budget: opt.budget, used: used(), fps: Math.round(fps), villages: simulated(), extra: VS() && VS().extraCount ? VS().extraCount() : extras.size, extras: [...extras].map(([k, x]) => ({ key: k, name: vname(k), d: Math.round(x.d) })),
-    under: Math.round(underMs / 1000), over: Math.round(overMs / 1000), memMB: opt.memMB, reach: opt.reach, settings: Object.assign({}, S), log: decisions.slice(-12) }),
+    under: Math.round(underMs / 1000), over: Math.round(overMs / 1000), memMB: opt.memMB, reach: opt.reach, peak: peak(), settings: Object.assign({}, S), log: decisions.slice(-12) }),
   log: () => decisions.slice(),
   // region workers (js/rplay.js): the leader's whole state for a follower's copy as it boots (opt alone isn't enough: the extras, the
   // measure's windows, the clock it measures by and the villages being let go all decide what happens next, and the automatic figures
   // are the leader's machine's)
   state() {
     return { opt: Object.assign({}, opt), S: Object.assign({}, S), extras: [...extras].map(([k, x]) => [k, { v: x.v, t: x.t, d: x.d }]), cooling: [...cooling], leaving: [...leaving],
-      lastLoad, lastN, slices: slices.map(x => Object.assign({}, x)), slice: Object.assign({}, slice), underMs, overMs, fps, lastClock, fixedAt, emptyAt, memTold: !!decide.memTold };
+      lastLoad, lastN, slices: slices.map(x => Object.assign({}, x)), slice: Object.assign({}, slice), underMs, overMs, fps, lastClock, fixedAt, emptyAt, memTold: !!decide.memTold,
+      hours: [...hours].map(([k, b]) => [k, Object.assign({}, b)]) };
   },
   load(s) {
     if (!s || !s.opt) return;
@@ -342,7 +374,8 @@ BF.active = {
     leaving.clear(); for (const [k, w] of s.leaving || []) leaving.set(k, w);
     lastLoad = s.lastLoad; lastN = s.lastN; slices = (s.slices || []).map(x => Object.assign({}, x)); slice = Object.assign({}, s.slice);
     underMs = s.underMs; overMs = s.overMs; fps = s.fps; lastClock = s.lastClock; fixedAt = s.fixedAt; emptyAt = s.emptyAt; decide.memTold = !!s.memTold;
+    hours = new Map((s.hours || []).map(([k, b]) => [k, Object.assign({}, b)]));
   },
-  reset() { leaving.clear(); fixedAt = null; emptyAt = null; lastClock = null; extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, game: 0, frames: 0 }; fps = 60; decide.memTold = false; },
+  reset() { leaving.clear(); fixedAt = null; emptyAt = null; lastClock = null; extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, game: 0, frames: 0 }; fps = 60; decide.memTold = false; hours = new Map(); },
 };
 })();
