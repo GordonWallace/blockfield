@@ -1,7 +1,7 @@
 // Block edits as requests for the simulation's other writers (spec r15-19): bakers' farm work, beekeepers, explorers' tents, glassmakers,
 // toolsmiths, merchants' path wear, chest deliveries (js/storage.js), village sign text, and villagers' and zombies' doors and gates. Kinds on
 // BF.req (js/requests.js), applied in the tick's apply phase in requester order; results arrive before the requester's next think.
-//   cells      target "x,y,z" (the first cell), data {cells: [{x, y, z, id, expect, keep}], take: [{id, n}], give: [{id, n}], emit, actor}.
+//   cells      target "x,y,z" (the first cell), data {cells: [{x, y, z, id, expect, keep}], take: [{id, n}], give: [{id, n}], emit, actor, on}.
 //              All or nothing: every cell loaded and holding `expect` (an id; "free": air, a plant or a replaceable block; null: anything),
 //              the requester (a mob with an inventory) holding `take` and with room for `give` plus the drops of every `keep` cell. Then the
 //              cells are written in order, `take` comes out and `give` and the kept drops go in, by the requester's inventory (fit: false
@@ -14,7 +14,7 @@
 //   doorBreak  target "x,y,z" (the lower half), data {expect: door id}: a zombie breaks a closed door; both halves go, one door drops. The
 //              break progress stays on the zombie (ai.doorT, js/mobs.js); a door opened, closed by someone else or gone is refused.
 // Game log: a WARN "requests" line when a villager loses a contended door to a lower id (at most one a game hour, as it can be frequent).
-// API: BF.blockReq = { cells(m, cells, opts) -> req, door(m, x, y, z, open) -> req, free(id), tick(), reset() }
+// API: BF.blockReq = { cells(m, cells, opts) -> req (opts.on: a result handler's name), onResult(name, fn(m, result, data)), door(m, x, y, z, open) -> req, free(id), tick(), reset() }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -53,7 +53,13 @@ R.on("cells", (req, w) => {
   } finally { if (d.actor && BF.vlog) BF.vlog.actor = null; }
   if (m && Array.isArray(m.inv)) { const T = TR().inv; for (const s of take) T.remove(m.inv, s.id, s.n); for (const s of give) T.add(m.inv, s.id, s.n); }
   return { ok: true, was, got: give };
-});
+}, { onResult(m, req, r) { const fn = req.data.on && results.get(req.data.on); if (fn) fn(m, r, req.data); } });
+// What a cells request's result does, by name (data.on: BF.blockReq.onResult(name, fn(m, result, data))), run by the kind's onResult. A
+// request whose cells are in another cluster waits for the meeting (js/ctick.js) and is delivered there on every worker alike, where a
+// req.then callback runs only on the worker that sent it: an explorer's tent pitched at a cluster's edge was a camp on that worker alone,
+// and the copy check stopped the workers (Gordon's laptop, 2026-10-30). Everything the result needs goes in the data.
+const results = new Map();
+const onResult = (name, fn) => { results.set(name, fn); };   // (not result: js/blockreq.js has that name)
 
 // door: the first requester in a tick fixes the door's state for that tick. Keyed by the canonical cell, so two villagers seeing a door on a
 // face edge from different faces' frames meet on one key (js/planet.js canonCell).
@@ -109,5 +115,5 @@ const door = (m, x, y, z, open) => R.send("door", pk(x, y, z), { open: !!open },
 
 // (with clusters, a group's own count: in its think the last apply it saw was the last tick's or a meeting's, both before 2 * tick - 1)
 function tick() { const C = BF.ctick; return C && C.on && C.cur ? (BF.req.phase === "think" ? 2 * BF.rand.tick - 1 : 2 * BF.rand.tick) : ticks; }
-BF.blockReq = { cells, door, free, tick, reset() { ticks = 0; warnAt = -1e9; doorSet.clear(); } };   // reset: a new world (BF.mobs.clear)
+BF.blockReq = { cells, onResult, door, free, tick, reset() { ticks = 0; warnAt = -1e9; doorSet.clear(); } };   // reset: a new world (BF.mobs.clear)
 })();

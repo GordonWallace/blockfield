@@ -360,20 +360,24 @@ function pitch(m) {
   const site = BF.tents.findSite(m.position.x, m.position.z, 7, blocked);
   if (!site) return false;
   // a request (spec r15-19): all twelve cells and the tent item at once in the apply phase; the camp is made when it is up (refused: the
-  // next evening check finds another site). The blockPlaced events are logged as this villager's (actor).
+  // next evening check finds another site). The blockPlaced events are logged as this villager's (actor). Its result is the named
+  // handler below, not a req.then: a site at its cluster's edge can be in another cluster's land, and that request is delivered at the
+  // meeting on every worker (js/blockreqs.js onResult).
   X.pitching = BF.blockReq.tick();
-  BF.blockReq.cells(m, BF.tents.pitchCells(site.x, site.y, site.z, site.f), { take: [{ id: tentItem(), n: 1 }], emit: true, actor: true }).then(r => {
-    X.pitching = null;
-    if (!r.ok) { log("pitch_refused", m, { at: site.x + "," + site.z, why: r.why }); return; }
-    X.camp = site; X.stage = null; X.target = null; X.deal = null; m.ai.route = null;
-    m.homeBed = m.homeBed || m.bed;
-    m.bed = { x: site.x, y: site.y, z: site.z, f: site.f, tent: true };
-    const k = keyOf(m);
-    if (k) campSet(k, { x: site.x, y: site.y, z: site.z, f: site.f, until: nightEnd() });
-    log("pitch", m, { at: site.x + "," + site.z, away: Math.round(homeDistance(m)) });
-  });
+  BF.blockReq.cells(m, BF.tents.pitchCells(site.x, site.y, site.z, site.f), { take: [{ id: tentItem(), n: 1 }], emit: true, actor: true, on: "explorer.pitch", site });
   return true;
 }
+BF.blockReq.onResult("explorer.pitch", (m, r, d) => {
+  const X = state(m), site = d.site;
+  X.pitching = null;
+  if (!r.ok) { log("pitch_refused", m, { at: site.x + "," + site.z, why: r.why }); return; }
+  X.camp = site; X.stage = null; X.target = null; X.deal = null; m.ai.route = null;
+  m.homeBed = m.homeBed || m.bed;
+  m.bed = { x: site.x, y: site.y, z: site.z, f: site.f, tent: true };
+  const k = keyOf(m);
+  if (k) campSet(k, { x: site.x, y: site.y, z: site.z, f: site.f, until: nightEnd() });
+  log("pitch", m, { at: site.x + "," + site.z, away: Math.round(homeDistance(m)) });
+});
 // Takes the tent down (when it still stands the item comes back, by request: spec r15-19) and gives the villager its own bed again. A tent on
 // land that is not loaded (the explorer came back somewhere else) comes back into its pack straight away and is taken down when its land
 // loads (camps, tick).
@@ -409,7 +413,7 @@ const CAMPERS = new Set(["explorer", "merchant"]);
 // tent down a second time when the night ends (tick), and the copies' blocks would differ.
 // In key order: campers in two regions pitch in whichever order their regions think, so the map's own order isn't the world's (test/region-tick.js)
 const byKey = () => [...camps].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-const campSet = (k, e) => { camps.set(k, e); if (BF.rworkers) BF.rworkers.touch("camp", k); const C = BF.ctick; if (C && C.filter) campOwner.set(k, C.cur.key); };
+const campSet = (k, e) => { camps.set(k, e); if (BF.rworkers) BF.rworkers.touch("camp", k); const C = BF.ctick; if (C && C.filter && C.cur) campOwner.set(k, C.cur.key); };   // (at a meeting: the meeting's end works the owners out, campOwners)
 // Clusters (spec r15-39b, js/ctick.js): the cluster that looks after each camp in tick (below) this interval, worked out at each meeting on
 // every worker alike: its camper's cluster when it is loaded (a merchant on the road is in the cluster it walks through), else its
 // village's; a camp made since, the cluster that made it.

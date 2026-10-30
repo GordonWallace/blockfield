@@ -15,7 +15,9 @@
 // paid yet; clusters on workers, spec r15-39b, take over). One is none. They need SharedArrayBuffer (a cross-origin isolated page:
 // ./run.sh).
 // Game log: INFO "workers" when they start for a world (how many), each switch to split or solo (with ms a tick before and after), and
-// when they stop; ERROR when one crashes, boots a different world or no longer matches.
+// when they stop; ERROR when one crashes, boots a different world or no longer matches. A follower's own ERROR lines (a mob it ran stuck, a
+// request it sent with callbacks: its game log goes nowhere else) come into the leader's log under their own kind, "worker n: ..." (at
+// most FWD_HOUR a game hour from each).
 // Each follower sends its thread's busy share (js/threadload.js) with a batch's answer about once a second: status().loads, for the
 // debug screen's Threads card.
 // Clusters (spec r15-39b, settings.kind "clusters": the page's ?clusters=1, the world server's --clusters): the split is the cluster tick on
@@ -47,6 +49,7 @@ const now = () => performance.now();
 const MAX = 8;            // the most worth asking for: each follower holds a whole copy of the world (memory), and the exchange grows with more
 const TRIAL = 200;        // ticks of a split trial
 const BACKOFF = 2000;     // ticks before trying a split again after one that didn't pay (doubles each time, up to 16x)
+const FWD_HOUR = 20;      // a follower's ERROR lines a game hour sent on to the leader's log
 const BUSY_MS = 2000;     // real ms of dropped ticks before a split is tried
 const LOAD_MS = 30000;    // real ms at 1x with the simulation's thread busy (js/active.js pressed: 65% of each second, or the Distant villages
                           // limit holding villages back) before a split is tried (Gordon, 2026-10-30: at 1x the workers never split)
@@ -140,6 +143,7 @@ function onFollower(f, epoch, m) {
     f.booted = true; L.ready++;
     if (L.ready === L.list.length) log("INFO", "Region workers: all " + L.list.length + " followers ready (" + L.list.map(x => L.ticks - x.ticks).join("/") + " ticks behind)");
   }
+  if (m.errorLine && BF.glog) BF.glog.log("ERROR", m.errorLine[0], "worker " + f.me + ": " + m.errorLine[1]);
   if (m.ticks != null) f.ticks = m.ticks;
   if (m.load) f.load = m.load;   // its thread's busy share (js/threadload.js), about once a second
   if (m.hashAt != null) soloCheck(f, m);
@@ -443,7 +447,13 @@ function follower(post) {
   function boot(b) {
     const w = b.world;
     me = b.me; n = b.n; verify = b.verify || 0; trail = !!b.trail;
-    BF.glog.setSink(null);
+    let fwdHour = -1, fwdN = 0;   // (its ERROR lines to the leader's log: the page's or world server's file has only the leader's)
+    BF.glog.setSink(e => {
+      if (e.l !== "ERROR") return;
+      const h = Math.floor((e.d || 0) * 24);
+      if (h !== fwdHour) { fwdHour = h; fwdN = 0; }
+      if (fwdN++ < FWD_HOUR) post({ errorLine: [e.k, e.x] });
+    });
     BF.boot.initSim();
     if (w.rivers) {
       BF.worldgen.init(BF.makeNoise((w.op === "load" ? w.data.seed : w.seed) >>> 0), { biomeScale: +String(w.rivers.seed).split(":")[1] || 1, villages: 10 });
