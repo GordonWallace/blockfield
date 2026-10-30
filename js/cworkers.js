@@ -153,8 +153,10 @@ function sync() {
     if (!bornHere.has(m)) { const gk = groupOf(m); if (!live.has(gk) || !ownsKey(gk)) continue; }
     const o = {};
     for (const k of Object.keys(m)) o[k] = m[k];   // (a plain copy, its own fields: the codec writes m itself as a reference)
-    born.push([m.id, m.type, R.enc(o, m)]);
+    born.push([m.id, m.type, [o, m]]);
   }
+  const bornE = R.encWhole(born.map(b => b[2]));   // (what lives in a record, such as a builder's entry, as where it is)
+  for (let i = 0; i < born.length; i++) born[i][2] = bornE[i];
   lap("born");
   const mobs = [], sums = [];
   for (const [m, s] of shadows) {
@@ -242,11 +244,9 @@ function sync() {
     for (const [k, e] of p.reg) if (BF.ids.find(k) === undefined) BF.ids.put(R.dec(e, null), k, true);   // (new, or put again: a newborn's bed claimed anew is a new object under its key; quiet, as the other worker's copy of a place this worker has too. A place a record here holds (js/ids.js finder) stays that object)
     for (const [id, type] of p.born) if (BF.ids.live(id) === undefined) { BF.mobs.blank(type, id); fresh.add(id); }
   }
-  for (let w = 0; w < ps.length; w++) {
-    const p = ps[w];
-    if (!p) continue;
-    for (const [id, , e] of p.born) { const m = BF.ids.live(id); if (m) BF.mobs.filled(m, R.dec(e, m), !fresh.has(id)); }
-  }
+  // (their fields go in inside the atLater below: a new mob's objects that live in a village record, such as a builder's entry in its
+  // village's list made in the same interval, are sent as where they are, and are only there once the records' changes are in)
+  const bornIn = [];
   lap("in.born");
   // partial copies: the others' summaries for the meeting, the mobs they removed; who holds each current copy
   if (CW.partial) {
@@ -281,6 +281,9 @@ function sync() {
   I.tablesStep(true);   // (and once for all the applies)
   try { R.atLater(() => { for (let w = 0; w < ps.length; w++) {   // (objects sent as where they are: looked up once every worker's changes are in)
     const p = ps[w];
+    if (p) for (const [id, , e] of p.born) { const m = BF.ids.live(id); if (m) { const o = R.dec(e, m); BF.mobs.filled(m, o, !fresh.has(id)); bornIn.push([m, o, Object.assign({}, m), m.ai && Object.assign({}, m.ai)]); } }
+  } for (let w = 0; w < ps.length; w++) {
+    const p = ps[w];
     if (!p) continue;
     lap(null);
     for (const [key, ops] of p.recs) { const rec = BF.mobs.villages.get(key); if (rec) R.patch(rec, ops); else err("worker " + w + " changed village " + key + ", which this worker doesn't have"); }
@@ -303,6 +306,12 @@ function sync() {
     lap("in.tables");
     for (const [name, key, data] of p.chans) { const ch = R.chan(name); if (ch) ch.set(ch.get(key), data, key); }
   } }); } finally { I.tablesStep(false); }
+  // the new mobs' own fields and their ai's as the lookups left them (filled took them, and made the ai anew, before), where nothing
+  // since put another there (a pen's table links its animals' states)
+  for (const [m, o, was, wasAi] of bornIn) {
+    for (const k of Object.keys(o)) if (k !== "def" && k !== "type" && k !== "ai" && m[k] === was[k] && m[k] !== o[k]) m[k] = o[k];
+    if (o.ai && m.ai && wasAi) for (const k of Object.keys(o.ai)) if (m.ai[k] === wasAi[k] && m.ai[k] !== o.ai[k]) m.ai[k] = o.ai[k];
+  }
   lap("in.atLater");
   // requests: the crossing ones join the meeting's list (it sorts them by due tick, sending group and order); the queued ones go back
   // into their groups' queues, in their order there, for the meeting to file again
