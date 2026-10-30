@@ -1020,6 +1020,7 @@ function stamp() { return (RW.clock = Math.round(now() * 1000) / 1000); }
 function realNow() { return RW.clock != null ? RW.clock : now(); }
 function tick(h) {
   if (!RW.journal) return;
+  if (RW.beforeTick) RW.beforeTick();   // (js/rplay.js: what waited for a meeting goes in first, and an interval opens)
   RW.journal.push(["t", h, stamp()]);
   if (RW.onTick) RW.onTick();   // (js/rplay.js: the ops go out before the tick, so the followers can start it with the leader)
 }
@@ -1054,7 +1055,7 @@ function hourly() {
   hourT = Object.assign({}, T);
 }
 
-Object.assign(RW, { journal: null, clock: null, onTick: null, onTouch: null, chan: name => channels.get(name), rec, stamp, realNow, tick, pause, channel, touch, writes, dynItem, setup, stop, beginThink, thinking, afterThink, beforeDeliver, afterDeliver, stats, text, hourly, replan,
+Object.assign(RW, { journal: null, clock: null, onTick: null, beforeTick: null, onTouch: null, chan: name => channels.get(name), rec, stamp, realNow, tick, pause, channel, touch, writes, dynItem, setup, stop, beginThink, thinking, afterThink, beforeDeliver, afterDeliver, stats, text, hourly, replan,
   enc, dec, Shadow, snap, diff, patch, makeShared, attach, SKIP, REBALANCE, SOLO_MS, refsOn,
   ownerOf, unitOf,   // (read only: the debug screen's Regions map colours each region by the worker its mobs think on, js/debugfeed.js)
   refs: refsOn, encData, encMany, encWhole, decAll, atLater });
