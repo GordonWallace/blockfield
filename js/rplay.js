@@ -19,7 +19,7 @@
 // Each follower sends its thread's busy share (js/threadload.js) with a batch's answer about once a second: status().loads, for the
 // debug screen's Threads card.
 // Clusters (spec r15-39b, settings.kind "clusters": the page's ?clusters=1, the world server's --clusters): the split is the cluster tick on
-// every copy, each worker running its own clusters with partial copies (js/cworkers.js), meeting every 20 ticks; the journal still
+// every copy, each worker running its own clusters with partial copies (js/cworkers.js), meeting every BF.ctick.MEET ticks; the journal still
 // brings every copy the client's packets and the chunks, and goes out every tick while they meet. Back to one: at the next meeting every
 // worker takes the whole world (cworkers.leave) and the leader goes on running every cluster, the followers replaying it; the cluster
 // tick goes off only when the followers go (end: the copies' tables are in different orders after a split, which only the plain tick
