@@ -152,8 +152,10 @@ function sync() {
     if (!bornHere.has(m)) { const gk = groupOf(m); if (!live.has(gk) || !ownsKey(gk)) continue; }
     const o = {};
     for (const k of Object.keys(m)) o[k] = m[k];   // (a plain copy, its own fields: the codec writes m itself as a reference)
-    born.push([m.id, m.type, R.encWhole(o, m)]);   // (what lives in a record, such as a builder's entry, as where it is)
+    born.push([m.id, m.type, [o, m]]);
   }
+  const bornE = R.encWhole(born.map(b => b[2]));   // (what lives in a record, such as a builder's entry, as where it is)
+  for (let i = 0; i < born.length; i++) born[i][2] = bornE[i];
   lap("born");
   const mobs = [], sums = [];
   for (const [m, s] of shadows) {
@@ -278,7 +280,7 @@ function sync() {
   I.tablesStep(true);   // (and once for all the applies)
   try { R.atLater(() => { for (let w = 0; w < ps.length; w++) {   // (objects sent as where they are: looked up once every worker's changes are in)
     const p = ps[w];
-    if (p) for (const [id, , e] of p.born) { const m = BF.ids.live(id); if (m) { const o = R.dec(e, m); BF.mobs.filled(m, o, !fresh.has(id)); bornIn.push([m, o]); } }
+    if (p) for (const [id, , e] of p.born) { const m = BF.ids.live(id); if (m) { const o = R.dec(e, m); BF.mobs.filled(m, o, !fresh.has(id)); bornIn.push([m, o, Object.assign({}, m), m.ai && Object.assign({}, m.ai)]); } }
   } for (let w = 0; w < ps.length; w++) {
     const p = ps[w];
     if (!p) continue;
@@ -303,10 +305,11 @@ function sync() {
     lap("in.tables");
     for (const [name, key, data] of p.chans) { const ch = R.chan(name); if (ch) ch.set(ch.get(key), data, key); }
   } }); } finally { I.tablesStep(false); }
-  // the new mobs' own fields and their ai's as the lookups left them (filled took them, and made the ai anew, before)
-  for (const [m, o] of bornIn) {
-    for (const k of Object.keys(o)) if (k !== "def" && k !== "type" && k !== "ai" && m[k] !== o[k]) m[k] = o[k];
-    if (o.ai && m.ai) for (const k of Object.keys(o.ai)) if (m.ai[k] !== o.ai[k]) m.ai[k] = o.ai[k];
+  // the new mobs' own fields and their ai's as the lookups left them (filled took them, and made the ai anew, before), where nothing
+  // since put another there (a pen's table links its animals' states)
+  for (const [m, o, was, wasAi] of bornIn) {
+    for (const k of Object.keys(o)) if (k !== "def" && k !== "type" && k !== "ai" && m[k] === was[k] && m[k] !== o[k]) m[k] = o[k];
+    if (o.ai && m.ai && wasAi) for (const k of Object.keys(o.ai)) if (m.ai[k] === wasAi[k] && m.ai[k] !== o.ai[k]) m.ai[k] = o.ai[k];
   }
   lap("in.atLater");
   // requests: the crossing ones join the meeting's list (it sorts them by due tick, sending group and order); the queued ones go back
