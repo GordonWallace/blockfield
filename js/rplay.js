@@ -73,6 +73,7 @@ function setup(o) {
   L.policy = o.split === "always" || o.split === "never" ? o.split : "auto";
   L.kind = o.kind === "clusters" ? "clusters" : "regions";   // (what a split shares: the regions' thinking each tick, or the clusters, js/cworkers.js)
   L.verify = o.verify > 0 ? o.verify | 0 : VERIFY;   // (tests: ?verify=N compares the copies every N split ticks)
+  L.trail = o.verify > 0;   // (the cells' trail only when ?verify= asks: noting the calls behind every block edit cost about 0.3 ms a tick on test4, for the rest of the session)
   if (L.want > 1 && !L.spawn) { L.why = "region workers run only on the world server (./run.sh)"; L.want = 1; }
   if (L.want > 1 && typeof SharedArrayBuffer !== "function") { L.why = "no SharedArrayBuffer here"; L.want = 1; }
   return L.want;
@@ -93,7 +94,7 @@ function begin(world) {
   world.player = player();   // (the look and the rest the title world left: a new world keeps them)
   world.clock = BF.simNow();   // the simulation clock goes on from world to world (js/timewarp.js): a fresh follower starts where the leader is
   world.villageSim = BF.villageSim && BF.villageSim.state ? BF.villageSim.state() : null;   // (when it last checked the simulated set: js/villagesim.js)
-  BF.world.trail = L.verify ? new Map() : null;   // (tests: who wrote each cell, for a cell that differs: js/world.js)
+  BF.world.trail = L.trail ? new Map() : null;   // (tests, ?verify=: who wrote each cell, for a cell that differs: js/world.js)
   L.world = world; L.ticks = 0; L.solo = new Map(); L.diff = null; L.recent = []; L.ready = 0; L.split = false; L.trial = null; L.backoff = BACKOFF; L.retryAt = 0; L.busySince = null;
   L.soloMs = null; L.plainMs = null; L.plainTicks = 0; L.splitMs = null; L.loopT0 = null; L.loopTicks = 0;
   { const h = BF.stateHash.full(); L.hash = h.hash; L.bootParts = h.parts; L.bootText = L.verify ? texts() : null; }   // (the followers must boot the same world)
@@ -104,7 +105,7 @@ function begin(world) {
   for (let me = 1; me < n; me++) {
     const f = { me, booted: false, ticks: 0, h: L.spawn(me, n) };
     f.h.on(m => onFollower(f, epoch, m));
-    f.h.post({ boot: { world, me, n, verify: L.verify, three: L.three } });
+    f.h.post({ boot: { world, me, n, verify: L.verify, trail: L.trail, three: L.three } });
     L.list.push(f);
   }
   log("INFO", "Region workers: " + n + " for this world (" + (n - 1) + " followers starting; " + (L.kind === "clusters" ? "the clusters are" : "the regions' thinking is") + " split when it pays)");
@@ -307,10 +308,10 @@ function setPlayer(a) {
 }
 
 // ---------------------------------------------------------------- a follower
-// follower(post) -> the message handler: {boot: {world, me, n, verify}}, {ops: [...]}, {end}. Answers {booted: hash}, {ticks: n} after each
+// follower(post) -> the message handler: {boot: {world, me, n, verify, trail}}, {ops: [...]}, {end}. Answers {booted: hash}, {ticks: n} after each
 // batch, {error} (and stops the barrier, so a split tick on the leader fails at once rather than waiting).
 function follower(post) {
-  let me = 0, n = 1, ticks = 0, host = null, link = null, verify = 0;
+  let me = 0, n = 1, ticks = 0, host = null, link = null, verify = 0, trail = false;
   const kept = new Map();   // (tests) the texts of the copy at the last few solo checks
   const op = o => {
     switch (o[0]) {
@@ -377,7 +378,7 @@ function follower(post) {
   }
   function boot(b) {
     const w = b.world;
-    me = b.me; n = b.n; verify = b.verify || 0;
+    me = b.me; n = b.n; verify = b.verify || 0; trail = !!b.trail;
     BF.glog.setSink(null);
     BF.boot.initSim();
     if (w.rivers) {
@@ -397,7 +398,7 @@ function follower(post) {
     if (w.player) setPlayer(w.player);
     if (w.active && w.active.opt && BF.active && BF.active.load) BF.active.load(w.active);   // (after the world: starting it resets the budget's state)
     if (w.villageSim && BF.villageSim && BF.villageSim.load) BF.villageSim.load(w.villageSim);   // (after the world too)
-    BF.world.trail = verify ? new Map() : null;   // (tests: who wrote each cell, as on the leader)
+    BF.world.trail = trail ? new Map() : null;   // (tests: who wrote each cell, as on the leader)
     // a protocol host whose output goes nowhere: the client's packets do here what they did on the leader
     host = BF.proto.host(() => {}, { replica: true, follower: true, world: () => new Promise(() => {}), onView: v => { if (v.dist > 0 && v.dist !== BF.world.viewDist) BF.world.setViewDist(v.dist); } });
     { const h = BF.stateHash.full(); post({ booted: h.hash, parts: h.parts, texts: verify ? texts() : null }); }
