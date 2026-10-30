@@ -21,11 +21,11 @@ The hash is made from separate parts, each with its own hash, so when two worlds
 
 Village logs, economy tallies, happiness and day timelines are not in the hash. They record what happened, and nothing in the simulation reads them back.
 
-Positions are rounded to 1/1024 of a block, and anything that is only drawing or sound (models, walking animation, arm swings, items bobbing on the ground, particles, sound timers) is left out. Working out the hash doesn't change the world.
+Positions are rounded to 1/1024 of a block, and anything that is only drawing or sound (models, walking animation, arm swings, items bobbing on the ground, particles, sound timers) is left out. Working out the hash doesn't change the world. (Until late in 1.5 it did, once: hashing, like saving, made an explorer's working state before its first think, with a random roll of its own, so a world hashed or saved early played differently.)
 
 ## Where to see it
 
-- The debug screen (`./run.sh`, then the debug screen) has a **State hash** card: the hash, the game day it was taken at, and the parts. It updates every 10 seconds. **Copy** puts the hash, its day and the parts on the clipboard for a bug report.
+- The debug screen (`./run.sh`, then the debug screen) has a **State hash** card: the hash, the game day it was taken at, and the parts. It updates once a minute (every 10 seconds before late 1.5: with several villages loaded the hash takes about a tenth of a second of the simulation's time). **Copy** puts the hash, its day and the parts on the clipboard for a bug report.
 - The [[page:game-log]] records the hash as each game day starts (INFO, kind *State hash*).
 
 ## The determinism test

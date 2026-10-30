@@ -371,13 +371,13 @@ function reservedForMemory(k, m) {
   if (!s || !BF.mobs || (memValid(m) && m.jobMem.prof === s.prof)) return false;
   return reaching(s, o => o !== m && !o.jobsite && memValid(o) && o.jobMem.prof === s.prof).length > 0;
 }
-function claimedByOther(k, m) {
+function claimedByOther(k, m, peek) {
   if (reservedForMemory(k, m)) return true;
   const o = claims.get(k);
   if (o) {
     if (o.mob === m || (o.key && o.key === vkey(m))) return false;
-    if (o.mob && o.mob.dead) { claims.delete(k); return false; }
-    if (!o.key && (!o.mob || o.mob.removed)) { claims.delete(k); return false; }
+    if (o.mob && o.mob.dead) { if (!peek) claims.delete(k); return false; }
+    if (!o.key && (!o.mob || o.mob.removed)) { if (!peek) claims.delete(k); return false; }
     return true;
   }
   const pl = planIndex.get(k);
@@ -394,14 +394,17 @@ function center(o) {
   return o.x != null && o.z != null ? { x: o.x, z: o.z } : null;
 }
 // Unclaimed jobsite blocks (loaded, still standing) within `radius` of a village / position / mob. `forMob` treats its own claims as free.
-function unclaimed(where, radius, forMob) {
+// peek (F3's village panel and the debug screen, js/villagelog.js panelData, js/debugfeed.js): the same list, but a site whose block is
+// gone and a dead or removed villager's claim are only skipped, not dropped, so reading never changes the world. Both tables are the
+// clusters' shared state (C.ownedMap below), so a screen's read dropping one on the leader also made the workers' copies differ (2026-10-30).
+function unclaimed(where, radius, forMob, peek) {
   hook();
   const c = center(where), R = radius || reachOf(where), out = [], W = BF.world;
   if (!c) return out;
   for (const [k, s] of sites) {
     if (Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) > R) continue;
-    if (W && W.isLoaded(s.x, s.z) && W.getBlock(s.x, s.y, s.z) !== s.id) { sites.delete(k); continue; }
-    if (claimedByOther(k, forMob || null)) continue;
+    if (W && W.isLoaded(s.x, s.z) && W.getBlock(s.x, s.y, s.z) !== s.id) { if (!peek) sites.delete(k); continue; }
+    if (claimedByOther(k, forMob || null, peek)) continue;
     out.push(s);
   }
   return out;

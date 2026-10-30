@@ -564,7 +564,9 @@ function statusText(m) {
   return blankSlots(m).length ? "has a blank map" : "looking for a map";
 }
 // fin: names of shelved maps (older saves: maps it gave up on, which it then sold). After a load it tries them again straight away.
-const pack = m => { const X = state(m); return { fin: Object.keys(X.fin), camp: X.camp || undefined }; };
+// (reads m.ex without making it: state(m) rolls its first cooldown from the villager's stream, and the save and the state hash, which the
+// debug screen asks for every 10 s, packed every explorer before its first think, so a world saved or hashed early played differently, 2026-10-30)
+const pack = m => { const X = m.ex; return { fin: X ? Object.keys(X.fin) : [], camp: (X && X.camp) || undefined }; };
 function unpack(m, o) {
   const X = state(m);
   if (o && Array.isArray(o.fin)) for (const n of o.fin) if (typeof n === "string") X.fin[n] = -1;

@@ -111,6 +111,18 @@ let latest = null, lastPush = 0, pushes = 0, seed = null, wid = null;   // seed,
 // The villager picked on the debug screen (its village key#slot, js/daytimeline.js): passed to the game in the answer to its next
 // snapshot, like the alerts; the game then adds that villager's day timeline to its snapshots. day: the last timeline it sent.
 let pick = null, pv = "0", day = null;
+// The village each open debug screen shows (POST /view, again every few seconds while it stays open): passed to the game the same way
+// (view, vv), so the game sends those villages' full detail in every snapshot and the others' only every 2 s (js/debugfeed.js). A screen
+// not heard from for VIEW_TTL ms is dropped. With none, the game sends every village's full detail, as before.
+const views = new Map(), VIEW_TTL = 15000;   // village key -> when a screen last said it shows it
+let vv = "0", vSig = "";
+function viewList() {
+  const t = Date.now();
+  for (const [k, at] of views) if (t - at > VIEW_TTL) views.delete(k);
+  const list = [...views.keys()].sort(), sig = list.join("|");
+  if (sig !== vSig) { vSig = sig; vv = String(t); }
+  return list;
+}
 // A planet debug toggle clicked on the debug screen ({tints | wedge | sphere: bool}, js/view.js setDebug): passed to the game the same
 // way. The game's snapshots carry the toggles as they are (pt), which is what the screen shows.
 let ptReq = null, ptv = "0";
@@ -203,7 +215,8 @@ function take(s) {
   if (newWid) wid = s.wid;
   const obj = o => (o && typeof o === "object" ? o : {});
   for (const k in obj(s.layouts)) layouts.set(k, s.layouts[k]);
-  for (const k in obj(s.detail)) details.set(k, s.detail[k]);
+  // a light detail (js/debugfeed.js lite: a village no screen shows, between its full ones) goes over the last full one
+  for (const k in obj(s.detail)) { const d = s.detail[k]; details.set(k, d && d.lite && details.has(k) ? Object.assign({}, details.get(k), d) : d); }
   for (const k in obj(s.icons)) icons.set(k, s.icons[k]);
   for (const k in obj(s.econ)) econ.set(k, s.econ[k]);
   if (s.day !== undefined) day = s.day && typeof s.day === "object" ? s.day : null;
@@ -237,10 +250,11 @@ function take(s) {
   // a fresh server holds no layouts or logs yet: ask the game to send them all again
   const resync = pushes++ === 0, stale = !s.alerts || s.alerts.av !== av;   // the game's alerts are out of date: send them along
   const staleP = !!s.pick && s.pick.pv !== pv;                                 // so is its picked villager
+  const vl = viewList(), staleV = !!s.view && s.view.vv !== vv;              // and the villages the screens show
   const staleT = !!ptReq && !!s.pt && s.pt.tv !== ptv;                         // and a planet toggle it hasn't applied
   const warp = warpAfter(s.wc, s.ff);   // fast-forward steps the game hasn't applied
   const staleS = (s.screens | 0) !== clients.size;                             // and how many debug screens are open (the perf meter runs while any is, js/perf.js)
-  const o = stale || staleP || staleT || staleS || glogAt != null || build || warp.length ? Object.assign({ resync }, stale ? { av, alerts } : {}, staleP ? { pick, pv } : {}, staleT ? { pt: ptReq, ptv } : {}, staleS ? { screens: clients.size } : {}, glogAt != null ? { glogAt } : {}, build ? { build } : {}, warp.length ? { warp } : {}) : null;
+  const o = stale || staleP || staleV || staleT || staleS || glogAt != null || build || warp.length ? Object.assign({ resync }, stale ? { av, alerts } : {}, staleP ? { pick, pv } : {}, staleV ? { view: vl, vv } : {}, staleT ? { pt: ptReq, ptv } : {}, staleS ? { screens: clients.size } : {}, glogAt != null ? { glogAt } : {}, build ? { build } : {}, warp.length ? { warp } : {}) : null;
   return o || (resync ? "resync" : "ok");
 }
 // Allow-Private-Network: Chrome asks before a page from a network address (a LAN IP) talks to this machine's localhost
@@ -286,6 +300,17 @@ function serveDebug(req, res) {
       const k = o && typeof o.key === "string" ? o.key.slice(0, 80) : null;
       if (k !== pick) { pick = k; pv = String(Date.now()); if (!k) day = null; }
       res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ pick, pv }));
+    }).bind(null, req, res));
+    return;
+  }
+  if (url.pathname === "/view" && req.method === "POST") {   // a debug screen shows this village ({key}); sent again every few seconds
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", c => { body += c; if (body.length > 1e4) req.destroy(); });
+    req.on("end", safe(() => {
+      let o; try { o = JSON.parse(body); } catch (e) { res.writeHead(400, cors()).end("bad json"); return; }
+      if (o && typeof o.key === "string" && o.key) views.set(o.key.slice(0, 80), Date.now());
+      res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ view: viewList(), vv }));
     }).bind(null, req, res));
     return;
   }

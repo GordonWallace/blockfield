@@ -397,7 +397,7 @@ function start(o) {
 
   // ---- the debug screen, read from the simulation here
   let feedN = 0, feeding = false, fedAt = 0;
-  const SIM_ACK = ["glogAt", "build", "pick", "pv", "resync"];
+  const SIM_ACK = ["glogAt", "build", "pick", "pv", "view", "vv", "resync"];
   async function feed() {
     const s = srv.active && srv.active.ready && !srv.active.crashed ? srv.active : srv.held && srv.held.ready ? srv.held : null;
     if (!debug || feeding || !s) return;

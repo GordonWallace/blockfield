@@ -547,7 +547,9 @@ setInterval(status, 1000);
 function onSnap(s) {
   sameWorld(s);
   if (s.glog) glogIn(s.glog);
-  Object.assign(layouts, s.layouts || {}); Object.assign(details, s.detail || {}); Object.assign(icons, s.icons || {});
+  Object.assign(layouts, s.layouts || {}); Object.assign(icons, s.icons || {});
+  // a light detail (a village this screen isn't showing, between its full ones every 2 s: js/debugfeed.js lite) goes over the last full one
+  for (const k in s.detail || {}) { const d = s.detail[k]; details[k] = d && d.lite && details[k] ? Object.assign({}, details[k], d) : d; }
   if (s.day !== undefined) dayData = s.day;   // the picked villager's day timeline, when it changed (js/daytimeline.js)
   let logChanged = false, econChanged = false;
   for (const k in s.logs || {}) { logs[k] = s.logs[k]; if (k === viewKey) logChanged = true; }
@@ -572,8 +574,18 @@ function pickView(s) {
   const list = s.villages || [];
   const k = pinned && list.some(v => v.key === pinned) ? pinned : (list[0] && list[0].loaded ? list[0].key : null);
   if (k !== viewKey) { viewKey = k; hlName = null; }
+  sendView(viewKey);
   layout = viewKey ? layouts[viewKey] || null : null;
   log = viewKey ? logs[viewKey] || null : null;
+}
+
+// The village on show goes to the server (POST /view), which tells the game: it sends that village's full detail in every snapshot and the
+// others' every 2 s (js/debugfeed.js). Sent when it changes and again every 5 s, so a closed screen's village drops out after 15 s.
+let viewSent, viewSentAt = 0;
+function sendView(key) {
+  if (!key || (key === viewSent && Date.now() - viewSentAt < 5000)) return;
+  viewSent = key; viewSentAt = Date.now();
+  fetch("view", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ key }) }).catch(() => { viewSent = undefined; });
 }
 
 // ---------------------------------------------------------------- village list

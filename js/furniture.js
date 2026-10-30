@@ -46,8 +46,8 @@ const chests = m => TR().inv.count(m.inv, BF.I.chest);
 const furnaces = m => (BF.B.furnace != null ? TR().inv.count(m.inv, BF.B.furnace) : FURNACE_STOCK);
 const isCobble = id => id === BF.I.cobblestone;
 const furnacesWanted = m => Math.max(0, FURNACE_STOCK - furnaces(m));
-const orders = m => (BF.storage && m.village ? BF.storage.orders(m.village) : []);
-const chestsWanted = m => Math.max(0, Math.min(CHEST_STOCK, orders(m).length) - chests(m));   // chests still to make for open orders
+const orders = (m, peek) => (BF.storage && m.village ? BF.storage.orders(m.village, peek) : []);
+const chestsWanted = (m, peek) => Math.max(0, Math.min(CHEST_STOCK, orders(m, peek).length) - chests(m));   // chests still to make for open orders (peek: js/storage.js orders)
 // Takes n items of a kind (wool, planks, logs) from the inventory, the biggest stacks first. Returns how many were taken.
 function take(m, f, n) {
   let left = n;
@@ -74,11 +74,11 @@ function seed(a) {
 }
 
 // What it could make right now: {kind: "chest" | "bed" | "planks"} or null. Chests for open orders come first.
-function plan(m) {
+function plan(m, peek) {   // (peek: reading changes nothing, for statusText)
   if (!m || !m.inv || BF.I.red_bed == null) return null;
   const inv = TR().inv, I = BF.I;
   const planks = sum(m, isPlanks);
-  if (I.chest != null && chestsWanted(m) > 0) {
+  if (I.chest != null && chestsWanted(m, peek) > 0) {
     if (planks >= CHEST_PLANKS && inv.canFit(m.inv, [{ id: I.chest, n: 1 }], [])) return { kind: "chest" };
     if (planks < CHEST_PLANKS && sum(m, isLog) > 0 && inv.canFit(m.inv, [{ id: I.planks, n: LOG_PLANKS }], [])) return { kind: "planks" };
   }
@@ -318,7 +318,8 @@ function statusText(m) {
   if (!m || m.profession !== "furniture_maker") return "";
   const sh = m.furn;
   if (sh && sh.stage && sh.deal) return sh.deal.kind === "deliver" ? "Delivering a chest" : sh.deal.kind === "sell" ? "Taking beds to a builder" : "Buying " + (isWool(sh.deal.item) ? "wool" : isCobble(sh.deal.item) ? "cobblestone" : "boards");
-  if (m.job && m.job.mode === "work" && plan(m)) return plan(m).kind === "chest" || chestsWanted(m) > 0 ? "Making a chest" : plan(m).kind === "furnace" ? "Making a furnace" : "Making beds";
+  const p = m.job && m.job.mode === "work" && plan(m, true);   // (peek: a status line is read at any moment and must change nothing)
+  if (p) return p.kind === "chest" || chestsWanted(m, true) > 0 ? "Making a chest" : p.kind === "furnace" ? "Making a furnace" : "Making beds";
   return "";
 }
 
