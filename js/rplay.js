@@ -38,7 +38,7 @@
 // tick, with the swap, only once it has them all. What would reach the followers' clusters (the clock, the rules) can't come late, so
 // while an interval is open the leader holds it for the next meeting (at most MEET ticks): a slash command, waking up (the next
 // morning), the monster options, the Distant villages settings, a test's eval (hold, js/simworker.js).
-// API: BF.rplay = { setup({workers, cores, spawn, split, kind}), begin(world), end(why), frame(raw), flush(), hold(fn, packet) -> true when it waits for the
+// API: BF.rplay = { setup({workers, cores, spawn, split, kind}), begin(world), end(why), loopStart(), frame(raw), flush(), hold(fn, packet) -> true when it waits for the
 //   next meeting, lagging() -> true when the leader runs no ticks this frame (its followers too far behind), status(), text(), follower(post),
 //   (tests) testCrash(me), testSlow(ms), testSolo() }
 //   spawn(me, n) -> {post(msg), on(fn(msg)), terminate()}: a follower (server/regionthread.js, the world server's Node threads; r15-77 dropped the browser's)
@@ -70,7 +70,12 @@ const L = {
   busySince: null, loadSince: null, soloMs: null, plainMs: null, splitMs: null, loopT0: null, loopTicks: 0, shared: null, why: "", lastText: "",
 };
 const log = (l, x) => { if (BF.glog) BF.glog.log(l, "workers", x); };
-const TRIAL_CLUSTERS = 400;   // ticks of a clusters' split trial (the first meetings hand over whole clusters)
+const TRIAL_CLUSTERS = 400;   // ticks of a clusters' split trial, measured after WARM_MEETS meetings
+// The first meetings of a clusters' split hand over whole clusters, the mobs moved and their first views (Gordon's laptop, test4, 8
+// workers, 2026-10-31: 1.6 s at the first meeting, then about 150 and 75 ms more; steady within 10% after about 600 ticks). The trial
+// used to judge the split on an average seeded by that first loop (1629 ms for its one tick, still 28.8 ms a tick at the verdict against
+// a true 6 and 10.8 on one), so every split on test4 was refused. It now leaves those out and judges the busy ms a tick it summed after them.
+const WARM_MEETS = 2;
 const PLAIN_TICKS = 1200;     // plain ticks measured before the first clusters' split (auto)
 const clustered = () => !!(BF.cworkers && BF.cworkers.active);
 // The clusters split over n workers, at this point of the journal on every worker alike: the cluster tick on (every system, the tick
@@ -84,7 +89,7 @@ function clusterOn(sh, me, n, link, verify) {
   BF.cworkers.preExchange = me === 0 ? flush : null;
   // (no village joins for the budget while the trial runs: it compares the split with one on the same villages. Here, at the same point
   // of the journal on every copy)
-  if (BF.active && BF.active.holdJoins) BF.active.holdJoins(BF.rand.tick + TRIAL_CLUSTERS);
+  if (BF.active && BF.active.holdJoins) BF.active.holdJoins(BF.rand.tick + TRIAL_CLUSTERS + WARM_MEETS * BF.ctick.MEET);
 }
 function setup(o) {
   const cores = Math.max(1, o.cores | 0 || 2);
@@ -117,7 +122,7 @@ function begin(world) {
   world.clock = BF.simNow();   // the simulation clock goes on from world to world (js/timewarp.js): a fresh follower starts where the leader is
   world.villageSim = BF.villageSim && BF.villageSim.state ? BF.villageSim.state() : null;   // (when it last checked the simulated set: js/villagesim.js)
   BF.world.trail = L.trail ? new Map() : null;   // (tests, ?verify=: who wrote each cell, for a cell that differs: js/world.js)
-  L.world = world; L.ticks = 0; L.solo = new Map(); L.diff = null; L.recent = []; L.ready = 0; L.split = false; L.trial = null; L.backoff = BACKOFF; L.retryAt = 0; L.busySince = null; L.loadSince = null; L.waited = false; L.heldAt = null; L.worst = null; L.splitAt = null;
+  L.world = world; L.ticks = 0; L.solo = new Map(); L.diff = null; L.recent = []; L.ready = 0; L.split = false; L.trial = null; L.backoff = BACKOFF; L.retryAt = 0; L.busySince = null; L.loadSince = null; L.waited = false; L.heldAt = null; L.worst = null; L.splitAt = null; L.lastTrial = null;
   L.soloMs = null; L.plainMs = null; L.plainTicks = 0; L.splitMs = null; L.loopT0 = null; L.loopTicks = 0;
   { const h = BF.stateHash.full(); L.hash = h.hash; L.bootParts = h.parts; L.bootText = L.verify ? texts() : null; }   // (the followers must boot the same world)
   RW.journal = []; RW.clock = null;
@@ -190,9 +195,11 @@ function onTick() {
   // (tests, ?verify=: while one thinks, the followers' copies are compared too, at the start of every verify-th tick: the journal
   // brought them everything that happened since the last)
   if (L.verify && !L.split && !clustered() && L.ticks % L.verify === 0 && !L.diff) L.solo.set(L.ticks, { parts: BF.stateHash.full().parts, text: texts() });
-  if (L.loopT0 == null) L.loopT0 = now();
+  if (L.loopT0 == null) L.loopT0 = now();   // (play: loopStart already set it, so the loop's own work counts, its meetings' too)
   if (L.split || clustered()) flush();   // (lockstep, or clusters that meet: the followers need this tick now)
 }
+// js/simworker.js, as a loop starts: its ticks' time counts from here (a meeting's exchange in a loop of one tick was missed before)
+function loopStart() { if (L.list.length) L.loopT0 = now(); }
 // The journal so far to every follower.
 function flush() {
   const ops = RW.journal;
@@ -208,7 +215,9 @@ function frame() {
   const t = now(), W = BF.warp;
   if (L.loopTicks > 0 && L.loopT0 != null) {
     const ms = (t - L.loopT0) / L.loopTicks, k = Math.min(1, L.loopTicks / 50);
-    if (L.split) L.splitMs = L.splitMs == null ? ms : L.splitMs + (ms - L.splitMs) * k * 0.5;
+    const warm = L.trial && L.ticks - L.loopTicks < L.trial.from;   // (a loop with ticks of the trial's warm-up: the handover)
+    if (L.trial && !warm) { if (L.trial.t0 == null) L.trial.t0 = L.loopT0; L.trial.ms += t - L.loopT0; L.trial.n += L.loopTicks; }
+    if (L.split && !warm) L.splitMs = L.splitMs == null ? ms : L.splitMs + (ms - L.splitMs) * k * 0.5;
     else L.soloMs = L.soloMs == null ? ms : L.soloMs + (ms - L.soloMs) * k * 0.5;
     // (the plain tick's, kept from before the first clusters' split: after a trial the cluster tick stays on, js/rplay.js toSolo, and a
     // split must beat one thread as it plays without workers, not the cluster tick on one, which was 1.65 times slower on test4)
@@ -236,7 +245,8 @@ function frame() {
       (L.kind !== "clusters" || L.plainTicks >= PLAIN_TICKS));
     if (ready && want && L.policy !== "never") startSplit();
   } else if (L.trial && L.ticks >= L.trial.end) {
-    const before = L.trial.solo, after = L.splitMs;
+    const before = L.trial.solo, after = L.trial.n > 0 ? L.trial.ms / L.trial.n : L.splitMs;
+    L.lastTrial = Object.assign({ at: L.splitAt, after, wall: L.trial.t0 != null ? now() - L.trial.t0 : null }, L.trial);   // (status, tests; wall: real ms from its first counted loop)
     L.trial = null;
     if (L.policy === "auto" && before != null && after != null && after > before * 0.9) {
       toSolo("ticks took " + after.toFixed(1) + " ms split against " + before.toFixed(1) + " ms on one: not worth it");
@@ -266,7 +276,8 @@ function startSplit() {
     clusterOn(L.shared, 0, n, L.link || (L.link = RW.attach(L.shared, 0, n)), L.verify);
     L.split = true; L.splitMs = null; L.ctick = true;
     const one = L.plainMs != null ? L.plainMs : L.soloMs;
-    L.trial = { end: L.ticks + TRIAL_CLUSTERS, solo: one };
+    const from = L.ticks + WARM_MEETS * BF.ctick.MEET;
+    L.trial = { from, end: from + TRIAL_CLUSTERS, solo: one, ms: 0, n: 0 };
     log("INFO", "Region workers: the clusters are split over " + n + " workers (ticks took " + (one != null ? one.toFixed(1) + " ms" : "?") + " on one" +
       (one !== L.soloMs && L.soloMs != null ? ", " + L.soloMs.toFixed(1) + " ms with the cluster tick" : "") + ")");
     return;
@@ -276,7 +287,7 @@ function startSplit() {
   RW.verify = L.verify;
   RW.setup({ n, me: 0, link: L.link || (L.link = RW.attach(L.shared, 0, n)) });
   L.split = true; L.splitMs = null;
-  L.trial = { end: L.ticks + TRIAL, solo: L.soloMs };
+  L.trial = { from: L.ticks, end: L.ticks + TRIAL, solo: L.soloMs, ms: 0, n: 0 };
   log("INFO", "Region workers: the regions' thinking is split over " + n + " workers (ticks took " + (L.soloMs != null ? L.soloMs.toFixed(1) + " ms" : "?") + " on one)");
 }
 function toSolo(why) {
@@ -317,7 +328,7 @@ function end(why, level) {
 function status() {
   const s = RW.active ? RW.stats() : clustered() ? BF.cworkers.stats() : null;
   return { want: L.want, followers: L.list.length, ready: L.ready, split: L.split, policy: L.policy, ticks: L.ticks,
-    behind: L.list.map(f => L.ticks - f.ticks), loads: L.list.map(f => f.load || null), soloMs: L.soloMs, splitMs: L.splitMs, why: L.why || null, worst: L.worst, splitAt: L.splitAt, stats: s };
+    behind: L.list.map(f => L.ticks - f.ticks), loads: L.list.map(f => f.load || null), soloMs: L.soloMs, splitMs: L.splitMs, why: L.why || null, worst: L.worst, splitAt: L.splitAt, lastTrial: L.lastTrial || null, stats: s };
 }
 // The F3 / debug screen line.
 function text() {
@@ -506,5 +517,5 @@ const testSlow = ms => { RW.rec(["slow", +ms || 0]); flush(); };
 // (tests) back to one now (split=always splits again once the followers are ready)
 const testSolo = () => { if (L.split) toSolo("a test"); };
 
-BF.rplay = { setup, begin, end, frame, flush, hold, lagging, status, text, follower, player, testCrash, testSlow, testSolo, MAX, TRIAL, VERIFY };
+BF.rplay = { setup, begin, end, frame, loopStart, flush, hold, lagging, status, text, follower, player, testCrash, testSlow, testSolo, MAX, TRIAL, VERIFY };
 })();

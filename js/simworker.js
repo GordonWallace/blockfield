@@ -108,6 +108,7 @@ function loopBody() {
   if (crashed) return;
   const now = performance.now(), raw = Math.max(0, (now - last) / 1000);
   last = now;
+  BF.rplay.loopStart();   // (region workers: the loop's busy time, js/rplay.js)
   try {
     if (crashNext) { crashNext = false; throw new Error("a test crash (test/sim-worker.js)"); }
     const W = BF.warp, p = BF.player.position;
