@@ -7,6 +7,7 @@
 //   - the save from rows is the save from the mobs sent whole, on every worker, but for drawing-only fields (a walk's phase, a head's
 //     turn), which the whole mobs never carried: the rows have the runner's, the old way kept the stale copy's;
 //   - the hash from rows is the hash from whole mobs, and the same on every worker;
+//   - with two bred villagers in the world (a child and a grown one: js/breeding.js reads their place and profession);
 //   - while the rows' fn runs, every stale copy here is overwritten with junk (and put back after): a module reading a mob another
 //     worker runs without row() would read the junk, so the save or hash would come out different.
 // Usage: node test/cluster-rows.js [--workers 3] [--extra 4] [--seconds 6] [--seeds 3,5]
@@ -29,6 +30,12 @@ function child() {
   const errors = [];
   BF.glog.setSink(e => { if (e.l === 'ERROR' && errors.length < 50) errors.push(e.k + ': ' + e.x); });
   BF.boot.headless({ seed, settings: { at: 'village', extra } });
+  // two bred villagers (js/breeding.js), alike on every worker: a child and one grown up and unemployed. Their village's save part reads
+  // their place and profession (metaOf), so it must read them through the "bred" row (their stale copies here had an old profession)
+  BF.mobs.list.filter(m => m.type === 'villager' && !m.removed && !m.dead && m.village && !m.bred).slice(0, 2).forEach((m, i) => {
+    BF.breeding.makeChild(m, ['farmer', 'farmer']);
+    if (i) { m.child = false; m.profession = 'unemployed'; }
+  });
   const C = BF.ctick, CW = BF.cworkers;
   C.only = C.converted(); C.order = 'tick'; C.on = true;
   CW.shuffle = 1; CW.fixed = true; CW.sizes = {};
