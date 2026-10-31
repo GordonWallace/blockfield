@@ -6,7 +6,8 @@
 // core), and the game fast-forwards at 10x:
 //   - the leader waits for them (the INFO line), so they are never further behind than a split allows (behind x ms a tick <= LAG_MS);
 //   - the game still moves on, at their pace;
-//   - the clusters split (the dropped ticks make it busy), and the trial ends either way; no ERROR in the workers' and clusters' lines.
+//   - the clusters split (the dropped ticks make it busy), and the trial ends either way, judged after the first 2 meetings (the
+//     handover); no ERROR in the workers' and clusters' lines.
 // Usage: NODE_PATH=$(npm root -g) node test/split-lag.js [seed=3]
 const { chromium } = require('playwright');
 const cp = require('child_process'), fs = require('fs'), os = require('os'), path = require('path'), net = require('net');
@@ -112,6 +113,9 @@ let S = null;
   check(split && !!splitLine, `the clusters split (${((Date.now() - t0) / 1000).toFixed(0)} s; ${splitLine.slice(0, 160) || s1.text})`);
   const ended = await until(pg, () => BF.glog.entries().some(e => e.k === 'workers' && /the split pays|not worth it/.test(e.x)), 600000, 'trial');
   check(ended && !s1.mismatch, 'the trial ended, no difference');
+  // (the trial leaves out its first 2 meetings, the handover, and sums the busy ms of the 400 ticks after them: js/rplay.js WARM_MEETS)
+  const tr = (await status(pg)).lastTrial;
+  check(tr && tr.from - tr.at === 160 && tr.n >= 300 && tr.after === tr.ms / tr.n, `the trial was judged after the first 2 meetings, on the ticks after them (${JSON.stringify(tr)})`);
   const errs = (await logLines(pg)).filter(l => /^ERROR/.test(l));
   check(!errs.length, `no ERROR in the workers' and clusters' game log lines${errs.length ? ': ' + errs.slice(0, 3).join(' | ').slice(0, 600) : ''}`);
   for (const l of (await logLines(pg)).slice(-8)) console.log('  log: ' + l.slice(0, 300));
