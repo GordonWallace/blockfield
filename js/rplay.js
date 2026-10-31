@@ -39,7 +39,8 @@
 // while an interval is open the leader holds it for the next meeting (at most MEET ticks): a slash command, waking up (the next
 // morning), the monster options, the Distant villages settings, a test's eval (hold, js/simworker.js).
 // API: BF.rplay = { setup({workers, cores, spawn, split, kind}), begin(world), end(why), frame(raw), flush(), hold(fn, packet) -> true when it waits for the
-//   next meeting, status(), text(), follower(post) }
+//   next meeting, lagging() -> true when the leader runs no ticks this frame (its followers too far behind), status(), text(), follower(post),
+//   (tests) testCrash(me), testSlow(ms), testSolo() }
 //   spawn(me, n) -> {post(msg), on(fn(msg)), terminate()}: a follower (server/regionthread.js, the world server's Node threads; r15-77 dropped the browser's)
 (() => {
 "use strict";
@@ -57,6 +58,10 @@ const VERIFY = 6000;      // split ticks between the copies' hash checks (5 game
 const LAG = 10;           // ticks a follower may be behind for the split to start, or more if replaying them takes at most LAG_MS at the leader's
 const LAG_MS = 2000;      // ms a tick (soloMs): the first meeting waits while they catch up (game seconds at the speed set were far too many on a slow
                           // machine at 100x: 4000 ticks, minutes of replay before the first meeting)
+// While one thinks, a leader faster than its followers (the world server puts it on the fast cores and them on the slower ones, server/
+// cores.js place) would leave them further behind every second, and the split, which waits for them, would never start (Gordon's laptop,
+// 2026-10-30: 3370 ticks behind, never split). So the leader runs no ticks while they are more than half the lag a split allows behind
+// (lagging, js/simworker.js): one thinking goes at the followers' pace until it splits, and then they all go at the split's.
 
 // ---------------------------------------------------------------- the leader
 const L = {
@@ -112,7 +117,7 @@ function begin(world) {
   world.clock = BF.simNow();   // the simulation clock goes on from world to world (js/timewarp.js): a fresh follower starts where the leader is
   world.villageSim = BF.villageSim && BF.villageSim.state ? BF.villageSim.state() : null;   // (when it last checked the simulated set: js/villagesim.js)
   BF.world.trail = L.trail ? new Map() : null;   // (tests, ?verify=: who wrote each cell, for a cell that differs: js/world.js)
-  L.world = world; L.ticks = 0; L.solo = new Map(); L.diff = null; L.recent = []; L.ready = 0; L.split = false; L.trial = null; L.backoff = BACKOFF; L.retryAt = 0; L.busySince = null; L.loadSince = null;
+  L.world = world; L.ticks = 0; L.solo = new Map(); L.diff = null; L.recent = []; L.ready = 0; L.split = false; L.trial = null; L.backoff = BACKOFF; L.retryAt = 0; L.busySince = null; L.loadSince = null; L.waited = false; L.heldAt = null; L.worst = null; L.splitAt = null;
   L.soloMs = null; L.plainMs = null; L.plainTicks = 0; L.splitMs = null; L.loopT0 = null; L.loopTicks = 0;
   { const h = BF.stateHash.full(); L.hash = h.hash; L.bootParts = h.parts; L.bootText = L.verify ? texts() : null; }   // (the followers must boot the same world)
   RW.journal = []; RW.clock = null;
@@ -209,7 +214,8 @@ function frame() {
     // split must beat one thread as it plays without workers, not the cluster tick on one, which was 1.65 times slower on test4)
     if (!L.split && !(BF.ctick && BF.ctick.on)) { L.plainMs = L.plainMs == null ? ms : L.plainMs + (ms - L.plainMs) * k * 0.5; L.plainTicks += L.loopTicks; }
   }
-  const dropped = W && !BF.state.paused && W.speed > 1 && W.last < W.speed * 0.9;
+  // (a frame the leader waited for its followers in, lagging, drops ticks too, though the frames between run in full)
+  const dropped = W && !BF.state.paused && W.speed > 1 && (W.last < W.speed * 0.9 || (L.heldAt != null && t - L.heldAt < 1000));
   L.busySince = dropped ? (L.busySince == null ? t : L.busySince) : null;
   const loaded = W && !BF.state.paused && W.speed === 1 && !!(BF.active && BF.active.pressed && BF.active.pressed());
   L.loadSince = loaded ? (L.loadSince == null ? t : L.loadSince) : null;
@@ -241,8 +247,19 @@ function frame() {
   }
   flush();
 }
+// js/simworker.js: no ticks this frame, the followers being too far behind (above); an INFO line the first time in a world
+function lagging() {
+  if (!L.list.length || L.split || L.policy === "never" || L.ready !== L.list.length || clustered()) return false;
+  const behind = Math.max(0, ...L.list.map(f => L.ticks - f.ticks));
+  if (L.soloMs != null && (!L.worst || behind * L.soloMs > L.worst.ms)) L.worst = { ticks: behind, ms: Math.round(behind * L.soloMs) };   // (status, tests)
+  if (behind <= LAG || (L.soloMs != null && behind * L.soloMs <= LAG_MS / 2)) return false;
+  L.heldAt = now();
+  if (!L.waited) { L.waited = true; log("INFO", "Region workers: the followers are " + behind + " ticks behind; one thinking waits for them, so a split can start"); }
+  return true;
+}
 function startSplit() {
   const n = L.list.length + 1;
+  L.splitAt = L.ticks;
   if (L.kind === "clusters") {
     RW.rec(["csplit", L.shared, n]);
     flush();
@@ -300,7 +317,7 @@ function end(why, level) {
 function status() {
   const s = RW.active ? RW.stats() : clustered() ? BF.cworkers.stats() : null;
   return { want: L.want, followers: L.list.length, ready: L.ready, split: L.split, policy: L.policy, ticks: L.ticks,
-    behind: L.list.map(f => L.ticks - f.ticks), loads: L.list.map(f => f.load || null), soloMs: L.soloMs, splitMs: L.splitMs, why: L.why || null, stats: s };
+    behind: L.list.map(f => L.ticks - f.ticks), loads: L.list.map(f => f.load || null), soloMs: L.soloMs, splitMs: L.splitMs, why: L.why || null, worst: L.worst, splitAt: L.splitAt, stats: s };
 }
 // The F3 / debug screen line.
 function text() {
@@ -352,7 +369,7 @@ function beforeTick() {
 // follower(post) -> the message handler: {boot: {world, me, n, verify, trail}}, {ops: [...]}, {end}. Answers {booted: hash}, {ticks: n} after each
 // batch, {error} (and stops the barrier, so a split tick on the leader fails at once rather than waiting).
 function follower(post) {
-  let me = 0, n = 1, ticks = 0, host = null, link = null, verify = 0, trail = false;
+  let me = 0, n = 1, ticks = 0, host = null, link = null, verify = 0, trail = false, slowMs = 0;
   const kept = new Map();   // (tests) the texts of the copy at the last few solo checks
   // running ahead: ahead, the ticks run before the leader's "t" for them came; views, this interval's clock after each tick; h, a tick's length
   let ahead = 0, h = null;
@@ -381,6 +398,7 @@ function follower(post) {
           post({ hashAt: ticks + 1, parts: BF.stateHash.full().parts });
         }
         RW.clock = o[2]; BF.simStep((h = o[1])); ticks++;
+        if (slowMs > 0 && !RW.active && !clustered()) { const end = now() + slowMs; while (now() < end) { /* (tests) */ } }
         if (CWk() && CWk().open) views.set(BF.rand.tick, K().view());
         break;
       case "open": CWk().open = true; views.clear(); break;   // (the leader's meeting tick follows: then this one may run ahead)
@@ -400,6 +418,7 @@ function follower(post) {
       case "csolo": BF.cworkers.leave(); break;
       case "sm": BF.cworkers.whenMet(ok => { if (ok) BF.cworkers.gathered(() => BF.save.snapshot({ quiet: true }), "save"); }); break;   // (a save at the next meeting, js/save.js)
       case "crash": if (o[1] === me) throw new Error("a test crash (test/multi-worker-play.js)"); break;
+      case "slow": slowMs = me > 0 ? o[1] : 0; break;   // (tests: a follower on a slower core, test/split-lag.js)
       default: throw new Error("region worker: unknown journal op " + o[0]);
     }
   };
@@ -482,8 +501,10 @@ function follower(post) {
 
 // (tests) follower me throws at this point of the journal: the crash path
 const testCrash = me => { RW.rec(["crash", me | 0]); flush(); };
+// (tests) every follower takes ms longer a tick while one thinks: as if on a slower core than the leader
+const testSlow = ms => { RW.rec(["slow", +ms || 0]); flush(); };
 // (tests) back to one now (split=always splits again once the followers are ready)
 const testSolo = () => { if (L.split) toSolo("a test"); };
 
-BF.rplay = { setup, begin, end, frame, flush, hold, status, text, follower, player, testCrash, testSolo, MAX, TRIAL, VERIFY };
+BF.rplay = { setup, begin, end, frame, flush, hold, lagging, status, text, follower, player, testCrash, testSlow, testSolo, MAX, TRIAL, VERIFY };
 })();
