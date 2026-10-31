@@ -118,8 +118,9 @@ function loopBody() {
     BF.inventory.simFrame(raw);
     BF.maps.simFrame();   // the held map fills in round the player (js/maps.js)
     BF.player.simRide(raw);   // an untamed horse carries the player; a boat or horse gone puts them off (js/player.js, r15-44 part 2)   // a furnace watched in the pause cooks in real time; a gone villager's trade screen closes (js/playerinv.js)
+    const waiting = !BF.state.paused && BF.rplay.lagging();   // (the followers too far behind for a split: none this frame, js/rplay.js)
     if (!BF.state.paused) {
-      const n = BF.boot.ticks(raw);
+      const n = waiting ? 0 : BF.boot.ticks(raw);
       W.done(n, n * W.TICK, raw);
       if (BF.save) BF.save.update(Math.min(raw, W.MAX_FRAME));
     }
@@ -128,7 +129,7 @@ function loopBody() {
     BF.rplay.frame();   // region workers: switch between one and several thinking, send the followers the journal (js/rplay.js)
   } catch (e) { crash(e); return; }
   // at 1x a loop about every frame (a tick every 50 ms); fast-forward goes again at once, leaving room for the page's messages
-  const W = BF.warp, busy = !BF.state.paused && W.speed > 1;
+  const W = BF.warp, busy = !BF.state.paused && W.speed > 1 && !BF.rplay.lagging();
   timer = setTimeout(loop, busy ? 0 : Math.max(4, 16 - (performance.now() - now)));
 }
 function crash(e) {
