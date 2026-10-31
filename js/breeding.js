@@ -467,13 +467,18 @@ function tick(dt) {
 }
 
 // ---------- persistence (mobs.exportVillagers / importVillagers hooks) ----------
+// What a save and the copy check read of a bred villager (metaOf): its place, whether it is a child, its profession. A row (js/cworkers.js
+// gathered), worked out where its copy is current: with clusters on workers, another worker's stale copy had an old profession (Gordon's
+// test4, 8 workers: a newborn grown up and turned builder on its worker was "unemployed" on the other 7, and every copy check from then
+// on said the villagers differ; a save would have written the stale one).
+const r2 = v => Math.round(v * 100) / 100;
+(BF.mobRows || (BF.mobRows = new Map())).set("bred", { fn: m => (m.bred ? [r2(m.position.x), r2(m.position.y), r2(m.position.z), m.child ? 1 : 0, m.profession] : null), uses: ["save", "hash"] });
 function metaOf(e) {
-  const m = e.mob && !e.mob.removed ? e.mob : null;
+  const m = e.mob && !e.mob.removed ? e.mob : null, b = m ? BF.cworkers.row("bred", m) : null;
   // (read only: a save, and the state hash's villagers part, must not change the record; the tick and an unload keep e.pos and e.prof)
-  const pos = m ? [m.position.x, m.position.y, m.position.z] : e.pos, prof = m && !m.child ? m.profession : e.prof;
-  const r = v => Math.round(v * 100) / 100;
+  const pos = b ? b.slice(0, 3) : e.pos, prof = b && !b[3] ? b[4] : e.prof;
   return { k: e.k, child: !!e.child, born: e.born, eaten: e.eaten || 0, parents: e.parents || [], prof, cd: e.cd,
-    pos: pos ? pos.map(r) : null, bed: e.bed || null, lastDay: e.lastDay, dead: !!e.dead };
+    pos: pos ? pos.map(r2) : null, bed: e.bed || null, lastDay: e.lastDay, dead: !!e.dead };
 }
 function exportAll(out) {
   const recs = new Map();
