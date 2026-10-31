@@ -216,7 +216,7 @@ function frame() {
   if (L.loopTicks > 0 && L.loopT0 != null) {
     const ms = (t - L.loopT0) / L.loopTicks, k = Math.min(1, L.loopTicks / 50);
     const warm = L.trial && L.ticks - L.loopTicks < L.trial.from;   // (a loop with ticks of the trial's warm-up: the handover)
-    if (L.trial && !warm) { L.trial.ms += t - L.loopT0; L.trial.n += L.loopTicks; }
+    if (L.trial && !warm) { if (L.trial.t0 == null) L.trial.t0 = L.loopT0; L.trial.ms += t - L.loopT0; L.trial.n += L.loopTicks; }
     if (L.split && !warm) L.splitMs = L.splitMs == null ? ms : L.splitMs + (ms - L.splitMs) * k * 0.5;
     else L.soloMs = L.soloMs == null ? ms : L.soloMs + (ms - L.soloMs) * k * 0.5;
     // (the plain tick's, kept from before the first clusters' split: after a trial the cluster tick stays on, js/rplay.js toSolo, and a
@@ -246,7 +246,7 @@ function frame() {
     if (ready && want && L.policy !== "never") startSplit();
   } else if (L.trial && L.ticks >= L.trial.end) {
     const before = L.trial.solo, after = L.trial.n > 0 ? L.trial.ms / L.trial.n : L.splitMs;
-    L.lastTrial = Object.assign({ at: L.splitAt, after }, L.trial);   // (status, tests)
+    L.lastTrial = Object.assign({ at: L.splitAt, after, wall: L.trial.t0 != null ? now() - L.trial.t0 : null }, L.trial);   // (status, tests; wall: real ms from its first counted loop)
     L.trial = null;
     if (L.policy === "auto" && before != null && after != null && after > before * 0.9) {
       toSolo("ticks took " + after.toFixed(1) + " ms split against " + before.toFixed(1) + " ms on one: not worth it");
