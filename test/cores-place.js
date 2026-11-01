@@ -3,6 +3,7 @@
 // region workers on the slow ones was the fastest of the placements measured). Plain node, a stand-in /sys/devices/system/cpu:
 //   - the laptop's layout (Ryzen AI 9 HX 370: CPUs 0-3 and 12-15 at 5.16 GHz, 4-11 and 16-23 at 3.29 GHz, SMT pairs n and n + 12): the
 //     leader gets 0-3,12-15; 8 workers' 7 followers get the slow CPUs (8 slow physical cores), 10 workers' 9 followers don't;
+//   - the slow CPUs' slowness for the cluster plan (5.16 / 3.29 GHz), 1 with no cpufreq;
 //   - every CPU the same top clock, no cpufreq (a container), a single CPU: nothing is placed;
 //   - pin() on Linux pins only the calling thread (a worker_thread pins itself to its first allowed CPU; the main thread is unchanged).
 // Usage: node test/cores-place.js
@@ -35,6 +36,10 @@ function sys(name, n, mhz, sib) {
     check(p8 && cores.cpuText(p8.leader) === '0-3,12-15' && p8.followers && cores.cpuText(p8.followers) === '4-11,16-23', '8 workers: the leader on the fast CPUs, 7 followers on the slow ones');
     check(p10 && p10.leader.length === 8 && p10.followers === null, '10 workers: 9 followers, 8 slow cores: followers left where the system puts them');
     check(p1 && p1.followers === null, 'one worker: only the leader is placed');
+    // (the cluster plan's worker speeds, js/cworkers.js CW.slow: the slow CPUs' top clock against the fastest)
+    const sl = cores.slowness(p8.followers, laptop), sf = cores.slowness(p8.leader, laptop);
+    check(Math.abs(sl - 5160 / 3290) < 0.01 && sf === 1, `the slow CPUs are ${sl.toFixed(2)} times slower, the fast ones ${sf}`);
+    check(cores.slowness([0, 1], sys('nofreq2', 4, () => null, c => String(c))) === 1, 'no cpufreq: slowness 1');
     check(cores.place(8, sys('same', 8, () => 4000, c => String(c))) === null, 'every CPU the same top clock: nothing placed');
     check(cores.place(8, sys('nofreq', 8, () => null, c => String(c))) === null, 'no cpufreq (a container): nothing placed');
     check(cores.place(8, sys('one', 1, () => 4000, () => '0')) === null, 'one CPU: nothing placed');

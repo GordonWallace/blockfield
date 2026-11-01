@@ -14,7 +14,7 @@
 // Elsewhere (one top clock, macOS, Windows, no cpufreq in a container) nothing is pinned. pin(cpus) is taskset on the calling thread's
 // own id (/proc/thread-self), so a worker_thread pins only itself.
 // API: perfCores() -> { n, logical, how }, speeds(sys?) -> { fast, slow } (CPU numbers) | null, place(n, sys?) -> { leader, followers } | null,
-//      pin(cpus) -> true when pinned, cpuText(cpus) -> "0-3,12-15"
+//      pin(cpus) -> true when pinned, cpuText(cpus) -> "0-3,12-15", slowness(cpus, sys?) -> their top clock's slowness (1 = the fastest)
 "use strict";
 const os = require("os"), fs = require("fs"), path = require("path"), cp = require("child_process");
 const MAX = 16;
@@ -63,6 +63,14 @@ function speeds(sys = SYS) {
   const top = Math.max(...f), fast = cpus.filter((c, i) => f[i] >= top * 0.95), slow = cpus.filter((c, i) => f[i] < top * 0.95);
   return slow.length ? { fast, slow } : null;
 }
+// How much slower these CPUs' top clock is than the machine's fastest (1.57 for Gordon's Zen 5c against Zen 5): the cluster plan's
+// worker speeds (js/cworkers.js CW.slow); 1 when it can't be read
+function slowness(cpus, sys = SYS) {
+  const f = c => +(read(sys + "/cpu" + c + "/cpufreq/cpuinfo_max_freq") || 0);
+  const all = cpuList(read(sys + "/online") || "").map(f), mine = (cpus || []).map(f);
+  if (!mine.length || mine.some(x => !(x > 0)) || !all.length) return 1;
+  return Math.max(1, Math.max(...all) / Math.max(...mine));
+}
 const physical = (cpus, sys) => new Set(cpus.map(c => (read(sys + "/cpu" + c + "/topology/thread_siblings_list") || String(c)).trim())).size;
 function place(n, sys = SYS) {
   const s = speeds(sys);
@@ -83,4 +91,4 @@ function cpuText(cpus) {
   for (let i = 0; i < cpus.length;) { let j = i; while (j + 1 < cpus.length && cpus[j + 1] === cpus[j] + 1) j++; out.push(j > i ? cpus[i] + "-" + cpus[j] : String(cpus[i])); i = j + 1; }
   return out.join(",");
 }
-module.exports = { perfCores, cpuList, MAX, speeds, place, pin, cpuText };
+module.exports = { perfCores, cpuList, MAX, speeds, place, pin, cpuText, slowness };

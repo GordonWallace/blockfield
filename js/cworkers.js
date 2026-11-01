@@ -33,6 +33,13 @@ const now = () => performance.now();
 const LEAD = 0.7;      // the share of a worker's load the first worker takes on (it also serves the player and the client)
 const MOB_MS = 0.01;   // a group not measured yet: its guessed ms a tick for each of its mobs (about what a mob costs on one thread)
 const SOLO_MS = 0.6;   // below this many ms a tick in all, every group goes to the first worker (an exchange costs more than it saves)
+// Workers on cores of different speeds (the world server puts the first worker on the fastest cores and the others on the slower ones,
+// server/cores.js place; Gordon's laptop: about 4.8 against 3.1 GHz under load): a group's time is measured on whichever worker ran it,
+// so a group measured on the first worker looked cheaper than it is on another, and the plan gave the slower workers as much as the
+// first one. CW.slow (set by the host: its cores' top clock against the machine's fastest, server/cores.js slowness; 1 when unknown) is
+// swapped at each meeting; each worker's speed (1 for the fastest, 1.6 for one that slow) scales the times it measured to the fastest
+// worker's, and what it can take. (Timing a bit of work at each meeting instead swung 10-20% from one meeting to the next.)
+let speed = [];
 
 // open: the followers may be running ahead of the leader in this interval (js/rplay.js "open", set at its meeting; every worker clears it
 // at the swap): what can't wait for the next meeting waits until then (js/villagesim.js update)
@@ -201,7 +208,8 @@ function sync() {
   const other = tRun > 0 ? +Math.max(0, b0 - busyRun - gs.reduce((a, g) => a + g.ms, 0)).toFixed(3) : null;   // (this interval's work outside its groups)
   lap("rest");
   const dyn = BF.dynRange.fresh();
-  const out = { born, mobs, sums, gone: goneE, rows, recs, edits, tables, chans, reg, dyn, waited, queued, ms, counters, hand, other };
+  const slow = +(CW.slow > 1 ? CW.slow : 1).toFixed(2);
+  const out = { born, mobs, sums, gone: goneE, rows, recs, edits, tables, chans, reg, dyn, waited, queued, ms, counters, hand, other, slow };
   const msg = JSON.stringify(out);
   lap("json");
   if (CW.sizes) {   // (tests: what the bytes are, by part and by the mobs' and records' fields)
@@ -224,15 +232,18 @@ function sync() {
   peers = all.map((x, w) => ({ bytes: x.length }));
   // everything every worker measured (its own groups'), for the plan
   groupMs = new Map(); ranBy = new Map();
+  const slows = all.map((x, w) => (w === CW.me ? slow : ps[w].slow || 1)), fast = Math.min(...slows);
+  speed = slows.map(v => Math.max(1, Math.round(v / fast * 10) / 10));
   const lift = [I.R2.ids.j, I.R2.made.j, BF.ids.range.top, BF.rand.made, I.R2.dyn.j];
   for (let w = 0; w < all.length; w++) {
     const p = w === CW.me ? { ms, counters } : ps[w];
-    for (const [k, v] of p.ms) { groupMs.set(k, v); ranBy.set(k, w); }
+    for (const [k, v] of p.ms) { groupMs.set(k, v / speed[w]); ranBy.set(k, w); }   // (as on the fastest worker)
     for (let i = 0; i < 5; i++) if (p.counters[i] > lift[i]) lift[i] = p.counters[i];
   }
   for (let w = 0; w < all.length; w++) {
-    const v = w === CW.me ? other : ps[w].other;
-    if (v === null || v === undefined) continue;
+    const v0 = w === CW.me ? other : ps[w].other;
+    if (v0 === null || v0 === undefined) continue;
+    const v = v0 / speed[w];   // (as on the fastest worker; room counts this worker's speed)
     base[w] = base[w] === undefined ? v : base[w] + SMOOTH * (v - base[w]);
   }
   const h0 = CW.me === 0 ? hand : ps[0].hand;
@@ -583,7 +594,7 @@ function plan(groups) {
   if (CW.solo) { CW.owners = new Map(); return; }
   // each worker's own time outside the groups (its share of every tick's global part, and the first worker's player and client), as
   // measured and swapped: what its groups add to; until every worker has measured it, the first worker counts LEAD of its load as room
-  const n = CW.n, measured = base.length === n && base.every(v => v !== undefined), room = w => (w === 0 && !measured ? LEAD : 1);
+  const n = CW.n, measured = base.length === n && base.every(v => v !== undefined), room = w => (w === 0 && !measured ? LEAD : 1) / (speed[w] || 1);
   const start = () => (measured ? base.slice() : new Array(n).fill(0));
   const order = groups.slice().sort((a, b) => est.get(b.key) - est.get(a.key) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   // held.get(key)[w]: the group's mobs whose current copy is on worker w only (partial copies; the holders from the last swap, the
@@ -673,7 +684,7 @@ function setup(o) {
   shadows = new Map(); recShadows = new Map(); known = new Set(BF.mobs.list); journal = new Map(); regNew = []; groupMs = new Map(); lastGroups = new Map(); meetings = 0; warned = 0;
   for (const k in T) T[k] = 0;
   for (const k in X) delete X[k];
-  smooth = new Map(); handMs = 0.5; handOwn = null; base = []; lapT = now(); atMet = []; leaving = false;
+  smooth = new Map(); handMs = 0.5; handOwn = null; base = []; speed = []; lapT = now(); atMet = []; leaving = false;
   if (BF.ids && BF.ids.hooks) BF.ids.hooks.onNew = onNewPlace;
   RW().onTouch = CW.active ? onTouch : null;
   touched = new Map();
@@ -709,9 +720,9 @@ const workerOf = k => !CW.active ? 0 : CW.pull ? ranBy.get(k) || 0 : CW.owners.h
 const f2 = v => (Math.round(v * 100) / 100).toFixed(2);
 function stats() {
   const n = Math.max(1, T.meetings), per = new Array(CW.n).fill(0), groups = new Array(CW.n).fill(0);
-  for (const g of C().groups()) { const w = workerOf(g.key); groups[w]++; per[w] += groupMs.get(g.key) || 0; }
+  for (const g of C().groups()) { const w = workerOf(g.key); groups[w]++; per[w] += (groupMs.get(g.key) || 0) * (speed[w] || 1); }   // (on the worker's own core)
   return { active: CW.active, n: CW.n, me: CW.me, solo: !!CW.solo, pull: CW.pull, meetings: T.meetings, groups, ms: per.map(v => v / C().MEET),
-    base: base.map(v => (v === undefined ? null : +(v / C().MEET).toFixed(2))), moved: T.moved / n, fetched: T.fetched / n, perMeeting: { run: T.run / n, collect: T.collect / n, exchange: T.exchange / n, adopt: T.adopt / n, snap: T.snap / n }, kbPerMeeting: T.bytes / n / 1024,
+    base: base.map(v => (v === undefined ? null : +(v / C().MEET).toFixed(2))), speed: speed.slice(), moved: T.moved / n, fetched: T.fetched / n, perMeeting: { run: T.run / n, collect: T.collect / n, exchange: T.exchange / n, adopt: T.adopt / n, snap: T.snap / n }, kbPerMeeting: T.bytes / n / 1024,
     x: Object.fromEntries(Object.entries(X).map(([k, x]) => [k, { n: x.n / n, ms: x.ms / n, wait: x.wait / n }])) };
 }
 // The F3 line: "Cluster workers 4: groups 2/3/2/2, ms a tick 1.20/1.10/0.90/1.30, swap 3.10 ms a meeting"

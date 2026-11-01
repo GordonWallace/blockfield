@@ -86,6 +86,7 @@ if (!isMainThread && workerData && workerData.play) {
   const { load } = require(path.join(__dirname, "..", "tools", "headless.js"));
   const { BF } = load({ globals: { navigator: globalThis.navigator, location: { search: "", hostname: "localhost", protocol: "node:", href: "node:server/regionthread.js" } },
     files: ["js/coords.js", "js/commands.js", "js/threadload.js", "js/debugfeed.js", "js/rplay.js"] });
+  if (workerData.pin) BF.cworkers.slow = require("./cores.js").slowness(workerData.pin);   // (the cluster plan's worker speeds, js/cworkers.js)
   const handle = BF.rplay.follower(m => parentPort.postMessage(m));
   parentPort.on("message", d => handle(d));
 }
