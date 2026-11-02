@@ -375,12 +375,12 @@ function serve(send, opts) {
   }
   // Everything else a flush does on a follower goes nowhere (15% of a follower's busy time, test4 with 8 workers, 2026-11-01): what is due is
   // dropped. Which chunks are in view (touchEntities' inView) and the touches, which hand out names and ids, stay as they were.
-  function followerFlush() {
+  function followerFlush(force) {
     S.flushes++; ST.flushes++;
     S.fx = []; S.logs = []; S.cells.clear(); S.editsDue = false; S.hurts = [];
     flushChunks(wanted(), S.view && S.view.budget != null ? S.view.budget : 16);
     const t = tickNow(), still = !!((BF.warp && BF.warp.frozen) || (BF.state && BF.state.paused));
-    if (t !== S.tick || S.changed || still) { touchEntities(); S.entsAt = now(); S.changed = false; }
+    if (t !== S.tick || force || S.changed || still) { touchEntities(); S.entsAt = now(); S.changed = false; }
     S.tick = t;
   }
   function flushEntities(ticked) {
@@ -516,7 +516,7 @@ function serve(send, opts) {
 
   function flush(force) {
     if (!BF.world) return;
-    if (opts.follower) { followerFlush(); return; }
+    if (opts.follower) { followerFlush(force); return; }
     if (R && !force && !S.changed && !S.editsDue && BF.warp && BF.warp.speed > 1 && !BF.warp.frozen && !(BF.state && BF.state.paused) && now() - S.flushedAt < FLUSH_MS) return;
     S.flushedAt = now();
     S.flushes++; ST.flushes++;
