@@ -14,7 +14,7 @@
   "js/textures-light.js", "js/recipes-light.js", "js/textures-shapes.js", "js/textures-jobs.js", "js/textures-bees.js",
   "js/textures-forester.js", "js/textures-furniture.js", "js/textures-miner.js", "js/textures-maps.js", "js/recipes-stone.js",
   "js/recipes-shapes.js", "js/recipes-panes.js", "js/recipes-jobs.js", "js/recipes-maps.js", "js/planet.js", "js/view.js",
-  "js/planetgen.js", "js/planetrivers.js", "js/worldgen.js", "js/mesher.js", "js/world.js", "js/requests.js", "js/rworkers.js", "js/blockreqs.js", "js/blockreq.js",
+  "js/planetgen.js", "js/planetrivers.js", "js/flatgen.js", "js/worldgen.js", "js/mesher.js", "js/world.js", "js/requests.js", "js/rworkers.js", "js/blockreqs.js", "js/blockreq.js",
   "js/grid.js", "js/villagesim.js", "js/active.js", "js/farmland.js", "js/grass.js", "js/light.js", "js/skylight.js", "js/sky.js",
   "js/weather.js", "js/ids.js", "js/trading.js", "js/prices.js", "js/market.js", "js/toolwear.js", "js/perf.js", "js/mobs.js",
   "js/mobsave.js", "js/blueprints.js", "js/builder.js", "js/bridges.js", "js/jobs.js", "js/villagelife.js", "js/breeding.js",
@@ -24,6 +24,6 @@
   "js/playerinv.js", "js/drops.js", "js/boats.js", "js/horses.js", "js/stables.js", "js/merchant.js", "js/sharedtable.js", "js/wildlife.js",
   "js/gameopts.js", "js/player.js", "js/village-names.js", "js/signs.js", "js/logmatch.js", "js/alertsim.js", "js/villagelog.js", "js/economy.js",
   "js/happiness.js", "js/villagestats.js", "js/statehash.js", "js/regions.js", "js/regiontick.js", "js/clusters.js", "js/ctick.js", "js/cworkers.js", "js/villagerstatus.js",
-  "js/daytimeline.js",
+  "js/daytimeline.js", "js/sandbox.js",
   "js/save.js", "js/protocol.js", "js/boot.js"
 ]);

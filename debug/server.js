@@ -16,6 +16,7 @@
 // No dependencies: Node's built-in modules only.
 "use strict";
 const http = require("http"), fs = require("fs"), path = require("path");
+const sandbox = require("./sandbox.js");
 
 const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf("--" + name); return i >= 0 && args[i + 1] ? +args[i + 1] : def; };
@@ -66,6 +67,7 @@ function serveGame(req, res) {
   try { rel = decodeURIComponent(new URL(req.url, "http://x").pathname); } catch (e) { res.writeHead(400).end(); return; }
   if (rel.includes("\0")) { res.writeHead(404).end(); return; }   // fs throws on a NUL byte (/%00)
   if (rel === "/wiki") { res.writeHead(301, { Location: "/wiki/" }).end(); return; }   // Blockfieldpedia (wiki/index.html)
+  if (rel.startsWith("/sandbox/api/") && sandbox.http(req, res, rel)) return;   // the sandbox's scene / structure / texture files (spec idea-050, debug/sandbox.js)
   if (rel.startsWith("/saves/")) { if (!world || !world.http(req, res, rel)) res.writeHead(404, { "Content-Type": "text/plain" }).end("No world server"); return; }   // export / import (spec r15-42)
   if (rel.endsWith("/")) rel += "index.html";
   const file = path.join(ROOT, rel);

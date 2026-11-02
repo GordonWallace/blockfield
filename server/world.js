@@ -306,7 +306,7 @@ function start(o) {
       const meta = worlds.meta(q.id), data = worlds.get(q.id, "data");
       if (!meta || !data) return { ok: false, why: "World not found" };
       const d = {};
-      for (const k of ["version", "gen", "seed", "biomeScale", "villages", "monsters", "spawn", "rand", "time", "player", "inventory", "weather"]) d[k] = data[k];
+      for (const k of ["version", "gen", "seed", "biomeScale", "world", "villages", "monsters", "spawn", "rand", "time", "player", "inventory", "weather"]) d[k] = data[k];
       return { ok: true, meta, data: JSON.parse(json(d)) };
     }
     if (q.op === "remove") {

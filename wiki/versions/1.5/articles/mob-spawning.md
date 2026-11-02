@@ -41,6 +41,8 @@ Wild animals breed without help, slowly:
 - They never breed while 8 or more of their kind are within 24 blocks. This keeps herds from exploding.
 - A successful roll makes the pair willing as if fed; they then walk together and a young one appears, just as with [[page:animal-husbandry]].
 
+In a [[page:sandbox-worlds|sandbox world]] nothing spawns by itself: no wild animals, monsters or iron golems.
+
 ## Monsters
 
 Monsters spawn in any loaded chunk, not only near you or near villages. Each loaded chunk gets about one surface attempt every 8 seconds while it is dark, and one cave attempt every 8 seconds at any hour. Each attempt picks a random chunk and a random spot in it, and picks a kind: [[mob:zombie]] 33%, [[mob:skeleton]] 25%, [[mob:creeper]] 24%, [[mob:spider]] 18%.

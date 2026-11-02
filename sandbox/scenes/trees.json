@@ -1,0 +1,165 @@
+{
+ "description": "One of each tree kind the world generator draws, in a row 14 blocks north of spawn, 9 blocks apart (west to east in the order of worldgen's TREE_KINDS).",
+ "entries": [
+  {
+   "tree": "oak",
+   "at": [
+    -77,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "oak_nest",
+   "at": [
+    -68,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "birch",
+   "at": [
+    -59,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "birch_nest",
+   "at": [
+    -50,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "swamp_oak",
+   "at": [
+    -41,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "jungle_oak",
+   "at": [
+    -32,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "spruce",
+   "at": [
+    -23,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "mega_spruce",
+   "at": [
+    -14,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "jungle",
+   "at": [
+    -5,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "jungle_big",
+   "at": [
+    4,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "acacia",
+   "at": [
+    13,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "dark_oak",
+   "at": [
+    22,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "cherry",
+   "at": [
+    31,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "mangrove",
+   "at": [
+    40,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "giant_mushroom",
+   "at": [
+    49,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "ice_spike",
+   "at": [
+    58,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "cactus",
+   "at": [
+    67,
+    0,
+    -14
+   ]
+  },
+  {
+   "tree": "boulder",
+   "at": [
+    76,
+    0,
+    -14
+   ]
+  },
+  {
+   "commands": [
+    "/time set day",
+    "/weather clear"
+   ]
+  },
+  {
+   "player": {
+    "at": [
+     0,
+     0,
+     4
+    ],
+    "gameMode": "creative"
+   }
+  }
+ ]
+}

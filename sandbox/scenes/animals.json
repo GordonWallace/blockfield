@@ -1,0 +1,118 @@
+{
+ "description": "A fenced field 6 blocks north of spawn with cows, pigs, sheep, chickens and a farmer villager.",
+ "entries": [
+  {
+   "fill": "oak_fence",
+   "at": [
+    -10,
+    0,
+    -6
+   ],
+   "to": [
+    10,
+    0,
+    -6
+   ]
+  },
+  {
+   "fill": "oak_fence",
+   "at": [
+    -10,
+    0,
+    -20
+   ],
+   "to": [
+    10,
+    0,
+    -20
+   ]
+  },
+  {
+   "fill": "oak_fence",
+   "at": [
+    -10,
+    0,
+    -7
+   ],
+   "to": [
+    -10,
+    0,
+    -19
+   ]
+  },
+  {
+   "fill": "oak_fence",
+   "at": [
+    10,
+    0,
+    -7
+   ],
+   "to": [
+    10,
+    0,
+    -19
+   ]
+  },
+  {
+   "mob": "cow",
+   "count": 3,
+   "at": [
+    -6,
+    0,
+    -10
+   ]
+  },
+  {
+   "mob": "pig",
+   "count": 3,
+   "at": [
+    0,
+    0,
+    -10
+   ]
+  },
+  {
+   "mob": "sheep",
+   "count": 3,
+   "at": [
+    6,
+    0,
+    -10
+   ]
+  },
+  {
+   "mob": "chicken",
+   "count": 4,
+   "at": [
+    -3,
+    0,
+    -16
+   ]
+  },
+  {
+   "mob": "villager",
+   "profession": "farmer",
+   "at": [
+    3,
+    0,
+    -16
+   ]
+  },
+  {
+   "commands": [
+    "/time set day",
+    "/weather clear"
+   ]
+  },
+  {
+   "player": {
+    "at": [
+     0,
+     0,
+     0
+    ],
+    "gameMode": "creative"
+   }
+  }
+ ]
+}
