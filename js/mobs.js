@@ -1804,13 +1804,18 @@ function pathOut(m) {
 }
 // Steers along ai.route. Returns "done", "stuck" or "going".
 // `ai` defaults to the villager's own route state (m.ai: route, ri, stuckT); detours pass their own.
-function followRoute(m, dt, out, speed, ai = m.ai) {
+function followRoute(m, dt, out, speed, ai = m.ai, again = false) {
   const r = ai.route;
   if (!r || ai.ri >= r.length) return "done";
   if (coarseStep && m === curMob) { const w = cellWalk(m, dt, speed, ai); if (w) return w; }   // (coarse mode: cell by cell)
   const c = r[ai.ri], dx = c[0] + 0.5 - m.position.x, dz = c[2] + 0.5 - m.position.z, d = Math.hypot(dx, dz);
   // reached: within 0.3 of its centre, and on a ladder only once the feet are in that cell
-  if (d < 0.3 && (m.onLadder ? Math.floor(m.position.y + 0.01) === c[1] : Math.abs(m.position.y - c[1]) < 1.1)) { ai.ri++; ai.stuckT = 0; return ai.ri >= r.length ? "done" : "going"; }
+  if (d < 0.3 && (m.onLadder ? Math.floor(m.position.y + 0.01) === c[1] : Math.abs(m.position.y - c[1]) < 1.1)) {
+    ai.ri++; ai.stuckT = 0;
+    if (ai.ri >= r.length) return "done";
+    if (!again) return followRoute(m, dt, out, speed, ai, true);   // on to the next cell this update, rather than a standing tick at each cell (idea-049)
+    return "going";
+  }
   ai.stuckT = (ai.stuckT || 0) + dt;
   if (ai.stuckT > 6) return "stuck";
   const s = Math.min(speed, d * 4 + 0.3);

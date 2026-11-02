@@ -796,18 +796,19 @@ function wallOres(m, sh, c) {
 // Digs the listed blocks one after another (each takes digTime with its pickaxe), swinging; calls done() after the last.
 function digBlocks(m, Q, blocks, dt, done) {
   const a = m.ai;
-  if (BF.blockReq.busy(m)) return true;   // its last block is being broken (the request's result comes before its next think)
+  if (BF.blockReq.busy(m)) { Q.carry = Math.min(2 * BF.warp.TICK, (Q.carry || 0) + dt); return true; }   // its last block is being broken (the request's result comes before its next think); the wait counts toward the next block (idea-049)
   const left = blocks.filter(([x, y, z]) => get(x, y, z) !== 0 && !liquid(get(x, y, z)));
   if (!left.length) { done(); return true; }
   const [x, y, z] = left[0], id = get(x, y, z), p = pickOf(m);
   if (!p && BF.blocks[id].needsTool) { endTask(m, Q); return true; }     // the pickaxe broke: think again
-  if (Q.digAt !== pk(x, y, z)) { Q.digAt = pk(x, y, z); Q.digT = 0; }
+  if (Q.digAt !== pk(x, y, z)) { Q.digAt = pk(x, y, z); Q.digT = Math.min(2 * BF.warp.TICK, Q.carry || 0); }   // (the time the last block ran over, idea-049)
+  Q.carry = 0;
   Q.digT += dt;
   if (a.swingT <= 0) { a.swingT = 0.3; if (BF.audio && BF.audio.blockSound) { try { BF.audio.blockSound("hit", id, x, y, z, 0.5); } catch (e) { /* optional */ } } }
   if (Q.digT >= digTime(id, p)) {
     const rq = dig(m, x, y, z);
     if (!rq) { endTask(m, Q); return true; }
-    Q.digAt = null; Q.digT = 0;
+    Q.carry = Q.digT - digTime(id, p); Q.digAt = null; Q.digT = 0;
     if (rq === true && left.length === 1) done();   // else the next think finds the cell open (or, refused, digs what is there now)
   }
   return true;

@@ -1137,6 +1137,9 @@ function travel(m, fs, dt, out, tx, ty, tz, speed) {
   else if (st === "done") ai.route = null;
   return "going";
 }
+// Time a farm step ran over its timer, or spent waiting for its block request's result, given to the next step (at most two ticks), so the
+// pace of the work doesn't depend on the tick length (idea-049).
+function takeCarry(fs) { const c = Math.min(2 * BF.warp.TICK, fs.carry || 0); fs.carry = 0; return c; }
 function newFarm() { return { task: null, stage: null, t: 0, actT: 0, breakT: 0, avoid: {}, stats: { day: -1, farm: 0, total: 0 }, last: null, counts: {} }; }
 function endTask(m, fs, success) {
   const t = fs.task;
@@ -1272,9 +1275,9 @@ function farmAI(m, dt, out) {
   ensureKit(m); ensureCover(D, m);
   if (fs.breakT > 0) { fs.breakT -= dt; return false; }
   if (!fs.task) {
-    if (fs.next) { fs.task = fs.next; fs.next = null; fs.stage = "act"; fs.actT = actOf(fs.task.kind); fs.t = 0; claimSet(fs.task.k, m); }
+    if (fs.next) { fs.task = fs.next; fs.next = null; fs.stage = "act"; fs.actT = actOf(fs.task.kind) - takeCarry(fs); fs.t = 0; claimSet(fs.task.k, m); }
     else {
-      fs.thinkT = (fs.thinkT || 0) - dt;
+      fs.thinkT = (fs.thinkT || 0) - dt - takeCarry(fs);
       if (fs.thinkT > 0) return fs.idleWork;      // brief pause between tasks still counts as work
       fs.thinkT = 0.4;
       if (!D.ready) { fs.idleWork = false; return false; }
@@ -1290,6 +1293,7 @@ function farmAI(m, dt, out) {
   const t = fs.task;
   if (fs.stage === "wait") {   // its block request is out: the result ends the task (one that never came, after a reset or a reload, gives it up)
     ai.mode = "idle"; ai.t = 2;
+    fs.carry = (fs.carry || 0) + dt;   // the wait for the result counts toward the next step (idea-049)
     if (!BF.blockReq.busy(m)) endTask(m, fs, false);
     return true;
   }
@@ -1318,6 +1322,7 @@ function farmAI(m, dt, out) {
   fs.actT -= dt;
   if (t.kind === "craft" && ai.swingT <= 0) ai.swingT = 0.35;
   if (fs.actT <= 0) {
+    fs.carry = -fs.actT;   // the time the action ran over goes to the next step (idea-049)
     let okDone = false;
     try { okDone = perform(m, fs, R, D); } catch (e) { console.error(e); }
     if (okDone && typeof okDone === "object") {   // a block request (spec r15-18): the result, before its next think, ends the task
