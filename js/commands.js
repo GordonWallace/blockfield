@@ -758,6 +758,22 @@ def("feed", {
     return `Fed ${PLAYER}`;
   },
 });
+// /loadvillages <n> (r15-90): the n nearest villages not yet simulated join the simulated set at the next village check, as the
+// budget's extras (js/active.js force), so a test needn't wait for them to load naturally; the usual rules decide from then on.
+// The debug screen's Simulation budget card sends it too (js/debugfeed.js).
+def("loadvillages", {
+  aliases: ["forcevillages"], usage: "/loadvillages <count>", desc: "Loads the nearest villages not yet simulated now (1 to 50); the usual loading rules take over afterwards", cheat: false,
+  complete: (a, i) => (i === 0 ? ["1", "3", "5", "10"] : null),
+  run(a) {
+    if (a.length !== 1) usage("loadvillages");
+    if (!BF.active || !BF.active.force) fail("Distant villages aren't available here");
+    const n = parseNum(a[0], "count", { int: true, min: 1, max: BF.active.FORCE_MAX });
+    const why = BF.active.force(n);
+    if (why) fail("Can't force-load villages: " + why);
+    const near = BF.active.settings().villages === "nearest";
+    return `Loading the ${n === 1 ? "nearest village" : n + " nearest villages"} not yet simulated` + (near ? " (Distant villages is set to nearest only, so they unload again one by one)" : "");
+  },
+});
 def("say", {
   usage: "/say <message>", desc: "Broadcasts a message", cheat: false,
   run(a, raw) {

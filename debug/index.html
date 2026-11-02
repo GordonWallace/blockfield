@@ -47,6 +47,10 @@
   .next[data-state=ready], .next[data-state=split] { border-color: var(--accent); } .next[data-state=waiting], .next[data-state=trial], .next[data-state=leaving] { border-color: var(--warn); } .next[data-state=full], .next[data-state=ended] { border-color: var(--danger); }
   .bar > s { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); opacity: 0.55; text-decoration: none; }
   .bar > i.mid { background: var(--warn); } .bar > i.hot { background: var(--danger); }
+  .vload { margin-top: 6px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+  .vload input { width: 48px; background: transparent; border: 1px solid var(--edge2); border-radius: 5px; padding: 1px 4px; font: 12px var(--mono); color: var(--ink); }
+  .vload button { background: transparent; border: 1px solid var(--edge2); border-radius: 5px; padding: 1px 8px; font: 12px var(--mono); color: var(--muted); cursor: pointer; }
+  .vload button:hover { color: var(--ink); border-color: var(--accent); }
   .card h3 { margin: 0 0 8px; font: 11px var(--display); letter-spacing: 0.5px; color: var(--muted); text-transform: uppercase; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   .big { font-size: 26px; font-weight: 600; line-height: 1.1; letter-spacing: -0.5px; }
   .big small { font-size: 13px; color: var(--muted); font-weight: 400; letter-spacing: 0; }
@@ -353,7 +357,7 @@
     <div class="card" id="c-perf" title="Villager-seconds of game time simulated per real second (js/perf.js): speed times villagers. The split is ms per simulation step by part; streaming is per frame, spread over its steps"><h3>Performance <span class="sub" id="c-perf-st"></span></h3>
       <div class="big" id="c-vss">-</div><div class="sub" id="c-perf-ms"></div><div class="psplit" id="c-split"></div><canvas class="spark" id="s-vss"></canvas></div>
     <div class="card" id="c-budgetcard" title="Distant villages (js/active.js, spec r15-34, the pause menu's settings): villages beyond the nearest four are simulated, nearest first, while the simulation needs less than this share of each real second at 1x, within the distance and memory limits; over it for 10 s, the farthest extra unloads with the countdown"><h3>Simulation budget <span class="sub" id="c-budget-st"></span></h3>
-      <div class="big" id="c-budget">-</div><div class="next" id="c-budget-next"></div><div class="sub" id="c-budget-sub"></div><div class="bar" title="The share of each second the simulation needs at 1x; the marks are the join and leave lines"><i id="b-budget"></i><s id="b-budget-join"></s><s id="b-budget-leave"></s></div><div class="sub" id="c-budget-more"></div><div class="sub" id="c-budget-ex" style="margin-top:4px"></div><div class="sub" id="c-budget-log" style="margin-top:6px;max-height:110px;overflow:auto"></div></div>
+      <div class="big" id="c-budget">-</div><div class="next" id="c-budget-next"></div><div class="sub" id="c-budget-sub"></div><div class="bar" title="The share of each second the simulation needs at 1x; the marks are the join and leave lines"><i id="b-budget"></i><s id="b-budget-join"></s><s id="b-budget-leave"></s></div><div class="sub" id="c-budget-more"></div><div class="sub" id="c-budget-ex" style="margin-top:4px"></div><div class="sub vload" id="c-vload" title="Force-load villages (r15-90): the nearest villages not yet simulated join now, nearest first (the /loadvillages command); the usual loading rules decide afterwards, so they may unload again if the machine can't run them">Load now <input type="number" id="c-vload-n" min="1" max="50" value="3"> nearest villages <button id="c-vload-go">Load</button> <span id="c-vload-st"></span></div><div class="sub" id="c-budget-log" style="margin-top:6px;max-height:110px;overflow:auto"></div></div>
     <div class="card" id="c-reqcard" title="The request queue (js/requests.js, spec r15-17): requests applied and refused, and world writes still made directly (by module) until the systems are converted"><h3>Requests</h3>
       <div class="big" id="c-req">-</div><div class="sub" id="c-req-sub"></div><div class="psplit" id="c-direct"></div></div>
     <div class="card" id="c-rtickcard" title="The region tick (js/regiontick.js, spec r15-33): mobs think region by region, and each region's requests apply together; ms per tick by phase over the last 200 ticks, and the regions with the most mobs"><h3>Region tick <span class="sub" id="c-rtick-st"></span></h3>
@@ -923,6 +927,15 @@ function renderHash(h) {
 }
 $("c-hashcopy").addEventListener("click", () => { if (snap && snap.hash && navigator.clipboard) navigator.clipboard.writeText(hashText(snap.hash)).catch(() => {}); });
 
+// force-loading villages (r15-90): POST /warp {op: "villages", n}; the game runs it as /loadvillages wherever the simulation is (js/debugfeed.js)
+$("c-vload-go").addEventListener("click", () => {
+  const n = Math.round(+$("c-vload-n").value), st = $("c-vload-st");
+  if (!(n >= 1 && n <= 50)) { st.textContent = "1 to 50"; return; }
+  st.textContent = "asking…";
+  fetch("warp", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ op: "villages", n }) })
+    .then(r => { st.textContent = r.ok ? "sent: " + n + " " + (n === 1 ? "village joins" : "villages join") + " at the next village check (see the log below)" : "refused"; })
+    .catch(() => { st.textContent = "no debug server"; });
+});
 // the simulation budget (js/active.js): the share of each second the simulation used against the budget, the extra villages, and the decisions
 function renderBudget(b) {
   $("c-budgetcard").hidden = !b;

@@ -39,6 +39,11 @@
 //             8000 MB (2000 MB in a browser) | MB
 // Under budget with room for several more villages, up to ADD_MAX join in one decision (nearest first), so a fast machine fills up in
 // minutes rather than one village every WIN seconds.
+// Force-loading (r15-90, Gordon 2026-11-02: skip the wait for villages to load naturally while testing): force(n) (the /loadvillages
+// command, the debug screen's Simulation budget card) adds the n nearest villages not yet simulated at the next decision, in the usual
+// order (nearest first, within the distance limit and the memory limit; ones cooling down after leaving for the budget may join too),
+// whatever the measure, the time of day or the hold. They are extras like any other from then on: the next join or leave for the budget
+// waits HOLD seconds as after any join, then the usual rules decide, and they may leave again if the machine can't run them.
 // API: BF.active = { frame(simMs, raw), decide(px, pz, base) -> [{key, v}], isExtra(key), extras(), set({on, budget, memMB, win, hold, morning,
 //                    cool, reach, minFps, settings}, quiet), opts(), peak(), used() -> the measure, pressed() -> the region workers
 //                    should split (PRESS), holdJoins(tick), settings(), choose(field, value, quiet) -> settings, adopt(settings, quiet) -> settings, next(field) ->
@@ -145,6 +150,7 @@ const extras = new Map();      // village key -> { v, t (real ms when it joined)
 const cooling = new Map();     // village key -> real ms until it may be picked again (it left for the budget)
 const decisions = [];          // newest last: { day, text }
 let lastLoad = -1e12, lastN = 0, stepAt = -1e12;   // (stepAt: real ms of the last "nearest only" step down)
+let forced = 0;     // villages to force-load at the next decision (force)
 let joinHold = -1;   // no join before this tick: a split's trial runs (js/rplay.js clusterOn), judged on the villages it started with
 const VS = () => BF.villageSim;
 const vKey = v => Math.round(v.x) + "," + Math.round(v.z);
@@ -202,6 +208,7 @@ function decide(px, pz, base) {
     if (x.d > lim()) drop(k, `over ${opt.reach} blocks away`);
   }
   const listed = () => { lastN = base.size + extras.size; return [...extras].map(([key, x]) => ({ key, v: x.v })); };
+  if (forced > 0 && !(opt.fixed > 0)) forceAdd(px, pz, base, t, ed);
   if (!(opt.budget > 0)) {   // nearest only: the farthest one each window
     if (extras.size && t - stepAt >= opt.win * 1000) { stepAt = t; drop(farthest(1)[0], "distant villages set to the nearest only"); }
     return listed();
@@ -259,6 +266,7 @@ function decide(px, pz, base) {
 // "ready", text }
 function blocker() {
   const t = now(), win = opt.win, pctS = f => pct(Math.max(0, f));
+  if (forced > 0) return { state: "ready", text: `Loading ${forced} more ${forced === 1 ? "village" : "villages"} now (asked for from the debug screen or /loadvillages)` };
   if (!opt.on) return { state: "off", text: "Budget off: only the nearest villages are simulated" };
   if (!(opt.budget > 0)) return { state: "off", text: "Distant villages set to Nearest only" + (extras.size ? `: ${extras.size} extra still to let go, one every ${win} s` : "") };
   if (opt.fixed > 0) return { state: "fixed", text: `A fixed set of ${opt.fixed} extra villages (a benchmark): the budget doesn't decide` };
@@ -300,8 +308,8 @@ const farthest = n => [...extras].sort((a, b) => b[1].d - a[1].d || (a[0] < b[0]
 // COOL_EMPTY real ms unless the player moved a region's width.
 const COOL_EMPTY = 60000;
 let emptyAt = null;   // {x, z, t, r}
-function candidates(px, pz, base, t, ed) {
-  if (emptyAt && t - emptyAt.t < COOL_EMPTY && Math.abs(emptyAt.x - px) < 384 && Math.abs(emptyAt.z - pz) < 384) return [];
+function candidates(px, pz, base, t, ed, need = 1, anyCool = false) {
+  if (!anyCool && emptyAt && t - emptyAt.t < COOL_EMPTY && Math.abs(emptyAt.x - px) < 384 && Math.abs(emptyAt.z - pz) < 384) return [];
   let far = 0;
   for (const x of extras.values()) far = Math.max(far, x.d || 0);
   const end = Math.min(lim(), SEARCH_MAX);
@@ -312,17 +320,49 @@ function candidates(px, pz, base, t, ed) {
     for (const v of near) {
       if (!v || v.minX == null) continue;
       const k = vKey(v);
-      if (base.has(k) || extras.has(k) || cooling.has(k)) continue;
+      if (base.has(k) || extras.has(k) || (!anyCool && cooling.has(k))) continue;
       const d = ed(v, px, pz);
       if (d <= Math.min(r, lim())) cand.push({ v, k, d });
     }
-    if (cand.length || r >= end) break;
+    if (cand.length >= need || r >= end) break;
     r = Math.min(end, r * 2);
   }
+  if (anyCool) return cand.sort((a, b) => a.d - b.d || (a.k < b.k ? -1 : 1));
   if (!cand.length && !emptyAt) note(`No more villages to add within ${Math.round(r)} blocks` + (r >= lim() ? " (the distance limit)" : ""));
   emptyAt = cand.length ? null : { x: px, z: pz, t, r };
   return cand.sort((a, b) => a.d - b.d || (a.k < b.k ? -1 : 1));
 }
+
+// The villages force(n) asked for: the n nearest not yet simulated, nearest first, within the distance and memory limits (r15-90)
+function forceAdd(px, pz, base, t, ed) {
+  const n = forced;
+  forced = 0;
+  const cand = candidates(px, pz, base, t, ed, n, true);
+  let added = 0, why = cand.length < n ? `only ${cand.length} more within ${opt.reach > 0 ? opt.reach : SEARCH_MAX} blocks` : "";
+  for (const c of cand) {
+    if (added >= n) break;
+    const keys = VS().footprint(c.v), mb = extraChunks(base, keys) * chunkBytes() / (1024 * 1024);
+    if (mb > opt.memMB) { why = `the extra villages' chunk data would pass ${opt.memMB} MB`; break; }
+    cooling.delete(c.k);
+    extras.set(c.k, { v: c.v, t, d: c.d }); fp.set(c.k, keys);
+    lastLoad = t; added++;
+    note(`${vname(c.k)} joins the simulated set, ${Math.round(c.d)} blocks away (force-loaded, ${added} of ${n})`, c.k);
+  }
+  stepAt = t;   // ("nearest only": the first step down waits a window, as after any join)
+  if (added < n && BF.glog) BF.glog.log("ERROR", "budget", `Force-loading ${n} villages added ${added}: ${why || "no more villages found"}`);
+  decisions.push({ day: +dayNow().toFixed(3), text: `Force-loaded ${added} of ${n} villages; the usual rules decide from here` }); if (decisions.length > 40) decisions.shift();
+}
+// force(n) -> null, or why it can't (the /loadvillages command)
+function force(n) {
+  n = Math.floor(+n);
+  if (!(n >= 1 && n <= FORCE_MAX)) return `the number of villages must be 1 to ${FORCE_MAX}`;
+  if (!opt.on) return "distant villages are off here (an automated browser): BF.active.set({ on: true }) turns them on";
+  if (opt.fixed > 0) return `a fixed set of ${opt.fixed} villages is being measured (--extra)`;
+  forced = Math.min(FORCE_MAX, forced + n);
+  if (BF.glog) BF.glog.log("INFO", "budget", `Force-loading ${n} villages: the ${n === 1 ? "nearest one" : n + " nearest"} not yet simulated join at the next village check`);
+  return null;
+}
+const FORCE_MAX = 50;
 
 // set({fixed: n}) (measuring, tools/headless.js --extra n): the n nearest villages within reach on top of the minimum, whatever the time
 // they take, so runs and workers compare alike (the budget reads real time); the memory limit still holds.
@@ -367,6 +407,7 @@ BF.active = {
   isExtra: key => extras.has(key),
   waitCap: key => (leaving.has(key) && !extras.has(key) ? WAIT_CAP : null), waitWhy: key => leaving.get(key) || null, leaving: () => (leavingNow(), [...leaving.keys()]),
   extras: () => [...extras.keys()],
+  force, forced: () => forced, FORCE_MAX,
   used, pressed, pressAt, PRESS,
   holdJoins: tick => { joinHold = tick; },
   peak,
@@ -404,7 +445,7 @@ BF.active = {
   text,
   // the debug screen's Simulation budget card
   feed: () => ({ on: opt.on, budget: opt.budget, used: used(), fps: Math.round(fps), villages: simulated(), extra: VS() && VS().extraCount ? VS().extraCount() : extras.size, extras: [...extras].map(([k, x]) => ({ key: k, name: vname(k), d: Math.round(x.d) })),
-    under: Math.round(underMs / 1000), over: Math.round(overMs / 1000), memMB: opt.memMB, reach: opt.reach, peak: peak(), settings: Object.assign({}, S), log: decisions.slice(-12),
+    under: Math.round(underMs / 1000), over: Math.round(overMs / 1000), memMB: opt.memMB, reach: opt.reach, peak: peak(), settings: Object.assign({}, S), forced, log: decisions.slice(-12),
     joinAt: joinAt(), leaveAt: leaveAt(), win: opt.win, unloading: [...leaving.keys()].filter(k => !extras.has(k) && VS() && VS().isActive(k)).length, next: blocker() }),
   log: () => decisions.slice(),
   blocker,
@@ -414,7 +455,7 @@ BF.active = {
   state() {
     return { opt: Object.assign({}, opt), S: Object.assign({}, S), extras: [...extras].map(([k, x]) => [k, { v: x.v, t: x.t, d: x.d }]), cooling: [...cooling], leaving: [...leaving],
       lastLoad, lastN, slices: slices.map(x => Object.assign({}, x)), slice: Object.assign({}, slice), underMs, overMs, fps, lastClock, fixedAt, emptyAt, memTold: !!decide.memTold, joinHold,
-      hours: [...hours].map(([k, b]) => [k, Object.assign({}, b)]) };
+      hours: [...hours].map(([k, b]) => [k, Object.assign({}, b)]), forced };
   },
   load(s) {
     if (!s || !s.opt) return;
@@ -425,7 +466,8 @@ BF.active = {
     lastLoad = s.lastLoad; lastN = s.lastN; slices = (s.slices || []).map(x => Object.assign({}, x)); slice = Object.assign({}, s.slice);
     underMs = s.underMs; overMs = s.overMs; fps = s.fps; lastClock = s.lastClock; fixedAt = s.fixedAt; emptyAt = s.emptyAt; decide.memTold = !!s.memTold; joinHold = s.joinHold != null ? s.joinHold : -1;
     hours = new Map((s.hours || []).map(([k, b]) => [k, Object.assign({}, b)]));
+    forced = s.forced || 0;
   },
-  reset() { leaving.clear(); fixedAt = null; emptyAt = null; lastClock = null; extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, game: 0, frames: 0 }; fps = 60; decide.memTold = false; hours = new Map(); joinHold = -1; },
+  reset() { leaving.clear(); fixedAt = null; emptyAt = null; lastClock = null; extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, game: 0, frames: 0 }; fps = 60; decide.memTold = false; hours = new Map(); joinHold = -1; forced = 0; },
 };
 })();

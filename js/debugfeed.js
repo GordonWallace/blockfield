@@ -280,6 +280,7 @@ let hooked = false;
 // Fast-forward steps from the debug screen (debug/warp.js: its arrow keys and buttons; debug/server.js /warp): the server answers with
 // the steps after wc, the id of the last one applied here, which each snapshot reports. The page's clock (BF.warp, js/timewarp.js) is the
 // one to step whatever runs the simulation: it sends its speed on to a worker or the world server (js/simhost.js).
+// The same channel carries the Simulation budget card's force-load ({op: "villages", n}, r15-90), run as the /loadvillages command.
 let wc = 0;
 function applyWarp(list) {
   const W = BF.warp;
@@ -288,6 +289,11 @@ function applyWarp(list) {
     if (!w || !(w.id > wc)) continue;
     wc = w.id;
     if (BF.player && BF.player.menu && BF.player.menu()) continue;   // the title screen: no game to speed up (the arrow keys do nothing there either)
+    if (w.op === "villages") {   // force-load villages (r15-90): the /loadvillages command, run wherever the simulation is
+      if (BF.glog) BF.glog.log("INFO", "budget", "Force-loading " + w.n + " villages from the debug screen");
+      if (BF.commands) BF.commands.execute("/loadvillages " + (w.n | 0));
+      continue;
+    }
     const was = W.speed;
     if (w.op === "faster") W.faster();
     else if (w.op === "slower") W.slower();
