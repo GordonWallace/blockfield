@@ -217,10 +217,10 @@ function open(name, opts) {
 // places a scene once the world plays and the spawn's chunks are in (a new sandbox world from #sandbox=<name> or the New World screen)
 function openWhenReady(name) {
   return new Promise(res => {
-    const t0 = Date.now();
+    let tries = 240;   // a minute of quarter seconds (counted, not timed: js/ reads no wall clock outside the files test/wallclock-lint.js lists)
     const go = () => {
       const p = BF.worldSpawn, W = BF.world;
-      if (!p || !W || !W.isLoaded(p.x, p.z) || BF.preparing) { if (Date.now() - t0 < 60000) return setTimeout(go, 250); }
+      if (!p || !W || !W.isLoaded(p.x, p.z) || BF.preparing) { if (--tries > 0) return setTimeout(go, 250); }
       res(open(name));
     };
     setTimeout(go, 250);
