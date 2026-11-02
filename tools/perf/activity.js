@@ -54,7 +54,7 @@ function measure({ seed = 3, seconds = 600, extra = 0, warm = 30, coarse, reroll
   // skipped), time moving (over 0.25 blocks a second) and, for villagers, time by state (js/perf.js stateOf) and asleep; move ERRORs from the
   // game log (stuck, fallen into a pit: tools/perf/moves.js)
   const P = BF.perf, cls = P.CLASSES, mv = {}, lastPos = new WeakMap(), vst = {}, SAMPLE = Math.max(1, Math.round(0.5 / TICK)), SS = SAMPLE * TICK;
-  for (const c of cls) mv[c] = { mobSeconds: 0, blocks: 0, movingSeconds: 0 };
+  for (const c of [...cls, 'traveller']) mv[c] = { mobSeconds: 0, blocks: 0, movingSeconds: 0 };   // (traveller: merchants and explorers, out of villager)
   let moveErrors = 0;
   if (BF.glog.setSink) BF.glog.setSink(e => { if (e.k === 'move' && e.l === 'ERROR') moveErrors++; });
   const moves = () => {
@@ -63,7 +63,7 @@ function measure({ seed = 3, seconds = 600, extra = 0, warm = 30, coarse, reroll
       const q = m.position, was = lastPos.get(m);
       lastPos.set(m, [q.x, q.z]);
       if (!was) continue;
-      const d = Math.hypot(q.x - was[0], q.z - was[1]), o = mv[cls[P.classOf(m)]];
+      const d = Math.hypot(q.x - was[0], q.z - was[1]), o = mv[m.profession === 'merchant' || m.profession === 'explorer' ? 'traveller' : cls[P.classOf(m)]];
       o.mobSeconds += SS;
       if (d <= 8) { o.blocks += d; if (d / SS > 0.25) o.movingSeconds += SS; }
       if (m.type === 'villager') { const st = m.sleeping ? 'asleep' : P.STATES[P.stateOf(m)]; vst[st] = (vst[st] || 0) + SS; }
