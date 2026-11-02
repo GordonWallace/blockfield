@@ -2439,7 +2439,8 @@ function updateMob(m, dt) {
   } else {
   m.onLadder = m.type === "villager" && !m.inWater && onLadder(m);
   if (m.knockT <= 0) {
-    const k = Math.min(1, dt * (m.onGround ? 10 : m.inWater ? 4 : 2.5));
+    // the same pull toward the wanted velocity per game second at any tick length (idea-049): what a 0.05 s tick gives, compounded
+    const rate = m.onGround ? 10 : m.inWater ? 4 : 2.5, k = dt === 0.05 ? Math.min(1, dt * rate) : 1 - Math.pow(1 - Math.min(1, 0.05 * rate), dt / 0.05);
     m.vel.x += (_desired.x - m.vel.x) * k;
     m.vel.z += (_desired.z - m.vel.z) * k;
   }
