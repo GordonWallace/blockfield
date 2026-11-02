@@ -1715,6 +1715,22 @@ function bowPull(stage) {
 }
 
 // Painter kit for extra tile packs (js/textures-stone.js etc.): add painters to T / ICON_T / SPRITES at load time.
+// Sandbox test blocks (spec idea-050): a placeholder tile per block, its colour in a checker with a dark frame and its number in white
+// (3 x 5 digits drawn at 2x), so the 16 tell apart until the texture studio (idea-052) paints them.
+{
+  const DIG = ["111101101101111", "010110010010111", "111001111100111", "111001111001111", "101101111001001", "111100111001111", "111100111101111",
+    "111001001001001", "111101111101111", "111101111001111"];
+  for (let n = 1; n <= 16; n++) T["sandbox_block_" + n] = p => {
+    const b = BF.blocks.find(x => x && x.sandbox === n), c = hex(b ? b.color : "#888888"), dark = mul(c, 0.78), edge = mul(c, 0.45);
+    p.fill((x, y) => p.set(x, y, x === 0 || y === 0 || x === TS - 1 || y === TS - 1 ? edge : ((x >> 3) + (y >> 3)) & 1 ? dark : c));
+    const s = String(n), w = s.length * 8 - 2, x0 = (TS - w) >> 1, y0 = (TS - 10) >> 1;
+    for (let k = 0; k < s.length; k++) {
+      const g = DIG[+s[k]];
+      for (let r = 0; r < 5; r++) for (let q = 0; q < 3; q++) if (g[r * 3 + q] === "1")
+        for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) p.set(x0 + k * 8 + q * 2 + dx, y0 + r * 2 + dy, WHITE);
+    }
+  };
+}
 BF.texKit = { T, ICON_T, SPRITES, TS, Px, hex, pal, mul, mix, ramp, clamp01, smooth, jit, dome, voronoi, ihash, WHITE, lighten,
   put, stroke, blob, stoneBase, cobbleBase, mossOver, sandBase, bricks, smoothBase, frame, planksBase, grassBlades, STONE, SAND, RED_SAND, SANDSTONE, SNOW, MOSS, WOOD_OAK,
   woolBase, barkSide, logTop, SPRITE_TILES, WOOD_SPRUCE, WOOD_ACACIA };

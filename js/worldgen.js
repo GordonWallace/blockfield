@@ -2080,124 +2080,11 @@ function generateRange(cx, cz, sy0, sy1) {
   return vox;
 }
 
-// Fills `vox` (zeroed, window-indexed: ((y - Y0) * 16 + z) * 16 + x) with absolute y in [Y0, Y0 + NY). Everything written outside the window is skipped.
-function core(cx, cz, vox, Y0, NY) {
-  const { CS, H, SEA, B } = BF;
-  const ox = cx * CS, oz = cz * CS;
-  const STONE = B.stone, WATER = B.water, AIR = 0;
-  const step = CS * CS;
-  const Y1 = Y0 + NY, MINY = BF.MIN_Y;
-  WY0 = Y0; WY1 = Y1;
-  const maxH = P.maxH;
-
-  // ---- terrain columns ----
-  for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
-    const wx = ox + x, wz = oz + z;
-    const hi = (z + 1) * HW + x + 1;
-    const h = hCache[hi];
-    const b = bCache[hi], tb = tbCache[hi], wl = wlCache[hi];
-    const n0 = hCache[hi - 1], n1 = hCache[hi + 1], n2 = hCache[hi - HW], n3 = hCache[hi + HW];
-    const slope = Math.max(Math.abs(n0 - h), Math.abs(n1 - h), Math.abs(n2 - h), Math.abs(n3 - h));
-    const minN = Math.min(n0, n1, n2, n3);
-    const r = noise.hash(wx, wz, 3);
-    const patch = N2(wx, wz, 13, 3.1, -7.3);
-
-    let top = B.grass, fill = B.dirt, depth = 3 + (r * 2 | 0), under = STONE, depth2 = 0, strata = false;
-    if (h < wl) {
-      // underwater floor
-      if (b === SWAMP) { top = r < 0.4 ? B.clay : B.dirt; fill = B.dirt; }
-      else if (b === MANGROVE) { top = fill = B.mud; depth = 4; }
-      else if (b === RIVER) { top = fill = patch > 0.35 ? B.clay : patch < -0.4 ? B.gravel : B.sand; depth = 2; }
-      else if (wl - h > 5) { top = fill = tb >= 3 ? B.sand : B.gravel; depth = 2; }
-      else { top = fill = B.sand; depth = 3; if (patch > 0.55) top = fill = B.clay; }
-      if (b === BADLANDS) top = fill = B.red_sand;
-    } else switch (b) {
-      case DESERT: top = fill = B.sand; under = B.sandstone; depth2 = 4; break;
-      case BADLANDS: strata = true; top = slope >= 2 ? 0 : B.red_sand; fill = B.red_sand; depth = slope >= 2 ? 0 : 1 + (r * 2 | 0); break;
-      case BEACH: case RIVER: top = fill = B.sand; depth = 3; under = B.sandstone; depth2 = 2; break;
-      case SNOWY_BEACH: top = fill = B.sand; depth = 3; if (h >= SEA + 1) top = B.snow_grass; break;
-      case STONY_SHORE: top = fill = patch > 0.3 ? B.gravel : STONE; depth = 2; break;
-      case SNOWY_PLAINS: case SNOWY_TAIGA: top = B.snow_grass; break;
-      case ICE_SPIKES: top = B.snow; break;
-      case MUSHROOM: top = B.mycelium; break;
-      case MANGROVE: top = fill = B.mud; depth = 4; break;
-      case OLD_TAIGA: top = patch > 0.35 ? B.coarse_dirt : patch > -0.45 ? B.podzol : B.grass; break;
-      case TAIGA: if (patch > 0.5) top = B.podzol; break;
-      case DARK_FOREST: if (patch > 0.6) top = B.podzol; break;
-      case SAVANNA: if (patch > 0.62) top = B.coarse_dirt; break;
-      case MOUNTAINS: case SNOWY_SLOPES: case PEAKS: case STONY_PEAKS: {
-        const snowLine = (b === SNOWY_SLOPES ? 1450 : b === PEAKS ? 1800 : 1950) + N2(wx, wz, 23, 0, 0) * 30;
-        const snowy = b !== STONY_PEAKS && h >= snowLine;
-        if (snowy) {
-          top = slope >= 4 ? STONE : B.snow; fill = slope >= 3 ? STONE : B.snow; depth = 1 + (r * 2 | 0);
-          if (b === PEAKS && patch > 0.5 && slope < 3) top = B.packed_ice;
-        } else if (b === STONY_PEAKS) top = fill = ((h + (patch * 3 | 0)) % 7 === 0) ? B.calcite : STONE;
-        else if (slope >= 2 || h > 1850 + r * 30) { top = STONE; fill = STONE; }
-        else if (b === SNOWY_SLOPES) top = B.snow_grass;
-        else if (slope >= 2 && r < 0.3) top = B.gravel;
-        break;
-      }
-      default:
-        if (h <= SEA + 1 && minN < SEA && b !== SWAMP) {
-          if (tb === 0) top = B.snow_grass;
-          else { top = fill = B.sand; depth = 3; }
-        } else if (slope >= 6) { top = STONE; fill = STONE; }
-    }
-    // frozen water: frozen biomes freeze near shore and in broken floes further out; cold rivers freeze
-    const ice = h < wl && b !== SWAMP && b !== MANGROVE && (tb === 0 || (tb === 1 && b === RIVER)) &&
-      (wl - h < 4 || patch > -0.35);
-    const topY = Math.max(h, wl);
-    const yStart = Y0 > MINY ? Y0 : MINY, yEnd = topY < Y1 - 1 ? topY : Y1 - 1;
-    let i = x + z * CS + (yStart - Y0) * step;
-    const strataY = h - 36 + r * 4;
-    for (let y = yStart; y <= yEnd; y++, i += step) {
-      let v;
-      if (y === MINY) v = B.bedrock;
-      else if (y - MINY <= 4 && noise.hash3(wx, y, wz, 9) < 0.85 - (y - MINY) * 0.17) v = B.bedrock;
-      else if (y > h) v = (y === wl && ice) ? B.ice : WATER;
-      else if (strata) {
-        if (y > h - depth) v = y === h ? top : fill;
-        else if (y > strataY) v = STRATA[(y + ((N2(wx, wz, 160, 0, 0) * 3) | 0) + 64) & 63];
-        else v = stone3(wx, y, wz);
-      }
-      else if (y === h) v = top;
-      else if (y > h - depth) v = fill;
-      else if (y > h - depth - depth2) v = under;
-      else v = stone3(wx, y, wz);
-      vox[i] = v;
-    }
-  }
-
-  const vils = P.vils;
-  // structures (villages, trees, plants) cannot reach a window that lies far below the lowest ground of the chunk
-  const skipTop = Y1 <= P.minH - 48;
-
-  // ---- caves (coarse 3D noise grid, interpolated) ----
-  caves3(vox, Y0, Y1, cx, cz);
-
-  // ---- ores and pockets ----
-  ores3(vox, Y0, Y1, cx, cz);
-
-  // ---- villages ----
-  if (!skipTop) for (const vil of vils) drawVillage(vil, ox, oz, vox, (x, z) => hCache[(z - oz + 1) * HW + x - ox + 1]);
-
-  // ---- trees and large features ----
-  const RENDER = BF.RENDER;
-  let cm = null;   // the map of the feature being drawn (it is drawn in its own face's frame), or null
-  const putLog = (x, y, z, id) => {
-    if (cm) { const X = mapX(cm, x, z); z = mapZ(cm, x, z); x = X; }
-    const lx = x - ox, lz = z - oz;
-    if (lx < 0 || lx >= CS || lz < 0 || lz >= CS || y <= MINY || y >= H || y < Y0 || y >= Y1) return;
-    const vi = ((y - Y0) * CS + lz) * CS + lx, cur = vox[vi];
-    if (cur === AIR || cur === WATER || RENDER[cur] === 2 || RENDER[cur] === 4) vox[vi] = id;
-  };
-  const putLeaf = (x, y, z, id) => {
-    if (cm) { const X = mapX(cm, x, z); z = mapZ(cm, x, z); x = X; }
-    const lx = x - ox, lz = z - oz;
-    if (lx < 0 || lx >= CS || lz < 0 || lz >= CS || y <= MINY || y >= H || y < Y0 || y >= Y1) return;
-    const vi = ((y - Y0) * CS + lz) * CS + lx;
-    if (vox[vi] === AIR) vox[vi] = id;
-  };
+// The tree and feature drawers of chunk generation (js/worldgen.js core) over two writers: putLog(x, y, z, id) (logs, stems, ice:
+// replace air, water, leaves and plants) and putLeaf(x, y, z, id) (only into air). Shared by core and drawTree (sandbox scenes, idea-050),
+// so a scene's tree is exactly the generator's tree.
+function treeKit(putLog, putLeaf) {
+  const B = BF.B;
   const disc = (tx, y, tz, r, id, trim) => {
     for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
       if (dx * dx + dz * dz > r * r + r * 0.8) continue;
@@ -2346,6 +2233,128 @@ function core(cx, cz, vox, Y0, NY) {
         if (dx * dx + dz * dz <= rr * rr) putLog(tx + dx, y, tz + dz, B.packed_ice);
     }
   }
+  return { disc, blob, oakTree, nestTree, spruceTree, megaSpruce, jungleTree, acacia, darkOak, cherry, mangrove, giantMushroom, iceSpike };
+}
+
+// Fills `vox` (zeroed, window-indexed: ((y - Y0) * 16 + z) * 16 + x) with absolute y in [Y0, Y0 + NY). Everything written outside the window is skipped.
+function core(cx, cz, vox, Y0, NY) {
+  const { CS, H, SEA, B } = BF;
+  const ox = cx * CS, oz = cz * CS;
+  const STONE = B.stone, WATER = B.water, AIR = 0;
+  const step = CS * CS;
+  const Y1 = Y0 + NY, MINY = BF.MIN_Y;
+  WY0 = Y0; WY1 = Y1;
+  const maxH = P.maxH;
+
+  // ---- terrain columns ----
+  for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
+    const wx = ox + x, wz = oz + z;
+    const hi = (z + 1) * HW + x + 1;
+    const h = hCache[hi];
+    const b = bCache[hi], tb = tbCache[hi], wl = wlCache[hi];
+    const n0 = hCache[hi - 1], n1 = hCache[hi + 1], n2 = hCache[hi - HW], n3 = hCache[hi + HW];
+    const slope = Math.max(Math.abs(n0 - h), Math.abs(n1 - h), Math.abs(n2 - h), Math.abs(n3 - h));
+    const minN = Math.min(n0, n1, n2, n3);
+    const r = noise.hash(wx, wz, 3);
+    const patch = N2(wx, wz, 13, 3.1, -7.3);
+
+    let top = B.grass, fill = B.dirt, depth = 3 + (r * 2 | 0), under = STONE, depth2 = 0, strata = false;
+    if (h < wl) {
+      // underwater floor
+      if (b === SWAMP) { top = r < 0.4 ? B.clay : B.dirt; fill = B.dirt; }
+      else if (b === MANGROVE) { top = fill = B.mud; depth = 4; }
+      else if (b === RIVER) { top = fill = patch > 0.35 ? B.clay : patch < -0.4 ? B.gravel : B.sand; depth = 2; }
+      else if (wl - h > 5) { top = fill = tb >= 3 ? B.sand : B.gravel; depth = 2; }
+      else { top = fill = B.sand; depth = 3; if (patch > 0.55) top = fill = B.clay; }
+      if (b === BADLANDS) top = fill = B.red_sand;
+    } else switch (b) {
+      case DESERT: top = fill = B.sand; under = B.sandstone; depth2 = 4; break;
+      case BADLANDS: strata = true; top = slope >= 2 ? 0 : B.red_sand; fill = B.red_sand; depth = slope >= 2 ? 0 : 1 + (r * 2 | 0); break;
+      case BEACH: case RIVER: top = fill = B.sand; depth = 3; under = B.sandstone; depth2 = 2; break;
+      case SNOWY_BEACH: top = fill = B.sand; depth = 3; if (h >= SEA + 1) top = B.snow_grass; break;
+      case STONY_SHORE: top = fill = patch > 0.3 ? B.gravel : STONE; depth = 2; break;
+      case SNOWY_PLAINS: case SNOWY_TAIGA: top = B.snow_grass; break;
+      case ICE_SPIKES: top = B.snow; break;
+      case MUSHROOM: top = B.mycelium; break;
+      case MANGROVE: top = fill = B.mud; depth = 4; break;
+      case OLD_TAIGA: top = patch > 0.35 ? B.coarse_dirt : patch > -0.45 ? B.podzol : B.grass; break;
+      case TAIGA: if (patch > 0.5) top = B.podzol; break;
+      case DARK_FOREST: if (patch > 0.6) top = B.podzol; break;
+      case SAVANNA: if (patch > 0.62) top = B.coarse_dirt; break;
+      case MOUNTAINS: case SNOWY_SLOPES: case PEAKS: case STONY_PEAKS: {
+        const snowLine = (b === SNOWY_SLOPES ? 1450 : b === PEAKS ? 1800 : 1950) + N2(wx, wz, 23, 0, 0) * 30;
+        const snowy = b !== STONY_PEAKS && h >= snowLine;
+        if (snowy) {
+          top = slope >= 4 ? STONE : B.snow; fill = slope >= 3 ? STONE : B.snow; depth = 1 + (r * 2 | 0);
+          if (b === PEAKS && patch > 0.5 && slope < 3) top = B.packed_ice;
+        } else if (b === STONY_PEAKS) top = fill = ((h + (patch * 3 | 0)) % 7 === 0) ? B.calcite : STONE;
+        else if (slope >= 2 || h > 1850 + r * 30) { top = STONE; fill = STONE; }
+        else if (b === SNOWY_SLOPES) top = B.snow_grass;
+        else if (slope >= 2 && r < 0.3) top = B.gravel;
+        break;
+      }
+      default:
+        if (h <= SEA + 1 && minN < SEA && b !== SWAMP) {
+          if (tb === 0) top = B.snow_grass;
+          else { top = fill = B.sand; depth = 3; }
+        } else if (slope >= 6) { top = STONE; fill = STONE; }
+    }
+    // frozen water: frozen biomes freeze near shore and in broken floes further out; cold rivers freeze
+    const ice = h < wl && b !== SWAMP && b !== MANGROVE && (tb === 0 || (tb === 1 && b === RIVER)) &&
+      (wl - h < 4 || patch > -0.35);
+    const topY = Math.max(h, wl);
+    const yStart = Y0 > MINY ? Y0 : MINY, yEnd = topY < Y1 - 1 ? topY : Y1 - 1;
+    let i = x + z * CS + (yStart - Y0) * step;
+    const strataY = h - 36 + r * 4;
+    for (let y = yStart; y <= yEnd; y++, i += step) {
+      let v;
+      if (y === MINY) v = B.bedrock;
+      else if (y - MINY <= 4 && noise.hash3(wx, y, wz, 9) < 0.85 - (y - MINY) * 0.17) v = B.bedrock;
+      else if (y > h) v = (y === wl && ice) ? B.ice : WATER;
+      else if (strata) {
+        if (y > h - depth) v = y === h ? top : fill;
+        else if (y > strataY) v = STRATA[(y + ((N2(wx, wz, 160, 0, 0) * 3) | 0) + 64) & 63];
+        else v = stone3(wx, y, wz);
+      }
+      else if (y === h) v = top;
+      else if (y > h - depth) v = fill;
+      else if (y > h - depth - depth2) v = under;
+      else v = stone3(wx, y, wz);
+      vox[i] = v;
+    }
+  }
+
+  const vils = P.vils;
+  // structures (villages, trees, plants) cannot reach a window that lies far below the lowest ground of the chunk
+  const skipTop = Y1 <= P.minH - 48;
+
+  // ---- caves (coarse 3D noise grid, interpolated) ----
+  caves3(vox, Y0, Y1, cx, cz);
+
+  // ---- ores and pockets ----
+  ores3(vox, Y0, Y1, cx, cz);
+
+  // ---- villages ----
+  if (!skipTop) for (const vil of vils) drawVillage(vil, ox, oz, vox, (x, z) => hCache[(z - oz + 1) * HW + x - ox + 1]);
+
+  // ---- trees and large features ----
+  const RENDER = BF.RENDER;
+  let cm = null;   // the map of the feature being drawn (it is drawn in its own face's frame), or null
+  const putLog = (x, y, z, id) => {
+    if (cm) { const X = mapX(cm, x, z); z = mapZ(cm, x, z); x = X; }
+    const lx = x - ox, lz = z - oz;
+    if (lx < 0 || lx >= CS || lz < 0 || lz >= CS || y <= MINY || y >= H || y < Y0 || y >= Y1) return;
+    const vi = ((y - Y0) * CS + lz) * CS + lx, cur = vox[vi];
+    if (cur === AIR || cur === WATER || RENDER[cur] === 2 || RENDER[cur] === 4) vox[vi] = id;
+  };
+  const putLeaf = (x, y, z, id) => {
+    if (cm) { const X = mapX(cm, x, z); z = mapZ(cm, x, z); x = X; }
+    const lx = x - ox, lz = z - oz;
+    if (lx < 0 || lx >= CS || lz < 0 || lz >= CS || y <= MINY || y >= H || y < Y0 || y >= Y1) return;
+    const vi = ((y - Y0) * CS + lz) * CS + lx;
+    if (vox[vi] === AIR) vox[vi] = id;
+  };
+  const { disc, blob, oakTree, nestTree, spruceTree, megaSpruce, jungleTree, acacia, darkOak, cherry, mangrove, giantMushroom, iceSpike } = treeKit(putLog, putLeaf);
   function boulder(tx, ty, tz) {
     for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > (noise.hash3(tx + dx, ty + dy, tz + dz, 91) < 0.5 ? 1 : 2)) continue;
@@ -2582,6 +2591,52 @@ function insideFace(x0, z0, x1, z1, m) {
   const f = Math.floor(x0 / PW), u0 = x0 - PW * f - PN, u1 = x1 - PW * f - PN, v0 = z0 - PN, v1 = z1 - PN;
   return f >= 0 && f < 6 && u0 >= m && v0 >= m && u1 < PN - m && v1 < PN - m;
 }
+// One tree or tree-grid feature, drawn by chunk generation's own code (treeKit), at (x, y, z) (y: the block above the ground), for
+// sandbox scenes (spec idea-050): [[x, y, z, id], ...] (last write wins as in a chunk: logs over leaves, leaves only into air).
+// size: the height (each kind's usual one when left out); opts: { big } (jungle: the 2 x 2 kind), { red } (giant mushroom),
+// { branch } (acacia: its branch bits 0-7), { ground } (mangrove: the mud's y, default y - 1), { nest } (oak_nest / birch_nest: always a nest).
+// Unknown kinds throw.
+const TREE_KINDS = { oak: 5, oak_nest: 5, birch: 6, birch_nest: 6, swamp_oak: 5, jungle_oak: 5, spruce: 8, mega_spruce: 22, jungle: 11, jungle_big: 22,
+  acacia: 6, dark_oak: 7, cherry: 5, mangrove: 5, giant_mushroom: 0, ice_spike: 10, cactus: 2, boulder: 0 };
+function drawTree(kind, x, y, z, size, opts) {
+  if (!(kind in TREE_KINDS)) throw new Error("unknown tree kind " + kind);
+  const B = BF.B, RENDER = BF.RENDER, o = opts || {}, cells = new Map(), a = size > 0 ? size | 0 : TREE_KINDS[kind];
+  x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
+  const key = (px, py, pz) => px + "," + py + "," + pz;
+  const putLog = (px, py, pz, id) => { const k = key(px, py, pz), c = cells.get(k), cur = c ? c[3] : 0; if (cur === 0 || RENDER[cur] === 2 || RENDER[cur] === 4) cells.set(k, [px, py, pz, id]); };
+  const putLeaf = (px, py, pz, id) => { const k = key(px, py, pz); if (!cells.has(k)) cells.set(k, [px, py, pz, id]); };
+  const K = treeKit(putLog, putLeaf);
+  switch (kind) {
+    case "oak": K.oakTree(x, y, z, B.oak_log, B.oak_leaves, a, false); break;
+    case "swamp_oak": K.oakTree(x, y, z, B.oak_log, B.oak_leaves, a, true); break;
+    case "jungle_oak": K.oakTree(x, y, z, B.jungle_log, B.jungle_leaves, a, false); break;
+    case "birch": K.oakTree(x, y, z, B.birch_log, B.birch_leaves, a, false); break;
+    case "oak_nest": case "birch_nest": {
+      const birch = kind === "birch_nest";
+      K.oakTree(x, y, z, birch ? B.birch_log : B.oak_log, birch ? B.birch_leaves : B.oak_leaves, a, false);
+      if (B.bee_nest != null) putLog(x, Math.max(y + 1, y + a - 4), z - 1, B.bee_nest);   // (a scene's nest tree always has its nest, on the north side)
+      break;
+    }
+    case "spruce": K.spruceTree(x, y, z, a); break;
+    case "mega_spruce": K.megaSpruce(x, y, z, a); break;
+    case "jungle": K.jungleTree(x, y, z, a, !!o.big); break;
+    case "jungle_big": K.jungleTree(x, y, z, a, true); break;
+    case "acacia": K.acacia(x, y, z, a, o.branch != null ? o.branch | 0 : 5); break;
+    case "dark_oak": K.darkOak(x, y, z, a); break;
+    case "cherry": K.cherry(x, y, z, a); break;
+    case "mangrove": K.mangrove(x, y, z, a, o.ground != null ? o.ground | 0 : y - 1); break;
+    case "giant_mushroom": K.giantMushroom(x, y, z, o.red !== false); break;
+    case "ice_spike": K.iceSpike(x, y, z, a, o.radius || (a > 16 ? 2.6 : 1.3)); break;
+    case "cactus": for (let k = 0; k <= Math.min(2, a); k++) putLog(x, y + k, z, B.cactus); break;
+    case "boulder":
+      for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+        if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > (noise.hash3(x + dx, y + dy, z + dz, 91) < 0.5 ? 1 : 2)) continue;
+        cells.set(key(x + dx, y + dy, z + dz), [x + dx, y + dy, z + dz, noise.hash3(x + dx, y + dy, z + dz, 92) < 0.7 ? B.mossy_cobblestone : B.cobblestone]);
+      }
+      break;
+  }
+  return [...cells.values()];
+}
 const bedPlanOf = (kind, w, d, h) => bedPlan({ type: kind, w, d, du: w >> 1, h: h == null ? 0.5 : h });
 
 BF.worldgen = {
@@ -2591,6 +2646,7 @@ BF.worldgen = {
   PIG_POP,
   setCoarse(v) { COARSE = !!v; },   // overview maps: approximate (cheap) plateau weights, see limWeights
   init(n, opts) {
+    if (BF.flatgen) BF.flatgen.uninstall(BF.worldgen);   // (a sandbox world's calls go; js/flatgen.js puts them back below for one)
     noise = n; VGEN = (opts && opts.villages) || 1; BF.setLimits(); SC = Math.max(1, (opts && opts.biomeScale) || 1);
     PG = BF.planetgen; PN = BF.planet.N; PW = BF.planet.W;
     // 3D noise and js/planetgen.js's continents (set by the planet's size); biome size (SC) scales its climate noise and the
@@ -2605,7 +2661,11 @@ BF.worldgen = {
       PRIV = c ? c.net : null; TAPE = c ? c.tape : null; PSOLVE = null; PSEED = pkey; TMODE = 0;
     }
     C.lk = 0; BF.rivers.usePlanet(planetRivers);   // (the network: planetRivers(), solved the first time it is needed)
-    LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); horseCache.clear(); tintCache.clear(); sandCache.clear(); STRATA = null; },
+    LAT.clear(); CRAW.clear(); CLIM.clear(); CLIS.clear(); villageCache.clear(); horseCache.clear(); tintCache.clear(); sandCache.clear(); STRATA = null;
+    // the sandbox world (spec idea-050): the same planet, its ground a grass plain (js/flatgen.js swaps the terrain calls in)
+    if (opts && opts.world === "flat" && BF.flatgen) BF.flatgen.install(BF.worldgen); },
+  world: "planet",   // "flat" while js/flatgen.js's calls are installed
+  drawTree, TREE_KINDS,
   generateBand, generateRange, heightAt,
   _layoutVillage: (x, z, pop) => layoutVillage(x, z, pop),   // tools / tests: lay out a village of pop villagers at (x, z)
   _villagePop: (a, b, salt) => villagePop(a, b, salt),

@@ -2857,6 +2857,7 @@ function pickHostileType(r) {
 const SURFACE_EVERY = 8, CAVE_EVERY = 8, MAX_TRIES = 64;
 let surfAcc = 0, caveAcc = 0, chunkArr = [], chunkArrT = 0;
 function spawnMonsters(dt) {
+  if (BF.state.world === "flat") return;   // a sandbox world: nothing spawns by itself (spec idea-050); /summon and scenes still make mobs
   if (own()) return spawnInCluster(dt);
   if (!playerAlive()) return;
   const W = BF.world;

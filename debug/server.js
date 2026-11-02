@@ -13,9 +13,12 @@
 // /push on the debug port and every open debug screen receives them over Server-Sent Events (/events).
 // The game can also be served some other way and pointed here with index.html?debugfeed=8001.
 // The game page also gets window.BF_BUILD, the commit and branch of this checkout (read from .git), for the game log (js/gamelog.js).
-// No dependencies: Node's built-in modules only.
+// The game port also answers /claude/* for the sandbox structure designer (spec idea-051, debug/claude.js, which holds the API key) and
+// /sandbox/api/* for the sandbox's files (debug/sandbox.js); the debug screen's API calls panel shows every call the designer makes.
+// No dependencies: Node's built-in modules only (debug/claude.js uses the Anthropic SDK when it's installed in debug/).
 "use strict";
 const http = require("http"), fs = require("fs"), path = require("path");
+const sandbox = require("./sandbox.js"), claude = require("./claude.js");
 
 const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf("--" + name); return i >= 0 && args[i + 1] ? +args[i + 1] : def; };
@@ -66,6 +69,8 @@ function serveGame(req, res) {
   try { rel = decodeURIComponent(new URL(req.url, "http://x").pathname); } catch (e) { res.writeHead(400).end(); return; }
   if (rel.includes("\0")) { res.writeHead(404).end(); return; }   // fs throws on a NUL byte (/%00)
   if (rel === "/wiki") { res.writeHead(301, { Location: "/wiki/" }).end(); return; }   // Blockfieldpedia (wiki/index.html)
+  if (rel.startsWith("/sandbox/api/") && sandbox.http(req, res, rel)) return;   // the sandbox's scene / structure / texture files (spec idea-050, debug/sandbox.js)
+  if (claude.handle(req, res, rel)) return;   // the structure designer's Claude API calls (spec idea-051, debug/claude.js)
   if (rel.startsWith("/saves/")) { if (!world || !world.http(req, res, rel)) res.writeHead(404, { "Content-Type": "text/plain" }).end("No world server"); return; }   // export / import (spec r15-42)
   if (rel.endsWith("/")) rel += "index.html";
   const file = path.join(ROOT, rel);
@@ -152,6 +157,7 @@ const layouts = new Map(), details = new Map(), history = new Map(), icons = new
 
 function send(res, event, data) { res.write("event: " + event + "\ndata: " + data + "\n\n"); }
 function broadcast(event, obj) { const d = JSON.stringify(obj); for (const c of clients) send(c, event, d); }
+claude.onCall(rec => broadcast("claudecall", rec));   // each new or updated designer API call (the API calls panel)
 
 const same = (x, y) => x && y && x[0] === y[0] && x[2] === y[2];
 // Adds the game's (capped) log to what the server already holds for that village; returns the full history.
@@ -374,11 +380,13 @@ function serveDebug(req, res) {
     send(res, "cache", JSON.stringify(cached()));
     send(res, "alerts", JSON.stringify({ av, alerts }));
     send(res, "vhist", JSON.stringify({ reset: true, data: vhist.cached() }));
+    send(res, "claudecalls", JSON.stringify(claude.callLog()));   // the structure designer's API calls so far (the API calls panel)
     if (latest) send(res, "snap", JSON.stringify({ ...latest, age: Date.now() - lastPush }));   // age: an old one isn't shown as live
     clients.add(res);
     req.on("close", () => clients.delete(res));
     return;
   }
+  if (url.pathname === "/claude-calls") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify(claude.callLog())); return; }
   if (url.pathname === "/glog") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify(glog)); return; }   // the game log as the server holds it
   if (url.pathname === "/state") { res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ latest, ...cached() })); return; }
   if (url.pathname === "/" || url.pathname === "/index.html") {
@@ -436,4 +444,5 @@ console.log(`Blockfield debug server
   Debug screen: http://${shown}:${DEBUG_PORT}   (open this one on your second monitor)${NO_GAME ? "" : `
   Blockfieldpedia: http://${shown}:${GAME_PORT}/wiki/   (the Blockfield wiki)`}${world ? `
   World server: ws://${shown}:${GAME_PORT}/sim   (the simulation runs here; saves in ${SAVES})` : ""}
+  Structure designer (sandbox worlds): ${claude.describe()}
 Ctrl+C to stop.`);

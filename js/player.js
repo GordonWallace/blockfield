@@ -82,7 +82,7 @@ const P = (BF.player = {
 // ---------- small helpers ----------
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const inv = () => BF.inventory || {};
-const invOpen = () => { try { return !!(inv().isOpen && inv().isOpen()) || !!(BF.commands && BF.commands.isOpen()) || !!(BF.signs && BF.signs.isOpen()) || !!(BF.mapview && BF.mapview.isOpen()) || !!(BF.coords && BF.coords.panel.isOpen()); } catch (_) { return false; } }; // the command line (commands.js) counts as a screen
+const invOpen = () => { try { return !!(inv().isOpen && inv().isOpen()) || !!(BF.commands && BF.commands.isOpen()) || !!(BF.signs && BF.signs.isOpen()) || !!(BF.mapview && BF.mapview.isOpen()) || !!(BF.coords && BF.coords.panel.isOpen()) || !!(BF.designer && BF.designer.isOpen()); } catch (_) { return false; } }; // the command line (commands.js) counts as a screen
 const selectedItem = () => {
   try { const s = inv().selected && inv().selected(); return s && s.count > 0 ? s : null; } catch (_) { return null; }
 };
@@ -241,8 +241,10 @@ function buildDOM() {
     <form class="bfp-view-create" hidden autocomplete="off">
       <div class="bfp-head"><span>Create New World</span></div>
       <label class="bfp-field">World name<input name="name" maxlength="40" value="New World" spellcheck="false"></label>
-      <label class="bfp-field">Seed<input name="seed" placeholder="Leave blank for a random seed" spellcheck="false"></label>
-      <label class="bfp-field">Biome size: <b class="bfp-bsl">${BIOME_SIZES[BIOME_DEF][1]}</b><input name="biome" type="range" min="0" max="${BIOME_SIZES.length - 1}" step="1" value="${BIOME_DEF}"><span class="bfp-hint">Relative size of biomes and climate zones. Small matches older worlds.</span></label>
+      <div class="bfp-field">World type<div class="bfp-mode bfp-wtype" role="group" aria-label="World type"><button type="button" data-act="wtype" data-wtype="planet">Planet</button><button type="button" data-act="wtype" data-wtype="flat">Sandbox</button></div><span class="bfp-hint bfp-wtypehint"></span></div>
+      <label class="bfp-field bfp-scene" hidden>Scene<select name="scene"><option value="">None (the empty plain)</option></select><span class="bfp-hint">Placed at spawn: ready-made test worlds from sandbox/scenes.</span></label>
+      <label class="bfp-field bfp-seedf">Seed<input name="seed" placeholder="Leave blank for a random seed" spellcheck="false"></label>
+      <label class="bfp-field bfp-biomef">Biome size: <b class="bfp-bsl">${BIOME_SIZES[BIOME_DEF][1]}</b><input name="biome" type="range" min="0" max="${BIOME_SIZES.length - 1}" step="1" value="${BIOME_DEF}"><span class="bfp-hint">Relative size of biomes and climate zones. Small matches older worlds.</span></label>
       <div class="bfp-field">Game mode${modeRow}</div>
       <div class="bfp-field bfp-createopts"></div>
       <button class="primary" type="submit">Create and play</button>
@@ -282,6 +284,7 @@ function buildDOM() {
     if (!act) return;
     const a = act.dataset.act, row = act.closest("[data-id]"), id = row && row.dataset.id;
     if (a === "mode") { createMode = act.dataset.mode; updateModeUI(); }
+    else if (a === "wtype") setWorldType(act.dataset.wtype);
     else if (a === "mon" || a === "far") flipOpt(act);   // the create form's and a world row's options (saved with Create / Save)
     else if (a === "options") renderWorlds({ options: id });
     else if (a === "options-ok") finishOptions(row);
@@ -425,7 +428,7 @@ const MODE_HINT = {
 };
 function updateModeUI() {
   if (!BF.page) return;   // (the simulation worker, r15-38: no screens)
-  for (const b of document.querySelectorAll(".bfp-mode button")) {
+  for (const b of document.querySelectorAll(".bfp-mode button[data-mode]")) {
     const on = b.dataset.mode === (startEl && startEl.contains(b) ? (createMode || gameMode) : gameMode);
     b.classList.toggle("on", on); b.setAttribute("aria-pressed", on);
   }
@@ -511,6 +514,7 @@ function showStartView(v) {
     createForm.elements.name.value = "New World";
     createForm.elements.seed.value = "";
     createForm.elements.biome.value = BIOME_DEF; createForm.querySelector(".bfp-bsl").textContent = BIOME_SIZES[BIOME_DEF][1];
+    setWorldType("planet");
     if (BF.gameOpts) createForm.querySelector(".bfp-createopts").innerHTML = "Game options" + optsHTML(BF.gameOpts.normalize());
     updateModeUI();
     setTimeout(() => { try { createForm.elements.name.select(); } catch (_) {} }, 0);
@@ -538,7 +542,7 @@ function renderWorlds(st) {
     return;
   }
   worldsEl.innerHTML = worldsCache.map(w => {
-    const id = esc(w.id), meta = `${fmtDate(w.lastPlayed)} · <b>${w.gameMode === "creative" ? "Creative" : "Survival"}</b> · seed ${esc(w.seed)}<button type="button" class="bfp-copy" data-act="copy-seed" title="Copy seed to clipboard" aria-label="Copy seed ${esc(w.seed)}">⧉</button> · ${biomeLabel(w.biomeScale)} biomes`;
+    const id = esc(w.id), meta = `${fmtDate(w.lastPlayed)} · <b>${w.gameMode === "creative" ? "Creative" : "Survival"}</b> · seed ${esc(w.seed)}<button type="button" class="bfp-copy" data-act="copy-seed" title="Copy seed to clipboard" aria-label="Copy seed ${esc(w.seed)}">⧉</button> · ${w.world === "flat" ? '<b class="bfp-sandtag">Sandbox</b>' : biomeLabel(w.biomeScale) + " biomes"}`;
     if (st.renaming === w.id) return `<div class="bfp-world" role="listitem" data-id="${id}">
       <div class="bfp-info"><input value="${esc(w.name)}" maxlength="40" aria-label="New world name"></div>
       <div class="bfp-wbtns"><button class="primary" data-act="rename-ok">Save</button><button data-act="cancel">Cancel</button></div></div>`;
@@ -627,23 +631,57 @@ function loaded(what, t0) {
   loading(null);
   if (BF.glog) BF.glog.log("INFO", "save", what + " world \"" + (BF.save && BF.save.current ? BF.save.current.name : "?") + "\": playing after " + ((performance.now() - t0) / 1000).toFixed(1) + " s of loading");
 }
+// The New World screen's world type (spec idea-050): Planet, or Sandbox (the planet with an empty grass plain for ground, nothing spawning;
+// no seed or biome size to pick, creative to start with, and a Scene list of sandbox/scenes to place at spawn).
+let createWorldType = "planet";
+function setWorldType(t) {
+  createWorldType = t === "flat" ? "flat" : "planet";
+  const flat = createWorldType === "flat";
+  for (const b of createForm.querySelectorAll('[data-act="wtype"]')) b.classList.toggle("on", b.dataset.wtype === createWorldType);
+  createForm.querySelector(".bfp-wtypehint").textContent = flat ? "An empty grass plain on the planet. Nothing spawns: build, summon and try things out." : "The round planet with its biomes, villages and wildlife.";
+  createForm.querySelector(".bfp-scene").hidden = !flat;
+  createForm.querySelector(".bfp-seedf").hidden = flat;
+  createForm.querySelector(".bfp-biomef").hidden = flat;
+  const nm = createForm.elements.name;
+  if (flat && nm.value === "New World") nm.value = "Sandbox";
+  else if (!flat && nm.value === "Sandbox") nm.value = "New World";
+  if (flat) { createMode = "creative"; updateModeUI(); }
+  if (flat && BF.sandbox) BF.sandbox.list().then(names => {
+    const sel = createForm.elements.scene, cur = sel.value;
+    sel.innerHTML = '<option value="">None (the empty plain)</option>' + names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+    sel.value = names.includes(cur) ? cur : "";
+  });
+}
+// A fresh sandbox world (#sandbox or #sandbox=<scene>, js/main.js): created, saved and played at once, the scene placed at spawn.
+function createSandbox(scene) {
+  if (!createForm) return;
+  showStartView("create");
+  setWorldType("flat");
+  createForm.elements.name.value = scene ? "Sandbox " + scene : "Sandbox";
+  const sel = createForm.elements.scene;
+  if (scene && ![...sel.options].some(o => o.value === scene)) sel.insertAdjacentHTML("beforeend", `<option value="${esc(scene)}">${esc(scene)}</option>`);
+  sel.value = scene || "";
+  if (BF.glog) BF.glog.log("INFO", "sandbox", "New sandbox world from the address" + (scene ? ", scene \"" + scene + "\"" : ""));
+  createWorld();
+}
 function createWorld() {
   const f = createForm.elements;
   const name = f.name.value.trim() || "New World", seedText = f.seed.value.trim(), mode = createMode || gameMode;
   const biomeScale = BIOME_SIZES[f.biome.value | 0][0], monsters = readOpts(createForm);
+  const world = createWorldType === "flat" ? "flat" : undefined, scene = world ? f.scene.value : "";   // a sandbox world (spec idea-050) and its scene
   requestLock();
   const btn = createForm.querySelector('button[type="submit"]');
   btn.disabled = true;
   const t0 = performance.now();
   loading("Creating " + name);
-  const done = () => { loaded("Created", t0); btn.disabled = false; beginPlay(); };
+  const done = () => { loaded("Created", t0); btn.disabled = false; beginPlay(); if (scene && BF.sandbox) BF.sandbox.openWhenReady(scene); };
   if (hasSave() && BF.save.create) {
-    Promise.resolve(BF.save.create({ name, seed: seedText, gameMode: mode, biomeScale, monsters }))
+    Promise.resolve(BF.save.create({ name, seed: seedText, gameMode: mode, biomeScale, monsters, world }))
       .catch(e => { console.error(e); if (BF.glog) BF.glog.log("ERROR", "save", "Creating world \"" + name + "\" failed: " + (e && e.message || e)); }).then(done);
   } else {
     const sd = parseSeed(seedText);
-    BF.prepareWorld(sd).then(() => {   // (the planet works out its rivers first)
-      try { BF.newWorld(sd, { gameMode: mode, biomeScale, monsters }); } catch (e) { console.error(e); }
+    BF.prepareWorld(sd, world).then(() => {   // (the planet works out its rivers first)
+      try { BF.newWorld(sd, { gameMode: mode, biomeScale, monsters, world }); } catch (e) { console.error(e); }
       setGameMode(mode);
       done();
     });
@@ -2109,6 +2147,7 @@ function die() {
     try { if (BF.signs && BF.signs.isOpen()) BF.signs.closeEditor(); } catch (_) {}
     try { if (BF.mapview && BF.mapview.isOpen()) BF.mapview.close(); } catch (_) {}
     try { if (BF.coords && BF.coords.panel.isOpen()) BF.coords.panel.close(); } catch (_) {}
+    try { if (BF.designer && BF.designer.isOpen()) BF.designer.close(); } catch (_) {}
   }
   const where = BF.coords ? "\n" + BF.coords.describe(pos.x, pos.y, pos.z, { whole: true }) + "  " + (BF.coords.latLonText(pos.x, pos.z) || "") : "";   // planet: where it happened (spec r14-18)
   deathEl.querySelector(".bfp-sub").textContent = (DEATH_MSG[lastCause] || "You died") + where;
@@ -2630,6 +2669,7 @@ P.aimedMob = () => { const h = mobHit(); return h && h.mob ? { type: h.mob.type,
 P.attack = () => { updateTarget(); attackCd = 0; return tryAttack(); };
 P.start = beginPlay;                 // dismiss the start screen without a click (tests / embeds)
 P.refreshWorlds = () => refreshWorlds();   // the title screen's world list again (tests)
+P.createSandbox = scene => createSandbox(scene);   // a fresh sandbox world, its scene at spawn (#sandbox=<name>, spec idea-050)
 P.isLocked = () => locked;
 P.clickLog = () => clickLog.slice();   // F3 overlay: last mouse presses and what they did
 P.escGrace = () => inEscGrace();   // tests: still inside the grace after an Escape closed a screen
