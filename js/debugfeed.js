@@ -292,8 +292,10 @@ function applyWarp(list) {
     if (w.op === "faster") W.faster();
     else if (w.op === "slower") W.slower();
     else if (w.op === "set") { const i = W.SPEEDS.indexOf(+w.speed); if (+w.speed === 0) W.freeze(); else if (i >= 0) W.set(i); }
-    if (BF.glog && W.speed !== was) BF.glog.log("INFO", "warp", "Fast-forward " + was + "x -> " + W.speed + "x from the debug screen");
+    if (BF.glog && W.speed !== was) BF.glog.log("INFO", "warp", "Fast-forward " + was + "x -> " + W.speed + "x from the debug screen" + (document.hidden ? " (game tab in the background)" : ""));
   }
+  // on to the simulation now: the game loop that would send it runs no frames while this tab is in the background (bug-113)
+  if (BF.simHost && BF.simHost.speedNow) BF.simHost.speedNow();
 }
 // On the world server the steps come straight from the debug server (GET /warp?wc=), not with the world server's answers: those wait on the
 // simulation and reach the page behind everything else it sends, seconds late at fast-forward.
@@ -608,7 +610,21 @@ function serverAck(o) {
 
 BF.debugFeed = { url: URL_, urls: URLS, snapshot, simPart, update, serverAck, live: () => told && screens > 0 };   // live: a debug screen is watching the feed
 // The game loop (requestAnimationFrame) stops while the game's tab is in the background, e.g. when the debug screen is opened
-// as another tab in the same window. A timer keeps the feed going then (browsers still run it about once a second), so the
-// debug screen can say the game is in the background instead of waiting for it.
-setInterval(() => { if (document.hidden) update(); }, 1000);
+// as another tab in the same window. A timer keeps the feed going then, so the debug screen can say the game is in the background
+// instead of waiting for it, and its fast-forward steps still reach the world server, which goes on there (bug-113). The timer runs in
+// a small worker: a background tab's own timers fire at most once a second, and once a minute after five minutes (Chrome), so a step
+// clicked on the debug screen waited for the game's tab to come back. With the world server the feed goes at its usual pace (its page
+// part is small); otherwise once a second, as before (the simulation is paused while the tab is hidden).
+let beat = 0;
+function hiddenTick() {
+  if (!document.hidden) return;
+  if (onServer() || ++beat % 4 === 0) update();
+}
+try {
+  const src = URL.createObjectURL(new Blob(["setInterval(() => postMessage(0), 250);"], { type: "text/javascript" }));
+  new Worker(src).onmessage = hiddenTick;
+} catch (e) {   // no worker here (a page opened as a file): the page's timer, throttled in the background
+  console.warn("debug feed: no timer worker, a background game tab takes debug-screen steps late:", e);
+  setInterval(hiddenTick, 250);
+}
 })();
