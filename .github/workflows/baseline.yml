@@ -9,7 +9,7 @@ name: Baseline tests
 
 on:
   pull_request:
-    branches: ['release-*', main]
+    branches: ['release-*', main, sandbox]   # sandbox: the long-lived sandbox world branch (specs idea-050 to 052), not a release yet
     types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
     inputs:
