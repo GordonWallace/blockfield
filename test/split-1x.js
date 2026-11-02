@@ -82,7 +82,7 @@ let S = null;
 (async () => {
   const b = await chromium.launch();
   const saves = fs.mkdtempSync(path.join(os.tmpdir(), 'bf-s1-'));
-  S = await server(['--test', '--saves', saves, '--workers', '3', '--clusters', '--verify', '100']);
+  S = await server(['--test', '--saves', saves, '--workers', '3', '--verify', '100']);   // (clusters: the default for --workers since 2026-11-02)
   const pg = await open(b, S.url + '?sim=server&workers=3');
   check(await pg.evaluate(() => BF.simHost.mode === 'server'), 'the page is the world server\'s client');
   const r = await pg.evaluate(async seed => {

@@ -111,10 +111,11 @@ class Sim {
 function start(o) {
   const worlds = IDB.open(o.saves).worlds, rivers = riverCache(o.saves);
   for (const [a, b] of worlds.tidy()) say("renamed folder " + JSON.stringify(a) + " to " + JSON.stringify(b) + " (its world's name)");
-  // region workers per world (spec r15-39, js/rplay.js): --workers N, else one, the simulation thread alone (while one thinks, every
-  // follower still replays every tick on its own copy, about a core each, and the split hasn't paid; clusters, r15-39b, take over)
+  // workers per world (js/rplay.js): --workers N, else one, the simulation thread alone (while one thinks, every follower still replays
+  // every tick on its own copy, about a core each). The split shares the clusters (spec r15-39b); --regions (kind "regions") is the old
+  // split of the regions' thinking each tick (spec r15-39), deprecated 2026-11-02 (it never paid: 28-49 ms a tick split against 3-10 on one)
   const workers = o.workers > 0 ? Math.floor(o.workers) : 1;
-  const srv = { saves: o.saves, build: o.build || null, coarse: o.coarse === "on" || o.coarse === "off" ? o.coarse : null, pin: o.pin !== false, workers, split: o.split || null, kind: o.kind === "clusters" ? "clusters" : null, verify: o.verify || 0, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
+  const srv = { saves: o.saves, build: o.build || null, coarse: o.coarse === "on" || o.coarse === "off" ? o.coarse : null, pin: o.pin !== false, workers, split: o.split || null, kind: o.kind === "regions" ? "regions" : "clusters", verify: o.verify || 0, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
   // The page's Cluster workers setting (js/simhost.js workers: {workers: {n: "auto" | N}} before its boot, and again when the player changes
   // it): the worker count for the worlds started from then on, clusters split over them (spec r15-39b) when more than one. --workers on
   // the command line wins (benchmarks and tests).

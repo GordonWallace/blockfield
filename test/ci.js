@@ -102,18 +102,20 @@ if (process.env.CI_OTHERS === 'page' && HOST !== 'page') run = run.flatMap(t => 
 // CI_SHARD=k/n (1-based): this job runs only its share of the tests, so a workflow can spread one tier across n runners at
 // once. Each runner is a machine of its own, so the games don't starve each other as they would side by side on one runner.
 // Longest first, each to the share with the least expected time so far. Expected times are seconds measured on a CI runner
-// (test/ci-times.json, from the 2026-10-09 integration run; refresh it when tests change a lot). A test not in it counts as a
+// (test/ci-times.json: medians of four baseline runs of 2026-10-27 to 11-02, page copies under their own -page names, older tests from
+// the 2026-10-09 integration run; refresh it when tests change a lot). A page copy not in it counts as its test; a test not in it as a
 // minute, or ten when it is a soak test.
 const shardM = /^(\d+)\/(\d+)$/.exec(process.env.CI_SHARD || '');
 const shard = shardM ? { k: +shardM[1], n: +shardM[2] } : null;
 let times = {};
 try { times = JSON.parse(fs.readFileSync(path.join(__dirname, 'ci-times.json'), 'utf8')); } catch (e) {}
-const weight = t => times[t.copyOf || t.name] || (t.soak ? 600 : 60);
-// CI_PLAN=1: how many runners this run should use, so each part takes about CI_PART_SECS (default 240) and never less than
-// its longest test allows; at most 20 (GitHub's limit on jobs at once for a free account). Written to $GITHUB_OUTPUT as parts=[1..n] and n.
+const weight = t => times[t.name] || (t.copyOf && times[t.copyOf]) || (t.soak ? 600 : 60);
+// CI_PLAN=1: how many runners this run should use, so each part takes about CI_PART_SECS (default 240); at most 20 (GitHub's limit on
+// jobs at once for a free account). Not fewer because one test is long: the parts would all come out about as long as it, and any
+// test slower than its time then holds up the run (the setup is ~15 s a part). Written to $GITHUB_OUTPUT as parts=[1..n] and n.
 if (process.env.CI_PLAN) {
-  const total = run.reduce((a, t) => a + weight(t), 0), longest = Math.max(1, ...run.map(weight));
-  const n = run.length ? Math.max(1, Math.min(20, run.length, Math.ceil(total / Math.max(+(process.env.CI_PART_SECS || 240), longest)))) : 0;
+  const total = run.reduce((a, t) => a + weight(t), 0);
+  const n = run.length ? Math.max(1, Math.min(20, run.length, Math.ceil(total / +(process.env.CI_PART_SECS || 240)))) : 0;
   const line = `parts=${JSON.stringify(Array.from({ length: n }, (_, i) => i + 1))}\nn=${n}\n`;
   console.log(`${run.length} test(s), about ${Math.round(total / 60)} min in all: ${n} part(s)`);
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, line); else process.stdout.write(line);

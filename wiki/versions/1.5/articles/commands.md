@@ -14,7 +14,7 @@ Commands let you change the world and yourself. They are meant for building, tes
 
 **Coordinates** can be plain numbers, `~` for your position, or `~5` for five blocks from it. They are `u y v` on the face you are standing on (see [[page:the-planet]]), in the same order as x y z. You can go past the face's edges: up to one face width beyond them is the neighbouring face, laid out flat, so `~10` works across an edge, and whatever you place or summon there lands on the right face. Further out than that is off the planet. Replies give places as `face 2  u 81,920  v 81,920  y 64`. Item names can be written with or without a `minecraft:` prefix, and some familiar vanilla names such as `grass_block`, `oak_planks` and `cooked_beef` also work.
 
-**Cheats.** Using any command other than `/help`, `/seed`, `/say` and `/loadvillages` marks the saved world as having used cheats.
+**Cheats.** Using any command other than `/help`, `/seed`, `/say`, `/loadvillages`, `/unloadvillages` and `/autovillages` marks the saved world as having used cheats.
 
 ## List of commands
 
@@ -48,6 +48,8 @@ Commands let you change the world and yourself. They are meant for building, tes
 - `/feed`: Fills your hunger and saturation.
 - `/say <message>`: Prints a message.
 - `/loadvillages <count>`: Starts the nearest villages that are not running yet, 1 to 50 of them, without waiting for them to join on their own. Also `/forcevillages`. See [[page:village-loading]].
+- `/unloadvillages <count>`: Stops the farthest extra villages, 1 to 50 of them. The nearest villages, which always run, stay. Also `/forceunload`. See [[page:village-loading]].
+- `/autovillages <on|off>`: Pauses (`off`) or resumes (`on`) the automatic adding and stopping of extra villages, so villages you loaded or unloaded by hand stay that way. See [[page:village-loading]].
 
 ### Details
 
