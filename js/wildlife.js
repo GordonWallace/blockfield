@@ -27,7 +27,7 @@ const HOUR = 1 / 24;           // game days: a chunk back within this brings its
 const RELOCATE_R = 8;          // blocks: how far a mob may have wandered by the time a chunk that was away longer comes back
 const GROUP = [4, 8];          // animals per first-generation group
 const ZONE = 4;                // chunks per side of a region whose groups are all of one kind
-const ROLLS_PER_STEP = 6;      // chunks rolled per update at most
+const ROLLS_PER_STEP = Math.ceil(6 * BF.warp.TICK / 0.05);      // chunks rolled per update at most (6 a 0.05 s tick, idea-049)
 const BREED_R = 8, BREED_CHANCE = 0.1, CROWD_R = 24, CROWD_MAX = 8;
 const WQ = {};
 const PAIR_P = 1 - Math.sqrt(1 - BREED_CHANCE);   // each adult rolls once a day: about BREED_CHANCE for a pair

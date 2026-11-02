@@ -1520,7 +1520,8 @@ let planBudget = 0;
 // module table, so that every copy of the world (spec r15-39: several workers, each thinking some regions) hands out the same grants: a
 // table here held only what this worker's own mobs asked, and still held them after their region moved to another worker. A tick number
 // ahead of the counter (a save loaded after the counter restarted) counts as lapsed.
-const PLANS = 2, KEEP = 20;
+const TS = BF.warp.TICK / 0.05;   // ticks of 0.05 s in one tick (idea-049): per-tick budgets below are per 0.05 s of game time
+const PLANS = Math.max(1, Math.round(2 * TS)), KEEP = Math.max(4, Math.round(20 / TS));
 let curMob = null, planTick = 0;   // (counts mob updates, not BF.rand.tick: tests step BF.mobs.update on its own; with clusters, the tick)
 // With clusters (spec r15-39b, js/ctick.js) the mob loop's parts run once per cluster: own(m) -> the mob is the running cluster's
 // (null: every mob is)
@@ -3507,7 +3508,7 @@ BF.mobs = {
   update(dt) {
     if (!ready) return;
     dt = Math.min(dt, BF.warp ? BF.warp.TICK : 0.05);   // (one tick at most: a longer tick, idea-049, moves mobs its whole length)
-    planBudget = 2; // A* searches per frame outside the mob loop
+    planBudget = PLANS; // A* searches per tick outside the mob loop (2 a 0.05 s tick)
     grantPlans();   // and the mob loop's (spec r15-33)
     // the region index (r15-30) up to date before the mobs query it (spec r15-31): main.js syncs it after each step, but tests and tools
     // step BF.mobs.update on its own, and move mobs between steps

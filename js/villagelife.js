@@ -221,7 +221,7 @@ const ACT = { harvest: 0.55, plant: 0.45, till: 0.9, border: 0.75, unborder: 0.8
 const actOf = k => (ACT[k] != null ? ACT[k] : BF.baker && BF.baker.FARM_KINDS[k] != null ? BF.baker.FARM_KINDS[k] : 0.6);   // + sugar cane and pumpkin tasks (js/baker.js)
 const TASK_MAX = 45;              // seconds before an unfinished task is given up
 const BREAK_P = 0.05;             // chance of a short break after a task (the rest of the day is farming)
-const SCAN_COLS = 500;            // columns of the village area scanned per tick
+const SCAN_COLS = Math.round(500 * BF.warp.TICK / 0.05);   // columns of the village area scanned per tick (500 a 0.05 s tick, idea-049)
 const RESCAN = 10;                // seconds between village farm scans
 const FARM_R = 12;                // a farmer tends farmland within 12 blocks, in every direction, of its composter, and the whole of any bed that reaches that box
 const BED_REACH = 16;             // ... so a bed it looks after (and builds) may stretch up to 16 blocks from the composter
