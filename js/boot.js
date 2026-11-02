@@ -27,6 +27,7 @@ BF.newWorld = function (seed, opts) {
   BF.state.time = 0;   // (game seconds simulated in this world: a world started after another starts from 0, as in a fresh page)
   BF.state.gen = 4;                                                          // worldgen version: 4 = the planet (saves keep it)
   BF.state.biomeScale = opts && opts.biomeScale >= 1 ? +opts.biomeScale : 1; // biome / climate size multiplier
+  BF.state.world = opts && opts.world === "flat" ? "flat" : "planet";       // "flat": a sandbox world, the planet with a grass plain for ground (spec idea-050, js/flatgen.js)
   BF.state.villages = opts && opts.villages ? opts.villages | 0 : 10;        // village generator: 1 = classic (capped at 24 villagers), 2 = 2-100 villagers, 3 = 3-100 with the core trades and desert gardens, 4 = 3 + a poultry keeper and coop in villages of 8+, 5 = 4 + a cowherd and pasture in grass villages of 10+, 6 = 5 + a baker and oven per 15 villagers, 7 = 6 + pane windows and a glassmaker near sand, 8 = 7 + bee nests in trees and a beekeeper in grass villages, 9 = 8 + a pig farmer and sty in 60% of grass villages of 10+, 10 = paddocks and keepers from village size and native animals, no spawn village (default)
   BF.noise = BF.makeNoise(BF.state.seed);
   BF.rand.reset();   // seeded random streams start over with the world (js/rand.js); a save restores its own counters afterwards
@@ -36,11 +37,12 @@ BF.newWorld = function (seed, opts) {
   if (BF.boats) BF.boats.clear();
   if (BF.horses) BF.horses.reset();
   BF.world.reset();
-  BF.worldgen.init(BF.noise, { biomeScale: BF.state.biomeScale, villages: BF.state.villages });
+  BF.worldgen.init(BF.noise, { biomeScale: BF.state.biomeScale, villages: BF.state.villages, world: BF.state.world });
   if (BF.lod) BF.lod.reset(BF.scene);   // distant terrain on the planet (js/lod.js): fresh rings and sampling workers for this seed
   if (BF.globe) BF.globe.reset(BF.scene);   // the whole planet as a globe (js/globe.js), sampled by the same workers
   // the spawn: dry temperate / subtropical land near 35 N on face 4, away from edges and corners (r14-19)
-  const [sx, sz] = BF.planetgen.spawnSearch();
+  // (a sandbox world: the centre of face 4, js/flatgen.js)
+  const [sx, sz] = BF.state.world === "flat" ? BF.flatgen.spawn() : BF.planetgen.spawnSearch();
   BF.spawnPoint = { x: sx + 0.5, z: sz + 0.5 };
   BF.worldSpawn = { x: sx + 0.5, z: sz + 0.5 };   // kept apart: the fallback when a spawn point or saved position is off the world (js/player.js)
   BF.player.spawn(sx + 0.5, BF.worldgen.heightAt(sx, sz) + 1.01, sz + 0.5);
@@ -152,7 +154,7 @@ function headless(o) {
   BF.world.setViewDist(s.viewDist > 0 ? s.viewDist | 0 : 8);
   if (BF.gameOpts && s.coarse != null) BF.gameOpts.override(s.coarse === "on" || s.coarse === true ? true : s.coarse === "off" || s.coarse === false ? false : null);   // --coarse (js/gameopts.js)
   if (o.save) BF.save.restore(o.save, o.save.meta || null);
-  else BF.newWorld(o.seed != null ? +o.seed : 1337, { villages: s.villages, biomeScale: s.biomeScale, monsters: s.monsters, gameMode: s.gameMode });
+  else BF.newWorld(o.seed != null ? +o.seed : 1337, { villages: s.villages, biomeScale: s.biomeScale, monsters: s.monsters, gameMode: s.gameMode, world: s.world });
   // the nearest n villages simulated besides the minimum, up to reach blocks away (default 4000), within memMB of chunks (default 500)
   if (s.extra > 0) BF.active.set({ on: true, fixed: s.extra | 0, reach: s.reach > 0 ? +s.reach : 4000, memMB: s.memMB > 0 ? +s.memMB : 500 });   // (500: as before the Distant villages settings' automatic memory, so runs compare)
   const village = !o.save && s.at === "village" ? toVillage() : null;

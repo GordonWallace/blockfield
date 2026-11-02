@@ -43,10 +43,11 @@ Commands let you change the world and yourself. They are meant for building, tes
 - `/spawnpoint [x y z]`: Sets your respawn point, by default where you stand. Also `/setworldspawn`.
 - `/setblock <x> <y> <z> <block> [replace|keep|destroy]`: Places one block. `keep` only fills air; `destroy` drops the old block as if mined.
 - `/fill <x1> <y1> <z1> <x2> <y2> <z2> <block> [mode]`: Fills a box with a block, at most 32768 blocks.
-- `/locate village`: Reports the nearest village, its name and distance. On the planet it also gives the compass direction and the `/tp face` command that goes there.
+- `/locate village`: Reports the nearest village, its name and distance (in a sandbox world, that there are none). On the planet it also gives the compass direction and the `/tp face` command that goes there.
 - `/heal [amount]`: Restores health: full by default, or the number of half-hearts you give.
 - `/feed`: Fills your hunger and saturation.
 - `/say <message>`: Prints a message.
+- `/scene <name>`, `/scene list`, `/scene clear [radius]`: Places a scene round you, lists the scenes, or puts the plain back. Sandbox worlds only: see [[page:sandbox-worlds]].
 
 ### Details
 

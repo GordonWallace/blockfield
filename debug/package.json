@@ -1,0 +1,8 @@
+{
+  "name": "blockfield-debug",
+  "private": true,
+  "description": "Blockfield needs no packages to run. This one is for the sandbox structure designer's calls to the Claude API (debug/claude.js).",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.1.0"
+  }
+}

@@ -1226,3 +1226,45 @@ worldgen.js (`sty` plot, `PIG_POP`), trading.js (table, `PRODUCE`, values, stock
   Every keeper searches 100 blocks (`FIND_R` / `CATCH_R`).
 - **Grass spreading** (js/grass.js, `BF.grass`): `SAMPLES_PER_S` (120) random columns of loaded chunks a sim second; their top block turns from dirt to grass when nothing opaque
   or fluid is on it, sky light above is at least 9 and a grass block is among its 26 neighbours. Farmland, paths and coarse dirt never change.
+
+## Sandbox worlds and scenes (js/flatgen.js, js/sandbox.js; spec idea-050)
+- `BF.state.world` is `"flat"` in a sandbox world, `"planet"` otherwise. It travels in `BF.newWorld` opts (`world`), the save (`data.world`,
+  `meta.world`), the world server's client fields, the protocol's hello settings, the distant-terrain workers' init, and `BF.prepareWorld(seed, world)`.
+- `worldgen.init(noise, {world: "flat"})` installs js/flatgen.js's calls on the same `BF.worldgen` object (generateBand, generateRange, heightAt,
+  surfaceAt, biomeAt, tintAt, villagesNear, treesIn, the river calls, ...); any other init restores the planet's. `BF.worldgen.world` says which.
+  Nothing else in the generator changes, so planet worlds generate exactly as before.
+- `BF.worldgen.drawTree(kind, x, y, z, size, opts)` -> `[[x, y, z, id], ...]`: one tree drawn by chunk generation's own code (`treeKit`).
+- Nothing spawns by itself in a sandbox world (js/mobs.js spawnMonsters, js/wildlife.js roll).
+- Blocks `sandbox_block_1..16` (the sandbox pack, append-only ids): creative only, `drop: null`, `sandbox: n`.
+- A `"stamp"` player request `{label, cells: [x, y, z, id, ...], mobs: [{type, x, y, z, count, variant, child}], clear?: {x, z, r}}` places cells and
+  mobs in one batch (sandbox worlds only; js/sandbox.js applyStamp). Scenes, the structure designer and the texture studio use it.
+- `BF.sandbox` (page): `list`, `load`, `resolve`, `place`, `open`, `openWhenReady`, `clear`, `stamp`, `command` (the page's `/scene`); format of a scene at
+  the top of js/sandbox.js. debug/sandbox.js answers `/sandbox/api/list?dir=scenes|structures|textures` on the game port.
+- Scenes fetch the library designs their `structure` entries name (`sandbox/structures/<name>.json`) before they are worked out (`BF.sandbox.structures`,
+  `BF.sandbox.designCells` set by js/designer.js).
+
+## Sandbox structure designer (js/housedesign.js, js/designer.js, debug/claude.js; spec idea-051)
+- `BF.blueprints.custom({cells: [[x, y, z, id, ph?]], label, house, wood}, rot)`: a blueprint from cells drawn elsewhere, through the same `assemble()` as
+  `get()` (builder blueprints are unchanged). Not cached.
+- `BF.houseDesign` (page): `palette()`, `toBlueprint(design)` -> `{bp, cells (grid frame), materials, warnings}`, `fromCells(cells, name)` -> `{design, warnings}`,
+  `frontOf(result)`, `Preview`. A design: `{name, summary, notes, width, depth, legend: [{symbol, block}], layers: [{label, rows}]}`; a legend block is a
+  palette name or (kept from a capture) a game block name.
+- `BF.designer` (page, sandbox worlds, key G): `request`, `build`, `rebuild`, `clear`, `capture`, `save`, `library`, `loadLibrary`, `showVersion`, `restore`;
+  builds go through the `"stamp"` request. `BF.designer.api(path, body)` is the one door to the server (tests replace it).
+- Game port: `GET /claude/status`, `POST /claude/blueprint {request, palette, previous?, model?}` (loopback, own origin, JSON; key server side; models and
+  prices in debug/claude.js PRICES; $1 per rolling hour by default), `POST /sandbox/api/save {dir: structures|textures, name, data}`. Debug port:
+  `/claude-calls` and the `claudecalls` / `claudecall` events (the API calls panel).
+
+## Sandbox texture studio (js/texturestudio.js, debug/texture.js, debug/providers/, debug/png.js; spec idea-052)
+- `BF.textures.edit` (page): `pixels(tile)`, `base(tile)` (the game's tile, adoption included), `editable(tile)` -> `{ok, why, tinted, tint}`,
+  `setPixels(tile, rgba | null)` (null = base; repaints the atlas cell and its mip levels and uploads them with copyTextureToTexture, no rebuild),
+  `cell(tile, k)` (the cell as uploaded), `edited()`. Animated tiles (water, lava) are not editable.
+- `BF.adoptedTextures` (sandbox/adopted.js, loaded before js/textures.js): `{tile: {rgba (base64 32x32 RGBA), texture, block, face}}`; paintTile uses it
+  in place of the Faithful/procedural tile in every world. Written only by the local server from sandbox/adopted.json.
+- `BF.textureStudio` (page, sandbox worlds, key K): `request`, `apply`, `undo`, `restore`, `compare`, `save`, `library`, `applyLibrary`, `adopt`, `unadopt`,
+  `paintRecipe(steps, tile)`, `revertAll`. Edits that aren't adopted are put back outside sandbox worlds. `BF.textureStudio.api(path, body)` is the one door
+  to the server (tests replace it).
+- Game port: `GET /sandbox/api/texture/status`, `POST /sandbox/api/texture {provider?, model?, request, tile, screenshot?, history, face, block, tileName,
+  tinted}` -> `{kind: "pixels", from: grid|image, rgba, fixes} | {kind: "recipe", steps, fixes} | {error}`, `POST /sandbox/api/texture/save {name, rgba,
+  meta}`, `/adopt {name, tile, block, face}`, `/unadopt {tile}`. Providers are modules in debug/providers/ with `{name, label, models, model, configured(),
+  texture(input, ctx)}`; calls go through debug/claude.js's meter (kind "texture", same hourly cap).
