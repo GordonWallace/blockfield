@@ -2,7 +2,7 @@
 title: Sandbox worlds
 category: World generation
 ---
-A sandbox world is the usual round [[page:the-planet]] with its ground replaced by an empty grass plain. Nothing spawns by itself, there are no villages, trees, water or caves, and nothing gets in the way of building, summoning and trying things out. It is meant for testing: a quick place to look at a new tree, a building or a block, and the home of the scene files, the [[page:structure-designer]] and the texture studio.
+A sandbox world is the usual round [[page:the-planet]] with its ground replaced by an empty grass plain. Nothing spawns by itself, there are no villages, trees, water or caves, and nothing gets in the way of building, summoning and trying things out. It is meant for testing: a quick place to look at a new tree, a building or a block, and the home of the scene files, the [[page:structure-designer]] and the [[page:texture-studio]].
 
 ## Starting one
 

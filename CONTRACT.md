@@ -1254,3 +1254,17 @@ worldgen.js (`sty` plot, `PIG_POP`), trading.js (table, `PRODUCE`, values, stock
 - Game port: `GET /claude/status`, `POST /claude/blueprint {request, palette, previous?, model?}` (loopback, own origin, JSON; key server side; models and
   prices in debug/claude.js PRICES; $1 per rolling hour by default), `POST /sandbox/api/save {dir: structures|textures, name, data}`. Debug port:
   `/claude-calls` and the `claudecalls` / `claudecall` events (the API calls panel).
+
+## Sandbox texture studio (js/texturestudio.js, debug/texture.js, debug/providers/, debug/png.js; spec idea-052)
+- `BF.textures.edit` (page): `pixels(tile)`, `base(tile)` (the game's tile, adoption included), `editable(tile)` -> `{ok, why, tinted, tint}`,
+  `setPixels(tile, rgba | null)` (null = base; repaints the atlas cell and its mip levels and uploads them with copyTextureToTexture, no rebuild),
+  `cell(tile, k)` (the cell as uploaded), `edited()`. Animated tiles (water, lava) are not editable.
+- `BF.adoptedTextures` (sandbox/adopted.js, loaded before js/textures.js): `{tile: {rgba (base64 32x32 RGBA), texture, block, face}}`; paintTile uses it
+  in place of the Faithful/procedural tile in every world. Written only by the local server from sandbox/adopted.json.
+- `BF.textureStudio` (page, sandbox worlds, key K): `request`, `apply`, `undo`, `restore`, `compare`, `save`, `library`, `applyLibrary`, `adopt`, `unadopt`,
+  `paintRecipe(steps, tile)`, `revertAll`. Edits that aren't adopted are put back outside sandbox worlds. `BF.textureStudio.api(path, body)` is the one door
+  to the server (tests replace it).
+- Game port: `GET /sandbox/api/texture/status`, `POST /sandbox/api/texture {provider?, model?, request, tile, screenshot?, history, face, block, tileName,
+  tinted}` -> `{kind: "pixels", from: grid|image, rgba, fixes} | {kind: "recipe", steps, fixes} | {error}`, `POST /sandbox/api/texture/save {name, rgba,
+  meta}`, `/adopt {name, tile, block, face}`, `/unadopt {tile}`. Providers are modules in debug/providers/ with `{name, label, models, model, configured(),
+  texture(input, ctx)}`; calls go through debug/claude.js's meter (kind "texture", same hourly cap).

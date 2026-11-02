@@ -1286,6 +1286,11 @@ function paintTile(name, color, paintFn) {
     const gain = der ? der[1] : TINTED.grass.includes(name) ? 0.95 : 1;
     for (let i = 0; i < f.length; i++) f[i] = (i & 3) === 3 ? raw.charCodeAt(i) : raw.charCodeAt(i) * gain;
   }
+  const ad = !paintFn && BF.adoptedTextures && BF.adoptedTextures[name];   // a sandbox texture adopted for every world (spec idea-052, sandbox/adopted.js)
+  if (ad && ad.rgba) {
+    const raw = atob(ad.rgba);
+    if (raw.length === f.length) for (let i = 0; i < f.length; i++) f[i] = raw.charCodeAt(i);
+  }
   for (let i = 0; i < f.length; i++) f[i] = Math.max(0, Math.min(255, f[i]));
   let cutout = false;
   for (let i = 3; i < f.length; i += 4) if (f[i] < 128) { cutout = true; break; }
@@ -1298,9 +1303,10 @@ function padMode(name) {
 }
 const crossTiles = new Set();
 
+const colorOf = {};   // tile name -> the colour of the block it came from (the fallback painter's)
 function drawAtlas() {
   if (atlasH) return;
-  const names = [], colorOf = {};
+  const names = [];
   for (const b of BF.blocks) if (b && b.tiles) for (const k of ["top", "side", "bottom", "front", "icon"]) {
     const n = k === "icon" ? b.icon : b.tiles[k];
     if (b.render === "cross") crossTiles.add(n);
@@ -1392,6 +1398,60 @@ function update(dt) {
     BF.renderer.copyTextureToTexture(water.pos, src, built.texture, k);
   }
 }
+
+// ---------- live tile edits (the sandbox texture studio, spec idea-052) ----------
+// setPixels(name, rgba) repaints one tile in place: its atlas cell at every per-cell mip level is rebuilt and re-uploaded (as the water
+// animation does), so every placed block with that tile changes at once, with no reload. rgba: 32 x 32 RGBA bytes, or null for the
+// tile as the game paints it. The game's own painting is kept the first time a tile is edited.
+const ANIMATED = new Set(["water", "lava", "still_lava", "flowing_lava"]);
+const edits = new Set();       // tiles that differ from base()
+const upload = { srcs: null, pos: null };
+// the tile as the game paints it in this world now (Faithful, then any adopted texture, sandbox/adopted.js)
+function base(name) { drawAtlas(); const { f } = paintTile(name, colorOf[name]); return new Uint8ClampedArray(f); }
+function pixels(name) { drawAtlas(); const d = tileData.get(name); return d ? new Uint8ClampedArray(d.data) : null; }
+function editable(name) {
+  drawAtlas();
+  if (!index.has(name)) return { ok: false, why: "no such tile" };
+  if (ANIMATED.has(name)) return { ok: false, why: "animated tiles (water, lava) can't be edited" };
+  const tint = tintOf(name);
+  return { ok: true, tinted: !!tint, tint: tint ? (TINTED.grass.includes(name) ? "grass" : TINTED.foliage.includes(name) ? "foliage" : "water") : null };
+}
+function setPixels(name, rgba) {
+  const e = editable(name);
+  if (!e.ok) return false;
+  const src = rgba || base(name);
+  if (!src || src.length !== TS * TS * 4) return false;
+  if (rgba) edits.add(name); else edits.delete(name);
+  const f = new Float32Array(src.length);
+  let cutout = false;
+  for (let i = 0; i < f.length; i++) { f[i] = src[i]; if ((i & 3) === 3 && src[i] < 128) cutout = true; }
+  tileData.set(name, new ImageData(new Uint8ClampedArray(src), TS, TS));
+  iconCache.clear();
+  const i = index.get(name), cx = i % PER_ROW, cy = Math.floor(i / PER_ROW), [wx, wy] = padMode(name), mips = tileMips(f, cutout);
+  const lv = drawAtlas.levels, canCopy = !!(built && BF.renderer && BF.renderer.copyTextureToTexture && typeof THREE !== "undefined");
+  if (canCopy && !upload.srcs) { upload.srcs = []; upload.pos = new THREE.Vector2(); for (let k = 0; k < MIP_CELL_LEVELS; k++) upload.srcs.push(new THREE.DataTexture(new Uint8Array((CELL >> k) * (CELL >> k) * 4), CELL >> k, CELL >> k)); }
+  for (let k = 0; k < MIP_CELL_LEVELS; k++) {
+    const cs = CELL >> k, W = atlasW >> k, cd = cellData(mips, k, wx, wy);
+    for (let y = 0; y < cs; y++) lv[k].data.set(cd.subarray(y * cs * 4, (y + 1) * cs * 4), ((cy * cs + y) * W + cx * cs) * 4);
+    if (canCopy) {
+      const t = upload.srcs[k];
+      t.image.data = new Uint8Array(cd.buffer); t.needsUpdate = true;
+      upload.pos.set(cx * cs, (atlasH >> k) - (cy + 1) * cs);
+      BF.renderer.copyTextureToTexture(upload.pos, t, built.texture, k);
+    }
+  }
+  if (built && !canCopy) built.texture.needsUpdate = true;
+  if (canvas && lv[0]) canvas.getContext("2d").putImageData(new ImageData(cellCopy(0, cx, cy), CELL, CELL), cx * CELL, cy * CELL);
+  return true;
+}
+// the atlas cell of a tile at mip level k as it now stands (what was uploaded): RGBA bytes, (CELL >> k) square
+function cellCopy(k, cx, cy) {
+  const cs = CELL >> k, W = atlasW >> k, d = drawAtlas.levels[k].data, out = new Uint8ClampedArray(cs * cs * 4);
+  for (let y = 0; y < cs; y++) out.set(d.subarray(((cy * cs + y) * W + cx * cs) * 4, ((cy * cs + y) * W + (cx + 1) * cs) * 4), y * cs * 4);
+  return out;
+}
+function cell(name, k = 0) { drawAtlas(); if (!index.has(name)) return null; const i = index.get(name); return cellCopy(k, i % PER_ROW, Math.floor(i / PER_ROW)); }
+const edit = { pixels, setPixels, editable, cell, base, edited: () => [...edits], OFF, CELL };
 
 // ---------- icons ----------
 const ICON = 64;
@@ -1733,6 +1793,6 @@ function bowPull(stage) {
 }
 BF.texKit = { T, ICON_T, SPRITES, TS, Px, hex, pal, mul, mix, ramp, clamp01, smooth, jit, dome, voronoi, ihash, WHITE, lighten,
   put, stroke, blob, stoneBase, cobbleBase, mossOver, sandBase, bricks, smoothBase, frame, planksBase, grassBlades, STONE, SAND, RED_SAND, SANDSTONE, SNOW, MOSS, WOOD_OAK,
-  woolBase, barkSide, logTop, SPRITE_TILES, WOOD_SPRUCE, WOOD_ACACIA };
-BF.textures = { build, uv, icon, bowPull, iconIsFlat, has, update, tinted: TINTED, defaultTint: DEFAULT_TINT, TILE: TS };
+  woolBase, barkSide, logTop, leafTile, oreTile, dirtBase, SPRITE_TILES, WOOD_SPRUCE, WOOD_ACACIA, DIRT, GRASS_N };
+BF.textures = { build, uv, icon, bowPull, iconIsFlat, has, update, edit, tinted: TINTED, defaultTint: DEFAULT_TINT, TILE: TS };
 })();
