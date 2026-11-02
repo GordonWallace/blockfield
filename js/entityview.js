@@ -8,7 +8,7 @@
 //   effects      puff, heart, crumbs and dust entries of the protocol's events messages (js/fx.js events), played here
 // Once per drawn frame render() builds, updates and removes the scene objects from that data: one gone from the mirror loses its object
 // on the next frame. Drops, arrows, boats and bees are drawn between where the last two ticks left them (spec r15-10: lerp(prev, cur, k),
-// k = BF.client.world.k(e, BF.warp.alpha)), except one that jumped (a face edge) and the player's own boat (it moves in real time), drawn
+// k = BF.client.world.k(e, BF.warp.alpha); off the page between prev and e.to at the drawing clock, bug-098), except one that jumped (a face edge) and the player's own boat (it moves in real time), drawn
 // where they are. Effects move with the drawn game time (dt, 0 while frozen); paddles settle in real time.
 // API: BF.entityView = { init(scene), render(dt, realDt), viewOf(entity | protocol number | sim object (tests)) -> its scene object | undefined, count() }
 (() => {
@@ -51,7 +51,7 @@ function drawDrops(seen, a) {
     }
     seen.add(d.n);
     sp.visible = loadedAt(d.x, d.z);
-    const k = M.k(d, a), j = 1 - k, q = d.prev || d, p = d, snap = k >= 1 || d2(q, p) > 16;
+    const k = M.k(d, a), j = 1 - k, q = d.prev || d, p = k < 1 && d.to || d, snap = k >= 1 || d2(q, p) > 16;
     const age = snap ? d.age : q.age * j + d.age * k, x = snap ? p.x : q.x * j + p.x * k, z = snap ? p.z : q.z * j + p.z * k;
     const y = snap ? p.y : q.y * j + p.y * k;
     sp.position.set(x, d.pulled ? y : y + 0.22 + Math.sin(age * 2.5 + d.phase) * 0.06, z);   // one flying into the player doesn't bob
@@ -79,9 +79,9 @@ function drawArrows(seen, alpha) {
     let mesh = arrowViews.get(r.n);
     if (!mesh) { mesh = new THREE.Mesh(arrowGeo, arrowMat); scene.add(mesh); arrowViews.set(r.n, mesh); }
     seen.add(r.n);
-    const k = M.k(r, alpha), q = r.prev;
-    if (r.stuck || k >= 1 || d2(q, r) > 64) mesh.position.set(r.x, r.y, r.z);
-    else mesh.position.set(q.x + (r.x - q.x) * k, q.y + (r.y - q.y) * k, q.z + (r.z - q.z) * k);
+    const k = M.k(r, alpha), q = r.prev, t = r.to || r;   // (to: off the page, the state after the drawing clock's)
+    if (r.stuck || k >= 1 || d2(q, t) > 64) mesh.position.set(r.x, r.y, r.z);
+    else mesh.position.set(q.x + (t.x - q.x) * k, q.y + (t.y - q.y) * k, q.z + (t.z - q.z) * k);
     if (r.lx || r.ly || r.lz) { _look.copy(mesh.position); _look.x += r.lx; _look.y += r.ly; _look.z += r.lz; mesh.lookAt(_look); }   // along its flight; a stuck one as it flew in
   }
 }
@@ -164,11 +164,11 @@ function drawBoats(seen, realDt, alpha) {
     if (!v) { v = buildBoat(b); boatViews.set(b.n, v); }
     seen.add(b.n);
     v.root.visible = loadedAt(b.x, b.z);
-    const k = M.k(b, alpha), q = b.prev;
-    if (b.rider || k >= 1 || d2(q, b) > 16) { v.root.position.set(b.x, b.y, b.z); v.root.rotation.y = b.yaw; }
+    const k = M.k(b, alpha), q = b.prev, t = b.to || b;
+    if (b.rider || k >= 1 || d2(q, t) > 16) { v.root.position.set(b.x, b.y, b.z); v.root.rotation.y = b.yaw; }
     else {
-      v.root.position.set(q.x + (b.x - q.x) * k, q.y + (b.y - q.y) * k, q.z + (b.z - q.z) * k);
-      const d = b.yaw - q.yaw;
+      v.root.position.set(q.x + (t.x - q.x) * k, q.y + (t.y - q.y) * k, q.z + (t.z - q.z) * k);
+      const d = t.yaw - q.yaw;
       v.root.rotation.y = q.yaw + Math.atan2(Math.sin(d), Math.cos(d)) * k;
     }
     v.body.rotation.z = b.hurtT > 0 ? Math.sin(b.hurtT * 30) * b.hurtT * 0.6 : 0;
@@ -247,8 +247,8 @@ function drawBees() {
   const n = bees.length, A = mesh.geometry.getAttribute("bee");
   for (let i = 0; i < n; i++) {
     const b = bees[i], L = b.mode === "land" && b.land ? b.land : null, s = L ? (LS.x = L[0], LS.y = L[1], LS.z = L[2], LS.nx = L[3], LS.ny = L[4], LS.nz = L[5], LS) : null;
-    const k = M.k(b, a), j = 1 - k, pb = b.prev, lerp = k < 1 && d2(pb, b) < 16;   // (a jump: a face edge, a new frame)
-    BP.x = lerp ? pb.x * j + b.x * k : b.x; BP.y = lerp ? pb.y * j + b.y * k : b.y; BP.z = lerp ? pb.z * j + b.z * k : b.z;
+    const k = M.k(b, a), j = 1 - k, pb = b.prev, t = b.to || b, lerp = k < 1 && d2(pb, t) < 16;   // (a jump: a face edge, a new frame)
+    BP.x = lerp ? pb.x * j + t.x * k : b.x; BP.y = lerp ? pb.y * j + t.y * k : b.y; BP.z = lerp ? pb.z * j + t.z * k : b.z;
     // the planet: the bee seen from the mesh (in the player's frame), its directions turned with it
     const r = BF.planet.local(mesh.position, BP, DQ), bx = r.x, bz = r.z, q = r.turn;
     if (s) {   // landed: belly on the surface, back along its normal

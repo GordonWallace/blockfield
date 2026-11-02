@@ -2,7 +2,7 @@
 // GPU-animated rain streaks and snow flakes around the camera that stop at each column's top blocking block,
 // lightning (sky flash + bolt mesh + 'lightning' event). sky.js reads intensity / thunder / flash to grey the sky,
 // thicken the clouds, hide sun/moon/stars, shorten fog and dim BF.sky.light (and so terrain via uDay).
-// API: BF.weather = { type, intensity, thunder, flash, set(type, sec?), update(dt), serialize(), deserialize(o),
+// API: BF.weather = { type, intensity, thunder, flash, set(type, sec?), update(dt) (the simulation's step), draw(dt) (each drawn frame), serialize(), deserialize(o),
 //                     precipAt(x, z, y?) -> 0 none | 1 rain | 2 snow, rainingAt(x, y, z), remaining, ms }
 (() => {
 "use strict";
@@ -368,7 +368,17 @@ const weather = {
     // flash envelope: bright strike plus a weaker second flash ~0.13 s later
     const f1 = Math.exp(-flashT / 0.05), f2 = flashT > 0.13 ? 0.7 * Math.exp(-(flashT - 0.13) / 0.06) : 0;
     weather.flash = flashT < 0.6 ? Math.min(1, f1 + f2) : 0;
-    if (!points) { weather.ms = weather.ms * 0.95 + (performance.now() - t0) * 0.05; return; }   // headless: nothing to draw
+    weather.ms = weather.ms * 0.95 + (performance.now() - t0) * 0.05;
+  },
+
+  // Every drawn frame (js/sky.js paint): the bolt and the rain or snow, moved on by dt, the game seconds drawn since the last frame. Not
+  // from update(): off the page (a worker or the world server, specs r15-38 / r15-41) the page steps no weather, and the drops' clock
+  // stood still, so rain hung frozen in the air (bug-098).
+  draw(dt) {
+    if (!inited) init();
+    if (!points) return;   // headless: nothing to draw
+    const t0 = performance.now();
+    dt = Math.max(0, dt || 0);
     const bo = boltT > 0 ? Math.min(1, boltT / BOLT_LIFE * 2.2) * (0.75 + 0.25 * Math.sin(boltT * 90)) : 0;
     bolt.visible = boltGlow.visible = bo > 0;
     boltMat.uniforms.uO.value = glowMat.uniforms.uO.value = bo;
@@ -392,9 +402,9 @@ const weather = {
       u.uLight.value = Math.min(1.3, 0.22 + 0.85 * (BF.sky ? BF.sky.light : 1));
       u.uHide.value = BF.player && BF.player.headInWater ? 1 : 0;
     }
-    const ms = performance.now() - t0;
-    weather.ms = weather.ms * 0.95 + ms * 0.05;
+    weather.drawMs = weather.drawMs * 0.95 + (performance.now() - t0) * 0.05;
   },
+  drawMs: 0,             // smoothed cost of draw() in ms
 };
 
 function strike() {

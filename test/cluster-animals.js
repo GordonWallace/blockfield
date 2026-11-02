@@ -49,14 +49,14 @@ function child() {
     const keys = C.groups().map(g => g.key), n = {};
     for (const name of ['horses.records', 'horses.herds']) {
       const t = C.table(name);
-      n[name] = t ? keys.reduce((s, k) => s + t.snap(k).length, 0) : -1;
+      n[name] = t ? keys.reduce((s, k) => { const p = t.snap(k, true); return s + (Array.isArray(p) ? p.length : p.keys.length); }, 0) : -1;   // (records: {keys, put})
     }
     return n;
   };
   process.on('message', msg => {
     if (msg.do === 'interval') {
       BF.boot.stream();
-      if (off) for (let t = 0; t < 20; t++) BF.simStep(BF.warp.TICK); else C.interval(BF.warp.TICK);
+      if (off) for (let t = 0; t < C.MEET; t++) BF.simStep(BF.warp.TICK); else C.interval(BF.warp.TICK);
       process.send({ parts: BF.stateHash.parts(), herds: H.herds.size, recs: H.records.size, owners: owners(), errors: errors.splice(0) });
     } else if (msg.do === 'end') process.send({ herds0, herds1: herdText(), centres: centres() }, () => process.exit(0));
   });

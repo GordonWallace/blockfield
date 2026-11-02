@@ -9,8 +9,8 @@
 // worked out again), so villages, their records and the trips' pins come and go only there, never between two clusters' passes; the
 // countdowns that tasks read (mayStart, timeLeft) then hold for the whole interval in every cluster. Trips ask for their pin at the
 // meeting too (js/merchant.js meet, run first): pin and unpin are called only between ticks then.
-// API: BF.villageSim = { RADIUS, MAX, MAX_PINS, keepKeys, update(px, pz) -> changed, isActive(key), status(), pin(id, a, b, keys) -> ok, unpin(id),
-//                        pins(), pinned() -> [worldgen villages], simulated() -> [worldgen villages], corridor(a, b) -> chunk keys, exportSeen(out), importSeen(o), reset() }
+// API: BF.villageSim = { RADIUS, MAX, MAX_PINS, keepKeys, update(px, pz) -> changed, isActive(key), status(), count(), pin(id, a, b, keys) -> ok, unpin(id),
+//                        pins(), pinned() -> [worldgen villages], simulated() -> [worldgen villages], corridor(a, b) -> chunk keys, exportSeen(out), importSeen(o), state() / load(s) (the checks' clocks and focus: js/rplay.js), reset() }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -147,11 +147,11 @@ function corridor(a, b) {
 }
 function pin(id, a, b, keys) {
   if (!pins.has(id) && pins.size >= MAX_PINS) return false;
-  pins.set(id, { a, b, keys: keys || corridor(a, b) });
+  pins.set(id, { a, b, keys: keys || corridor(a, b) }); areasV++;
   pinDirty = true;
   return true;
 }
-function unpin(id) { if (pins.delete(id)) { pinDirty = true; } }
+function unpin(id) { if (pins.delete(id)) { pinDirty = true; areasV++; } }
 const pinnedKeys = () => { const s = new Set(); for (const p of pins.values()) { s.add(vKey(p.a)); s.add(vKey(p.b)); } return s; };
 
 // Distance from a point to the village's edge (its bounds), 0 inside.
@@ -167,9 +167,9 @@ function edgeDist(v, px, pz) {
 const ending = new Map();        // village key -> {t0, until (game day), est: [{who, task, secs}], max}
 const errors = [];               // loading errors, newest last (shown on the debug screen)
 const nowDay = () => dayNow();
-function logError(kind, data) {
-  errors.push(Object.assign({ kind, t: +nowDay().toFixed(3) }, data)); if (errors.length > 100) errors.shift();
-  if (BF.glog) BF.glog.log("ERROR", "loading", kind === "task-running" ? data.who + "'s task was cut off when the village unloaded: " + data.task + " (estimate " + data.estimate + " s, ran " + data.ran + " s; " + data.why + ")"
+function logError(kind, data, lvl) {
+  if (!lvl) { errors.push(Object.assign({ kind, t: +nowDay().toFixed(3) }, data)); if (errors.length > 100) errors.shift(); }   // (a WARN is no loading error)
+  if (BF.glog) BF.glog.log(lvl || "ERROR", "loading", kind === "task-running" ? data.who + "'s task was cut off when the village unloaded: " + data.task + " (estimate " + data.estimate + " s, ran " + data.ran + " s; " + data.why + ")"
     : data.who + " was stopped mid-task: " + data.task + " (" + data.action + "; " + data.why + ")", { village: data.village });   // js/gamelog.js
 }
 // At leisure: no task begun (begin) and doing one of the leisure things in js/villagerstatus.js. A task that runs past its estimate still counts.
@@ -329,6 +329,7 @@ function windows() {
   if (same) return false;
   winKeys.clear();
   for (const k of next) winKeys.add(k);
+  areasV++;
   return true;
 }
 
@@ -348,8 +349,9 @@ function update(px, pz) {
   let changed = stepChanged;
   stepChanged = false;
   // (a trip pinned or unpinned since the last step is taken at once: nothing has stepped since, so it is the same moment the next step would see;
-  // with the cluster tick on, at the next meeting)
-  if ((!stepping() || (pinDirty && !clustered())) && check(px, pz, realClock, BF.rworkers.realNow() / 1000)) changed = true;
+  // with the cluster tick on, at the next meeting. Not while the cluster workers' followers may be ahead (js/cworkers.js open: paused
+  // mid-interval while fast-forwarding): at the next meeting then too)
+  if ((!stepping() || (pinDirty && !clustered())) && !(BF.cworkers && BF.cworkers.open) && check(px, pz, realClock, BF.rworkers.realNow() / 1000)) changed = true;
   return changed;
 }
 // Called every game step (world.tickSim); cheap (re-evaluates every 1.5 game seconds, the villager windows every 0.5). With the cluster
@@ -359,15 +361,23 @@ function step() {
   if (check(focusX, focusZ, simClock, BF.simNow())) stepChanged = true;
 }
 // A meeting of the cluster tick: the trips' pin asks first (js/merchant.js), then the set (the clock check as step() does it).
-// With partial copies (js/cworkers.js) the merchants come current first (merchant.meet reads and clears what they noted), and a
-// village's mobs before the set reads their tasks or stops them (fetchVillage).
+// With partial copies (js/cworkers.js) a village's mobs come current before the set reads their tasks or stops them (fetchVillage).
 // (which mobs is asked of each one's current copy: a stale copy may not show yet that it joined the village or became a merchant)
 const fetch = pred => { if (BF.cworkers && BF.cworkers.partial) BF.cworkers.fetch(BF.mobs.list, pred); };
-const fetchVillage = key => fetch(m => m.villageId === key || m.penVillageId === key || (m.ledBy && m.ledBy.villageId === key));
+// (at a meeting each village's mobs come over once, those of every village the set may stop in one exchange: fetched)
+let fetched = null;
+function fetchVillages(keys) {
+  const ks = new Set(fetched ? keys.filter(k => !fetched.has(k)) : keys);
+  if (!ks.size) return;
+  if (fetched) for (const k of ks) fetched.add(k);
+  fetch(m => ks.has(m.villageId) || ks.has(m.penVillageId) || (m.ledBy && ks.has(m.ledBy.villageId)));
+}
+const fetchVillage = key => fetchVillages([key]);
 function meet() {
-  if (BF.merchant && BF.merchant.meet) { fetch(m => m.mc); BF.merchant.meet(); }
+  if (BF.merchant && BF.merchant.meet) BF.merchant.meet();   // (it reads the merchants other workers run by their views: js/cworkers.js)
   if (focusX == null) return;
-  if (check(focusX, focusZ, simClock, BF.simNow())) stepChanged = true;
+  fetched = new Set();
+  try { if (check(focusX, focusZ, simClock, BF.simNow())) stepChanged = true; } finally { fetched = null; }
 }
 function check(px, pz, clk, now) {
   let winChanged = false;
@@ -407,6 +417,7 @@ function check(px, pz, clk, now) {
   // a village that would stop waits for its villagers' tasks (the countdown); one the player came back to cancels it
   const nd = nowDay();
   for (const k of [...ending.keys()]) if (next.has(k) || !active.has(k)) ending.delete(k);
+  if (fetched) fetchVillages([...active.keys()].filter(k => { if (next.has(k)) return false; const en = ending.get(k); return !en || !(nd < en.until || nd < en.t0); }));   // (the ones the loop below reads: starting or ending their countdown)
   for (const [k, e] of active) {
     if (next.has(k)) continue;
     let en = ending.get(k);
@@ -414,7 +425,10 @@ function check(px, pz, clk, now) {
       fetchVillage(k);
       const est = estimates(k);
       if (!(est.max > 0)) continue;                                  // nothing out on a task: it unloads now
-      en = { t0: nd, until: nd + est.max / DAY_S, est: est.list, max: est.max };
+      // an extra the budget let go (too slow, or past the player's distance limit) waits a short while only (js/active.js waitCap)
+      const cap = BF.active && BF.active.waitCap ? BF.active.waitCap(k) : null;
+      if (cap != null && est.max > cap) est.max = cap;
+      en = { t0: nd, until: nd + est.max / DAY_S, est: est.list, max: est.max, cap: cap != null ? BF.active.waitWhy(k) : null };
       ending.set(k, en);
       const top = est.list[0];
       vlogLine(BF.mobs.villages.get(k), "Unloading in " + Math.round(est.max) + " s: waiting for " + est.list.length + " task" + (est.list.length === 1 ? "" : "s") + (top ? ", longest " + top.who + " (" + top.task + ")" : ""));
@@ -422,7 +436,8 @@ function check(px, pz, clk, now) {
     if (nd < en.until || nd < en.t0) { next.set(k, e); if (e.extra) extra.add(k); continue; }   // still counting down
     const rec = BF.mobs.villages.get(k);
     fetchVillage(k);
-    for (const x of estimates(k).list) if (x.errand) logError("task-running", { village: rec ? rec.key : k, who: x.who, task: x.task, estimate: x.est != null ? x.est : x.secs, ran: x.ran != null ? x.ran : Math.round((nd - en.t0) * DAY_S), why: "the unload timer ended" });
+    // (cut short on purpose when the budget let it go: a WARN, not an error)
+    for (const x of estimates(k).list) if (x.errand) logError("task-running", { village: rec ? rec.key : k, who: x.who, task: x.task, estimate: x.est != null ? x.est : x.secs, ran: x.ran != null ? x.ran : Math.round((nd - en.t0) * DAY_S), why: en.cap ? "the unload timer ended early: " + en.cap : "the unload timer ended" }, en.cap ? "WARN" : undefined);
     ending.delete(k);
   }
   // over a limit: stop villages in priority order until it is fine (never one within ALWAYS of the player)
@@ -448,6 +463,7 @@ function check(px, pz, clk, now) {
   const fresh = [...next].filter(([k]) => !active.has(k));
   active.clear();
   for (const [k, e] of next) active.set(k, e);
+  areasV++;
   for (const [k, e] of fresh) startCatchUp(k, e);
   for (const k of dropped) fetchVillage(k);
   for (const k of dropped) if (BF.merchant && BF.merchant.remember) BF.merchant.remember(k, true);   // its prices are written down for merchants elsewhere
@@ -474,8 +490,15 @@ function onChunkLoad(cx, cz, c) {
 // each group of touching villager windows. A window group that overlaps or touches a village or a trip belongs to that area: it is the ground
 // its villagers walk at the village's edge, and as a separate area of its own the monsters spawned in the village drifted into it (zombies
 // after villagers walking the edge at dusk) and took it over its cap. Kept together, nothing loaded lies around the village to drift in from.
-// [{kind: "village" | "trip" | "window", key, keys: [chunk keys]}]
+// [{kind: "village" | "trip" | "window", key, keys: [chunk keys]}], worked out again only when the running villages, the trips' pins or the
+// windows changed (areasV; with clusters every group asks once per meeting): read it, don't change it
+let areasV = 0, areasAt = -1, areasOut = null;
 function areas() {
+  if (areasAt === areasV && areasOut) return areasOut;
+  areasOut = areasNow(); areasAt = areasV;
+  return areasOut;
+}
+function areasNow() {
   const out = [], own = new Map();   // chunk key -> the village or trip area it is in
   for (const [k, e] of active) out.push({ kind: "village", key: k, keys: e.keys.slice(), v: e.v });
   for (const [id, p] of pins) out.push({ kind: "trip", key: id, keys: p.keys.slice() });
@@ -510,11 +533,12 @@ BF.villageSim = {
   update,
   pin, unpin, corridor,
   pins: () => pins,
+  count: () => active.size,   // villages simulated now (js/mobs.js: the A* searches a tick hands out)
   simulated: () => [...active.values()].map(e => e.v),   // every village simulated now (the minimum, pins and the budget's extras)
   pinned: () => { const out = [], seenK = new Set(); for (const p of pins.values()) for (const v of [p.a, p.b]) if (!seenK.has(vKey(v))) { seenK.add(vKey(v)); out.push(v); } return out; },
   isPinned: key => pinnedKeys().has(key),
   isActive: key => active.has(key),
-  areas, LIMITS, mayStart, begin, done, walkSecs, timeLeft, countdown, errors: () => errors, estimates, ALWAYS, MAXT, DROP, EST_MARGIN,
+  areas, get areasV() { return areasV; }, LIMITS, mayStart, begin, done, walkSecs, timeLeft, countdown, errors: () => errors, estimates, ALWAYS, MAXT, DROP, EST_MARGIN,
   _edgeDist: edgeDist, footprint, count: () => active.size,
   extraCount() { let n = 0; for (const e of active.values()) if (e.extra) n++; return n; },   // of count(): the budget's extras, counting down too (js/active.js)
   status: () => `${active.size} sim village${active.size === 1 ? "" : "s"}` + (BF.active && BF.active.extras().length ? ` (${BF.active.extras().length} extra)` : "") + `, ${keepKeys.size} kept chunks` + (pins.size ? `, ${pins.size} trip${pins.size === 1 ? "" : "s"} pinned` : ""),
@@ -523,16 +547,26 @@ BF.villageSim = {
     for (const [id, p] of pins) out["pin:" + id] = { a: vKey(p.a), b: vKey(p.b) };   // the corridor is worked out again on load
   },
   importSeen(o) {
-    seen.clear(); pins.clear(); pinDirty = true;
+    seen.clear(); pins.clear(); pinDirty = true; areasV++;
     if (o) for (const k in o) {
       if (k.slice(0, 5) === "seen:") seen.set(k.slice(5), +o[k]);
       else if (k.slice(0, 4) === "pin:" && o[k] && typeof o[k].a === "string" && typeof o[k].b === "string") {
         const a = villageByKey(o[k].a), b = villageByKey(o[k].b);
-        if (a && b && pins.size < MAX_PINS) pins.set(k.slice(4), { a, b, keys: corridor(a, b) });
+        if (a && b && pins.size < MAX_PINS) { pins.set(k.slice(4), { a, b, keys: corridor(a, b) }); areasV++; }
       }
     }
   },
-  reset() { if (BF.active) BF.active.reset(); simClock.win = simClock.last = realClock.win = realClock.last = -1e9; stepChanged = false; aiCoolUntil = 0; active.clear(); catchQ.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); pinDirty = false; },
+  // the clocks of the checks, the focus and what waits for the next one: module state no save holds, handed to the region workers as they
+  // boot (js/rplay.js begin) so every copy checks the set on the same ticks
+  state: () => ({ sim: [simClock.win, simClock.last], real: [realClock.win, realClock.last], pinDirty, stepChanged, focus: [focusX, focusZ], aiCoolUntil }),
+  load(s) {
+    if (!s) return;
+    [simClock.win, simClock.last] = s.sim; [realClock.win, realClock.last] = s.real;
+    pinDirty = !!s.pinDirty; stepChanged = !!s.stepChanged; [focusX, focusZ] = s.focus; aiCoolUntil = s.aiCoolUntil || 0;
+  },
+  // (the focus too: the title world's, kept into a loaded world, made the first tick check the set there on the leader only, and its copies
+  // checked out of step from then on: villages joined a few ticks apart, Gordon's test4, 2026-10-29)
+  reset() { if (BF.active) BF.active.reset(); simClock.win = simClock.last = realClock.win = realClock.last = -1e9; stepChanged = false; focusX = focusZ = null; aiCoolUntil = 0; active.clear(); catchQ.clear(); ending.clear(); errors.length = 0; winKeys.clear(); seen.clear(); pending.clear(); keepKeys.clear(); pins.clear(); pinDirty = false; areasV++; },
   init() {
     BF.world.onChunkLoad(onChunkLoad);
     BF.world.onThink(step, "villageSim");   // re-checks on the game clock (update), in the think phase (js/world.js tickSim)

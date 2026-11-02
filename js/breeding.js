@@ -77,7 +77,7 @@ function bredList(rec) {
 function villagerCount(rec) {
   const live = (rec.members || []).filter(m => m.type === "villager" && !m.dead && !m.removed && !m.bred).length;
   const roster = rec.roster ? Math.max(0, rec.roster.length - ((rec.killed && rec.killed.villager) || 0)) : live;
-  return Math.max(roster, live) + bredList(rec).filter(e => !e.dead).length;
+  return Math.max(roster, live) + (rec.bred || S.pending.get(rec.key) || []).filter(e => !e.dead).length;   // (bredList's list without taking it: F3 and the debug screen count too, and reading must change nothing)
 }
 
 // Beds of the village: every bed foot block inside the village box (+8) or a builder's structure, found by
@@ -98,9 +98,10 @@ function areaRects(rec) {
   return out;
 }
 const inRects = (rects, x, z) => rects.some(r => x >= r[0] && x <= r[2] && z >= r[1] && z <= r[3]);
-function scanBeds(rec) {
+// keep false (a reader's look, bedsSeen): the same beds, nothing stored (no cache entry, rec.beds as it was)
+function scanBeds(rec, keep = true) {
   const CS = BF.CS, W = BF.world, rects = areaRects(rec), F = footTable();
-  const cache = rec.bedCache || (rec.bedCache = new Map());
+  const cache = rec.bedCache || (keep ? (rec.bedCache = new Map()) : new Map());
   const chunks = new Set(), sig = rects.join(";");
   for (const r of rects) for (let cx = Math.floor(r[0] / CS); cx <= Math.floor(r[2] / CS); cx++)
     for (let cz = Math.floor(r[1] / CS); cz <= Math.floor(r[3] / CS); cz++) chunks.add(cx + "," + cz);
@@ -118,7 +119,7 @@ function scanBeds(rec) {
           if (inRects(rects, x, z)) scan.push({ x, y, z, f: F[id] });
         }, -1, BF.MIN_Y + 1);
         if (found) BF.dcmp.check("village beds", scan, found.slice(), [c.cx * CS, 0, c.cz * CS]);
-        else { found = scan; found.c = c; found.ver = c.ver; found.sig = sig; cache.set(ck, found); }
+        else { found = scan; found.c = c; found.ver = c.ver; found.sig = sig; if (keep) cache.set(ck, found); }
       }
       beds.push(...found);
     } else if (cache.has(ck)) beds.push(...cache.get(ck));
@@ -128,10 +129,14 @@ function scanBeds(rec) {
         if (Math.floor(b.x / CS) === cx && Math.floor(b.z / CS) === cz) beds.push({ x: b.x, y: b.y, z: b.z, f: b.f });
     }
   }
-  rec.beds = beds; rec.bedScanAt = BF.simNow() * 1000;
+  if (keep) { rec.beds = beds; rec.bedScanAt = BF.simNow() * 1000; }
   return beds;
 }
 function bedCount(rec) { if (!rec.beds || rec.bedDirty) { rec.bedDirty = false; scanBeds(rec); } return rec.beds.length; }
+// The beds F3 and the debug screen show (js/villagelog.js tally): bedCount's number, but reading changes nothing. bedCount scanned and
+// kept the beds on the record, so the moment a reader first looked decided when the village's beds were scanned, and the region workers'
+// copies, which then read the debug feed for themselves (js/rplay.js "feed"), each looked at other moments: their records differed (2026-10-29)
+const bedsSeen = rec => (rec.beds && !rec.bedDirty ? rec.beds : scanBeds(rec, false)).length;
 // beds >= villagers + 1, counting the children of pairs already in love (born in a moment) as villagers
 const lovesIn = rec => S.loves.filter(L => L.rec === rec).length;
 const maxTotal = rec => rec && rec.pop ? Math.max(MAX_TOTAL, Math.ceil(rec.pop * 1.5)) : MAX_TOTAL;   // sized villages (2-100 villagers) may grow by half
@@ -462,13 +467,18 @@ function tick(dt) {
 }
 
 // ---------- persistence (mobs.exportVillagers / importVillagers hooks) ----------
+// What a save and the copy check read of a bred villager (metaOf): its place, whether it is a child, its profession. A row (js/cworkers.js
+// gathered), worked out where its copy is current: with clusters on workers, another worker's stale copy had an old profession (Gordon's
+// test4, 8 workers: a newborn grown up and turned builder on its worker was "unemployed" on the other 7, and every copy check from then
+// on said the villagers differ; a save would have written the stale one).
+const r2 = v => Math.round(v * 100) / 100;
+(BF.mobRows || (BF.mobRows = new Map())).set("bred", { fn: m => (m.bred ? [r2(m.position.x), r2(m.position.y), r2(m.position.z), m.child ? 1 : 0, m.profession] : null), uses: ["save", "hash"] });
 function metaOf(e) {
-  const m = e.mob && !e.mob.removed ? e.mob : null;
+  const m = e.mob && !e.mob.removed ? e.mob : null, b = m ? BF.cworkers.row("bred", m) : null;
   // (read only: a save, and the state hash's villagers part, must not change the record; the tick and an unload keep e.pos and e.prof)
-  const pos = m ? [m.position.x, m.position.y, m.position.z] : e.pos, prof = m && !m.child ? m.profession : e.prof;
-  const r = v => Math.round(v * 100) / 100;
+  const pos = b ? b.slice(0, 3) : e.pos, prof = b && !b[3] ? b[4] : e.prof;
   return { k: e.k, child: !!e.child, born: e.born, eaten: e.eaten || 0, parents: e.parents || [], prof, cd: e.cd,
-    pos: pos ? pos.map(r) : null, bed: e.bed || null, lastDay: e.lastDay, dead: !!e.dead };
+    pos: pos ? pos.map(r2) : null, bed: e.bed || null, lastDay: e.lastDay, dead: !!e.dead };
 }
 function exportAll(out) {
   const recs = new Map();
@@ -477,8 +487,8 @@ function exportAll(out) {
   for (const [vk, list] of recs) for (const e of list) {
     if (e.dead) { delete out[vk + "#" + (KEY_BASE + e.k)]; continue; }
     const key = vk + "#" + (KEY_BASE + e.k);
-    const m = e.mob && !e.mob.removed ? e.mob : null;
-    const base = m && m.inv ? BF.trades.pack(m) : (out[key] && out[key].inv ? out[key] : e.save || { inv: [], level: 1, xp: 0 });
+    const r = e.mob && !e.mob.removed ? BF.cworkers.row("trades", e.mob) : null;   // (js/mobs.js: its runner's, with clusters on workers)
+    const base = r ? r[1] : (out[key] && out[key].inv ? out[key] : e.save || { inv: [], level: 1, xp: 0 });
     out[key] = Object.assign({}, base, { bred: metaOf(e) });
   }
   for (const k of S.deadKeys) delete out[k];
@@ -593,11 +603,13 @@ BF.onLoad(() => {
 // main.js defines BF.on after this file loads: hook up as soon as the page has loaded (or on the first tick)
 BF.onLoad(hookEvents);
 
+// a newborn's entry by its key "bred:<village key>#<k>" (js/ids.js finder: a village record from another cluster worker)
+if (BF.ids && BF.ids.finder) BF.ids.finder("bred", rest => { const j = rest.lastIndexOf("#"), rec = BF.mobs && BF.mobs.villages ? BF.mobs.villages.get(rest.slice(0, j)) : null; return rec && rec.bred ? rec.bred.find(e => e && String(e.k) === rest.slice(j + 1)) : undefined; });
 BF.breeding = {
   RADIUS, CHANCE, NEED, PAY, CHILD_BREAD, CHILD_RATE, COOLDOWN, LOVE_T, MAX_TOTAL, KEY_BASE,
   tick, ai, childMove, exportAll, importAll, reset,
   onRemoved(m) { const e = m.bredEntry; if (e && e.mob === m && !e.dead) keepState(e, m); },   // js/mobs.js removeMob (js/ids.js: links to a removed mob go)
-  eligible, bedsOK, bedCount, villagerCount, scanBeds, freeBed, bedFree, breadEq,
+  eligible, bedsOK, bedCount, bedsSeen, villagerCount, scanBeds, freeBed, bedFree, breadEq,
   forceBreed, birth, growUp, makeChild, info, stats: S.stats, log: S.log, state: S,
   // instant variants for tests
   forceBirth(a, b) { const rec = villageOf(a) || villageOf(b); return rec ? birth(a, b, rec, true) : null; },

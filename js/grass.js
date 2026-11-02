@@ -46,7 +46,7 @@ const hashKey = s => { let h = 0; for (let i = 0; i < s.length; i++) h = Math.im
 function tickCluster(g) {
   const W = BF.world, C = BF.ctick, CC = W.clusterCells, CS = BF.CS;
   const st = C.local("grass", () => {
-    const cs = [...W.chunks.values()].filter(c => CC.cellGroup(c.cx * CS + 8, c.cz * CS + 8) === g.key).sort((a, b) => a.cx - b.cx || a.cz - b.cz);
+    const cs = CC.groupChunks(g.key).slice().sort((a, b) => a.cx - b.cx || a.cz - b.cz);
     return { cs, share: W.chunks.size ? cs.length / W.chunks.size : 0, carry: 0, salt: hashKey(g.key) };
   });
   if (!st.cs.length) return;

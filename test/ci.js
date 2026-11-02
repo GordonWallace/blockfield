@@ -179,7 +179,10 @@ async function runOne(t) {
   const fails = lines.filter(l => /^\s*(FAIL|FAILED)\b/.test(l) || /\bFAIL(ED)?:/.test(l));
   if (fails.length) reasons.push(fails.length + ' FAIL line(s): ' + fails[0].trim().slice(0, 200));
   for (const re of t.mustPrint || []) if (!new RegExp(re, 'm').test(log)) reasons.push('expected output missing: /' + re + '/');
-  return { t, secs, ok: !reasons.length, reasons, tail: lines.filter(Boolean).slice(-15).join('\n') };
+  // a failure's FAIL and page error lines in full (the first 10 of each), as the job log is all a reader may get: the artifact with the
+  // test's own log can't always be downloaded, and the reason above keeps only 200 characters of the first
+  const full = r.status !== 0 || reasons.length ? fails.slice(0, 10).concat(pageErr.slice(0, 10)).map(l => (l.length > 4000 ? l.slice(0, 4000) + ' ...' : l)) : [];
+  return { t, secs, ok: !reasons.length, reasons, full, tail: lines.filter(Boolean).slice(-15).join('\n') };
 }
 
 (async () => {
@@ -190,6 +193,7 @@ for (const t of run) {
   process.stdout.write(`::group::${t.name}\n`);
   const r = await runOne(t);
   results.push(r);
+  if (!r.ok && r.full.length) console.log(r.full.join('\n') + '\n...');
   console.log(r.tail);
   process.stdout.write('::endgroup::\n');
   console.log(`${r.ok ? 'PASS' : 'FAIL'} ${t.name} (${r.secs.toFixed(0)}s)${r.ok ? '' : ': ' + r.reasons.join('; ')}`);

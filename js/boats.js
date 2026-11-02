@@ -231,6 +231,11 @@ function exitSpot(b, hw, h) {
 }
 // Pen, coop, pasture and sty stock (bug-085): their building keeps their records and brings them back, so a boat never keeps its own copy.
 const penned = m => !!(m.pen || m.coop || m.pasture || m.sty || m.penVillage);
+// A boat's passenger as the save and the copy check read it: {type, variant, style, key} (key: its village roster slot), 0 when a pen
+// took it in while it sat in the boat (the pen saves it), null when it's dead. A row (js/cworkers.js gathered): with clusters on
+// workers, its runner's.
+(BF.mobRows || (BF.mobRows = new Map())).set("boat", { uses: ["save", "hash"],
+  fn: m => (m.dead ? null : penned(m) ? 0 : { type: m.type, variant: m.variant || null, style: m.style || null, key: m.village && m.slot ? m.village.key + "#" + m.slot.idx : null }) });
 function stow(b) {   // the mob passenger's chunk unloaded: remember it and seat it again when the boat is back
   const m = b.mob;
   b.mob = null;
@@ -433,9 +438,8 @@ const boats = {
   serialize() {
     const r = v => Math.round(v * 1000) / 1000;
     return list.map(b => {
-      let pass = b.stowed;
-      if (b.mob && !b.mob.dead && penned(b.mob)) pass = null;   // a passenger a pen took in while it sat in the boat: the pen saves it
-      else if (b.mob && !b.mob.dead) { const m = b.mob; pass = { type: m.type, variant: m.variant || null, style: m.style || null, key: m.village && m.slot ? m.village.key + "#" + m.slot.idx : null }; }
+      const p = b.mob ? BF.cworkers.row("boat", b.mob) : null;   // (its runner's, with clusters on workers)
+      const pass = p === null ? b.stowed : p || null;
       return [b.wood, r(b.pos.x), r(b.pos.y), r(b.pos.z), r(b.yaw), b.rider ? 1 : 0, pass || null];
     });
   },
@@ -464,7 +468,7 @@ function ownTables() {
   const C = BF.ctick;
   if (!C || ownTables.done) return;
   ownTables.done = true;
-  const G = (b, g) => { const k = CL().clOf(b); return k !== undefined && CL().groupFor(k) === g; };
+  const G = (b, g) => CL().groupFor(CL().thingBase(b, b.pos, passengerCl)) === g;   // (thingBase: a boat no pass here has seen yet, restored from a save, too)
   const V = v => [v.x, v.y, v.z];
   C.owned("boats", {
     snap: g => list.filter(b => b.id != null && G(b, g)).map(b => { const o = { id: b.id, cl: CL().clOf(b), pos: V(b.pos), prev: V(b.prev), vel: V(b.vel) }; for (const k of F) o[k] = b[k]; return o; }),

@@ -1,14 +1,16 @@
 // @ci baseline suite=village,jobs,farming timeout=900
 // Order-independent think (spec r15-71): a mob's thinking reads the other mobs as they stood at the start of the tick, and a keeper's
 // change to an animal (feeding, milking, shearing) waits for the end of the mob loop (js/mobs.js later), so the world comes out the same
-// whatever order the mobs think in. Headless, seed 9 (its village of about 77 villagers, keepers and pens: the largest of seeds 1-10):
-// three runs of the same seed, one with the usual order (regions in key order, each region's mobs by id) and two with every tick's
+// whatever order the mobs think in. Headless, seeds 9 and 3 (villages of about 77 and 55 villagers, keepers and pens: the largest of seeds 1-10):
+// for each seed, three runs of it, one with the usual order (regions in key order, each region's mobs by id) and two with every tick's
 // whole mob order shuffled by a seeded random permutation (BF.rtick.plan wrapped). The state hash and its parts are compared every
 // 60 game s; any difference is an order dependency, and the test prints the first part and where its text differs.
 // Each run is its own Node process (the simulation loads once a process).
-// Usage: node test/think-order.js [seed=9] [seconds=300]
+// Two requests for one requester sent by different thinkers (a buyer and the seller selling to it) apply in thinker-id order (js/requests.js).
+// Usage: node test/think-order.js [seeds=9,3] [seconds=300]
 const path = require('path'), cp = require('child_process'), fs = require('fs'), os = require('os');
-const seed = +(process.argv[2] || 9), seconds = +(process.argv[3] || 300);
+const seeds = String(process.argv[2] || '9,3').split(',').map(Number), seconds = +(process.argv[3] || 300);
+let seed = seeds[0];
 const EVERY = 60 * 20;
 
 if (process.argv[4] === '--child') {
@@ -54,25 +56,27 @@ const run = k => new Promise((res, rej) => {
 });
 (async () => {
   const t0 = Date.now();
-  const [a, b, c] = await Promise.all([0, 1, 2].map(run));
   let fail = false;
-  console.log(`seed ${seed}, ${seconds} game s, ${a.villagers} villagers; keeper changes made after the loop: ${a.deferred} (id order), ${b.deferred}, ${c.deferred} (shuffled)`);
-  for (const r of [b, c]) {
-    for (let i = 0; i < a.checks.length; i++) {
-      const x = a.checks[i], y = r.checks[i];
-      if (x.hash === y.hash) continue;
-      const parts = Object.keys(x.parts).filter(p => x.parts[p] !== y.parts[p]);
-      console.log(`FAIL shuffle ${r.k}: the world differs from id order at ${x.t} game s, in ${parts.join(', ')}`);
-      {
-        const ta = JSON.parse(fs.readFileSync(a.dump, 'utf8')), tb = JSON.parse(fs.readFileSync(r.dump, 'utf8'));
-        const p = parts.find(q => ta[q] !== tb[q]);
-        if (p) { const u = ta[p], v = tb[p]; let j = 0; while (j < u.length && u[j] === v[j]) j++; console.log(`  at the end, ${p} from character ${j}: ...${u.slice(Math.max(0, j - 300), j + 150)}\n  shuffled: ...${v.slice(Math.max(0, j - 300), j + 150)}`); }
+  for (seed of seeds) {
+    const [a, b, c] = await Promise.all([0, 1, 2].map(run));
+    console.log(`seed ${seed}, ${seconds} game s, ${a.villagers} villagers; keeper changes made after the loop: ${a.deferred} (id order), ${b.deferred}, ${c.deferred} (shuffled)`);
+    for (const r of [b, c]) {
+      for (let i = 0; i < a.checks.length; i++) {
+        const x = a.checks[i], y = r.checks[i];
+        if (x.hash === y.hash) continue;
+        const parts = Object.keys(x.parts).filter(p => x.parts[p] !== y.parts[p]);
+        console.log(`FAIL shuffle ${r.k}: the world differs from id order at ${x.t} game s, in ${parts.join(', ')}`);
+        {
+          const ta = JSON.parse(fs.readFileSync(a.dump, 'utf8')), tb = JSON.parse(fs.readFileSync(r.dump, 'utf8'));
+          const p = parts.find(q => ta[q] !== tb[q]);
+          if (p) { const u = ta[p], v = tb[p]; let j = 0; while (j < u.length && u[j] === v[j]) j++; console.log(`  at the end, ${p} from character ${j}: ...${u.slice(Math.max(0, j - 300), j + 150)}\n  shuffled: ...${v.slice(Math.max(0, j - 300), j + 150)}`); }
+        }
+        fail = true;
+        break;
       }
-      fail = true;
-      break;
     }
+    if (!fail) console.log(`OK seed ${seed}: ${a.checks.length} checks, the same world in id order and two shuffled orders (${a.checks[a.checks.length - 1].hash})`);
   }
-  if (!fail) console.log(`OK: ${a.checks.length} checks, the same world in id order and two shuffled orders (${a.checks[a.checks.length - 1].hash})`);
   console.log(`(${((Date.now() - t0) / 1000).toFixed(0)} s)`);
   fs.rmSync(tmp, { recursive: true, force: true });
   process.exit(fail ? 1 : 0);

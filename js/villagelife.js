@@ -1114,7 +1114,7 @@ function importAll(o) {
 function travel(m, fs, dt, out, tx, ty, tz, speed) {
   const ai = m.ai, N = nav(), px = m.position.x, pz = m.position.z;
   const d = Math.hypot(tx + 0.5 - px, tz + 0.5 - pz);
-  if (d <= REACH_H && Math.abs(ty - m.position.y) < 1.6) { ai.route = null; fs.navFail = 0; return "arrived"; }
+  if (d <= REACH_H && Math.abs(ty - m.position.y) < 1.6) { if (ai.routeKind === "farm") ai.route = null; fs.navFail = 0; return "arrived"; }   // (another job's route is left alone: a keeper already at its pen exit dropped its walk back to the village every tick and stood there replanning)
   if (!ai.route || ai.routeKind !== "farm") {
     ai.route = null;
     if (fs.navWait > 0) { fs.navWait -= dt; return "going"; }

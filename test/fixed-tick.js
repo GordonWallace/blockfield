@@ -5,7 +5,7 @@
 // - at 1x for 10 real seconds the sim clock advances 10 s (± 0.1) in ticks of exactly 0.05;
 // - forced 30 fps and 120 fps frames give the same world after 200 ticks (mob position checksum, from the same start, seeded random);
 // - frames at 1000x never run a tick of any other size, and drop (not owe) the ticks the budget can't fit;
-// - a mob is drawn between where the previous tick and the latest left it.
+// - a mob is drawn between where the previous tick and the latest left it (off the page, at the client's drawing clock: bug-098).
 const lib = require('./lib');
 module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
@@ -164,18 +164,22 @@ module.exports = async (pg, out) => {
     return { n: BF.proto.numberOf(m), q: { x: m.prev.x, y: m.prev.y, z: m.prev.z }, c: { x: m.position.x, y: m.position.y, z: m.position.z } };
   });
   // the page's mirror has the cow's latest tick and the one before it
-  await pg.waitForFunction(mv => { const M = BF.client.world, e = M.entities.get(mv.n); return e && Math.abs(e.x - mv.c.x) < 1e-9 && M.k(e, 0.5) === 0.5; }, mv, { timeout: 20000 }).catch(() => {});
+  await pg.waitForFunction(mv => { const M = BF.client.world, e = M.entities.get(mv.n); return e && Math.abs(e.x - mv.c.x) < 1e-9 && (M.rt != null || M.k(e, 0.5) === 0.5); }, mv, { timeout: 20000 }).catch(() => {});
   console.log("mirror " + JSON.stringify(await pg.evaluate(mv => { const M = BF.client.world, e = M.entities.get(mv.n); return { mv, tick: M.tick, e: e && { x: e.x, z: e.z, prev: e.prev, ct: e.ct, pt: e.pt } }; }, mv)));
   const drawn = await pg.evaluate(mv => {
-    // drawn by js/mobview.js at BF.warp.alpha, held here at 0.5 and then 1
-    const W = BF.warp, desc = Object.getOwnPropertyDescriptor(W, "alpha"), V = BF.mobView, e = BF.client.world.entities.get(mv.n);
+    // drawn by js/mobview.js at BF.warp.alpha, held here at 0.5 and then 1; off the page (bug-098) at the client's drawing clock, held
+    // here half a tick before the cow's latest tick and then at it (no frame runs inside this evaluate to move it)
+    const W = BF.warp, desc = Object.getOwnPropertyDescriptor(W, "alpha"), V = BF.mobView, M = BF.client.world, e = M.entities.get(mv.n);
     if (!e) return null;
     let A = 0.5;
+    const off = M.rt != null;
     Object.defineProperty(W, "alpha", { get: () => A, configurable: true });
     try {
+      if (off) M.place(e.ct - 0.5);
       V.render(0);
       const d = V.drawPos(e), v = V.viewOf(mv.n), mid = { x: d.x, y: d.y, z: d.z }, model = v ? { x: v.root.position.x, z: v.root.position.z } : null;
       A = 1;
+      if (off) M.place(e.ct);
       V.render(0);
       const f = V.drawPos(e), end = { x: f.x, y: f.y, z: f.z };
       return { mid, model, end };

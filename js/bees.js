@@ -79,6 +79,7 @@ const canFly = h => dayOut() && !wetAt(h);
 // ---------------------------------------------------------------- homes
 const recs = new Map();        // "x,y,z" -> home record, every home ever seen (saved)
 const loaded = new Map();      // "x,y,z" -> record, homes in loaded chunks
+let loadedVer = 0;             // (counts the changes to loaded: each group's homes are listed again, homesOf)
 const flowers = new Map();     // chunk key -> Set of "x,y,z" flower cells in loaded chunks
 const bees = [];               // bees out in the world
 const lures = new Set();       // villagers holding a flower for bees to follow (js/beekeeper.js)
@@ -100,7 +101,7 @@ function track(x, y, z, id) {
   let h = recs.get(k);
   if (!h || (h.kind === "nest") !== (id === NEST)) { h = newRec(x, y, z, id, edited(x, y, z)); recs.set(k, h); }
   h.out = 0; h.rest = []; h.scatter = true; h.flT = -1e9;
-  loaded.set(k, h);
+  loaded.set(k, h); loadedVer++;
   return h;
 }
 function homeAt(x, y, z) { return recs.get(ckey(x, y, z)) || null; }
@@ -384,12 +385,13 @@ const moveL = [];
 function housekeeping() {
   const now = simNow(), pp = playerPos() || { x: 0, y: 0, z: 0 }, day = today(), C = cluster();
   const list = C ? [...loaded.values()].filter(h => homeMine(C, h)) : [...loaded.values()];   // (clusters: the group's homes; CAP is per group)
+  const dist = new Map();   // (not kept on the home: a beekeeper's job holds its home, and each worker's copy would have its own)
   for (const h of list) {
     if (h.day < day) { if (h.bees > 0 && h.bees < MAX && flowersNear(h, true).length >= GROW_FLOWERS) h.bees++; h.day = day; }   // one bee a game day it is loaded
     h.rest = h.rest.filter(t => t > now);
-    h.dist = BF.planet.distance(h, pp);
+    dist.set(h, BF.planet.distance(h, pp));
   }
-  list.sort((a, b) => a.dist - b.dist);
+  list.sort((a, b) => dist.get(a) - dist.get(b));
   let left = CAP;
   for (const h of list) { h.allow = canFly(h) ? Math.min(h.bees, left) : 0; left -= h.allow; h.hurry = !canFly(h); }
   // bees over a home's allowance (dusk, rain, the cap) or homeless at dusk head home
@@ -421,8 +423,8 @@ function housekeeping() {
 // Bees scattered around a home whose chunk just loaded by day in dry weather (preferring flowers), and bees coming out of their homes.
 function release(dt) {
   const now = simNow(), C = cluster();
-  for (const h of loaded.values()) {
-    if (h.allow == null || (C && !homeMine(C, h))) continue;
+  for (const h of C ? homesOf(C) : loaded.values()) {
+    if (h.allow == null) continue;
     if (h.scatter) {
       h.scatter = false;
       if (h.allow > 0 && h.out === 0) {
@@ -462,6 +464,17 @@ const beeMine = (C, b) => beeGroup(b) === C.cur.key;
 let byGroup = null, byGroupAt = -1;
 const NO_BEES = [];
 function addTo(b) { const k = beeGroup(b), a = byGroup.get(k); if (a) a.push(b); else byGroup.set(k, [b]); }
+// Each group's homes in loaded, in its order: a home's group changes only at meetings, so listed at the first use after one or after
+// loaded changed (instead of every group testing every home, every tick)
+let homesBy = null, homesAt = -1, homesVer = -1;
+const NO_HOMES = [];
+function homesOf(C) {
+  if (!homesBy || homesAt !== C.epoch || homesVer !== loadedVer) {
+    homesBy = new Map(); homesAt = C.epoch; homesVer = loadedVer;
+    for (const h of loaded.values()) { const k = BF.clusters.groupOf(homeBase(h)), a = homesBy.get(k); if (a) a.push(h); else homesBy.set(k, [h]); }
+  }
+  return homesBy.get(C.cur.key) || NO_HOMES;
+}
 function groupBees(C) {
   if (!byGroup || byGroupAt !== C.epoch) { byGroup = new Map(); byGroupAt = C.epoch; for (const b of bees) addTo(b); }
   return byGroup.get(C.cur.key) || NO_BEES;
@@ -520,7 +533,7 @@ function unloadChunk(cx, cz) {
     if (Math.floor(h.x / cs) !== cx || Math.floor(h.z / cs) !== cz) continue;
     for (let i = bees.length - 1; i >= 0; i--) if (bees[i].home === h) removeBee(bees[i]);   // dropped: only the count stays
     h.out = 0; h.rest = []; h.allow = null;
-    loaded.delete(k);
+    loaded.delete(k); loadedVer++;
   }
 }
 // world.setBlock: homes placed and broken, flowers planted and picked.
@@ -529,7 +542,7 @@ function onSet(x, y, z, old, id) {
   if (isFlower(id)) addFlower(x, y, z);
   if (isHome(old) && !isHome(id)) {
     const k = pk(x, y, z), h = recs.get(k);
-    recs.delete(k); loaded.delete(k);
+    recs.delete(k); loaded.delete(k); loadedVer++; dropped.add(k);
     if (!h) return;
     // its bees that are out look for a home with room within R; the rest are lost
     const outB = bees.filter(b => b.home === h), ang = [];
@@ -545,7 +558,22 @@ function onSet(x, y, z, old, id) {
   }
   if (isHome(id) && !isHome(old)) {
     const k = pk(x, y, z), h = newRec(x, y, z, id, true);
-    recs.set(k, h); h.scatter = false; loaded.set(k, h);
+    recs.set(k, h); h.scatter = false; loaded.set(k, h); loadedVer++;
+  }
+}
+// Another worker's cell, at a meeting (js/cworkers.js, without setBlock): flowers, and homes placed or broken there. Only the home's
+// record follows the block here (in loaded while its chunk is); its counts and its bees come with its group's table (tables apply), so
+// nothing is rehomed or drawn from a random stream. (Without this, a home broken on its group's worker stayed in the others' records and
+// one placed there was never in their loaded: the bees hash part differed, and so did the homes a group ran after it changed workers.)
+function onReplayed(x, y, z, old, id) {
+  if (isFlower(old)) delFlower(x, y, z);
+  if (isFlower(id)) addFlower(x, y, z);
+  const k = pk(x, y, z);
+  if (isHome(old) && !isHome(id)) { if (recs.delete(k)) dropped.add(k); if (loaded.delete(k)) loadedVer++; }
+  else if (isHome(id) && !isHome(old)) {
+    let h = recs.get(k);
+    if (!h) { h = { x, y, z, kind: id === NEST ? "nest" : "hive", bees: 0, honey: 0, day: today(), out: 0, rest: [], emT: 0, angry: 0, fl: null, flT: -1e9, scatter: false }; recs.set(k, h); }
+    loaded.set(k, h); loadedVer++;
   }
 }
 // The planet: bee b, now belonging to home o, flies on in o's frame (a home on another face: its position and heading turned with it,
@@ -611,33 +639,86 @@ if (BF.rworkers) {
   BF.rworkers.channel("lure", { key: m => m.id, get: id => BF.ids.get(id), state: m => lures.has(m), set: (m, on) => { if (!m) return; if (on) lures.add(m); else lures.delete(m); } });
 }
 
-// (the multi-worker runtime, js/cworkers.js: each group's homes and the bees out of them at meetings)
+// (the multi-worker runtime, js/cworkers.js: each group's homes and the bees out of them at meetings). Homes go as what changed since
+// every worker last had them (as BF.ctick.ownedLog: had, the text every worker has; gone, the group's homes broken since), so homes that
+// sit still (unloaded, or at night) cost nothing; the bees that are out go whole with full copies, and with partial copies only to a
+// group's new worker (carry, below).
+const hadHome = new Map();     // home key -> its text every worker has
+const dropped = new Set();     // home keys taken out of recs since the last meeting (broken), for their group's gone list
+const homeText = h => JSON.stringify(h);
+const groupOfKey = k => { const p = k.split(","); return BF.clusters.groupOf(BF.clusters.ofRegion(BF.regions.keyOf(+p[0], 0, +p[2]))); };
 function tables() {
   const K = BF.ctick;
   if (!K || !K.owned) return;
-  const plain = o => JSON.parse(JSON.stringify(o));
-  const homeOf = gk => h => BF.clusters.groupOf(homeBase(h)) === gk;
-  const beeOf = gk => b => BF.clusters.groupOf(b.cl !== undefined ? b.cl : b.home ? homeBase(b.home) : "w:none") === gk;
+  const homeGroup = (k, h) => BF.clusters.groupOf(homeBase(h));
+  const beeOf = gk => b => beeGroup(b) === gk;
   K.owned("bees", {
-    snap(gk) {
-      const homes = [...recs.values()].filter(homeOf(gk)).map(h => plain(h));
-      const out = bees.filter(beeOf(gk)).map(b => plain(Object.assign({}, b, { home: b.home ? pk(b.home.x, b.home.y, b.home.z) : null,
-        follow: b.follow ? Object.assign({}, b.follow, { who: b.follow.who === "player" ? "player" : b.follow.who.id }) : null, rng: b.rng, hm0: null, hm1: null, lastD: b.lastD === Infinity ? "inf" : b.lastD })));   // (hm0 / hm1: caches of world columns; JSON has no Infinity)
-      return { homes, out };
+    reset() { hadHome.clear(); dropped.clear(); },
+    snap(gk, all) {
+      const put = [], gone = [];
+      for (const k of K.keysOf(recs, gk, homeGroup)) {
+        const t = homeText(recs.get(k));
+        if (all || hadHome.get(k) !== t) { hadHome.set(k, t); put.push(JSON.parse(t)); }
+      }
+      for (const k of dropped) {
+        if (recs.has(k)) { dropped.delete(k); continue; }   // (broken and placed again: sent as it is now)
+        if (groupOfKey(k) !== gk) continue;
+        dropped.delete(k);
+        if (hadHome.delete(k)) gone.push(k);
+      }
+      const out = partial() ? null : bees.filter(beeOf(gk)).map(beeOut);   // (partial copies: carried at handovers instead, below)
+      return all ? { put, gone, out, keys: K.keysOf(recs, gk, homeGroup).slice() } : { put, gone, out };   // (all: the group's whole part, its keys for those gone)
     },
     apply(gk, o) {
       if (!o) return;
-      for (const h of o.homes || []) { const k = pk(h.x, h.y, h.z), was = recs.get(k); if (was) Object.assign(was, h); else recs.set(k, h); }
+      const keep = o.keys ? new Set(o.keys) : null, gone = keep ? (o.gone || []).concat(K.keysOf(recs, gk, homeGroup).filter(k => !keep.has(k))) : o.gone || [];
+      for (const k of gone) {   // (broken on its group's worker)
+        hadHome.delete(k); dropped.delete(k);
+        recs.delete(k);
+        if (loaded.delete(k)) { loadedVer++; BF.glog && BF.glog.log("INFO", "bees", "Cluster workers: the home at " + k + " was broken on its group's worker"); }
+      }
+      for (const h of o.put || []) {
+        const k = pk(h.x, h.y, h.z), was = recs.get(k);
+        hadHome.set(k, JSON.stringify(h));
+        if (was) { for (const f in was) if (!(f in h)) delete was[f]; Object.assign(was, h); }
+        else recs.set(k, h);
+      }
+      K.applied(recs, gk);
       for (let i = bees.length - 1; i >= 0; i--) if (beeOf(gk)(bees[i])) { bees[i].gone = true; bees.splice(i, 1); }
       byGroup = null;
-      for (const e of o.out || []) {
-        const b = Object.assign({}, e, { home: e.home ? recs.get(e.home) || null : null, lastD: e.lastD === "inf" ? Infinity : e.lastD });
-        if (e.home && !b.home && BF.herd) BF.herd.lost("bees", "the home at " + e.home);
-        if (e.follow) b.follow = Object.assign({}, e.follow, { who: e.follow.who === "player" ? "player" : BF.ids.live(e.follow.who) || "player" });
-        bees.push(b);
-      }
+      for (const e of o.out || []) beeIn(e);
     },
   });
+  // partial copies (js/cworkers.js carry): only the worker running a group keeps its bees that are out; nothing else reads them (they
+  // aren't in the state hash or the save, and the player's group, whose bees the page draws, is on the first worker)
+  if (BF.cworkers && BF.cworkers.carry) BF.cworkers.carry("bees", {
+    give(destOf) {
+      const by = new Map(), me = BF.cworkers.me;
+      for (let i = bees.length - 1; i >= 0; i--) {
+        const b = bees[i], d = destOf(beeGroup(b));
+        if (d === me) continue;
+        let a = by.get(d);
+        if (!a) by.set(d, (a = []));
+        a.unshift(beeOut(b));
+        b.gone = true; bees.splice(i, 1);
+      }
+      byGroup = null;
+      return [...by];
+    },
+    take(list) { for (const e of list) beeIn(e); byGroup = null; },
+    all: () => bees.map(beeOut),
+  });
+}
+const partial = () => !!(BF.cworkers && BF.cworkers.partial);
+// a bee that is out as plain JSON for another worker, and back (its home, and the mob it follows, by key and id)
+const plainOf = o => JSON.parse(JSON.stringify(o));
+const beeOut = b => plainOf(Object.assign({}, b, { home: b.home ? pk(b.home.x, b.home.y, b.home.z) : null,
+  follow: b.follow ? Object.assign({}, b.follow, { who: b.follow.who === "player" ? "player" : b.follow.who.id }) : null, rng: b.rng, hm0: null, hm1: null, lastD: b.lastD === Infinity ? "inf" : b.lastD }));   // (hm0 / hm1: caches of world columns; JSON has no Infinity)
+function beeIn(e) {
+  const b = Object.assign({}, e, { home: e.home ? recs.get(e.home) || null : null, lastD: e.lastD === "inf" ? Infinity : e.lastD });
+  if (e.home && !b.home && BF.herd) BF.herd.lost("bees", "the home at " + e.home);
+  if (e.follow) b.follow = Object.assign({}, e.follow, { who: e.follow.who === "player" ? "player" : BF.ids.live(e.follow.who) || "player" });
+  bees.push(b);
 }
 BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(() => { ids(); if (NEST != null) hook(); }); });   // (clusters: set up at the first meeting, js/ctick.js warm)
 function hook() {
@@ -646,7 +727,7 @@ function hook() {
   tables();
   W().onChunkLoad(scanChunk);
   W().onChunkUnload(unloadChunk);
-  if (W().onReplayedSet) W().onReplayedSet((x, y, z, old, id) => { if (isFlower(old)) delFlower(x, y, z); if (isFlower(id)) addFlower(x, y, z); });   // (another worker's cells, at a meeting: js/cworkers.js)
+  if (W().onReplayedSet) W().onReplayedSet(onReplayed);   // (another worker's cells, at a meeting: js/cworkers.js)
   for (const c of W().chunks.values()) scanChunk(c.cx, c.cz, c);
   if (BF.on) BF.on("blockBroken", (x, y, z, id) => {   // the player broke a home: its bees that were out sting
     if (!isHome(id) || !lastBroken || ckey(x, y, z) !== pk(lastBroken.x, lastBroken.y, lastBroken.z)) return;
@@ -657,14 +738,16 @@ function hook() {
 function reset() {
   for (const b of bees) b.gone = true;
   byGroup = null;
-  bees.length = 0; recs.clear(); loaded.clear(); flowers.clear(); lures.clear(); cropGrid = new Map(); lastBroken = null; acc = 0; lureT = 0;
+  bees.length = 0; recs.clear(); loaded.clear(); loadedVer++; flowers.clear(); lures.clear(); cropGrid = new Map(); lastBroken = null; acc = 0; lureT = 0;
 }
 
 // ---------------------------------------------------------------- saving
-// [x, y, z, kind (0 nest, 1 hive), bees, honey, day, ...]; bees that are out count as home.
+// [x, y, z, kind (0 nest, 1 hive), bees, honey, day, ...]; bees that are out count as home. By position (x, z, y), not in the order the
+// homes were found: with clusters on several workers, homes placed in two groups in the same interval are recorded in a different order
+// on each (the state hash's bees part is this).
 function serialize() {
   const a = [];
-  for (const h of recs.values()) a.push(h.x, h.y, h.z, h.kind === "nest" ? 0 : 1, h.bees, h.honey, h.day);
+  for (const h of [...recs.values()].sort((p, q) => p.x - q.x || p.z - q.z || p.y - q.y)) a.push(h.x, h.y, h.z, h.kind === "nest" ? 0 : 1, h.bees, h.honey, h.day);
   return a;
 }
 function deserialize(a) {
@@ -677,6 +760,7 @@ function deserialize(a) {
     recs.set(pk(h.x, h.y, h.z), h);
   }
   for (const [k, h] of loaded) { const r = recs.get(k); if (r) loaded.set(k, r); else loaded.delete(k); }
+  loadedVer++;
 }
 
 function stats() {

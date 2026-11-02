@@ -8,8 +8,9 @@
 // Worlds start by the protocol's world message: demo (the title screen's world), create (a new saved world, its meta made by the page)
 // or load (a saved world by id). Each takes the page's solved river network (js/worldgen.js riverState), so it isn't solved twice.
 // The page's menus pause it (speed message with pause); a hidden tab pauses it too, as 1.4 stopped with the page's frames.
-// Region workers (spec r15-39, js/rplay.js): for each saved world it plays, this worker starts followers that keep copies of the world
-// from its journal, and splits the regions' thinking over them when that pays (?workers=N and ?split=always|never on the page's URL).
+// Region workers (spec r15-39, js/rplay.js): on the world server (server/simthread.js), for each saved world it plays, this worker starts
+// followers (Node threads) that keep copies of the world from its journal, and splits the work over them when that pays. In a browser
+// it has none (r15-77): it simulates on one thread.
 // A crash (an error out of the loop, a follower's while split) stops the loop, goes to the game log and to the page as {crash}; the page offers a reload.
 // Game log: INFO "worker" when the worker has loaded (files, time) and when each world starts here; ERROR for a crash.
 (() => {
@@ -35,18 +36,15 @@ function boot(o) {
   importScripts("debugfeed.js" + Q);   // (its snapshot only: the page sends it to the debug server)
   importScripts("coords.js" + Q);      // (the planet's positions, for the commands: /tp corner, latitude / longitude, face / u / v)
   importScripts("commands.js" + Q);    // (the slash commands: the page's command line sends them as "command" requests)
-  importScripts("rplay.js" + Q);       // (region workers, spec r15-39: the followers this worker starts for each world)
+  importScripts("rplay.js" + Q);       // (region workers, spec r15-39: the followers the world server's copy starts for each world)
   BF.boot.initSim();
   BF.glog.setSink(e => { if (e.l === "ERROR") post({ errorLine: e.x }); });   // (the page shows the latest error with a crash)
   BF.worker = { feed: o.feed || null };
   sim = BF.proto.host(p => post(p, p.b ? [p.b] : []), { replica: true, world: worldOp, onView: v => { if (v.dist > 0 && v.dist !== BF.world.viewDist) BF.world.setViewDist(v.dist); } });
-  // region workers (spec r15-39): followers in Web Workers of their own (js/regionworker.js), or the world server's threads
-  // (server/simthread.js gives BF_REGION_SPAWN); how many from the page (?workers=, ?split=) or the server's environment
-  const spawn = self.BF_REGION_SPAWN || (typeof Worker === "function" ? (me, n) => {
-    const w = new Worker("regionworker.js" + Q);
-    return { post: m => w.postMessage(m), on: fn => { w.onmessage = e => fn(e.data); w.onerror = e => { e.preventDefault(); fn({ error: e.message || "the worker failed" }); }; }, terminate: () => w.terminate() };
-  } : null);
-  const nw = BF.rplay.setup({ workers: o.workers || self.BF_WORKERS, split: o.split || self.BF_SPLIT, verify: o.verify, cores: self.BF_CORES || (self.navigator && navigator.hardwareConcurrency), spawn, three: o.three });
+  // region workers (spec r15-39): only the world server's threads (server/simthread.js gives BF_REGION_SPAWN); how many from its
+  // environment or the page's ?workers=. A browser's worker has none (r15-77)
+  const spawn = self.BF_REGION_SPAWN || null;
+  const nw = BF.rplay.setup({ workers: o.workers || self.BF_WORKERS, split: o.split || self.BF_SPLIT, kind: o.kind, verify: o.verify, cores: self.BF_CORES || (self.navigator && navigator.hardwareConcurrency), spawn, three: o.three });
   BF.on("worldRestored", (data, meta) => { if (loadingWorld) BF.rplay.begin({ op: "load", data, meta, rivers: riverSt }); });   // (a saved world: right as it is restored)
   BF.glog.log("INFO", "worker", "Simulation worker loaded: " + BF.SIM_FILES.length + " files in " + Math.round(performance.now() - t0) + " ms" + (nw > 1 ? "; " + nw + " region workers per world" : ""));
   for (const p of early.splice(0)) sim.receive(p);
@@ -111,6 +109,7 @@ function loopBody() {
   if (crashed) return;
   const now = performance.now(), raw = Math.max(0, (now - last) / 1000);
   last = now;
+  BF.rplay.loopStart();   // (region workers: the loop's busy time, js/rplay.js)
   try {
     if (crashNext) { crashNext = false; throw new Error("a test crash (test/sim-worker.js)"); }
     const W = BF.warp, p = BF.player.position;
@@ -121,8 +120,9 @@ function loopBody() {
     BF.inventory.simFrame(raw);
     BF.maps.simFrame();   // the held map fills in round the player (js/maps.js)
     BF.player.simRide(raw);   // an untamed horse carries the player; a boat or horse gone puts them off (js/player.js, r15-44 part 2)   // a furnace watched in the pause cooks in real time; a gone villager's trade screen closes (js/playerinv.js)
+    const waiting = !BF.state.paused && BF.rplay.lagging();   // (the followers too far behind for a split: none this frame, js/rplay.js)
     if (!BF.state.paused) {
-      const n = BF.boot.ticks(raw);
+      const n = waiting ? 0 : BF.boot.ticks(raw);
       W.done(n, n * W.TICK, raw);
       if (BF.save) BF.save.update(Math.min(raw, W.MAX_FRAME));
     }
@@ -131,7 +131,7 @@ function loopBody() {
     BF.rplay.frame();   // region workers: switch between one and several thinking, send the followers the journal (js/rplay.js)
   } catch (e) { crash(e); return; }
   // at 1x a loop about every frame (a tick every 50 ms); fast-forward goes again at once, leaving room for the page's messages
-  const W = BF.warp, busy = !BF.state.paused && W.speed > 1;
+  const W = BF.warp, busy = !BF.state.paused && W.speed > 1 && !BF.rplay.lagging();
   timer = setTimeout(loop, busy ? 0 : Math.max(4, 16 - (performance.now() - now)));
 }
 function crash(e) {
@@ -151,10 +151,35 @@ function onMessage(ev) {
   if (d && d.test === "crash") { crashNext = true; return; }   // (test/sim-worker.js: the crash path)
   if (d && d.test === "eval") { if (BF) BF.testEval = true; return; }
   if (d && d.rivers) { pageRivers = d.rivers; return; }   // the page's river network for the next world message (js/simhost.js world)
-  if (d && d.budget) { if (BF && BF.active) BF.active.set(d.budget); if (BF && BF.gameOpts && d.coarse != null) BF.gameOpts.override(d.coarse); return; }   // the page's Simulated villages setting (js/simhost.js budget, js/active.js), and its ?coarse= (js/gameopts.js)
+  if (d && d.budget) {   // the page's Distant villages settings (js/simhost.js budget, js/active.js), and its ?coarse= (js/gameopts.js)
+    if (BF && BF.rplay && BF.rplay.hold(() => budgetIn(d))) return;   // (cluster workers ahead: at the next meeting, js/rplay.js)
+    budgetIn(d);
+    return;
+  }
   if (d && d.auto) { if (BF && BF.rplay && !d.workers) { BF.rplay.end(); BF.rplay.setup({ workers: 1 }); } return; }   // (an automated browser's page: one region worker unless the URL asks for more, ?workers= on the world server's page too; its budget comes as {budget})
   if (!d || d.h == null) return;
   if (!sim) { early.push(d); return; }
+  if (crashed) return;
+  if (BF.rplay && BF.rplay.hold(() => packetIn(d), d)) return;   // (one that reaches every cluster, while cluster workers are ahead: at the next meeting)
+  packetIn(d);
+}
+// the page's Distant villages settings, now (onMessage: or at the next meeting)
+function budgetIn(d) {
+  if (BF && BF.active) {
+    BF.active.set(d.budget);
+  }
+  if (BF && BF.gameOpts && d.coarse != null) BF.gameOpts.override(d.coarse);
+  // region workers: the followers take the same figures (the leader's automatic values: a follower's thread may work out others) and the
+  // same ?coarse=, here between frames as the leader did (js/rplay.js "b")
+  if (BF && BF.active && BF.rworkers.journal) {
+    const o = BF.active.opts();
+    const rec = ["b", { settings: BF.active.settings(), on: o.on, budget: o.budget, memMB: o.memMB, reach: o.reach }];
+    if (d.coarse != null && BF.gameOpts) rec.push(BF.gameOpts.overridden());   // (only when the page sent one, as the leader applied it)
+    BF.rworkers.rec(rec);
+  }
+}
+// a client packet, now (onMessage: or at the next meeting)
+function packetIn(d) {
   if (crashed) return;
   try {
     // region workers: the packet goes in the journal, with the player as it left them (js/rplay.js)

@@ -8,7 +8,8 @@
 // socket (b can be transferred); their size is what bytes() counts.
 // Interest: the sim side sends only what the client's view (position and view distance) covers: loaded chunks within the view distance,
 // and the entities, effects and changes in them. Rate: everything is sent by flush(), once a drawn frame after the frame's ticks, and
-// entities only when a tick ran since the last flush: every tick at 1x (a frame holds at most one), the latest state at fast-forward.
+// entities only when a tick ran since the last flush: every tick at 1x (a frame holds at most one), the latest state at fast-forward
+// (off the page's own thread, at most every FLUSH_MS, about 30 times a second, at fast-forward).
 // In-page transport (BF.proto.local, on from the boot): the game is still one thread; the two ends are joined by a direct queue that
 // encodes and decodes every message, and the client keeps a mirror of what it was sent (BF.client.world). Player requests (r15-20) go
 // through it: BF.req.player sends a request message, the sim applies it at once (js/requests.js), and its block changes and result come
@@ -18,12 +19,12 @@
 // so the page generates and lights its chunks itself and only the edits cross. The page owns the player's body (position, look,
 // health, hunger: player messages); the simulation sends back what it does to the player (self: hurts, inventory, food, teleports).
 // Game log: INFO "protocol" when the in-page transport connects and once a game hour while the debug overlay or screen is on (bytes per
-// second by type), ERROR for a message the other end can't take (bad packet, unknown type, a failed query or encoding).
+// second by type), ERROR for a message the other end can't take (bad packet, unknown type, a failed query or encoding). INFO when the page has to draw the entities more than 250 ms behind the simulation (once a minute at most, bug-098).
 // API: BF.proto = { VERSION, TYPES, encode(msg) -> packet, decode(packet) -> msg, bytes(packet), serve(send, opts?) -> sim end, connect(send) -> client end,
 //        local: { connect(), disconnect(), on, sim, client }, worker: { connect(worker, via?) -> client, disconnect() }, host(send, opts) -> sim end (in the worker), hosted() -> it,
 //        flush(), stats(), resetStats(), check() -> {ok, diffs, ...}, mirrorHash(), simHash(keys),
 //        queries (what -> fn(args)), HOT, COLD }
-//      BF.client = the client end once connected: { world: {chunks, entities, villages, clock, getBlock(x, y, z)}, mode, request(kind, target, data) -> req,
+//      BF.client = the client end once connected: { world: {chunks, entities, villages, clock, getBlock(x, y, z), k(entity, alpha), rt, draw(dTicks, realDt), place(rt), drawLag(), drawStats(); off the page an entity's prev / to / k are the drawing clock's}, mode, request(kind, target, data) -> req,
 //        query(what, args, fn), view(x, y, z, dist), speed(s, pause), save(), receive(packet), hello, player(state), worldOp(op, args, fn), meta(m),
 //        log(entries), self (the latest self fields), onEdits(chunks, full), onSelf(m), onLog(list), onEvents(list) }
 (() => {
@@ -230,9 +231,16 @@ const kb = n => (n >= 1024 ? (n / 1024).toFixed(1) + " KB" : Math.round(n) + " B
 // opts.replica (r15-38): the client keeps its own copy of the world and owns the player's body: every block edit is sent (not only those in
 // chunks the client has), all of them (edits) at the first flush after each hello, its player messages move the player here, and what the
 // simulation does to the player goes back in self messages. opts.world(op, args) -> Promise: the world message's handler (the host's).
+// opts.follower (a region worker's copy, js/rplay.js: its packets go nowhere): no entity messages, only what working them out does to
+// the world (touchEntities).
 const ckey = (cx, cz) => cx + "," + cz;
 const sectionsOf = c => c.secs.map(s => (typeof s === "number" ? s : s.slice()));
 let liveSim = null;   // the sim end the world's block hook reports to
+const PACE_MS = 500;   // (serve: how often entities go to a page that has fallen behind)
+// (serve: at fast-forward the simulation goes round its loop every tick or two, and working out a flush took 17% of the leader's busy time on
+// Gordon's test4 with 8 workers, about 200 flushes a second. A replica's flushes at fast-forward wait this long: 2% more ticks a second, the
+// leader 9 points less busy at 10x. An action the player took, a new client, a paused or frozen world and a forced flush don't wait.)
+const FLUSH_MS = 33;
 function serve(send, opts) {
   opts = opts || {};
   const R = !!opts.replica;
@@ -251,6 +259,7 @@ function serve(send, opts) {
     movedTo: null,            // replica: where self.pos last put the player, until the client's messages say it is there (playerIn)
     moveSeq: 0,               // replica: counts self.pos moves (sent as mv); a player message carrying the latest mv was sent after the client took it
     cursorSent: null, screenSent: null,   // (r15-44: the held stack and the open screen, in every mode)
+    flushedAt: -1e9, behind: false, entsAt: 0, // the page reads slower than this sends (the world server, pace()): entities go every PACE_MS, the change since the last
   };
   const out = msg => {
     let p;
@@ -277,12 +286,14 @@ function serve(send, opts) {
   function wanted() {
     const W = BF.world, want = new Map();
     if (!S.view || !W) return want;
-    const R = S.view.dist, pcx = Math.floor(S.view.x / 16), pcz = Math.floor(S.view.z / 16);
+    const R = S.view.dist, pcx = Math.floor(S.view.x / 16), pcz = Math.floor(S.view.z / 16), gen = W.chunkGen ? W.chunkGen() : -1, K = S.wantKey;
+    if (K && gen >= 0 && K[0] === gen && K[1] === pcx && K[2] === pcz && K[3] === R) return S.want;   // (until the view moves or a chunk comes or goes)
     for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
       if (dx * dx + dz * dz > (R + 0.5) * (R + 0.5)) continue;
       const c = W.chunkC ? W.chunkC(pcx + dx, pcz + dz) : W.chunks.get(ckey(pcx + dx, pcz + dz));
       if (c && !want.has(c.key)) want.set(c.key, c);
     }
+    S.want = want; S.wantKey = [gen, pcx, pcz, R];
     return want;
   }
   function flushChunks(want, budget) {
@@ -296,7 +307,7 @@ function serve(send, opts) {
     for (const [k, c] of want) {
       if (S.chunks.has(k)) continue;
       if (budget-- <= 0) break;   // the rest on the next flushes
-      out({ t: "chunk", key: k, cx: c.cx, cz: c.cz, lo: c.lo, hi: c.hi, secs: sectionsOf(c) });
+      if (!opts.follower) out({ t: "chunk", key: k, cx: c.cx, cz: c.cz, lo: c.lo, hi: c.hi, secs: sectionsOf(c) });
       S.chunks.set(k, { c, lo: c.lo, hi: c.hi });
     }
   }
@@ -354,6 +365,23 @@ function serve(send, opts) {
     if (BF.mobs && BF.mobs.arrowList) for (const a of BF.mobs.arrowList()) fn("arrow", a, a.pos.x, a.pos.z);
     if (BF.boats) for (const b of BF.boats.list) fn("boat", b, b.pos.x, b.pos.z);
     if (BF.bees && BF.bees.list) for (const b of BF.bees.list) fn("bee", b, b.x, b.z);
+  }
+  // A follower's flush (opts.follower): what flushEntities does to the entities themselves, as the leader's does, and nothing else: a
+  // villager in view gets its name (js/villagelog.js nameOf keeps it), a boat in view its id (BF.ids.idOf). The whole entity feed was
+  // about 1.6 ms a tick on every follower of Gordon's test4 with 8 workers (2026-10-29), for messages that go nowhere.
+  function touchEntities() {
+    if (BF.mobs && BF.vlog) for (const m of BF.mobs.list) if (!m.removed && m.type === "villager" && !m.vname && inView(m.position.x, m.position.z)) BF.vlog.nameOf(m);
+    if (BF.boats && BF.ids) for (const b of BF.boats.list) if (inView(b.pos.x, b.pos.z)) BF.ids.idOf(b);
+  }
+  // Everything else a flush does on a follower goes nowhere (15% of a follower's busy time, test4 with 8 workers, 2026-11-01): what is due is
+  // dropped. Which chunks are in view (touchEntities' inView) and the touches, which hand out names and ids, stay as they were.
+  function followerFlush(force) {
+    S.flushes++; ST.flushes++;
+    S.fx = []; S.logs = []; S.cells.clear(); S.editsDue = false; S.hurts = [];
+    flushChunks(wanted(), S.view && S.view.budget != null ? S.view.budget : 16);
+    const t = tickNow(), still = !!((BF.warp && BF.warp.frozen) || (BF.state && BF.state.paused));
+    if (t !== S.tick || force || S.changed || still) { touchEntities(); S.entsAt = now(); S.changed = false; }
+    S.tick = t;
   }
   function flushEntities(ticked) {
     const add = [], set = [], seen = new Set();
@@ -488,6 +516,9 @@ function serve(send, opts) {
 
   function flush(force) {
     if (!BF.world) return;
+    if (opts.follower) { followerFlush(force); return; }
+    if (R && !force && !S.changed && !S.editsDue && BF.warp && BF.warp.speed > 1 && !BF.warp.frozen && !(BF.state && BF.state.paused) && now() - S.flushedAt < FLUSH_MS) return;
+    S.flushedAt = now();
     S.flushes++; ST.flushes++;
     if (S.editsDue) flushEdits();
     const want = wanted();
@@ -497,8 +528,7 @@ function serve(send, opts) {
     // entities: after a tick; after a request applied (changed); and every flush while the world is frozen or paused, when nothing ticks
     // but a request, a command or a test can still move things (no ticks then, so the diff is the only cost)
     const still = !!((BF.warp && BF.warp.frozen) || (BF.state && BF.state.paused));
-    if (ticked || force || S.changed || still) flushEntities(ticked);
-    S.changed = false;
+    if ((ticked || force || S.changed || still) && (!S.behind || force || now() - S.entsAt >= PACE_MS)) { flushEntities(ticked); S.entsAt = now(); S.changed = false; }
     // replica (r15-43): the sign text store whenever it changed (a few entries; the page draws sign texts from it)
     if (R && BF.signs && BF.signs.ver !== S.signsVer) { S.signsVer = BF.signs.ver; S.fx.push({ kind: "signs", store: BF.signs.serialize() }); }
     if (S.fx.length) {
@@ -606,7 +636,8 @@ function serve(send, opts) {
     each((kind, o, x, z) => { if (inView(x, z)) m.set(nOf(o), { kind, s: stateOf(kind, o) }); });
     return { entities: m, chunks: wanted() };
   }
-  const sim = { receive, flush, reset, hello, onBlock, onFx: e => S.fx.push(e), onLog: e => S.logs.push(e), S, interest, nOf, replica: R };
+  const pace = on => { S.behind = !!on; };
+  const sim = { receive, flush, reset, hello, pace, onBlock, onFx: e => S.fx.push(e), onLog: e => S.logs.push(e), S, interest, nOf, replica: R };
   liveSim = sim;
   return sim;
 }
@@ -629,7 +660,7 @@ const QUERIES = {
   // the world state hash and its parts (js/statehash.js)
   hash() { return BF.stateHash ? Object.assign({ ok: true, tick: BF.rand ? BF.rand.tick : null }, BF.stateHash.full()) : { ok: false, why: "no state hash" }; },   // (tick: r15-41's test compares with a headless run of as many ticks)
   // the pause menu's Simulated villages line, where the simulation is (bug-081: js/player.js updateBudgetBtn)
-  budget() { return BF.active ? { ok: true, text: BF.active.text(), on: BF.active.opts().on, budget: BF.active.opts().budget } : { ok: false, why: "no budget" }; },
+  budget() { return BF.active ? { ok: true, text: BF.active.text(), on: BF.active.opts().on, budget: BF.active.opts().budget, settings: BF.active.settings(), auto: BF.active.auto(), villages: BF.villageSim ? BF.villageSim.count() : 0 } : { ok: false, why: "no budget" }; },   // (auto: the automatic values where the simulation is, for the pause menu's Distant villages panel)
   // the protocol's own figures
   stats() { return Object.assign({ ok: true }, stats()); },
   // a hash of the blocks of chunks {keys} and which of them aren't loaded (a client keeping its own copy checks it against this, r15-38)
@@ -722,11 +753,87 @@ function connect(send, mode) {
     } };
   // r15-37: how far to draw entity r from prev towards its current fields, given the warp's alpha: alpha when r changed in the latest tick
   // and prev is the tick just before; else 1 (it stood still, or several ticks went by since the last message: fast-forward).
-  world.k = (r, a) => (r.prev && r.ct === world.tick && r.ct - r.pt === 1 && typeof a === "number" ? Math.max(0, Math.min(1, a)) : 1);
+  // bug-098: with the simulation elsewhere (a worker or the world server) its ticks arrive on their own schedule, late or several at a
+  // time, and the page's alpha (its own clock) is not in step with them: mobs snapped forward and back. There the page keeps a drawing
+  // clock (world.rt, in ticks, moved on by draw() every frame) a little behind the newest tick it has, each moving entity keeps its
+  // recent states (hist: {t, hot fields}), and draw() points prev and to at the two states either side of the clock, with k how far
+  // between them (r.k). Renderers draw lerp(prev, to || r, k). In the page (rt null) the alpha rule above holds.
+  world.rt = null;
+  world.k = (r, a) => {
+    if (!r.prev) return 1;
+    if (world.rt != null) return r.k != null ? r.k : 1;
+    return r.ct === world.tick && r.ct - r.pt === 1 && typeof a === "number" ? Math.max(0, Math.min(1, a)) : 1;
+  };
+  // The drawing clock: dTicks the ticks the page's clock drew this frame (0 while frozen or paused), realDt its real seconds. It moves on
+  // at the rate the ticks have been arriving (so a simulation a little under its speed doesn't leave it waiting at the newest tick every
+  // few frames), aims `lag` ticks behind the newest (a little more than the longest recent wait for the next entities message, so the
+  // next is there before the clock gets to it), eases back to that aim, and never runs past the newest: it waits there instead of guessing.
+  const HIST_MAX = 48, CADENCE = 6;   // CADENCE: a change this few ticks after the last is drawn from it (animals idling in a pen step every 5 ticks)
+  const DRAW = { lag: 1.5, peak: 1, lastT: -1, lastAt: 0, tickMs: 50, rate: null, winT: -1, winAt: 0, frames: 0, waits: 0, toldAt: -1e9 };
+  world.draw = (dTicks, realDt) => {
+    const T = world.tick;
+    if (T < 0) { world.rt = null; return; }
+    const aim = T - DRAW.lag;
+    realDt = Math.max(0, Math.min(0.25, realDt || 0));
+    if (world.rt == null || world.rt > T + 1 || world.rt < aim - 20 - DRAW.lag) world.rt = aim;   // (a new world, a load, a long stall)
+    else if (dTicks > 0) {
+      world.rt += DRAW.rate != null ? DRAW.rate * realDt : dTicks;
+      world.rt += (aim - world.rt) * (1 - Math.exp(-realDt / 0.5));
+    }
+    DRAW.frames++;
+    if (world.rt >= T && dTicks > 0) DRAW.waits++;
+    if (world.rt > T) world.rt = T;
+    return world.place(world.rt);
+  };
+  // every entity with recent states drawn at clock rt (draw(), each frame; tests call it to hold the clock somewhere)
+  world.place = rt => {
+    world.rt = rt;
+    for (const r of world.entities.values()) {
+      const h = r.hist;
+      if (!h) continue;
+      let i = 0;
+      while (i + 1 < h.length && h[i + 1].t <= rt) i++;
+      if (i > 0) { h.splice(0, i); i = 0; }   // (the states before the clock's are done with)
+      if (h.length < 2 || rt >= h[h.length - 1].t) { r.prev = null; r.to = null; r.k = 1; if (h.length > 1) h.splice(0, h.length - 1); continue; }
+      const A = h[0], B = h[1];
+      r.prev = A; r.to = B === h[h.length - 1] ? null : B;   // (to null: its current fields)
+      r.k = rt <= A.t ? 0 : (rt - A.t) / (B.t - A.t);
+    }
+    return rt;
+  };
+  // the lag in ticks, the arrival rate (ticks a second), and the frames drawn / those that waited at the newest tick since the last call
+  world.drawStats = () => { const o = { lag: DRAW.lag, rate: DRAW.rate, frames: DRAW.frames, waits: DRAW.waits }; DRAW.frames = DRAW.waits = 0; return o; };
+  world.drawLag = () => DRAW.lag;
+  // each entities message: how long it was since the last one, in ticks (the larger of the ticks it moved on and the real time between
+  // them at the simulation's pace); the lag follows the peak of those, decaying slowly, within 1.5 ticks and 0.4 real seconds. And the
+  // rate the ticks arrive, measured over half a second at a time and smoothed.
+  function arrived(T) {
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now(), ck = world.clock;
+    const sp = ck && ck.achieved > 0 ? ck.achieved : ck && ck.speed > 0 ? ck.speed : 1;
+    DRAW.tickMs = 50 / Math.max(0.05, sp);
+    if (DRAW.lastT >= 0 && T > DRAW.lastT) {
+      const gap = Math.max(T - DRAW.lastT, (now - DRAW.lastAt) / DRAW.tickMs);
+      DRAW.peak = Math.max(gap, DRAW.peak * 0.97);
+      DRAW.lag = Math.max(1.5, Math.min(DRAW.peak + 0.5, Math.max(2, 400 / DRAW.tickMs)));
+      // the game log: the page drawing far behind (the ticks arriving very unevenly), at most once a minute
+      if (DRAW.lag * DRAW.tickMs > 250 && now - DRAW.toldAt > 60000) {
+        DRAW.toldAt = now;
+        glog("INFO", "The page draws the mobs " + Math.round(DRAW.lag * DRAW.tickMs) + " ms behind the simulation: its ticks arrive unevenly (up to " + Math.round(gap) + " ticks apart)");
+      }
+    }
+    if (DRAW.winT < 0 || T < DRAW.winT || now - DRAW.winAt > 3000) { DRAW.winT = T; DRAW.winAt = now; DRAW.rate = null; }
+    else if (now - DRAW.winAt >= 500) {
+      const r = (T - DRAW.winT) * 1000 / (now - DRAW.winAt);
+      DRAW.rate = DRAW.rate == null ? r : DRAW.rate + (r - DRAW.rate) * 0.3;
+      DRAW.winT = T; DRAW.winAt = now;
+    }
+    if (T !== DRAW.lastT) { DRAW.lastT = T; DRAW.lastAt = now; }
+  }
+  const snap = (r, t) => { const o = { t }; for (const f of HOT[r.kind]) o[f] = r[f]; return o; };
   world.gen = 0;   // counts hello messages: a new world (the render layers drop what they were showing)
   const C = { world, mode: mode || "in page", hello: null, lastView: null };
   const out = msg => send(encode(msg));
-  function clear() { world.chunks.clear(); world.entities.clear(); world.villages.clear(); world.clock = null; world.log = []; world.tick = -1; }
+  function clear() { world.chunks.clear(); world.entities.clear(); world.villages.clear(); world.clock = null; world.log = []; world.tick = -1; world.rt = null; DRAW.lastT = -1; DRAW.winT = -1; DRAW.rate = null; }
   const LOG_KEEP = 500;
   const ON = {
     hello(m) { C.hello = m; clear(); C.lastView = null; world.gen++; },
@@ -750,17 +857,28 @@ function connect(send, mode) {
     // from a tick's message stood still in it, so when the ticks come one by one its prev is its state at the tick before the change.
     // A change within the same tick (a request while frozen) only overwrites the current fields.
     entities(m) {
-      const T = m.tick, step = T === world.tick + 1;
+      const T = m.tick, was = world.tick, drawn = world.rt != null;
+      arrived(T);
       for (const e of m.add) world.entities.set(e.n, Object.assign({ n: e.n, kind: e.kind, prev: null, pt: null, ct: T }, e.s));
       for (const e of m.set) {
         const r = world.entities.get(e.n);
         if (!r) continue;
         if (r.ct !== T) {
-          const prev = r.prev || (r.prev = {});
-          for (const f of HOT[r.kind]) prev[f] = r[f];
-          r.pt = step ? T - 1 : r.ct; r.ct = T;
+          if (drawn) {   // off the page: its states over time (it stood still from its last change up to the last tick heard of)
+            const h = r.hist || (r.hist = [snap(r, r.ct)]), s0 = T - r.ct <= CADENCE ? r.ct : Math.max(r.ct, Math.min(was, T - 1));
+            if (s0 > h[h.length - 1].t) h.push(snap(r, s0));
+          } else {
+            const prev = r.prev || (r.prev = {});
+            for (const f of HOT[r.kind]) prev[f] = r[f];
+          }
+          r.pt = Math.max(r.ct, Math.min(was, T - 1)); r.ct = T;
         }
         Object.assign(r, e.s);
+        if (drawn) {
+          const h = r.hist || (r.hist = [snap(r, T)]), L = h[h.length - 1];   // (a first change within its own tick: a request while frozen)
+          if (L.t === T) Object.assign(L, e.s); else h.push(snap(r, T));
+          if (h.length > HIST_MAX) h.splice(0, h.length - HIST_MAX);
+        }
       }
       for (const n of m.gone) world.entities.delete(n);
       world.tick = T;

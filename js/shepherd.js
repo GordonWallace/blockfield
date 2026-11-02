@@ -256,8 +256,10 @@ function seeded(str) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+// a living animal's place to 1/100 (its runner's, with clusters on workers: js/mobs.js row "spot"), else where its state last had it
+const spotOf = (s, i) => { const p = s.mob ? BF.cworkers.row("spot", s.mob) : null; return p ? p[i] : i ? s.z : s.x; };
 const packSt = s => [s.fed == null ? null : +s.fed.toFixed(3), s.shorn ? +(s.woolAt || 0).toFixed(3) : null, s.growAt == null ? null : +s.growAt.toFixed(3),
-  +(s.cd || 0).toFixed(3), s.mob && live(s.mob) ? +s.mob.position.x.toFixed(2) : s.x, s.mob && live(s.mob) ? +s.mob.position.z.toFixed(2) : s.z];
+  +(s.cd || 0).toFixed(3), spotOf(s, 0), spotOf(s, 1)];
 function unpackSt(a) {
   const num = (x, d) => (x != null && Number.isFinite(+x) ? +x : d);
   if (!Array.isArray(a)) return null;
@@ -421,20 +423,23 @@ const shp = m => m.shp || (m.shp = BF.ids.refs({ task: null, stage: null, t: 0, 
 // emeralds and buys its shears (js/villagelife.js toolAI) and wheat. Kept as a no-op for callers of the old API.
 function ensureKit() {}
 // The pen this shepherd works: the one its loom stands beside (its footprint within 4 blocks of the loom).
-function penOf(m) {
-  const S = shp(m);
-  if (S.penFor === m.jobsite && S.pen !== undefined) return S.pen;
+// peek (the debug screen's read, js/debugfeed.js): changes nothing. Making the keeper's state there drew from its stream, and keeping the
+// pen there decided when it was looked for: a world with a screen watching played differently (2026-10-30), and the region workers had
+// to read the screen too to stay the same.
+function penOf(m, peek) {
+  const S = peek ? m.shp : shp(m);
+  if (S && S.penFor === m.jobsite && S.pen !== undefined) return S.pen;
   let best = null;
   if (m.jobsite && m.village) {
     let bd = 4.5;
     for (const p of pensOf(m.village)) { const d = penDist(p, m.jobsite.x + 0.5, m.jobsite.z + 0.5); if (d < bd) { bd = d; best = p; } }
   }
-  S.penFor = m.jobsite; S.pen = best;
+  if (!peek) { S.penFor = m.jobsite; S.pen = best; }
   return best;
 }
 // What the shepherd looks after: {pen, sheep (live mobs to feed / shear), flock (live mobs counted for crowding and culling), threshold}.
-function tended(m) {
-  const pen = penOf(m);
+function tended(m, peek) {
+  const pen = penOf(m, peek);
   const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position, R = pen ? TEND_R : FREE_RADIUS;
   const near = o => o.type === "sheep" && live(o) && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= R && Math.abs(o.position.y - m.position.y) < 6;
   const M = BF.mobs, list = M.checkScan("shepherd.tended", M.near(home, R).filter(near), L => L.filter(near));
@@ -557,7 +562,7 @@ function leave(m, S, dt, out) {
     if (!R) return false;
     pen = pensOf(R).find(q => p.x > q.fx0 && p.x < q.fx1 && p.z > q.fz0 && p.z < q.fz1 && Math.abs(p.y - (q.y + 1)) < 2);
     if (!pen) return false;
-    S.exit = pen; S.exitT = 0; S.navFail = 0; m.ai.route = null;
+    S.exit = pen; S.exitT = 0; S.navFail = 0; if (m.ai.routeKind === "farm") m.ai.route = null;   // (not another job's route: standing at the exit already, that dropped its walk back every tick)
   }
   S.exitT += dt;
   const N = BF.mobs.nav, [fx, fy, fz] = N.feetCell(m);
@@ -569,6 +574,12 @@ function leave(m, S, dt, out) {
   }
   const st = BF.villageLife.travel(m, S, dt, out, pen.out[0], pen.y + 1, pen.out[1], m.def.speed);
   if (st === "going" && S.exitT < 30) { m.ai.mode = "idle"; m.ai.t = 2; return true; }
+  if (st === "arrived" && S.exitT < 30 && p.x > pen.fx0 && p.x < pen.fx1 && p.z > pen.fz0 && p.z < pen.fz1) {   // close enough to the cell outside, but still in the open gate (it stayed open all day): the last step out
+    const dx = pen.out[0] + 0.5 - p.x, dz = pen.out[1] + 0.5 - p.z, d = Math.hypot(dx, dz) || 1;
+    m.ai.mode = "idle"; m.ai.t = 2;
+    out.x = dx / d * m.def.speed; out.z = dz / d * m.def.speed;
+    return true;
+  }
   S.exit = null;
   return false;
 }

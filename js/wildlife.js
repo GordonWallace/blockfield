@@ -63,6 +63,7 @@ const chunkBase = k => { const i = k.indexOf(","), CS = BF.CS; return CL().baseA
 const ownChunk = k => CL().ownsBase(chunkBase(k));
 
 let rolled = new Set();        // chunk keys that had their first-generation roll
+let rolledNew = [];            // (clusters on workers: the keys rolled here since the last meeting, ownTables)
 const toRoll = new Set();      // loaded chunks still to roll
 let stored = new Map();        // chunk key -> [packed wild mob + {t, open}]
 const toRestore = new Set();   // loaded chunks with stored mobs waiting
@@ -158,6 +159,7 @@ function restore(k) {
 // ---------------------------------------------------------------- first-generation animals
 function roll(k) {
   rolled.add(k);
+  if (BF.cworkers && BF.cworkers.active) rolledNew.push(k);
   const [cx, cz] = k.split(",").map(Number), CS = BF.CS;
   let b = null;
   try { b = BF.worldgen.biomeAt(cx * CS + 8, cz * CS + 8); } catch (e) { return; }
@@ -226,19 +228,20 @@ let targets = new Map(), targetsDirty = true;   // villagers and golems by chunk
 // the areas in force: the world's, or with clusters the running cluster's (its own chunks; worked out at its first use in an interval)
 function areasNow() {
   if (!clustered()) { if (!areaList.length) rebuildAreas(); return { list: areaList, of: areaOf }; }
-  return BF.ctick.local("wildlife.areas", () => buildAreas(ownChunk));
+  return BF.ctick.local("wildlife.areas", () => { const own = BF.world.clusterCells.groupChunks(BF.ctick.cur.key); return buildAreas(new Set(own.map(c => c.key)), own); });
 }
 function rebuildAreas() { const o = buildAreas(null); areaList = o.list; areaOf = o.of; }
-function buildAreas(mine) {
+// (mine: with clusters the running cluster's chunk keys, and own those chunks in world.chunks order)
+function buildAreas(mine, own) {
   const areaList = [], areaOf = new Map();
   const W = BF.world, VS = BF.villageSim;
   if (VS && VS.areas) for (const a of VS.areas()) {
     const idx = areaList.length, A = { kind: a.kind, key: a.key, n: 0, h: 0, cap: 0 };
-    for (const k of a.keys) if (!areaOf.has(k) && W.chunks.has(k) && (!mine || mine(k))) { areaOf.set(k, idx); A.n++; }
+    for (const k of a.keys) if (!areaOf.has(k) && W.chunks.has(k) && (!mine || mine.has(k))) { areaOf.set(k, idx); A.n++; }
     if (A.n) areaList.push(A); else continue;
   }
   const P = { kind: "player", key: "player", n: 0, h: 0, cap: 0 }, pi = areaList.length;
-  for (const k of W.chunks.keys()) if (!areaOf.has(k) && (!mine || mine(k))) { areaOf.set(k, pi); P.n++; }
+  for (const k of own ? own.map(c => c.key) : W.chunks.keys()) if (!areaOf.has(k)) { areaOf.set(k, pi); P.n++; }
   areaList.push(P);
   // monsters switched off in the world (js/gameopts.js): the cap shrinks by their share of the spawn weights and only monsters that are on
   // count, so turning creepers off leaves zombies' numbers as they were
@@ -250,7 +253,7 @@ function buildAreas(mine) {
 function rebuildTargets() {
   targets = new Map();
   const f = BF.ctick && BF.ctick.on ? BF.ctick.filter : null;
-  for (const m of BF.mobs.list) {
+  for (const m of (f && BF.ctick.mobs()) || BF.mobs.list) {   // (clusters: the running group's own, js/ctick.js mobs)
     if (!live(m) || !(m.type === "villager" || (m.def && m.def.golem)) || (f && !f(m))) continue;
     const k = ck(m.position.x, m.position.z), a = targets.get(k);
     if (a) a.push(m); else targets.set(k, [m]);
@@ -362,6 +365,7 @@ function updateCluster() {
   if (toRoll.size && BF.mobs.spawning !== false) {
     let n = 0;
     for (const k of [...toRoll]) {
+      if (rolled.has(k)) { toRoll.delete(k); continue; }   // (rolled by its group on another worker: nothing left to do, whoever owns it)
       if (!ownChunk(k)) continue;
       toRoll.delete(k);
       if (!W.chunks.has(k) || rolled.has(k)) continue;
@@ -381,13 +385,34 @@ function ownTables() {
   if (!C || ownTables.done) return;
   ownTables.done = true;
   const G = k => CL().groupFor(chunkBase(k)), GV = k => CL().groupFor("v:" + k);   // (each key's group: C.keysOf lists a group's keys in order)
+  // rolled only grows: a group's part is the keys its worker rolled since the last meeting (all of them, with all: the first swap). It
+  // was the group's whole part, every meeting, put back key by key: about 16 ms a meeting on every worker of test4 (2026-10-29 profile).
   C.owned("wildlife.rolled", {
-    snap: g => C.keysOf(rolled, g, G).slice(),
-    apply: (g, a) => { for (const k of C.keysOf(rolled, g, G)) rolled.delete(k); for (const k of a || []) rolled.add(k); C.applied(rolled, g); },
+    reset() { rolledNew = []; },
+    snap: (g, all) => {
+      if (all) return { all: C.keysOf(rolled, g, G).slice() };
+      const add = [], keep = [];
+      for (const k of rolledNew) (G(k) === g ? add : keep).push(k);
+      rolledNew = keep;
+      return { add };
+    },
+    apply: (g, o) => {
+      if (o && o.all) { for (const k of C.keysOf(rolled, g, G)) rolled.delete(k); for (const k of o.all) rolled.add(k); }
+      else if (o) for (const k of o.add) rolled.add(k);
+      C.applied(rolled, g);
+    },
   });
   C.owned("wildlife.stored", {
     snap: g => C.keysOf(stored, g, G).map(k => [k, stored.get(k)]),
-    apply: (g, a) => { for (const k of C.keysOf(stored, g, G)) stored.delete(k); for (const [k, v] of a || []) stored.set(k, v); C.applied(stored, g); },
+    apply: (g, a) => {
+      for (const k of C.keysOf(stored, g, G)) stored.delete(k);
+      for (const [k, v] of a || []) stored.set(k, v);
+      C.applied(stored, g);
+      // (a chunk its group's worker brought back still waits here: dropped, as there, so when it loads again it waits in the same place
+      // in the order as there; left, back on one worker every copy brought its chunks back in its own order and their mobs took one
+      // another's ids)
+      if (toRestore.size) for (const k of [...toRestore]) if (!stored.has(k) && G(k) === g) toRestore.delete(k);
+    },
   });
   C.owned("wildlife.nights", {
     snap: g => C.keysOf(nights, g, GV).map(k => [k, [...nights.get(k)]]),
@@ -414,7 +439,7 @@ function deserialize(o) {
   for (const k in o.nights || {}) if (Array.isArray(o.nights[k])) nights.set(k, new Map(o.nights[k].filter(Array.isArray).map(a => [+a[0], [+a[1] || 0, +a[2] || 0, +a[3] || 0]])));
 }
 function reset() {
-  rolled = new Set(); toRoll.clear(); stored = new Map(); toRestore.clear(); nights = new Map();
+  rolled = new Set(); rolledNew = []; toRoll.clear(); stored = new Map(); toRestore.clear(); nights = new Map();
   areaList = []; areaOf = new Map(); targets = new Map(); targetsDirty = true; LOG.length = 0; areasT = breedT = watchT = 0;
 }
 function counts() {

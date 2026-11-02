@@ -42,10 +42,16 @@ const num = v => Number.isInteger(v) ? String(v) : Number.isFinite(v) ? "f" + Ma
 const SKIP = new Set(["def", "root", "model", "meshes", "material", "mesh", "geo", "geometry", "walkPhase", "walkAmt", "headYaw", "headPitch",
   "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg", "_ri", "_rs", "_res",
   "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN",   // caches on mobs (r15-61: js/ids.js links, js/regiontick.js ids)
-  "swingT", "cl"]);   // ai.swingT: the arm swing, drawn and heard only, set by the professions' unseeded "visual" rolls (r15-20 report)
-// cl: a mob's cluster (js/clusters.js, spec r15-39b), worked out from the rest of the world at each meeting.
+  "swingT", "cl", "planT0", "planN", "bedCache"]);   // ai.swingT: the arm swing, drawn and heard only, set by the professions' unseeded "visual" rolls (r15-20 report); ai.planT0/planN: the replan count for the game log (r15-73)
+// cl: a mob's cluster (js/clusters.js, spec r15-39b), worked out from the rest of the world at each meeting. bedCache: a village record's
+// beds by chunk (js/breeding.js scanBeds), each copy's own from the chunks it scanned; what they give is rec.beds.
 // Fields named _snd...: mobs' sound timers (js/audio.js), heard only.
 const skipKey = k => SKIP.has(k) || k.startsWith("_snd");
+// A village record's coops and pens (js/poultry.js coopsOf, js/shepherd.js pensOf): a list each copy fills in when it first asks, and
+// again when a builder finishes one, so a copy that hasn't asked since lacks the empty ones. Only those with stock are state, as the
+// tables that send them count it (js/herd.js penTable: Gordon's test4, 2026-10-29, the owner of a village it never asked about had
+// _coops=[] where the others had its two built coops, empty, and the copies were stopped as different).
+const PENS = { _coops: p => p.hens || p.eggs, _pens: p => p.sheep };
 let mobSet = new Set(), dropSet = new Set();
 const mobRef = m => m.id != null ? "#" + m.id : m.type + (m.name ? ":" + m.name : "");
 const isMob = v => mobSet.has(v) || (v.def && v.position && v.type && v.ai);   // (a mob: js/mobs.js createMob)
@@ -83,8 +89,8 @@ function canon(v, out, d, seen) {
     out.push("{");
     const keys = Object.keys(v).filter(k => !skipKey(k)).sort();
     for (const k of keys) {
-      const x = v[k];
-      if (x === undefined || typeof x === "function") continue;
+      const pens = PENS[k] && Array.isArray(v[k]) && v.members, x = pens ? v[k].filter(PENS[k]) : v[k];
+      if (x === undefined || typeof x === "function" || (pens && !x.length)) continue;
       out.push(k, "=");
       canon(x, out, d + 1, seen);
       out.push(";");
@@ -109,12 +115,15 @@ function editsText() {
 }
 function mobsText() {
   const L = BF.mobs ? BF.mobs.list : [];
-  return L.filter(m => !m.removed).map(m => {
-    const o = [m.type, "@", num(m.position.x), ",", num(m.position.y), ",", num(m.position.z)];
-    canon(m.horse ? Object.assign({}, m, { horse: "H" + m.horse.hid }) : m, o, 0, new Set());   // a horse's record is in the horses part
-    return o.join("");
-  }).sort().join("\n");
+  return L.filter(m => !m.removed).map(m => BF.cworkers.row("hash", m)).sort().join("\n");
 }
+// A mob's line of the mobs part. A row (js/cworkers.js gathered): with clusters on workers, worked out by its runner, refs on there too.
+function mobLine(m) {
+  const o = [m.type, "@", num(m.position.x), ",", num(m.position.y), ",", num(m.position.z)];
+  canon(m.horse ? Object.assign({}, m, { horse: "H" + m.horse.hid }) : m, o, 0, new Set());   // a horse's record is in the horses part
+  return o.join("");
+}
+(BF.mobRows || (BF.mobRows = new Map())).set("hash", { fn: mobLine, uses: ["hash"], around: go => { refsOn(); try { return go(); } finally { refsOff(); } } });
 function villagesText() {
   const V = BF.mobs && BF.mobs.villages, o = [];
   if (V) for (const k of [...V.keys()].sort()) o.push(k + ":" + text(V.get(k)));
@@ -126,8 +135,8 @@ function horsesText() {
   const H = BF.horses;
   if (!H || !H.records) return "";
   const recs = [...H.records.values()].sort((a, b) => a.hid - b.hid).map(r => {
-    const m = r.mob, c = Object.assign({}, r);
-    if (m) Object.assign(c, { x: m.position.x, y: m.position.y, z: m.position.z, yaw: m.yaw, hp: m.hp });
+    const h = r.mob ? BF.cworkers.row("horse", r.mob) : null, c = Object.assign({}, r);   // (js/horses.js: its runner's, with clusters on workers)
+    if (h) Object.assign(c, { x: h[0], y: h[1], z: h[2], yaw: h[3], hp: h[4] });
     return c;
   });
   return text({ recs, herds: H.herds });
@@ -209,7 +218,14 @@ function update() {
   BF.glog.log("INFO", "statehash", `State hash at the start of day ${day}: ${r.hash} (${r.ms} ms)`);
 }
 
+// The cells two edits texts disagree on (tests: region workers out of step): ["chunk key:edit index", ...], at most max.
+function editsDiff(p, q, max = 8) {
+  const cells = t => { const m = new Map(); for (const part of String(t || "").split("|")) { const at = part.lastIndexOf(":"); if (at < 0) continue; const k = part.slice(0, at); for (const c of part.slice(at + 1).split(",")) { const [i, id] = c.split("="); m.set(k + ":" + i, id); } } return m; };
+  const a = cells(p), b = cells(q), out = [];
+  for (const k of new Set([...a.keys(), ...b.keys()])) if (a.get(k) !== b.get(k)) { out.push(k); if (out.length >= max) break; }
+  return out;
+}
 const stateHash = () => full().hash;
-Object.assign(stateHash, { PARTS: Object.keys(PARTS), parts: () => full().parts, full, text: partText, canon: text, hashStr, update, last: null });
+Object.assign(stateHash, { PARTS: Object.keys(PARTS), parts: () => full().parts, full, text: partText, canon: text, hashStr, update, editsDiff, last: null });
 BF.stateHash = stateHash;
 })();

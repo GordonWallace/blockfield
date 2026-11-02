@@ -149,10 +149,17 @@ function placeThing(o, p) {
 function ownsThing(o, p, of) {
   const C = BF.ctick;
   if (!C || !C.on || !C.filter) return true;
-  const tok = C.groups();
+  return ownsBase(thingBase(o, p, of));
+}
+// thingBase(o, p, of?) -> o's base this interval, worked out now if it wasn't yet (as ownsThing does). The owned tables' snap and apply
+// (drops, boats, arrows) go by it, not by clOf: a thing no pass on this worker has looked at (one restored from a save, on a worker that
+// runs none of its groups or no group at all) has no base yet, and with clOf's undefined it was neither sent nor replaced, so each copy
+// kept its own version of it. Every copy works out the same base: the thing is where it was at the last meeting until its group runs it.
+function thingBase(o, p, of) {
+  const tok = BF.ctick.groups();
   let t = thingCl.get(o);
   if (!t || t[0] !== tok) thingCl.set(o, (t = [tok, (of && of(o)) || baseAt(p)]));
-  return ownsBase(t[1]);
+  return t[1];
 }
 const clOf = o => { const t = thingCl.get(o); return t ? t[1] : undefined; };
 // a thing sent at a meeting (js/cworkers.js: an owned table's apply) keeps the base it had where it ran, until it is worked out again
@@ -202,9 +209,9 @@ function ownTables() {
   const dec = o => keepThing(Object.assign({}, o, { pos: V3(o.pos), prev: V3(o.prev), vel: V3(o.vel), look: V3(o.look), dir: V3(o.dir), owner: o.owner ? BF.ids.live(o.owner) || null : null,
     victim: o.victim ? BF.ids.live(o.victim) || null : null, hit: null, cl: undefined }), o.cl);
   C.owned("mobs.arrows", {
-    snap: g => arrows.filter(a => clOf(a) !== undefined && groupFor(clOf(a)) === g).map(enc),
+    snap: g => arrows.filter(a => groupFor(thingBase(a, a.pos)) === g).map(enc),
     apply(g, a) {
-      for (let i = arrows.length - 1; i >= 0; i--) if (clOf(arrows[i]) !== undefined && groupFor(clOf(arrows[i])) === g) arrows.splice(i, 1);
+      for (let i = arrows.length - 1; i >= 0; i--) if (groupFor(thingBase(arrows[i], arrows[i].pos)) === g) arrows.splice(i, 1);
       for (const o of a || []) arrows.push(dec(o));
     },
   });
@@ -413,7 +420,7 @@ const AI_FIELDS = [
   "t", "mode", "tx", "tz", "fleeT", "target", "losT", "los", "attackCd", "shootCd", "fuse", "strafe", "lookT", "swingT", "provoked", "burnT", "aiming",
   "leaving", "zScanT", "threat", "night", "held", "blockedT", "route", "ri", "stuckT", "routeKind", "doors", "leaveTries", "leaveEnd", "outT",
   "wanderAt", "hScanT", "rescueId", "revengeId", "foeId", "golemFoeT", "gScanT", "golemFoeId", "vScanT", "vTargetId", "doorT", "doorAt", "detour",
-  "fleeJitter", "gLos", "was", "pitT", "pitOut", "pitLogged", "climbT", "chase", "giveUpId", "giveUpT", "chaseBest", "chaseSlowT", "planW", "planL", "planG"];
+  "fleeJitter", "gLos", "was", "pitT", "pitOut", "pitLogged", "climbT", "chase", "giveUpId", "giveUpT", "chaseBest", "chaseSlowT", "planW", "planL", "planG", "planT0", "planN"];
 // The constructors: named stores (the only way V8 sizes an object for all of them), generated from the lists; js/ids.js Refs is the
 // prototype, so the link accessors (m.village, m.ai.foe...) work as on any refs() record and BF.ids.refs passes these through.
 const shapeOf = fields => { const C = new Function(fields.map(k => "this." + k + " = undefined;").join("\n")); C.prototype = BF.ids.Refs; return C; };
@@ -758,10 +765,22 @@ function shootArrow(m, target, victim) {
   dir.x += rnd(R(m), -0.03, 0.03); dir.y += rnd(R(m), -0.03, 0.03); dir.z += rnd(R(m), -0.03, 0.03);
   dir.normalize();
   from.addScaledVector(dir, 0.5);
-  arrows.push(placeThing({ pos: from.clone(), prev: from.clone(), vel: dir.multiplyScalar(speed), look: null, life: 6, stuck: false, owner: m, victim: victim || null }, from));
+  dir.multiplyScalar(speed);
+  if (inThink()) { BF.req.send("arrow", m.id, { from: [from.x, from.y, from.z], vel: [dir.x, dir.y, dir.z], victim: victim ? victim.id : null }, m); return; }
+  loose(m, from, dir, victim);
+}
+function loose(m, from, vel, victim) {
+  arrows.push(placeThing({ pos: from.clone(), prev: from.clone(), vel, look: null, life: 6, stuck: false, owner: m, victim: victim || null }, from));
   noiseSound(0.15, 2500, 0.25, from);
   if (BF.emit) BF.emit("arrowShot", m, from);
 }
+// A skeleton's arrow loosed while it thinks is a request (as a hit is): it flies on every copy of a world split over region workers, not
+// only on the worker that ran the skeleton (spec r15-39: an arrow on one copy hit a golem there only), and in requester order on one.
+BF.req.on("arrow", req => {
+  const d = req.data, m = BF.ids.get(req.target), V = a => new THREE.Vector3(a[0], a[1], a[2]);
+  loose(m && !m.removed ? m : null, V(d.from), V(d.vel), d.victim ? BF.ids.get(d.victim) || null : null);
+  return { ok: true };
+});
 // Player arrows (js/player.js bow): `vel` in blocks/s, `o` = { damage, crit, pickup } where pickup is 1 (walking over the stuck
 // arrow gives it back), 2 (fired in creative: it is just removed) or 0. They hit any living mob as a player attack (BF.mobs.hit:
 // knockback, hostiles turn on the player, a hurt villager or golem angers the village's golems), never the player, and stick in
@@ -1511,11 +1530,15 @@ const navCell = (x, y, z) => walkCell(x, y, z) || ladderCell(x, y, z);
 // its cell and overhangs all eight around it, those clear above knee height too (or it would walk its head into a ledge beside the route),
 // and no fence gates: it can't open one, and through one left open it walked into a pen that was then shut on it (r15-70).
 let planBudget = 0;
-// A* searches (spec r15-33). In the mob loop a mob may search only with a grant: PLANS grants are handed out at the start of each tick
+// A* searches (spec r15-33). In the mob loop a mob may search only with a grant: PLANS grants per simulated village (at least PLANS) are
+// handed out at the start of each tick
 // to the mobs that have been waiting longest (then by id), so who gets a search never depends on the order mobs think in (regions,
 // later threads). A mob that asks without one joins the waiting list and searches in a later tick (one tick later when few are
 // waiting); one that stopped asking for KEEP ticks leaves it, and an unused grant lapses after KEEP ticks. Outside the mob loop (the
-// village ticks after it, in a fixed order) searches share planBudget as before.
+// village ticks after it, in a fixed order) searches share planBudget (PLANS per village too) as before.
+// Per village, not per world (chunk churn thread, 2026-10-28): one thread's 2 a tick for the whole world left 2,341 mobs of a 100-village
+// world waiting ~10 s for a search, while the cluster tick handed out 2 per group; now both hand out PLANS for each simulated village in
+// the scope that runs (the world, or the running cluster group's village bases), so the two do the same work.
 // The waiting list and the grants live on the mobs (ai.planW: the tick it first asked, planL: last asked, planG: granted), not in a
 // module table, so that every copy of the world (spec r15-39: several workers, each thinking some regions) hands out the same grants: a
 // table here held only what this worker's own mobs asked, and still held them after their region moved to another worker. A tick number
@@ -1532,7 +1555,23 @@ let coarseStep = false, walked = false, coarseN = 0;   // this update is a coars
 let mobUpdates = 0;   // every mob update run (BF.mobs.updates: test/perf-activity.js checks BF.perf.byState counts each once)
 const idNum = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15; };
 const lapsed = (v, t) => v > t || v < t - KEEP;
-function grantPlans() {
+// the searches a tick hands out in the scope that runs: PLANS per simulated village there, at least PLANS
+function planShare() {
+  const C = BF.ctick, g = C && C.on ? C.cur : null;
+  let n = 0;
+  if (g) { if (g.bases) for (const b of g.bases) if (b.charCodeAt(0) === 118) n++; }   // ("v:<village key>" bases, js/clusters.js)
+  else if (BF.villageSim && BF.villageSim.count) n = BF.villageSim.count();
+  return PLANS * Math.max(1, n);
+}
+// the game log notes the world's share when it changes (a village joined or left the simulated set)
+let shareLogged = 0;
+function logShare() {
+  const n = BF.villageSim && BF.villageSim.count ? BF.villageSim.count() : 0, all = PLANS * Math.max(1, n);
+  if (all === shareLogged) return;
+  shareLogged = all;
+  if (BF.glog) BF.glog.log("INFO", "plans", "Route searches a tick: " + all + " (" + PLANS + " for each of " + n + " running village" + (n === 1 ? "" : "s") + ")");
+}
+function grantPlans(share) {
   const C = BF.ctick, t = C && C.on ? (planTick = BF.rand.tick) : ++planTick, w = [], mm = ownMobs();
   for (const m of mm || list) {
     if (mm && m.removed) continue;
@@ -1545,14 +1584,27 @@ function grantPlans() {
   }
   if (!w.length) return;
   w.sort((a, b) => a.ai.planW - b.ai.planW || idNum(a) - idNum(b) || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
-  for (let i = 0; i < w.length && i < PLANS; i++) { const a = w[i].ai; a.planG = t; a.planW = a.planL = undefined; }
+  for (let i = 0; i < w.length && i < share; i++) { const a = w[i].ai; a.planG = t; a.planW = a.planL = undefined; }
+}
+// A villager that plans route after route (two jobs taking its route from each other each tick, r15-73) goes in the game log, once a game
+// minute while it lasts: REPLAN_MAX searches in a minute is far more than any job needs.
+const REPLAN_MAX = 30;
+function replanCheck(m, a) {
+  if (m.type !== "villager") return;
+  const now = BF.simNow ? BF.simNow() : 0;
+  if (!(a.planT0 > now - 60)) { a.planT0 = now; a.planN = 0; }
+  if (++a.planN === REPLAN_MAX && BF.glog) {
+    const p = m.position;
+    BF.glog.log("WARN", "replan", (BF.vlog ? BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.profession || "villager") + ")" : "A villager") + " planned " + REPLAN_MAX +
+      " routes within a game minute at " + Math.floor(p.x) + ", " + Math.floor(p.y) + ", " + Math.floor(p.z) + " (route " + (a.routeKind || "none") + ")", { village: m.village, at: m });
+  }
 }
 function takePlan() {
   const m = curMob;
   if (!m) { if (planBudget > 0) { planBudget--; return true; } return false; }
   const a = m.ai;
   if (!a) return false;
-  if (a.planG != null) { a.planG = undefined; return true; }
+  if (a.planG != null) { a.planG = undefined; replanCheck(m, a); return true; }
   const t = planTick;
   if (a.planW != null) a.planL = t; else { a.planW = t; a.planL = t; }
   return false;
@@ -1962,7 +2014,7 @@ function homeOfBed(rec, b) {
 // nearest free bed of the village and keeps it: it sleeps there every night and the claim is saved (trades.pack). Newborns claim theirs in js/breeding.js.
 function claimBed(m, n, dt) {
   const rec = m.village, B = BF.breeding;
-  if (!rec || !B || !B.freeBed || (m.slot && m.slot.bred) || (m.bed && m.bed.tent) || m.homeBed !== undefined) return;
+  if (!rec || !B || !B.freeBed || m.bred || (m.bed && m.bed.tent) || m.homeBed !== undefined) return;
   if (m.bed && bedOK(m.bed)) return;
   if ((n.claimT = (n.claimT || 0) - dt) > 0) return;
   n.claimT = 5;                                              // none free: look again in a few seconds
@@ -1976,7 +2028,7 @@ BF.claims.kind("bed", {
   free: (m, d) => BF.breeding && BF.breeding.bedFree(m.village, d.bed, m) ? null : "taken",
   take(m, d) {
     const b = Object.assign({}, d.bed), rec = m.village;
-    if (m.slot && m.slot.bred) { m.bed = b; if (m.bredEntry) m.bredEntry.bed = b; return; }   // a newborn's bed (js/breeding.js)
+    if (m.bred) { m.bed = b; if (m.bredEntry) m.bredEntry.bed = b; return; }   // a newborn's bed (js/breeding.js; m.bred, not its slot: another worker's copy of a newborn has no slot object, js/cworkers.js)
     m.bed = Object.assign(b, { claimed: true });
     const h = homeOfBed(rec, b);
     if (h) m.home = h;
@@ -1984,7 +2036,7 @@ BF.claims.kind("bed", {
     m.ai.route = null;
     if (BF.vlog && BF.vlog.log) BF.vlog.log(rec, "bed", BF.vlog.nameOf(m) + " (" + BF.vlog.pretty(m.child ? "child" : m.profession) + ") claimed the bed at " + b.x + ", " + b.y + ", " + b.z);
   },
-  result(m, ok) { if (!ok && m.ai.night && !(m.slot && m.slot.bred)) m.ai.night.claimT = 0; },   // lost it to someone first: look again next tick
+  result(m, ok) { if (!ok && m.ai.night && !m.bred) m.ai.night.claimT = 0; },   // lost it to someone first: look again next tick
 });
 // Without a bed at night: walk into the nearest building (its own house first) that has room, along a path through the door. True while going.
 const inHouse = (h, x, z) => x >= h.x && x <= h.x + h.w && z >= h.z && z <= h.z + h.d;
@@ -2843,9 +2895,8 @@ function spawnInCluster(dt) {
   const C = BF.ctick, W = BF.world, CS = BF.CS;
   const by = C.local("spawnChunks", () => {
     const m = new Map();
-    for (const ch of W.chunks.values()) {
+    for (const ch of W.clusterCells.groupChunks(C.cur.key)) {   // (the group's chunks: those whose base it handles, as ownsBase)
       const b = baseAt({ x: ch.cx * CS + CS / 2, z: ch.cz * CS + CS / 2 });
-      if (!ownsBase(b)) continue;
       const a = m.get(b);
       if (a) a.push(ch); else m.set(b, [ch]);
     }
@@ -2930,18 +2981,34 @@ function applyDead(rec) {
 let villageT = 0;
 // Villager trading state by stable key (village "x,z" + roster slot index): kept while unloaded and saved with the world.
 const villagerSaves = new Map();
+let villagesV = 0;   // (counts the records made or dropped: js/regions.js syncVillages)
 function villagerKey(m) { return m.villageId && m.slot ? m.villageId + "#" + m.slot.idx : null; }
+// Rows a save or the copy check reads of a mob (js/cworkers.js gathered: with clusters on workers, worked out where its copy is current):
+//   trades  [the roster key of a living villager or null, its trading state (BF.trades.pack)] for a mob with an inventory, else null
+//   spot    [x, z] to 1/100 of a living mob (a pen animal's place in its pen's save, js/shepherd.js...), null for a dead or removed one
+{
+  const rows = BF.mobRows || (BF.mobRows = new Map());
+  rows.set("trades", { fn: m => (m.inv ? [m.type === "villager" && !m.dead ? villagerKey(m) : null, BF.trades.pack(m)] : null), uses: ["save", "hash"] });
+  rows.set("spot", { fn: m => (!m.dead && !m.removed ? [+m.position.x.toFixed(2), +m.position.z.toFixed(2)] : null), uses: ["save", "hash"] });
+}
 let restockT = 0;
 // With the cluster tick on (spec r15-39b, js/ctick.js) a module timer would count down once per cluster: every cluster runs its own on
 // the tick counter instead (the same ticks in every order and on every worker), every `s` game seconds at tick phase `at`.
 const everyTicks = (s, at) => BF.rand.tick % Math.round(s / BF.warp.TICK) === at;
-const recMine = (rec, C) => BF.clusters.groupOf("v:" + rec.key) === C.cur.key;   // (a village record of the running cluster)
+// (a village record of the running cluster; its group by key, worked out once per meeting: groups change only there, js/ctick.js epoch)
+const recG = { ep: -1, m: new Map() };
+function recMine(rec, C) {
+  if (recG.ep !== C.epoch) { recG.ep = C.epoch; recG.m.clear(); }
+  let g = recG.m.get(rec.key);
+  if (g === undefined) { g = BF.clusters.groupOf("v:" + rec.key); recG.m.set(rec.key, g); }
+  return g === C.cur.key;
+}
 function restockVillagers(dt) { // once per in-game day, never while someone is trading with the villager
   const f = BF.ctick && BF.ctick.filter;
   if (f) { if (!everyTicks(2, 1)) return; }
   else { restockT -= dt; if (restockT > 0) return; restockT = 2; }
   if (!BF.trades || !BF.sky) return;
-  for (const m of list) if (m.type === "villager" && !m.dead && !m.removed && !m.tradingWith && !m.child && (!f || f(m))) { BF.trades.restock(m, BF.sky.day); if (BF.prices) BF.prices.tick(m, BF.sky.day); if (BF.market) BF.market.sync(m); }
+  for (const m of ownMobs() || list) if (m.type === "villager" && !m.dead && !m.removed && !m.tradingWith && !m.child && (!f || f(m))) { BF.trades.restock(m, BF.sky.day); if (BF.prices) BF.prices.tick(m, BF.sky.day); if (BF.market) BF.market.sync(m); }
 }
 const VILLAGERS_PER_VILLAGE = 24;   // roster cap of classic villages; villages of village generator 2 carry their own population (rec.pop, 2-100)
 const EXPLORER_CHANCE = 0.7;   // per cartographer in the roster
@@ -3326,7 +3393,7 @@ function meetVillages() {
     const key = Math.round(v.x) + "," + Math.round(v.z);
     if (villages.has(key)) continue;
     const rec = newVillageRec(key, v);
-    villages.set(key, rec); applyDead(rec);
+    villages.set(key, rec); villagesV++; applyDead(rec);
     if (BF.glog) BF.glog.log("INFO", "clusters", "Village record made at the meeting (tick " + BF.rand.tick + ")", { village: rec });
   }
 }
@@ -3353,7 +3420,7 @@ function updateVillages(dt) {
     const key = Math.round(v.x) + "," + Math.round(v.z);
     let rec = villages.get(key);
     if (!rec && f) continue;   // (made at the next meeting, below)
-    if (!rec) { rec = newVillageRec(key, v); villages.set(key, rec); applyDead(rec); }
+    if (!rec) { rec = newVillageRec(key, v); villages.set(key, rec); villagesV++; applyDead(rec); }
     if (!mineR(rec)) continue;
     const lp = BF.planet.local(v, pp, VQ);   // (the player seen from the village, across a face edge)
     const away = v.pop ? Math.hypot(Math.max(0, v.minX - lp.x, lp.x - v.maxX), Math.max(0, v.minZ - lp.z, lp.z - v.maxZ)) > 24   // sized villages: near any part of it
@@ -3467,7 +3534,7 @@ BF.mobs = {
   shapeAi, MOB_FIELDS, AI_FIELDS,   // one mob layout (test/mob-shape.js, js/mobsave.js)
   // clusters (spec r15-39b, C2) for the other systems of C2 (js/drops.js, js/boats.js, js/wildlife.js, js/mobsave.js): see placeThing,
   // ownsThing, ownsBase, groupFor; baseAt(p) -> the base cluster of p's region; the player as the running cluster sees it
-  cl: { placeThing, ownsThing, clOf, keepThing, ownsBase, groupFor, baseAt, playerPos, playerLives, owned: () => !!own() },
+  cl: { placeThing, ownsThing, thingBase, clOf, keepThing, ownsBase, groupFor, baseAt, playerPos, playerLives, owned: () => !!own() },
   list,
   toolHolders,   // profession -> (villager => item id of the tool drawn in its hands, or null): sets the villager's `held`
   types: Object.keys(TYPES),
@@ -3490,16 +3557,27 @@ BF.mobs = {
   init(sceneRef) {
     ready = true;   // (mobs, arrows and effects are drawn by js/mobview.js and js/entityview.js)
     if (BF.mobView) BF.mobView.init(sceneRef);
+    const cellOf = m => {
+      let mx = m.position.x, mz = m.position.z;   // (by its canonical cell: it may be kept in another face's frame)
+      { const c = BF.planet.canon(mx, mz, GC); if (!c.off) { mx = c.x; mz = c.z; } }
+      return Math.floor(mx / BF.CS) + "," + Math.floor(mz / BF.CS);
+    };
+    // (partial copies: the mobs in the chunks streaming drops, stored and saved as they are now; which they are, their current copies say,
+    // since a stale copy may be somewhere else, so every worker takes the same ones: fetched for all those chunks in one exchange)
+    const partial = () => BF.cworkers && BF.cworkers.partial;
+    let dropping = null;
+    BF.world.onChunkDrops(cells => {
+      if (!partial() || !cells.length) return;
+      const ks = new Set(cells.map(([x, z]) => x + "," + z));
+      dropping = { ks, cur: BF.cworkers.fetch(list, m => !m.removed && ks.has(cellOf(m))) };
+      return () => { dropping = null; };
+    });
     BF.world.onChunkUnload((cx, cz) => {
-      const inChunk = m => {
-        let mx = m.position.x, mz = m.position.z;   // (by its canonical cell: it may be kept in another face's frame)
-        { const c = BF.planet.canon(mx, mz, GC); if (!c.off) { mx = c.x; mz = c.z; } }
-        return Math.floor(mx / BF.CS) === cx && Math.floor(mz / BF.CS) === cz;
-      };
-      if (BF.cworkers && BF.cworkers.partial) BF.cworkers.fetch(list.filter(m => !m.removed && inChunk(m)));   // (partial copies: stored and saved as they are now)
+      const k = cx + "," + cz, inChunk = m => cellOf(m) === k;
+      const cur = dropping && dropping.ks.has(k) ? dropping.cur : partial() ? BF.cworkers.fetch(list, m => !m.removed && inChunk(m)) : null;
       for (let i = list.length - 1; i >= 0; i--) {
         const m = list[i];
-        if (inChunk(m)) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
+        if (cur ? cur.has(m) && inChunk(m) : inChunk(m)) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
       }
       for (let i = arrows.length - 1; i >= 0; i--) {
         const a = arrows[i];
@@ -3513,11 +3591,13 @@ BF.mobs = {
   update(dt) {
     if (!ready) return;
     dt = Math.min(dt, BF.warp ? BF.warp.TICK : 0.05);   // (one tick at most: a longer tick, idea-049, moves mobs its whole length)
-    planBudget = PLANS; // A* searches per tick outside the mob loop (2 a 0.05 s tick)
-    grantPlans();   // and the mob loop's (spec r15-33)
+    logShare();
+    const share = planShare();
+    planBudget = share; // A* searches per frame outside the mob loop
+    grantPlans(share);   // and the mob loop's (spec r15-33)
     // the region index (r15-30) up to date before the mobs query it (spec r15-31): main.js syncs it after each step, but tests and tools
     // step BF.mobs.update on its own, and move mobs between steps
-    if (BF.regions) BF.regions.tick();
+    if (BF.regions) BF.regions.tick(ownMobs() || undefined);   // (clusters: the running group's mobs, js/ctick.js; the others are kept by theirs)
     // the villager-seconds meter (js/perf.js): each lap charges the time since the last to a category; nothing while it's off
     const PF = BF.perf, PC = PF.C, pon = PF.on;
     buildSepGrid();
@@ -3576,6 +3656,7 @@ BF.mobs = {
       if (pon) PF.mobLap(m, st);
     }
     commitMoves();
+    if (BF.trades && BF.trades.inv.release) BF.trades.inv.release();   // (own-inventory copies kept for the others thinking, js/trading.js)
     runLaters();
     if (RW && RW.active) RW.afterThink();   // the other workers' mobs and requests (js/rworkers.js)
     // the systems after the loop, each by name (clusters, js/ctick.js: per cluster once converted, else once a tick)
@@ -3596,7 +3677,7 @@ BF.mobs = {
     if (BF.pigFarmer) sys("pigFarmer", () => BF.pigFarmer.tick(dt));   // piglets growing up, sty stock (js/pigfarmer.js)
     PF.lap(PC.vanimals);
     if (BF.baker) sys("baker", () => BF.baker.tick(dt));   // event hooks (js/baker.js)
-    if (BF.explorer && BF.explorer.tick) sys("explorer", () => BF.explorer.tick(dt));   // tents of explorers that unloaded while camping (js/explorer.js)
+    if (BF.explorer && BF.explorer.tick) sys("explorer", () => BF.explorer.tick());   // tents of explorers that unloaded while camping (js/explorer.js)
     PF.lap(PC.villagers);
     if (BF.mobs.spawning !== false) sys("spawn", () => spawnMonsters(dt));   // animals are never spawned around the player: chunks roll them once and they breed (js/wildlife.js)
     PF.lap(PC.monsters);
@@ -3649,7 +3730,7 @@ BF.mobs = {
   isWild, spawnGroup, penBoxes, inPenBox, standable, roofLedge, findPath, findPathFast, findPathOld, routeCost, pathsAgree, pathStatsReset,   // findPath(sx, sy, sz, {x, z, at(x, y, z)}, maxNodes, tall): A* route cells (tests); the Fast/Old pair and routeCost for test/findpath-compare.js
   findStand(x, y, z, type) { return TYPES[type] ? findStand(x, y, z, TYPES[type]) : null; },
   skyOpen(x, y, z) { return !!skyAt(x, y, z).open; }, skyDark(x, y, z) { return skyAt(x, y, z).level <= CAVE_SKY; }, typeDef: type => TYPES[type] || null, passiveTypes: PASSIVE_TYPES,
-  villages,
+  villages, get villagesV() { return villagesV; },
   later,
   // A mob's links, read from its ids (js/ids.js): work on a plain copy of a mob too (a save, a worker), where m.village is not there.
   villageOf: m => m ? BF.ids.get(m.villageId) : undefined,
@@ -3679,7 +3760,7 @@ BF.mobs = {
   exportVillagers() {
     const out = {};
     for (const [k, v] of villagerSaves) out[k] = v;
-    for (const m of list) if (m.type === "villager" && !m.dead && m.inv) { const k = villagerKey(m); if (k) out[k] = BF.trades.pack(m); }
+    for (const m of list) { const r = BF.cworkers.row("trades", m); if (r && r[0]) out[r[0]] = r[1]; }
     if (BF.bridges) BF.bridges.exportAll(out);   // "cross:<village key>" -> river crossings counted in the last 3 days (js/bridges.js)
     if (BF.builder) BF.builder.exportAll(out);   // "built:<village key>" -> structures the builders have placed (progress included)
     if (BF.villageLife) BF.villageLife.exportAll(out);   // "farmbeds:<village key>" -> beds the farmers are making or growing
@@ -3815,13 +3896,13 @@ BF.mobs = {
     list.length = 0;
     arrows.length = 0;
     BF.fx.clear();   // and the effects playing
-    villages.clear();
+    villages.clear(); villagesV++;
     villagerSaves.clear();
     pendingDead.clear();
     BF.ids.reset();
     villageT = restockT = 0;   // (and the counters and timers below, so a world started after another plays as in a fresh page: spec r15-39)
     surfAcc = caveAcc = chunkArrT = 0; chunkArr = [];
-    planTick = planBudget = 0;
+    planTick = planBudget = shareLogged = 0;
     aiAcc = aiEma = aiN = aiWork = 0;
     if (BF.builder) BF.builder.reset();
     if (BF.bridges) BF.bridges.reset();

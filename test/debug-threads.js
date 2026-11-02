@@ -1,14 +1,15 @@
 // @ci integration suite=ui timeout=900
 // The debug screen's Threads card and the Regions overlay by worker (js/threadload.js, js/debugfeed.js, debug/server.js hostLoad;
 // Gordon 2026-10-26: "which cores the program is utilizing, at what level", regions "color coded by core"). Seed 3, at the village
-// nearest the spawn, region workers splitting (?workers=3&split=always), a while at 100x:
+// nearest the spawn, the world server's region workers splitting (--workers 3 --split always), a while at 100x (only the world server
+// has region workers since r15-77):
 //   - the snapshot carries the page's thread, the simulation's and each follower's (busy shares 0..1 with a minute's history), and the
 //     debug server's computer: one entry per OS core (os.cpus) and its own thread;
 //   - the Threads card lists page, simulation, worker 1, worker 2 and the debug server, and draws one bar per core;
 //   - with Regions on, each region carries the worker its mobs think on, more than one worker has regions, and the legend names them;
 //   - the game log has the "threads" line naming the simulation's threads;
-//   - the world server (--workers 3 --split always): its threads are named as server threads, the same checks.
-// Screenshots: <out>-worker.png, <out>-server.png (the Threads card and the map).
+//   - its threads are named as server threads.
+// Screenshots: <out>-server-card.png, <out>-server-map.png (the Threads card and the map).
 // Usage: NODE_PATH=$(npm root -g) node test/debug-threads.js [outPrefix]
 const path = require('path'), fs = require('fs'), os = require('os');
 const { chromium } = require(process.env.PW || 'playwright');
@@ -99,10 +100,7 @@ async function run(b, label, srv, query) {
 
 (async () => {
   const b = await chromium.launch();
-  let srv = await lib.serve({ world: false });
-  await run(b, 'worker', { url: srv.url, debug: srv.debugUrl }, '?sim=worker&workers=3&split=always');
-  srv.stop();
-  srv = await lib.serve({ world: true, args: ['--workers', '3', '--split', 'always'] });
+  const srv = await lib.serve({ world: true, args: ['--workers', '3', '--split', 'always'] });
   await run(b, 'server', { url: srv.url, debug: srv.debugUrl }, '?sim=server&workers=3');
   srv.stop();
   await b.close();

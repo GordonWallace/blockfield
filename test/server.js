@@ -143,8 +143,12 @@ function headless(n) {
     await pg.close();
     await new Promise(res => { const t = setInterval(() => { if (/paused and saved/.test(srv.out)) { clearInterval(t); res(); } }, 200); setTimeout(() => { clearInterval(t); res(); }, 30000); });
     check(/world "server-test" paused and saved/.test(srv.out), 'the page closed: the server paused the world and saved it');
-    await new Promise(res => setTimeout(res, 1500));
-    const st1 = await state(debug);
+    // (with no debug screen open the server feeds every 2 s, server/world.js FEED_IDLE_MS: waits for a fresh one, up to 8 s)
+    let st1 = null;
+    for (const until = Date.now() + 8000; Date.now() < until; await new Promise(res => setTimeout(res, 250))) {
+      st1 = await state(debug);
+      if (st1.latest && st1.latest.server && st1.latest.server.held && Date.now() - st1.latest.t < 3000) break;
+    }
     check(st1.latest && st1.latest.server && st1.latest.server.held && Date.now() - st1.latest.t < 3000, 'with no page the debug screen still gets the feed from the server');
     const pg2 = await open(b, surl);
     const l = await pg2.evaluate(async id => {

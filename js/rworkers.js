@@ -15,7 +15,7 @@
 // SOLO_MS of thinking a tick everything goes to one worker (the exchange isn't free).
 // The transport is synchronous, so a tick needs no event loop: SharedArrayBuffer mailboxes (one per worker, two halves used in turn)
 // and a barrier on Atomics (makeShared / attach below). The workers are Node worker_threads (server/regionthread.js: the world server
-// and tools/headless.js --workers) or Web Workers (js/regionworker.js, from the simulation worker, js/simworker.js).
+// and tools/headless.js --workers); r15-77 dropped the browser's Web Workers.
 // The first worker (me 0, the leader) is the simulation the client talks to; the others are followers: they replay the leader's
 // journal (journal / replay below: protocol packets, chunk loads and unloads, how many ticks a loop ran) so their copies stay the same.
 // The followers' game log lines and effects go to the leader in the exchange.
@@ -36,7 +36,8 @@ const now = () => performance.now();
 // (_res: a villager's reserve, js/market.js), the tick's previous position (keepPrev: every replica sets it), a request's callbacks.
 const SKIP = new Set(["def", "root", "model", "meshes", "material", "mesh", "geo", "geometry", "walkPhase", "walkAmt", "headYaw", "headPitch",
   "prevPos", "prevYaw", "lerp", "badgeMesh", "label", "sprite", "particles", "puffs", "fx", "wg", "_ri", "_rs", "_res", "prev", "cbs", "_r", "_tm",
-  "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN"]);   // (and each replica's own caches on mobs: js/ids.js links, js/regiontick.js ids, r15-61)
+  "_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG", "_idK", "_idN",   // (and each replica's own caches on mobs: js/ids.js links, js/regiontick.js ids, r15-61)
+  "bedCache"]);   // (a village record's beds by chunk, js/breeding.js scanBeds: each copy's own, from the chunks it scanned; the beds go as rec.beds)
 const skipKey = k => SKIP.has(k) || (k.charCodeAt(0) === 95 && k.startsWith("_snd"));
 let mobSet = null, recSet = null, dropSet = null, hiveSet = null, self = null;
 function refsOn() {
@@ -266,6 +267,17 @@ function encData(req) {
 // encMany(list): several entities' own fields (plain copies) in one call, for another worker to take whole (clusters with partial
 // copies, js/cworkers.js handovers): an object two of them share stays one object, and one that lives inside a village record (every
 // worker's records are current) is sent as where it is there, so it stays the record's object too. Decode with dec inside atLater.
+// encWhole([[o, m]]): mobs made since the last meeting (o: a plain copy of m's own fields), with the objects that live in a village record
+// (a builder's entry in its village's list, a pen sheep's state) sent as where they are, so they stay one object on the other workers
+// (decode inside atLater); their own objects written in full. Only the records this worker ran are looked in: the other workers' copies
+// of another mob may be stale, so a path into one could find the wrong thing. Encoded without paths, a builder that came out
+// mid-interval had a copy of its entry on the other workers, and the one that ran it next built on that copy, which never reached the record.
+function encWhole(list) {
+  const prev = self, pk = topKey, ps = RW.indexScope;
+  RW.indexScope = { mobs: new Set(), recs: ps ? ps.recs : recSet }; shared = null;
+  try { return list.map(([o, m]) => { self = m; topKey = null; return withPaths([], () => encV(o, new Map()), m); }); }
+  finally { self = prev; topKey = pk; RW.indexScope = ps; shared = null; }
+}
 function encMany(list) {
   const prev = self, ps = RW.indexScope;
   self = null; RW.indexScope = { mobs: new Set(), recs: recSet }; shared = null;
@@ -507,6 +519,8 @@ function makeShared(n, bytes) {
   return { n, bytes, ctl: new SharedArrayBuffer((CTL + 2 * n) * 4), boxes };
 }
 const TE = new TextEncoder(), TD = new TextDecoder();
+// (e.rw: the workers can't go on; a caller that keeps going after an error, a chunk unload's hooks, passes it on: js/world.js)
+const rwErr = text => { const e = new Error(text); e.rw = true; return e; };
 const SPIN = 20000, TIMEOUT = 120000;
 function attach(sh, me, n) {
   const C = new Int32Array(sh.ctl), half = sh.bytes >> 1;
@@ -525,9 +539,8 @@ function attach(sh, me, n) {
       const t0 = now();
       while (Atomics.load(C, 0) === g) {
         Atomics.wait(C, 0, g, 1000);
-        if (now() - t0 > TIMEOUT) { link.stop(); throw new Error("region workers: no answer from the other workers in " + TIMEOUT / 1000 + " s"); }
+        if (now() - t0 > TIMEOUT) { link.stop(); throw rwErr("region workers: no answer from the other workers in " + TIMEOUT / 1000 + " s"); }
       }
-      link.waitMs += now() - t0;
       if (Atomics.load(C, 2)) throw stopErr();
     },
     // mine (a string) to every other worker; returns every worker's, by index (mine included)
@@ -535,7 +548,7 @@ function attach(sh, me, n) {
       const h = round++ & 1, v = views[me], at = h * half;
       if (scratch.length < Math.min(half, mine.length * 3)) scratch = new Uint8Array(Math.min(half, Math.max(mine.length * 3, scratch.length * 2)));
       const r = TE.encodeInto(mine, scratch);   // (browsers' encodeInto takes no shared memory either: encoded here, then copied in)
-      if (r.read < mine.length) { link.stop(); throw new Error("region workers: a message of " + mine.length + " characters is too big for the mailbox"); }
+      if (r.read < mine.length) { link.stop(); throw rwErr("region workers: a message of " + mine.length + " characters is too big for the mailbox"); }
       v.set(scratch.subarray(0, r.written), at);
       Atomics.store(C, CTL + me * 2 + h, r.written);
       link.bytesOut += r.written;
@@ -553,7 +566,7 @@ function attach(sh, me, n) {
       return out;
     },
   };
-  const stopErr = () => { const e = new Error("region workers stopped: worker " + link.who() + " crashed or stopped"); e.rwStop = true; return e; };
+  const stopErr = () => { const e = rwErr("region workers stopped: worker " + link.who() + " crashed or stopped"); e.rwStop = true; return e; };
   return link;
 }
 
@@ -697,10 +710,10 @@ function thinking(m) {
   const k = unitOf(m, BF.regions ? BF.regions.regionOf(m) : -1), t = now();
   if (k !== curRegion) { if (curRegion != null) load.set(curRegion, (load.get(curRegion) || 0) + t - regionT0); curRegion = k; regionT0 = t; }
 }
-const reqOut = (e, req) => [e[0], e[1], req.kind, enc(req.target, null), encData(req), req.from, req.tick, req.region == null ? -1 : req.region];
+const reqOut = (e, req) => [e[0], e[1], req.kind, enc(req.target, null), encData(req), req.from, req.tick, req.region == null ? -1 : req.region, req.by];
 function adoptAll(list, into) {
   for (const r of list) {
-    const req = BF.req.adopt({ kind: r[2], target: dec(r[3], null), data: dec(r[4], null), from: r[5], seq: 0, tick: r[6], region: r[7] });
+    const req = BF.req.adopt({ kind: r[2], target: dec(r[3], null), data: dec(r[4], null), from: r[5], seq: 0, tick: r[6], region: r[7], by: r[8] });
     into.push([r[0], r[1], req]);
   }
 }
@@ -808,7 +821,7 @@ function afterDeliver() {
   foreignOps(mobs);
   const mineSends = dSends.filter(e => e[1] === 1);   // (those from callbacks: only this worker made them; onResult's are made everywhere)
   const plan = T.ticks % REBALANCE === 0;
-  const out = { mobs, recs: recDirty.size ? recOps(recDirty) : [], touched: takeTouched(), dyn: takeDyn(), reg: takeReg(), reqs: mineSends.map(e => [e[0] * 2 + e[1], e[2], e[3].kind, enc(e[3].target, null), encData(e[3]), e[3].from, e[3].tick, e[3].region == null ? -1 : e[3].region]),
+  const out = { mobs, recs: recDirty.size ? recOps(recDirty) : [], touched: takeTouched(), dyn: takeDyn(), reg: takeReg(), reqs: mineSends.map(e => [e[0] * 2 + e[1], e[2], e[3].kind, enc(e[3].target, null), encData(e[3]), e[3].from, e[3].tick, e[3].region == null ? -1 : e[3].region, e[3].by]),
     logs, fx, load: plan ? [...load] : null };
   const msg = JSON.stringify(out);
   const all = RW.link.exchange(msg);
@@ -889,10 +902,17 @@ function checkHashes(hs) {
     for (const k of diff) mine[k] = BF.stateHash.text(k);
     const all = RW.link.exchange(JSON.stringify(mine)).map(x => JSON.parse(x));
     if (RW.me === 0) for (let w = 1; w < all.length; w++) for (const k of diff) {
+      if (hs[w] && a[k] === hs[w][k]) continue;   // (another worker's part that differs)
       const p = all[0][k] || "", q = all[w][k] || "";
       if (p === q) { out_of_step("worker " + w + ", " + k + ": the hashes differ but the texts match (a field the hash reads that the text leaves out)"); continue; }
       let i = 0; while (i < p.length && p[i] === q[i]) i++;
       out_of_step("worker " + w + ", " + k + " from character " + i + ": leader ..." + p.slice(Math.max(0, i - 300), i + 200) + " / worker " + w + " ..." + q.slice(Math.max(0, i - 300), i + 200));
+    }
+    // block edits: every worker says who last wrote each cell that differs (js/world.js trail, on with ?verify=), the leader logs them
+    if (diff.has("edits")) {
+      const cells = [...new Set([].concat(...all.slice(1).map(x => BF.stateHash.editsDiff(all[0].edits, x.edits))))].slice(0, 8);
+      const trails = RW.link.exchange(JSON.stringify(BF.world.trailOf(cells))).map(x => JSON.parse(x));
+      if (RW.me === 0) for (const c of cells) out_of_step("the last writes of cell " + c + " [tick, phase, by, id]: " + trails.map((t, w) => (w ? "worker " + w : "leader") + " " + JSON.stringify(t[c])).join(" / "));
     }
   }
   for (let w = 1; w < hs.length; w++) {
@@ -939,7 +959,7 @@ function takeDyn() { const d = dynNew; dynNew = []; return d; }
 // Places registered while this worker thinks (a house a builder finished, made its home: js/ids.js place keys hold a ":"): the other
 // workers register a copy under the same key, else the key the mob's changes carry would read nothing there.
 let regNew = [];
-const onNewPlace = (o, k) => { if (RW.active && owning && typeof k === "string" && k.includes(":")) regNew.push([k, o]); };   // (hooked at setup: js/ids.js loads after this file)
+const onNewPlace = (o, k, had) => { if (RW.active && owning && !had && typeof k === "string" && k.includes(":")) regNew.push([k, o]); };   // (hooked at setup: js/ids.js loads after this file)
 function takeReg() { const d = regNew; regNew = []; return d.map(([k, o]) => [k, enc(o, null)]); }
 function adoptReg(list) { for (const [k, e] of list || []) if (BF.ids.live(k) === undefined) BF.ids.put(dec(e, null), k); }
 function adoptDyn(list, from) { for (const [name, id] of list || []) if (!BF.dynItemAs(name, id)) out_of_step("worker " + from + " made item " + name + " as " + id + ", which is another item here"); }
@@ -1000,6 +1020,7 @@ function stamp() { return (RW.clock = Math.round(now() * 1000) / 1000); }
 function realNow() { return RW.clock != null ? RW.clock : now(); }
 function tick(h) {
   if (!RW.journal) return;
+  if (RW.beforeTick) RW.beforeTick();   // (js/rplay.js: what waited for a meeting goes in first, and an interval opens)
   RW.journal.push(["t", h, stamp()]);
   if (RW.onTick) RW.onTick();   // (js/rplay.js: the ops go out before the tick, so the followers can start it with the leader)
 }
@@ -1034,9 +1055,9 @@ function hourly() {
   hourT = Object.assign({}, T);
 }
 
-Object.assign(RW, { journal: null, clock: null, onTick: null, onTouch: null, chan: name => channels.get(name), rec, stamp, realNow, tick, pause, channel, touch, writes, dynItem, setup, stop, beginThink, thinking, afterThink, beforeDeliver, afterDeliver, stats, text, hourly, replan,
+Object.assign(RW, { journal: null, clock: null, onTick: null, beforeTick: null, onTouch: null, chan: name => channels.get(name), rec, stamp, realNow, tick, pause, channel, touch, writes, dynItem, setup, stop, beginThink, thinking, afterThink, beforeDeliver, afterDeliver, stats, text, hourly, replan,
   enc, dec, Shadow, snap, diff, patch, makeShared, attach, SKIP, REBALANCE, SOLO_MS, refsOn,
   ownerOf, unitOf,   // (read only: the debug screen's Regions map colours each region by the worker its mobs think on, js/debugfeed.js)
-  refs: refsOn, encData, encMany, decAll, atLater });
+  refs: refsOn, encData, encMany, encWhole, decAll, atLater });
 BF.rworkers = RW;
 })();

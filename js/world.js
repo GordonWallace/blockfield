@@ -397,6 +397,23 @@ world.ensureRange = function (x, z, y0, y1) {
   return true;
 };
 
+// (tests: region workers out of step, js/rworkers.js) While world.trail is a Map, every edit notes who made it: "chunk key:edit index" ->
+// its last 3 writes [tick, request phase (js/requests.js), the calls that made it (the first frames outside this file), id], so a cell
+// that differs between workers can be traced to the system that wrote it on each. Set by js/rplay.js with ?verify= (tests) only.
+world.trail = null;
+function trailNote(key, i, id, who) {
+  const k = key + ":" + i, a = world.trail.get(k) || [];
+  a.push([BF.rand ? BF.rand.tick : 0, BF.req ? BF.req.phase : "", who || caller(), id]);
+  if (a.length > 3) a.shift();
+  world.trail.set(k, a);
+}
+function caller() {
+  const lines = String(new Error().stack).split("\n").filter(l => /^\s*at /.test(l) && !/\/world\.js[?:]/.test(l));
+  return lines.slice(0, 4).map(l => l.trim().slice(3).replace(/[a-z]+:\/\/[^/]+\//, "").replace(/\?v=\d+/, "").replace(/:\d+(\)?)$/, "$1")).join(" < ");
+}
+// The trail of cells: ["chunk key:edit index", ...] -> {cell: [[tick, phase, who, id], ...] or null}.
+world.trailOf = cells => { const o = {}; for (const k of cells) o[k] = world.trail ? world.trail.get(k) || null : "off"; return o; };
+
 // Sets a block, records the edit, and schedules remeshing. Returns false if the chunk isn't loaded.
 world.setBlock = function (x, y, z, id) {
   x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
@@ -416,6 +433,7 @@ world.setBlock = function (x, y, z, id) {
   let e = world.edits.get(c.key);
   if (!e) world.edits.set(c.key, (e = new Map()));
   e.set(i, id);
+  if (world.trail) trailNote(c.key, i, id);
   for (let k = 0; k < setL.length; k++) setL[k](c, i, id);   // (the protocol's block changes, js/protocol.js)
   updateColumn(c, lx, lz);
   world._dirty.add(c.key);
@@ -484,6 +502,7 @@ function applyCell(key, i, id, replayed) {
   let e = world.edits.get(key);
   if (!e) world.edits.set(key, (e = new Map()));
   e.set(i, id);
+  if (world.trail) trailNote(key, i, id, replayed ? "another worker's" : "from the simulation");
   const c = world.chunks.get(key);
   if (!c) { if (world.farMeshes.has(key) && !staleFar.has(key)) { staleFar.add(key); lastCenter = null; } return; }
   const y = (i >> 8) + BF.MIN_Y, lx = i & 15, lz = (i >> 4) & 15;
@@ -497,6 +516,7 @@ function applyCell(key, i, id, replayed) {
   const x = c.cx * CS + lx, z = c.cz * CS + lz;
   if (BF.light) BF.light.onSet(x, y, z, oldId, id);
   if (BF.skyLight) BF.skyLight.onSet(x, y, z, oldId, id);
+  if (world.replica && BF.signs) BF.signs.onView(x, y, z, oldId, id);   // the page finds the sign to draw its text (js/signs.js, bug-097)
   if (replayed) for (let k = 0; k < replL.length; k++) replL[k](x, y, z, oldId, id);
   if (lx === 0 || lz === 0 || lx === CS - 1 || lz === CS - 1) markNeighboursDirty(c);
 }
@@ -641,9 +661,11 @@ function installHeld() {
   if (!heldChunks.size) return;
   const list = [...heldChunks.values()];
   heldChunks.clear();
+  const RJ = BF.rworkers && BF.rworkers.journal ? BF.rworkers : null;
   for (const c of list) {
     if (world.chunks.has(c.key)) continue;
     const e = world.edits.get(c.key);
+    if (RJ) RJ.rec(["c", c.cx, c.cz]);   // (the followers make it too: js/rplay.js; built from the same edits, it comes out the same)
     installChunk((e ? e.size : -1) === c.eSig ? c : buildChunk(c.cx, c.cz));   // (edited meanwhile: built again)
   }
   if (BF.glog) BF.glog.log("DEBUG", "chunks", "Loaded " + list.length + " chunk" + (list.length > 1 ? "s" : "") + " held for the cluster meeting");
@@ -685,7 +707,7 @@ function unload(key) {
   world.chunks.delete(key); CGEN++; forgetChunk(c);   // (caches must not keep its arrays alive, r15-35)
   world._dirty.delete(key);
   MP.queue.delete(c);
-  for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }
+  for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { if (err && err.rw) throw err; console.error(err); } }
 }
 
 // Keeps only chunk key's meshes (its block data goes, as on unloading): it is far from the player, meshed and unchanged. The meshes' arrays
@@ -704,7 +726,7 @@ function purge(key) {
   world.chunks.delete(key); CGEN++; forgetChunk(c);   // (caches must not keep its arrays alive, r15-35)
   world._dirty.delete(key);
   world.purged = (world.purged || 0) + 1;
-  for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { console.error(err); } }
+  for (const fn of world._unloadL) { try { fn(c.cx, c.cz, c); } catch (err) { if (err && err.rw) throw err; console.error(err); } }
 }
 const NOARR = new Float32Array(0);
 function freeArray() { this.array = NOARR; }
@@ -723,13 +745,26 @@ function dropFar(key) {
   world.farMeshes.delete(key);
 }
 
+// The chunks streaming drops in one pass, in order (["u", key] unloads, ["g", key] purges): the hooks of world.onChunkDrops hear of them
+// all first, so with partial cluster copies the mobs in them come over in one exchange rather than one a chunk (js/mobs.js)
+function drops(ops) {
+  const cells = [];
+  for (const [, k] of ops) { const c = world.chunks.get(k); if (c) cells.push([c.cx, c.cz]); }
+  const ends = [];
+  for (const fn of dropL) { const e = fn(cells); if (e) ends.push(e); }
+  try { for (const [op, k] of ops) (op === "u" ? unload : purge)(k); }
+  finally { for (const e of ends) e(); }
+}
+// fn(cells) before streaming drops those chunks ([cx, cz] each; their unload hooks run next, one a chunk); it may return a function, called after
+const dropL = [];
+world.onChunkDrops = fn => dropL.push(fn);
 // the region workers' journal (js/rworkers.js): a chunk streaming dropped, for the followers to drop too
 function jrec(op, key) { const RJ = BF.rworkers; if (RJ && RJ.journal) RJ.rec([op, key]); }
 // The followers' side of the journal (js/rplay.js): what the leader's streaming did, done the same way
 world.replay = {
   create: (cx, cz) => (world.chunks.has(ckey(cx, cz)) ? world.chunks.get(ckey(cx, cz)) : createChunk(cx, cz)),
   extendDown: (cx, cz, lo) => { const c = world.chunks.get(ckey(cx, cz)); if (c && c.lo > lo) extendDown(c, lo); },
-  unload, purge,
+  drops,
 };
 
 function disposeMeshes(c) {
@@ -815,19 +850,20 @@ function plan(pcx, pcz) {
   };
   const RU = world.high ? -1 : R;
   let dropped = 0;
-  const hold = heldNow();   // (clusters: chunks go at the next meeting, the plan runs again then)
+  const hold = heldNow(), ops = [];   // (clusters: chunks go at the next meeting, the plan runs again then)
   for (const k of [...world.chunks.keys()]) {
     if (hold) { heldUnloads = true; break; }
     const c = world.chunks.get(k);
     const vk = BF.villageSim && BF.villageSim.keepKeys.has(k);
-    if (!keep.has(k) && far(c.cx, c.cz, RU + 3)) { jrec("u", k); unload(k); continue; }
+    if (!keep.has(k) && far(c.cx, c.cz, RU + 3)) { ops.push(["u", k]); continue; }
     // a chunk past the view distance (a border chunk, or one just left behind) that no chunk still to be meshed needs: the purge never
     // takes it (it has no mesh), so it would stay loaded, with its mobs, as a thin ring outside the view distance
-    if ((border.has(k) || !keep.has(k)) && !data.has(k) && c.mesh === undefined && !vk) { jrec("u", k); unload(k); dropped++; continue; }
+    if ((border.has(k) || !keep.has(k)) && !data.has(k) && c.mesh === undefined && !vk) { ops.push(["u", k]); dropped++; continue; }
     // (chunks just left behind, kept for the hysteresis, keep only their meshes too)
     if (!data.has(k) && c.mesh === true && !c.meshJob && !world._dirty.has(k) && !world.edits.has(k) && !vk &&
-      far(c.cx, c.cz, Math.min(R, KEEP) + 3)) { jrec("g", k); purge(k); }
+      far(c.cx, c.cz, Math.min(R, KEEP) + 3)) ops.push(["g", k]);
   }
+  if (ops.length) { jrec("ug", ops); drops(ops); }
   if (dropped && BF.glog) BF.glog.log("DEBUG", "chunks", "Unloaded " + dropped + " border chunk" + (dropped > 1 ? "s" : "") + " past the view distance once their neighbours were drawn");
   for (const k of [...world.farMeshes.keys()]) {
     if (keep.has(k)) continue;
@@ -994,6 +1030,7 @@ world.update = function (px, pz, budgetMs = 8) {
 };
 
 world.setViewDist = function (d) { world.viewDist = d; lastCenter = null; };
+world.chunkGen = () => CGEN;   // (the chunk set's generation: js/protocol.js wanted)
 world.meshedCount = () => { let n = 0; for (const c of world.chunks.values()) if (c.mesh) n++; return n; };
 
 // ---------- meshing ----------
@@ -1271,6 +1308,28 @@ function cellGroup(x, z) {
   return g;
 }
 const mineCell = (x, z) => { const g = clusterCur(); return !g || cellGroup(x, z) === g.key; };
+// The loaded chunks of group key gk (a chunk's group is its centre cell's), in world.chunks order: one pass over the chunks for every group,
+// made again when the groups or the chunk set change (chunks come and go only at meetings), instead of each group's pass sorting out its
+// own from all of them (js/grass.js, js/mobs.js monster spawning, js/wildlife.js areas)
+let byGroup = null, byGroupAt = { gs: null, ep: -1, gen: -1 };
+function groupChunks(gk) {
+  const C = CT();
+  if (!C) return [];
+  const gs = C.groups(), A = byGroupAt;
+  if (!byGroup || A.gs !== gs || A.ep !== C.epoch || A.gen !== CGEN) {
+    A.gs = gs; A.ep = C.epoch; A.gen = CGEN;
+    byGroup = new Map();
+    const live = new Set(gs.map(e => e.key)), first = gs.length ? gs[0].key : null, CS = BF.CS, rg = new Map();
+    for (const c of world.chunks.values()) {
+      const k = BF.regions.keyOf(c.cx * CS + 8, 0, c.cz * CS + 8);
+      let g = rg.get(k);
+      if (g === undefined) { g = BF.clusters.groupOf(BF.clusters.ofRegion(k)); if (!live.has(g)) g = first; rg.set(k, g); }
+      const a = byGroup.get(g);
+      if (a) a.push(c); else byGroup.set(g, [c]);
+    }
+  }
+  return byGroup.get(gk) || [];
+}
 // A cell of another group within r blocks of (x, z) (axis and diagonal), as [x, z], or null when every cell there is the running
 // group's. Regions are 64-block squares, so the four corners of the square are enough.
 function foreignNear(x, z, r) {
@@ -1298,7 +1357,9 @@ function onBlockTickReq(req) {
 }
 // A table of cells ("x,y,z" keys: a Set, or a Map with plain values) as BF.ctick.owned wants it: a group's part and putting it back.
 // enc / dec (Maps): a value to plain JSON and back onto the entry already there (dec(plain, old) -> the entry to keep).
-// (js/requests.js and js/ctick.js load after this file: the handler and the tables are registered once every file is in, BF.onLoad)
+// Only what changed since this worker last sent or got it goes: the entries whose JSON changed (a Set's new keys), and the keys gone
+// from the table (a key's cell names its group, so the group's owner finds them among the keys every worker has); snap(g, true) puts
+// the whole part (tests: a part sent and snapped again).
 const ownQ = [];
 let ownDone = false;
 function clusterSetup() {
@@ -1314,21 +1375,50 @@ function ownCellsNow(name, coll, enc, dec) {
   const C = BF.ctick;
   const isMap = coll instanceof Map;
   const of = k => { const i = k.indexOf(","), j = k.lastIndexOf(","); return cellGroup(+k.slice(0, i), +k.slice(j + 1)); };
+  const had = new Map();   // key -> its JSON (a Set's: 1) as every worker has it
+  let goneAt = -1, gone = null;   // (the keys gone from the table, by group: worked out once a swap)
+  const goneOf = gk => {
+    if (goneAt !== BF.rand.tick || !gone) {
+      goneAt = BF.rand.tick; gone = new Map();
+      for (const k of had.keys()) if (!coll.has(k)) { const g = of(k); let a = gone.get(g); if (!a) gone.set(g, (a = [])); a.push(k); }
+    }
+    return gone.get(gk) || [];
+  };
+  const put1 = (k, j) => {
+    if (!isMap) { coll.add(k); had.set(k, 1); return; }
+    coll.set(k, dec ? dec(j, coll.get(k)) : j); had.set(k, JSON.stringify(j));
+  };
   C.owned(name, {
-    snap(gk) {
-      const out = [];
-      for (const k of C.keysOf(coll, gk, of)) out.push(isMap ? [k, enc ? enc(coll.get(k)) : coll.get(k)] : k);
-      return out;
+    reset() { had.clear(); gone = null; },
+    snap(gk, all) {
+      const put = [];
+      for (const k of C.keysOf(coll, gk, of)) {
+        if (!isMap) { if (all || !had.has(k)) { had.set(k, 1); put.push(k); } continue; }
+        const j = enc ? enc(coll.get(k)) : coll.get(k), t = JSON.stringify(j);
+        if (all || had.get(k) !== t) { had.set(k, t); put.push([k, j]); }
+      }
+      if (all) return { all: true, put, gone: [] };
+      const g = goneOf(gk);
+      for (const k of g) had.delete(k);
+      return { put, gone: g };
     },
-    apply(gk, list) {
-      const old = new Map();
-      for (const k of C.keysOf(coll, gk, of)) { if (isMap) old.set(k, coll.get(k)); coll.delete(k); }
-      for (const it of list) { if (isMap) coll.set(it[0], dec ? dec(it[1], old.get(it[0])) : it[1]); else coll.add(it); }
+    apply(gk, o) {
+      if (o.all) {
+        const keep = new Set(isMap ? o.put.map(it => it[0]) : o.put);
+        for (const k of C.keysOf(coll, gk, of)) if (!keep.has(k)) { coll.delete(k); had.delete(k); }
+      }
+      for (const k of o.gone) { coll.delete(k); had.delete(k); }
+      for (const it of o.put) if (isMap) put1(it[0], it[1]); else put1(it);
+      // a Set's keys of the group that only this worker added (its own chunk loads add the others' groups' keys too: farmland's blocks
+      // due, a fluid cell queued) and its owner never had or has dealt with: dropped, or this worker would deal with them again the day
+      // the group comes to it, as the group's owner never did (farmland stamped there and nowhere else: cluster-play at meetings every
+      // 80 ticks, when the workers went back to one)
+      if (!isMap) for (const k of C.keysOf(coll, gk, of)) if (!had.has(k)) coll.delete(k);
       C.applied(coll, gk);
     },
   });
 }
-world.clusterCells = { cellGroup, mineCell, foreignNear, toMeeting, onMeeting, ownCells, later, cur: clusterCur };
+world.clusterCells = { cellGroup, groupChunks, mineCell, foreignNear, toMeeting, onMeeting, ownCells, later, cur: clusterCur };
 // Chunks wait for the next meeting: true while the cluster tick is on and an interval is under way.
 const heldNow = () => !!(CT() && BF.rand && BF.rand.tick % CT().MEET !== 0);
 world.heldNow = heldNow;

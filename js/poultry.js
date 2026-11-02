@@ -259,7 +259,9 @@ function seeded(str) {
   };
 }
 const fix3 = v => (v == null ? null : +(+v).toFixed(3));
-const packSt = s => [fix3(s.fed), fix3(s.cd || 0), fix3(s.growAt), fix3(s.layAt), s.mob && live(s.mob) ? +s.mob.position.x.toFixed(2) : s.x, s.mob && live(s.mob) ? +s.mob.position.z.toFixed(2) : s.z];
+// a living animal's place to 1/100 (its runner's, with clusters on workers: js/mobs.js row "spot"), else where its state last had it
+const spotOf = (s, i) => { const p = s.mob ? BF.cworkers.row("spot", s.mob) : null; return p ? p[i] : i ? s.z : s.x; };
+const packSt = s => [fix3(s.fed), fix3(s.cd || 0), fix3(s.growAt), fix3(s.layAt), spotOf(s, 0), spotOf(s, 1)];
 function unpackSt(a) {
   const num = (x, d) => (x != null && Number.isFinite(+x) ? +x : d);
   if (!Array.isArray(a)) return null;
@@ -355,7 +357,7 @@ function hook() {
   hooked = true;
   BF.on("mobKilled", m => { if (m && m.type === "chicken" && m.coop) leaveCoop(m); });
   BF.herd.villageTable("poultry.pending", () => pending);   // (clusters: save data waiting for its coops, by village)
-  BF.herd.penTable("poultry.coops", { field: "_coops", list: "hens", mob: "hen", pen: "coop", of: coopsOf });   // (and the flocks)
+  BF.herd.penTable("poultry.coops", { field: "_coops", list: "hens", mob: "hen", pen: "coop", of: coopsOf, keep: ["eggs"] });   // (and the flocks; the eggs in the nest)
   BF.herd.gateTable("poultry.toShut", toShut);             // (and the gates keepers held open, by keeper)
 }
 function tick(dt) {
@@ -413,18 +415,21 @@ function reset() { pending = new Map(); activeCoops.length = 0; toShut.length = 
 // ---------------------------------------------------------------- the poultry keeper
 const pkp = m => m.pkp || (m.pkp = BF.ids.refs({ task: null, stage: null, t: 0, actT: 0, cd: rnd(RS(m), 0, 2), avoid: new Map(), navFail: 0, stockAt: 0, trail: [], trailBase: 0 }));
 // The coop this keeper works: the one its nesting box stands beside (footprint within 4.5 blocks).
-function coopOf(m) {
-  const S = pkp(m);
+// peek (the debug screen's read, js/debugfeed.js): changes nothing. Making the keeper's state there drew from its stream, and keeping the
+// coop there decided when it was looked for: a world with a screen watching played differently (2026-10-30), and the region workers had
+// to read the screen too to stay the same.
+function coopOf(m, peek) {
+  const S = peek ? m.pkp : pkp(m);
   if (!m.jobsite || !m.village) return null;
-  if (S.coopFor === m.jobsite && S.coop) return S.coop;
+  if (S && S.coopFor === m.jobsite && S.coop) return S.coop;
   let best = null, bd = 4.5;
   for (const p of coopsOf(m.village)) { const d = coopDist(p, m.jobsite.x + 0.5, m.jobsite.z + 0.5); if (d < bd) { bd = d; best = p; } }
-  S.coopFor = m.jobsite; S.coop = best;
+  if (!peek) { S.coopFor = m.jobsite; S.coop = best; }
   return best;
 }
 // What the keeper looks after: {coop, hens (live chickens to feed), flock (live chickens counted for culling), size (the flock, unloaded ones too)}.
-function tended(m) {
-  const coop = coopOf(m);
+function tended(m, peek) {
+  const coop = coopOf(m, peek);
   const home = m.jobsite ? { x: m.jobsite.x + 0.5, z: m.jobsite.z + 0.5 } : m.position, R = coop ? TEND_R : FREE_RADIUS;
   const near = o => o.type === "chicken" && live(o) && !o.ledBy && Math.hypot(o.position.x - home.x, o.position.z - home.z) <= R && Math.abs(o.position.y - m.position.y) < 6;
   const M = BF.mobs, list = M.checkScan("poultry.tended", M.near(home, R).filter(near), L => L.filter(near));
@@ -547,7 +552,7 @@ function leave(m, S, dt, out) {
     if (!R) return false;
     coop = coopsOf(R).find(q => p.x > q.fx0 && p.x < q.fx1 && p.z > q.fz0 && p.z < q.fz1 && Math.abs(p.y - (q.y + 1)) < 2 && q.out);
     if (!coop) return false;
-    S.exit = coop; S.exitT = 0; S.navFail = 0; m.ai.route = null;
+    S.exit = coop; S.exitT = 0; S.navFail = 0; if (m.ai.routeKind === "farm") m.ai.route = null;   // (not another job's route: standing at the exit already, that dropped its walk back every tick)
   }
   S.exitT += dt;
   const N = BF.mobs.nav, [fx, fy, fz] = N.feetCell(m);
@@ -559,6 +564,12 @@ function leave(m, S, dt, out) {
   }
   const st = BF.villageLife.travel(m, S, dt, out, coop.out[0], coop.y + 1, coop.out[1], m.def.speed);
   if (st === "going" && S.exitT < 30) { m.ai.mode = "idle"; m.ai.t = 2; return true; }
+  if (st === "arrived" && S.exitT < 30 && p.x > coop.fx0 && p.x < coop.fx1 && p.z > coop.fz0 && p.z < coop.fz1) {   // close enough to the cell outside, but still in the open gate (it stayed open all day): the last step out
+    const dx = coop.out[0] + 0.5 - p.x, dz = coop.out[1] + 0.5 - p.z, d = Math.hypot(dx, dz) || 1;
+    m.ai.mode = "idle"; m.ai.t = 2;
+    out.x = dx / d * m.def.speed; out.z = dz / d * m.def.speed;
+    return true;
+  }
   S.exit = null;
   return false;
 }

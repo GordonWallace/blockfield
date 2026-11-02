@@ -160,6 +160,19 @@ class Index {
       if (k !== ks[i]) { this._set(i, this.objs[i], k); this.moves++; }
     }
   }
+  // sync for some of the objects only (the others haven't moved since the last sync: clusters, the running group's mobs); the ones
+  // that left their box are moved in slot order, as sync moves them
+  syncSome(list) {
+    const ps = this.ps, bx = this.bx, bz = this.bz, objs = this.objs, S = REGION, out = [];
+    for (let j = 0, n = list.length; j < n; j++) {
+      const o = list[j], i = o._ri;
+      if (i === undefined || objs[i] !== o) continue;
+      const p = ps[i], x = p.x, z = p.z, x0 = bx[i], z0 = bz[i];
+      if (!(x >= x0 && x < x0 + S && z >= z0 && z < z0 + S)) out.push(i);
+    }
+    if (out.length > 1) out.sort((a, b) => a - b);
+    for (const i of out) { const p = ps[i], k = keyOf(p.x, 0, p.z); if (k !== this.ks[i]) { this._set(i, objs[i], k); this.moves++; } }
+  }
   in(k) { return this.by.get(k); }
   // The keys of the regions holding objects, ascending (kept until a region is added or emptied).
   keys() {
@@ -255,22 +268,29 @@ const dropRemoved = d => drops.remove(d);
 
 const vilSkip = v => !(BF.villageSim ? BF.villageSim.isActive(v.key) : true);
 // The end of a simulation step: moved mobs and drops change region, villages that started or stopped running come and go.
-function tick() {
+// some (clusters, js/ctick.js: the running group's mobs, which are the only ones that moved since the last tick() / tick(some)): only
+// they are checked for a new region
+function tick(some) {
   hook();
-  mobs.sync();
+  if (some) mobs.syncSome(some); else mobs.sync();
   drops.sync();
   syncVillages();
 }
-// Villages don't move: they only start and stop running.
+// Villages don't move: they only start and stop running. Nothing to do while no record was made or dropped and the running set didn't
+// change (with clusters it runs after every group's pass)
+const vilAt = { v: -1, a: -1, V: null };
 function syncVillages() {
   const V = BF.mobs && BF.mobs.villages;
   if (!V) return;
+  const v = BF.mobs.villagesV, a = BF.villageSim ? BF.villageSim.areasV : 0;
+  if (v !== undefined && a !== undefined && vilAt.v === v && vilAt.a === a && vilAt.V === V) return;
+  vilAt.v = v; vilAt.a = a; vilAt.V = V;
   for (const v of V.values()) { if (vilSkip(v)) villages.remove(v); else villages.add(v); }
   for (let i = villages.objs.length - 1; i >= 0; i--) { const v = villages.objs[i]; if (V.get(v.key) !== v) villages.remove(v); }   // records dropped (a new world)
 }
 // Empties the index and fills it again with what is there now (a new world, a new region size).
 function reset() {
-  mobs.clear(); drops.clear(); villages.clear(); bes.clear(); beBy.clear(); byType.clear();
+  mobs.clear(); drops.clear(); villages.clear(); bes.clear(); beBy.clear(); byType.clear(); typeCut.clear(); vilAt.V = null;
   if (BF.mobs && BF.mobs.list) for (const m of BF.mobs.list) if (!m.removed) { m._rs = ++mseq; mobs.add(m); typeAdd(m); }
   if (BF.drops && BF.drops.list) for (const d of BF.drops.list) drops.add(d);
   syncVillages();
@@ -381,8 +401,27 @@ function ofType(t) {
   if (!a) byType.set(t, (a = []));
   if (regions.verifyQueries) checkQuery("ofType " + t, a, () => ((BF.mobs && BF.mobs.list) || []).filter(m => m.type === t && !m.removed));
   const hide = BF.ids && BF.ids.hidden;
-  return hide ? a.filter(m => !hide(m)) : a;   // (clusters: a copy without the other clusters' mobs)
+  if (!hide) return a;
+  // (clusters: a copy without the other clusters' mobs. Every group's copy is made in one pass and kept while no mob of the type came or
+  // went and no meeting placed the mobs again: a mob's cluster changes only then, js/ctick.js epoch. A mob with no cluster yet is seen by
+  // every group: then each call filters)
+  const C = BF.ctick, g = C && C.filter ? C.cur : null;
+  if (!g) return a.filter(m => !hide(m));
+  const v = typeVer.get(t) || 0;
+  let c = typeCut.get(t);
+  if (!c || c.ep !== C.epoch || c.ver !== v) {
+    c = { ep: C.epoch, ver: v, by: new Map(), all: false };
+    for (const m of a) {
+      if (m.cl === undefined) { c.all = true; break; }
+      const k = BF.clusters.groupOf(m.cl), o = c.by.get(k);
+      if (o) o.push(m); else c.by.set(k, [m]);
+    }
+    typeCut.set(t, c);
+  }
+  if (c.all) return a.filter(m => !hide(m));
+  return c.by.get(g.key) || [];
 }
+const typeCut = new Map();   // type -> {ep, ver, by: group key -> its mobs of the type, all}
 // Clusters (spec r15-39b, js/ctick.js): while a cluster runs, the queries don't see other clusters' mobs (BF.ids.hidden).
 function hideIn(out) {
   const hide = BF.ids && BF.ids.hidden;
@@ -392,8 +431,10 @@ function hideIn(out) {
   out.length = j;
   return out;
 }
-const typeAdd = m => { let a = byType.get(m.type); if (!a) byType.set(m.type, (a = [])); if (!a.length || a[a.length - 1]._rs < m._rs) a.push(m); else if (!a.includes(m)) { a.push(m); a.sort(bySeq); } };
-const typeDel = m => { const a = byType.get(m.type), i = a ? a.lastIndexOf(m) : -1; if (i >= 0) a.splice(i, 1); };
+const typeVer = new Map();   // type -> count of the changes to its list
+const typeBump = t => typeVer.set(t, (typeVer.get(t) || 0) + 1);
+const typeAdd = m => { typeBump(m.type); let a = byType.get(m.type); if (!a) byType.set(m.type, (a = [])); if (!a.length || a[a.length - 1]._rs < m._rs) a.push(m); else if (!a.includes(m)) { a.push(m); a.sort(bySeq); } };
+const typeDel = m => { typeBump(m.type); const a = byType.get(m.type), i = a ? a.lastIndexOf(m) : -1; if (i >= 0) a.splice(i, 1); };
 // villageMobs(rec, filter) -> the live mobs of village record rec (rec.members whose m.village is rec) that pass filter, in BF.mobs.list
 // order: what a scan of BF.mobs.list for m.village === rec found.
 function villageMobs(rec, filter) {

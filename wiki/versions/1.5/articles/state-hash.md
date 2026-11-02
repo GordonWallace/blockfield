@@ -21,11 +21,11 @@ The hash is made from separate parts, each with its own hash, so when two worlds
 
 Village logs, economy tallies, happiness and day timelines are not in the hash. They record what happened, and nothing in the simulation reads them back.
 
-Positions are rounded to 1/1024 of a block, and anything that is only drawing or sound (models, walking animation, arm swings, items bobbing on the ground, particles, sound timers) is left out. Working out the hash doesn't change the world.
+Positions are rounded to 1/1024 of a block, and anything that is only drawing or sound (models, walking animation, arm swings, items bobbing on the ground, particles, sound timers) is left out. Working out the hash doesn't change the world. (Until late in 1.5 it did, once: hashing, like saving, made an explorer's working state before its first think, with a random roll of its own, so a world hashed or saved early played differently.)
 
 ## Where to see it
 
-- The debug screen (`./run.sh`, then the debug screen) has a **State hash** card: the hash, the game day it was taken at, and the parts. It updates every 10 seconds. **Copy** puts the hash, its day and the parts on the clipboard for a bug report.
+- The debug screen (`./run.sh`, then the debug screen) has a **State hash** card: the hash, the game day it was taken at, and the parts. It updates once a minute (every 10 seconds before late 1.5: with several villages loaded the hash takes about a tenth of a second of the simulation's time). **Copy** puts the hash, its day and the parts on the clipboard for a bug report.
 - The [[page:game-log]] records the hash as each game day starts (INFO, kind *State hash*).
 
 ## The determinism test
@@ -36,7 +36,7 @@ Positions are rounded to 1/1024 of a block, and anything that is only drawing or
 
 Each tick, the mobs think one simulation region at a time (squares of 64 by 64 blocks, see [[page:the-planet]]), and the changes they ask for are applied region by region. This is how the simulation will later share its work between several threads. The order of the regions must not change anything, and `test/region-tick.js` checks that: it runs the same world for a game day with the regions in order, in reverse order, and as one list, and the hashes must match all day.
 
-The order of the mobs themselves must not matter either: `test/think-order.js` runs a big village with every tick's mobs shuffled into a random order, and the hash must match the usual order. For that, a mob reads the others as they stood at the start of the tick. When a villager does something to another mob while thinking, such as a keeper feeding, milking or shearing an animal, the villager gets its answer at once (the animal was hungry, how much wool it got), but the animal itself only changes once every mob has thought.
+The order of the mobs themselves must not matter either: `test/think-order.js` runs a big village with every tick's mobs shuffled into a random order, and the hash must match the usual order. For that, a mob reads the others as they stood at the start of the tick. When a villager does something to another mob while thinking, such as a keeper feeding, milking or shearing an animal, the villager gets its answer at once (the animal was hungry, how much wool it got), but the animal itself only changes once every mob has thought. Two trades can also be asked for one buyer in the same tick, one by the buyer and one by a seller who comes to sell to it. When that happens, they are settled in the order of the villagers who asked, not the order in which they thought. A villager that changes its own inventory while thinking, for example by spinning wool into string, shows the others its stock as it was at the start of the tick, until every mob has thought.
 
 ## Your actions, in tick order
 

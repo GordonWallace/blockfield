@@ -60,16 +60,19 @@ function coverage(d) {
 }
 const isFilled = d => coverage(d) >= FILLED;
 // A map put aside today (blanks out of reach or not loaded, or worked too long): left alone until the next day, never sold.
-const isShelved = (m, it) => { const f = state(m).fin[nameOf(it)]; return f !== undefined && f >= today(); };
+const isShelved = (m, it, peek) => { const X = peek ? m.ex : state(m), f = X && X.fin[nameOf(it)]; return f !== undefined && f >= today(); };
 // Filled-map items in the inventory: [{slot, it, d, done, shelved}]
-function carried(m) {
+// peek (the status line, which F3 and the debug screen read): changes nothing (making the explorer's state drew from its stream: a world
+// with a screen watching played differently, 2026-10-30); a map whose data was never made is left out.
+function carried(m, peek) {
   const out = [];
   m.inv.forEach((s, slot) => {
     const it = s && BF.items[s.id];
     if (!it || !it.map) return;
-    const d = BF.maps.getData(it.map.size, it.map.zx, it.map.zz);
+    const d = BF.maps.getData(it.map.size, it.map.zx, it.map.zz, !peek);
+    if (!d) return;
     const done = isFilled(d);
-    out.push({ slot, it, d, done, shelved: !done && isShelved(m, it) });
+    out.push({ slot, it, d, done, shelved: !done && isShelved(m, it, peek) });
   });
   return out;
 }
@@ -357,20 +360,24 @@ function pitch(m) {
   const site = BF.tents.findSite(m.position.x, m.position.z, 7, blocked);
   if (!site) return false;
   // a request (spec r15-19): all twelve cells and the tent item at once in the apply phase; the camp is made when it is up (refused: the
-  // next evening check finds another site). The blockPlaced events are logged as this villager's (actor).
+  // next evening check finds another site). The blockPlaced events are logged as this villager's (actor). Its result is the named
+  // handler below, not a req.then: a site at its cluster's edge can be in another cluster's land, and that request is delivered at the
+  // meeting on every worker (js/blockreqs.js onResult).
   X.pitching = BF.blockReq.tick();
-  BF.blockReq.cells(m, BF.tents.pitchCells(site.x, site.y, site.z, site.f), { take: [{ id: tentItem(), n: 1 }], emit: true, actor: true }).then(r => {
-    X.pitching = null;
-    if (!r.ok) { log("pitch_refused", m, { at: site.x + "," + site.z, why: r.why }); return; }
-    X.camp = site; X.stage = null; X.target = null; X.deal = null; m.ai.route = null;
-    m.homeBed = m.homeBed || m.bed;
-    m.bed = { x: site.x, y: site.y, z: site.z, f: site.f, tent: true };
-    const k = keyOf(m);
-    if (k) campSet(k, { x: site.x, y: site.y, z: site.z, f: site.f, until: nightEnd() });
-    log("pitch", m, { at: site.x + "," + site.z, away: Math.round(homeDistance(m)) });
-  });
+  BF.blockReq.cells(m, BF.tents.pitchCells(site.x, site.y, site.z, site.f), { take: [{ id: tentItem(), n: 1 }], emit: true, actor: true, on: "explorer.pitch", site });
   return true;
 }
+BF.blockReq.onResult("explorer.pitch", (m, r, d) => {
+  const X = state(m), site = d.site;
+  X.pitching = null;
+  if (!r.ok) { log("pitch_refused", m, { at: site.x + "," + site.z, why: r.why }); return; }
+  X.camp = site; X.stage = null; X.target = null; X.deal = null; m.ai.route = null;
+  m.homeBed = m.homeBed || m.bed;
+  m.bed = { x: site.x, y: site.y, z: site.z, f: site.f, tent: true };
+  const k = keyOf(m);
+  if (k) campSet(k, { x: site.x, y: site.y, z: site.z, f: site.f, until: nightEnd() });
+  log("pitch", m, { at: site.x + "," + site.z, away: Math.round(homeDistance(m)) });
+});
 // Takes the tent down (when it still stands the item comes back, by request: spec r15-19) and gives the villager its own bed again. A tent on
 // land that is not loaded (the explorer came back somewhere else) comes back into its pack straight away and is taken down when its land
 // loads (camps, tick).
@@ -406,7 +413,7 @@ const CAMPERS = new Set(["explorer", "merchant"]);
 // tent down a second time when the night ends (tick), and the copies' blocks would differ.
 // In key order: campers in two regions pitch in whichever order their regions think, so the map's own order isn't the world's (test/region-tick.js)
 const byKey = () => [...camps].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-const campSet = (k, e) => { camps.set(k, e); if (BF.rworkers) BF.rworkers.touch("camp", k); const C = BF.ctick; if (C && C.filter) campOwner.set(k, C.cur.key); };
+const campSet = (k, e) => { camps.set(k, e); if (BF.rworkers) BF.rworkers.touch("camp", k); const C = BF.ctick; if (C && C.filter && C.cur) campOwner.set(k, C.cur.key); };   // (at a meeting: the meeting's end works the owners out, campOwners)
 // Clusters (spec r15-39b, js/ctick.js): the cluster that looks after each camp in tick (below) this interval, worked out at each meeting on
 // every worker alike: its camper's cluster when it is loaded (a merchant on the road is in the cluster it walks through), else its
 // village's; a camp made since, the cluster that made it.
@@ -421,6 +428,8 @@ function campOwners() {
 }
 BF.onLoad(() => { if (BF.ctick && BF.ctick.onMeet) BF.ctick.onMeet(campOwners, "explorer camps", "end"); });
 const campDrop = k => { camps.delete(k); if (BF.rworkers) BF.rworkers.touch("camp", k); };
+// (a camp changed in place, in tick or onSpawn: with clusters on workers only the camp's cluster runs them, so the others need it too)
+const campTouch = k => { if (BF.rworkers) BF.rworkers.touch("camp", k); };
 if (BF.rworkers) BF.rworkers.channel("camp", {
   key: k => k, get: k => k, state: k => { const e = camps.get(k); return e ? Object.assign({}, e) : null; },
   set: (k, e) => { if (e) camps.set(k, Object.assign({}, e)); else camps.delete(k); },
@@ -430,11 +439,12 @@ const dayNow = () => (BF.sky ? (BF.sky.day || 0) + skyT() : 0);
 // When the coming (or current) night ends, as a game day + time.
 function nightEnd() { const d = BF.sky ? BF.sky.day || 0 : 0, t = skyT(); return d + (t < 0.985 ? 0.985 : 1.985); }
 const tentAt = c => BF.world.isLoaded(c.x, c.z) && BF.world.getBlock(c.x, c.y, c.z) === BF.tentId(c.f, 0, 1);
-let tickT = 0;
-function tick(dt) {
-  const C = BF.ctick && BF.ctick.filter ? BF.ctick : null;   // (clusters: every 2 game seconds on the tick counter, each cluster its camps)
-  if (C) { if (!camps.size || BF.rand.tick % 40 !== 8) return; }
-  else { if (!camps.size || (tickT -= dt) > 0) return; tickT = 2; }
+// Every 2 game seconds on the tick counter, so every copy of the world looks on the same ticks: a timer of its own here started again at
+// 0 on a region worker booting a loaded world, and the worker took a tent down ticks before the leader did (test/workers-load.js, 2026-10-29).
+function tick() { if (camps.size && BF.rand.tick % 40 === 8) sweep(); }
+// The camps' look (tests call it directly).
+function sweep() {
+  const C = BF.ctick && BF.ctick.filter ? BF.ctick : null;   // (clusters: each cluster its camps)
   const here = new Set();
   for (const m of BF.mobs.list) if (CAMPERS.has(m.profession) && !m.dead && !m.removed && (!C || C.filter(m))) { const k = keyOf(m); if (k) here.add(k); }
   const now = dayNow();
@@ -442,14 +452,14 @@ function tick(dt) {
     if (C && (campOwner.get(k) || C.ofVillage(k.slice(0, k.lastIndexOf("#")))) !== C.cur.key) continue;
     if (here.has(k) && !e.returned) continue;   // its own AI strikes it in the morning
     if (!e.returned && now >= e.until) {
-      e.returned = true;
+      e.returned = true; campTouch(k);
       if (BF.glog) BF.glog.log("INFO", "explorer", "camper " + k + " away when the night ended: its tent at " + e.x + ", " + e.z + " is taken down and goes back into its pack", { at: [e.x, e.y, e.z] });
     }
     if (e.returned && !e.removed && BF.world.isLoaded(e.x, e.z)) {
       if (tentAt(e)) BF.blockReq.cells(null, BF.tents.strikeCells(e.x, e.y, e.z, BF.tentId(e.f, 0, 1)));   // nobody's request: no items move
-      e.removed = true;
+      e.removed = true; campTouch(k);
     }
-    if (e.returned && e.removed && e.given) camps.delete(k);
+    if (e.returned && e.removed && e.given) campDrop(k);
   }
 }
 // A villager of its village loading (mobs.js updateVillages, after its saved state and snapshot are back on it).
@@ -459,9 +469,9 @@ function onSpawn(m) {
   if (!e && !(m.ex && m.ex.camp)) return;
   const X = state(m);
   if (e && e.returned) {
-    if (!e.given) { T().inv.add(m.inv, tentItem(), 1); e.given = true; log("tent_back", m, { at: e.x + "," + e.z }); }
+    if (!e.given) { T().inv.add(m.inv, tentItem(), 1); e.given = true; log("tent_back", m, { at: e.x + "," + e.z }); campTouch(k); }
     X.camp = null;
-    if (e.removed) camps.delete(k);
+    if (e.removed) campDrop(k);
     return;
   }
   if (!X.camp) return;
@@ -549,8 +559,8 @@ function away(m) {
 // Trade-screen status line.
 function statusText(m) {
   if (!m || m.profession !== "explorer" || !BF.maps) return "";
-  if (state(m).camp) return "camping for the night";   // waiting at its tent from dusk, then asleep in it
-  const cs = carried(m), act = cs.find(c => !c.done && !c.shelved);
+  if (m.ex && m.ex.camp) return "camping for the night";   // waiting at its tent from dusk, then asleep in it
+  const cs = carried(m, true), act = cs.find(c => !c.done && !c.shelved);
   if (act) return "exploring, map " + Math.floor(coverage(act.d) * 100) + "% filled";
   if (cs.some(c => c.done)) return "has a filled map";
   const sh = cs.find(c => c.shelved);
@@ -558,12 +568,14 @@ function statusText(m) {
   return blankSlots(m).length ? "has a blank map" : "looking for a map";
 }
 // fin: names of shelved maps (older saves: maps it gave up on, which it then sold). After a load it tries them again straight away.
-const pack = m => { const X = state(m); return { fin: Object.keys(X.fin), camp: X.camp || undefined }; };
+// (reads m.ex without making it: state(m) rolls its first cooldown from the villager's stream, and the save and the state hash, which the
+// debug screen asks for every 10 s, packed every explorer before its first think, so a world saved or hashed early played differently, 2026-10-30)
+const pack = m => { const X = m.ex; return { fin: X ? Object.keys(X.fin) : [], camp: (X && X.camp) || undefined }; };
 function unpack(m, o) {
   const X = state(m);
   if (o && Array.isArray(o.fin)) for (const n of o.fin) if (typeof n === "string") X.fin[n] = -1;
   if (o && o.camp && Number.isFinite(+o.camp.x) && Number.isFinite(+o.camp.f)) X.camp = { x: +o.camp.x, y: +o.camp.y, z: +o.camp.z, f: +o.camp.f & 3 };   // despawned while camping: struck on the next morning
 }
 
-BF.explorer = { offerFor, pitch, strike, away, tick, onSpawn, exportAll, importAll, camps, atHome, PRICE_BLANK, SELL_PRICE, FILLED, cellPx, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, shelve, LOG };
+BF.explorer = { offerFor, pitch, strike, away, tick, sweep, onSpawn, exportAll, importAll, camps, atHome, PRICE_BLANK, SELL_PRICE, FILLED, cellPx, MAX_FOR_SALE, ai, syncOffers, statusText, pack, unpack, coverage, carried, useBlank, pickTarget, shelve, LOG };
 })();

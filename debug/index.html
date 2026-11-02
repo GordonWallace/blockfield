@@ -110,6 +110,8 @@
   .wild td.hit { color: var(--warn); } .wild td.dead { color: var(--danger); }
   .ptog { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; } .ptog kbd { font: 10px var(--mono, monospace); opacity: 0.6; margin-left: 4px; }
   #mmap { display: block; width: 100%; height: 460px; cursor: grab; touch-action: none; } #mmap.drag { cursor: grabbing; }
+  #mpanel.pop { position: fixed; z-index: 7; inset: 3vh 3vw; display: flex; flex-direction: column; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.6), 0 20px 60px rgba(0, 0, 0, 0.6); }
+  #mpanel.pop .mapwrap { flex: 1; min-height: 0; } #mpanel.pop #mmap { height: 100%; }
   .mleg { display: flex; flex-wrap: wrap; gap: 4px 6px; padding: 8px 16px 12px; font-size: 11px; align-items: center; }
   .mleg .item { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--edge2); background: none; color: var(--muted); cursor: pointer; font-size: 11px; }
   .mleg .item b { color: var(--ink); font-weight: 500; } .mleg .item i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
@@ -344,7 +346,7 @@
     <div class="card"><h3>Frame rate</h3><div class="big" id="c-fps">-</div><div class="sub" id="c-calls"></div><canvas class="spark" id="s-fps"></canvas></div>
     <div class="card" id="c-perf" title="Villager-seconds of game time simulated per real second (js/perf.js): speed times villagers. The split is ms per simulation step by part; streaming is per frame, spread over its steps"><h3>Performance <span class="sub" id="c-perf-st"></span></h3>
       <div class="big" id="c-vss">-</div><div class="sub" id="c-perf-ms"></div><div class="psplit" id="c-split"></div><canvas class="spark" id="s-vss"></canvas></div>
-    <div class="card" id="c-budgetcard" title="Simulation budget (js/active.js, spec r15-34): villages beyond the nearest four are simulated while the simulation uses less than this share of each real second; over it for 10 s, the farthest extra unloads with the countdown"><h3>Simulation budget <span class="sub" id="c-budget-st"></span></h3>
+    <div class="card" id="c-budgetcard" title="Distant villages (js/active.js, spec r15-34, the pause menu's settings): villages beyond the nearest four are simulated, nearest first, while the simulation needs less than this share of each real second at 1x, within the distance and memory limits; over it for 10 s, the farthest extra unloads with the countdown"><h3>Simulation budget <span class="sub" id="c-budget-st"></span></h3>
       <div class="big" id="c-budget">-</div><div class="sub" id="c-budget-sub"></div><div class="bar"><i id="b-budget"></i></div><div class="sub" id="c-budget-ex"></div><div class="sub" id="c-budget-log" style="margin-top:6px;max-height:110px;overflow:auto"></div></div>
     <div class="card" id="c-reqcard" title="The request queue (js/requests.js, spec r15-17): requests applied and refused, and world writes still made directly (by module) until the systems are converted"><h3>Requests</h3>
       <div class="big" id="c-req">-</div><div class="sub" id="c-req-sub"></div><div class="psplit" id="c-direct"></div></div>
@@ -409,7 +411,7 @@
       <div class="panel" id="hpanel"></div>
       <div class="panel" id="mpanel">
         <div class="ph"><h2>Mobs map</h2><span class="sub" id="m-count"></span><div class="grow"></div>
-          <div class="seg"><button id="m-zout" title="Zoom out (or the mouse wheel)">−</button><button id="m-zin" title="Zoom in (or the mouse wheel)">+</button><button id="m-center" title="Centre the map on you again">Centre</button></div><div class="seg"><button id="m-regions" title="Shade the simulation regions (64 x 64 blocks) by how many mobs each holds, coloured by the worker that thinks them">Regions</button></div></div>
+          <div class="seg"><button id="m-zout" title="Zoom out (or the mouse wheel)">−</button><button id="m-zin" title="Zoom in (or the mouse wheel)">+</button><button id="m-center" title="Centre the map on you again">Centre</button></div><div class="seg"><button id="m-pop" title="Open the map across nearly the whole screen (Esc closes)">Pop out</button></div><div class="seg"><button id="m-regions" title="Shade the simulation regions (64 x 64 blocks) by how many mobs each holds, coloured by the worker that thinks them">Regions</button></div></div>
         <div class="mapwrap"><canvas id="mmap"></canvas><div class="tip" id="mtip"></div></div>
         <div class="mleg" id="m-rlegend" hidden title="With Regions on: each region coloured by the worker its mobs think on, striped when they think on several (a village's mobs go with their village wherever they stand, the wild ones with their region); each village is outlined in its worker's colour. The busy share is the worker's thread, as on the Threads card"></div>
         <div class="mleg"><div class="seg"><button id="m-all" title="Show every type">All</button><button id="m-none" title="Hide every type">None</button></div><span id="m-legend"></span></div>
@@ -545,7 +547,9 @@ setInterval(status, 1000);
 function onSnap(s) {
   sameWorld(s);
   if (s.glog) glogIn(s.glog);
-  Object.assign(layouts, s.layouts || {}); Object.assign(details, s.detail || {}); Object.assign(icons, s.icons || {});
+  Object.assign(layouts, s.layouts || {}); Object.assign(icons, s.icons || {});
+  // a light detail (a village this screen isn't showing, between its full ones every 2 s: js/debugfeed.js lite) goes over the last full one
+  for (const k in s.detail || {}) { const d = s.detail[k]; details[k] = d && d.lite && details[k] ? Object.assign({}, details[k], d) : d; }
   if (s.day !== undefined) dayData = s.day;   // the picked villager's day timeline, when it changed (js/daytimeline.js)
   let logChanged = false, econChanged = false;
   for (const k in s.logs || {}) { logs[k] = s.logs[k]; if (k === viewKey) logChanged = true; }
@@ -558,8 +562,10 @@ function onSnap(s) {
   const was = viewKey;
   pickView(s);
   if (window.BFHist) BFHist.snap(s, viewKey);
-  renderTop(s); renderVillages(s); renderCompare(s); renderVillage(s); renderRoutes(s); renderDay(); status(); alertsFromSnap(s);
-  if (s.mobmap) { mm = s.mobmap; renderMobMap(); }
+  // (each card on its own: one that throws on a shape it doesn't know leaves the others drawing; the map stood still behind the workers
+  // card when cluster workers' stats first came)
+  for (const f of [renderTop, renderVillages, renderCompare, renderVillage, renderRoutes, renderDay, status, alertsFromSnap]) try { f(s); } catch (e) { console.error("debug screen: " + f.name + ": " + (e.stack || e)); }
+  if (s.mobmap) { mm = s.mobmap; try { renderMobMap(); } catch (e) { console.error("debug screen: renderMobMap: " + (e.stack || e)); } }
   if (logChanged || logDirty || was !== viewKey) { if (logDirty || was !== viewKey) econChanged = true; logDirty = false; renderLog(); }
   if (econChanged && eopt.tab === "econ") renderEcon();
 }
@@ -568,8 +574,18 @@ function pickView(s) {
   const list = s.villages || [];
   const k = pinned && list.some(v => v.key === pinned) ? pinned : (list[0] && list[0].loaded ? list[0].key : null);
   if (k !== viewKey) { viewKey = k; hlName = null; }
+  sendView(viewKey);
   layout = viewKey ? layouts[viewKey] || null : null;
   log = viewKey ? logs[viewKey] || null : null;
+}
+
+// The village on show goes to the server (POST /view), which tells the game: it sends that village's full detail in every snapshot and the
+// others' every 2 s (js/debugfeed.js). Sent when it changes and again every 5 s, so a closed screen's village drops out after 15 s.
+let viewSent, viewSentAt = 0;
+function sendView(key) {
+  if (!key || (key === viewSent && Date.now() - viewSentAt < 5000)) return;
+  viewSent = key; viewSentAt = Date.now();
+  fetch("view", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ key }) }).catch(() => { viewSent = undefined; });
 }
 
 // ---------------------------------------------------------------- village list
@@ -810,7 +826,9 @@ let threadBusy = [];   // by worker: the last minute's busy share, for the map's
 function renderThreads(s) {
   const pg = s.page, sim = s.threads || [], host = s.host, onSrv = !!s.server, rows = [];
   const pct = v => (v == null ? "?" : Math.round(v * 100) + "%");
-  if (pg) rows.push({ name: pg.sim ? "Page (draws, runs the simulation)" : "Page (draws, input)", avg: pg.avg, busy: pg.busy, worker: pg.sim ? 0 : null });
+  // (the page's frames: how many a second, its busy ms a frame and how much of that the drawing call took, bug-098)
+  const pf = pg && pg.frame, pfs = pf ? ` \u00B7 ${Math.round(pf.fps)} fps, ${pf.ms.toFixed(1)} ms a frame (${pf.draw.toFixed(1)} drawing)` : "";
+  if (pg) rows.push({ name: (pg.sim ? "Page (draws, runs the simulation)" : "Page (draws, input)") + pfs, avg: pg.avg, busy: pg.busy, worker: pg.sim ? 0 : null });
   for (const t of sim) rows.push({ name: t.worker === 0 ? (onSrv ? "Simulation (world server thread)" : "Simulation (Web Worker)") : t.name + (onSrv ? " (server thread)" : ""), avg: t.avg, busy: t.busy, worker: t.worker });
   if (host) rows.push({ name: onSrv ? "World server main thread" : "Debug server", avg: host.main.hist.length ? host.main.hist.reduce((a, v) => a + v, 0) / host.main.hist.length / 100 : host.main.busy, busy: host.main.busy, worker: null });
   threadBusy = [];
@@ -845,12 +863,18 @@ function renderWorkers(w) {
   $("c-wkcard").hidden = !w || w.want <= 1;
   if (!w || w.want <= 1) return;
   const st = w.stats, n = w.followers + 1, f1 = v => (v == null ? "?" : v.toFixed(1));
-  $("c-wk").innerHTML = `${fmt(w.followers ? n : 1)} <small>${w.split ? "splitting the regions" : "workers, one thinking"}</small>`;
+  const cl = !!(st && Array.isArray(st.groups));   // cluster workers (js/cworkers.js stats): each worker's groups and ms a tick, the meeting's phases
+  $("c-wk").innerHTML = `${fmt(w.followers ? n : 1)} <small>${w.split ? (cl ? "splitting the clusters" : "splitting the regions") : "workers, one thinking"}</small>`;
   $("c-wk-st").textContent = w.policy === "auto" ? "" : "split " + w.policy;
   $("c-wk-sub").textContent = !w.followers ? "none for this world" : `${w.ready}/${w.followers} followers ready \u00B7 ${Math.max(0, ...w.behind)} ticks behind \u00B7 ${f1(w.soloMs)} ms a tick on one` + (w.splitMs != null ? `, ${f1(w.splitMs)} split` : "");
-  const ms = st ? Object.entries(st.ms) : [], mx = Math.max(0.001, ...ms.map(e => e[1]));
+  const ms = !st ? [] : cl ? Object.entries(st.perMeeting || {}).map(([k, v]) => [k + " a meeting", v]) : Object.entries(st.ms || {}), mx = Math.max(0.001, ...ms.map(e => e[1]));
   $("c-wk-ms").innerHTML = ms.map(([k, v]) => `<span>${esc(k)}</span><i style="width:${Math.round(v / mx * 100)}%"></i><b>${v.toFixed(2)} ms</b>`).join("");
-  const per = st ? st.workers : [], pm = Math.max(1, ...per.map(e => e.mobs));
+  if (cl) {
+    const tm = Math.max(0.001, ...st.ms);
+    $("c-wk-per").innerHTML = st.ms.map((v, i) => `<span>worker ${i}: ${fmt(st.groups[i] || 0)} groups</span><i style="width:${Math.round(v / tm * 100)}%"></i><b>${v.toFixed(2)} ms a tick</b>`).join("");
+    return;
+  }
+  const per = (st && st.workers) || [], pm = Math.max(1, ...per.map(e => e.mobs));
   $("c-wk-per").innerHTML = per.map(e => `<span>worker ${e.worker}: ${fmt(e.regions)} regions</span><i style="width:${Math.round(e.mobs / pm * 100)}%"></i><b>${fmt(e.mobs)} mobs</b>`).join("");
 }
 
@@ -897,7 +921,8 @@ function renderBudget(b) {
   $("c-budget-st").textContent = on ? "budget " + pc(b.budget) : "off";
   const ex = b.extra != null ? b.extra : b.extras.length;
   $("c-budget").innerHTML = `${b.villages} <small>${b.villages === 1 ? "village" : "villages"} simulated (${b.villages - ex} nearest + ${ex} extra)</small>`;
-  $("c-budget-sub").textContent = `simulation took ${pc(b.used)} of real time` + (on ? ` (limit ${pc(b.budget)})` : "") + ` · ${b.fps} fps` + (on ? ` · ${b.over ? "over for " + b.over + " s" : "under for " + b.under + " s"}` : "");
+  $("c-budget-sub").textContent = `simulation needs ${pc(b.used)} of each second at 1x` + (on ? ` (limit ${pc(b.budget)}${b.reach > 0 ? ", within " + b.reach + " blocks" : ""}, memory ${b.memMB} MB)` : "") + ` · ${b.fps} fps` + (on ? ` · ${b.over ? "over for " + b.over + " s" : "under for " + b.under + " s"}` : "") +
+    (on && b.peak != null ? ` · busiest hour of the last day ${pc(b.peak)} a village` : "");
   $("b-budget").style.width = Math.min(100, Math.round(on ? b.used / b.budget * 100 : 0)) + "%";
   $("c-budget-ex").textContent = b.extras.length ? "Extra: " + b.extras.map(e => `${e.name} (${e.d} blocks)`).join(", ") : "No extra villages";
   $("c-budget-log").innerHTML = b.log.slice().reverse().map(e => `<div>day ${e.day.toFixed(2)} · ${esc(e.text)}</div>`).join("");
@@ -1130,7 +1155,8 @@ mapCv.addEventListener("click", () => { hlName = hoverName && hoverName !== hlNa
 
 // ---------------------------------------------------------------- Mobs map (js/debugfeed.js mobMap, once a second)
 // Every loaded mob as a dot over the loaded land: hostiles warm, animals cool, village stock ringed. Click a legend entry to hide a type
-// (remembered in this browser); wheel or + / - zooms, dragging pans, Centre follows the player again.
+// (remembered in this browser); wheel or + / - zooms (out to a few times the loaded area), dragging pans, Centre follows the player
+// again, Pop out opens it over nearly the whole screen (Esc or the button closes it).
 const MOB_COLORS = { zombie: "#e8583c", skeleton: "#f2c66d", creeper: "#ff9a3d", spider: "#d6477e", pig: "#a796f2", cow: "#4f9be8", sheep: "#a8dcf2",
   chicken: "#5fd6c2", horse: "#4f6fd0", villager: "#e6dfc8", merchant: "#c98a4b", iron_golem: "#b9c6ce" };
 const MOB_ORDER = ["zombie", "skeleton", "creeper", "spider", "cow", "sheep", "chicken", "pig", "horse", "villager", "merchant", "iron_golem"];
@@ -1156,7 +1182,9 @@ function mobBounds() {
   if (!isFinite(x0)) { x0 = mm.player[0] - 64; x1 = mm.player[0] + 64; z0 = mm.player[1] - 64; z1 = mm.player[1] + 64; }
   return [x0, z0, x1, z1];
 }
-const mZoomMin = (w, h) => { const [x0, z0, x1, z1] = mobBounds(); return Math.min((w - 20) / (x1 - x0), (h - 20) / (z1 - z0)); };   // the whole loaded area
+const mZoomFit = (w, h) => { const [x0, z0, x1, z1] = mobBounds(); return Math.min((w - 20) / (x1 - x0), (h - 20) / (z1 - z0)); };   // the whole loaded area
+const MZOOM_OUT = 4;                                                                                                                  // how far past that it zooms out
+const mZoomMin = (w, h) => mZoomFit(w, h) / MZOOM_OUT;
 const mZoomMax = w => w / (3 * (mm.cs || 16));                                                                                     // about 3 chunks across
 function clampZoom(w, h) { const lo = mZoomMin(w, h), hi = Math.max(lo, mZoomMax(w)); mview.sc = Math.max(lo, Math.min(hi, mview.sc)); }
 function renderMobMap() {
@@ -1164,7 +1192,7 @@ function renderMobMap() {
   if (!mm || !w) { $("m-count").textContent = mm ? "" : "waiting for the game"; return; }
   if (mCv.width !== w * r || mCv.height !== h * r) { mCv.width = w * r; mCv.height = h * r; }
   const g = mCv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0);
-  if (!mview.sc) { mview.sc = mZoomMin(w, h); const [x0, z0, x1, z1] = mobBounds(); mview.x = (x0 + x1) / 2; mview.z = (z0 + z1) / 2; mview.follow = false; mview.fitted = true; }
+  if (!mview.sc) { mview.sc = mZoomFit(w, h); const [x0, z0, x1, z1] = mobBounds(); mview.x = (x0 + x1) / 2; mview.z = (z0 + z1) / 2; mview.follow = false; mview.fitted = true; }
   if (mview.follow) { mview.x = mm.player[0]; mview.z = mm.player[1]; }
   clampZoom(w, h);
   const sc = mview.sc, X = x => w / 2 + (x - mview.x) * sc, Z = z => h / 2 + (z - mview.z) * sc, cs = mm.cs || 16;
@@ -1251,7 +1279,7 @@ function renderMobMap() {
   g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 6); g.lineTo(0, 3); g.lineTo(-6, 6); g.closePath();
   g.fillStyle = "#a6dc72"; g.fill(); g.lineWidth = 1.5; g.strokeStyle = "#0b0f0d"; g.stroke(); g.restore();
   // scale bar
-  const blocks = [8, 16, 32, 64, 128, 256, 512].find(b => b * sc >= 60) || 512;
+  const blocks = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096].find(b => b * sc >= 60) || 4096;
   g.fillStyle = "rgba(238,243,234,0.7)"; g.fillRect(12, h - 14, blocks * sc, 2); g.fillText(blocks + " blocks", 12, h - 20);
   northMark(g, w, mm);
   $("m-count").textContent = `${fmt(mm.mobs.length)} mobs · ${fmt(c.length / 2)} chunks loaded` + (mm.face != null ? ` · face ${mm.face}` : "");
@@ -1286,6 +1314,15 @@ function mZoom(f, mx, my) {
 $("m-zin").addEventListener("click", () => mZoom(1.5));
 $("m-zout").addEventListener("click", () => mZoom(1 / 1.5));
 $("m-center").addEventListener("click", () => { mview.follow = true; renderMobMap(); });
+// Pop out: the panel over nearly the whole screen, keeping the zoom, so more of the world fits
+let mPop = false;
+function setMapPop(on) {
+  mPop = on; $("mpanel").classList.toggle("pop", on); $("m-pop").classList.toggle("on", on); $("m-pop").textContent = on ? "Close" : "Pop out";
+  mHover = null; mTip.style.display = "none";
+  if (mm) renderMobMap();
+}
+$("m-pop").addEventListener("click", () => setMapPop(!mPop));
+addEventListener("keydown", e => { if (e.key === "Escape" && mPop) { setMapPop(false); e.stopImmediatePropagation(); } }, true);   // (before the Compare table's Esc)
 // Regions overlay on / off (remembered in this browser)
 const RSTORE = "bf-debug-mobmap-regions";
 let mRegions = false;
@@ -1328,7 +1365,7 @@ function mobWhere(m) {
   const b = (Math.atan2(n[0] * dz - n[1] * dx, n[0] * dx + n[1] * dz) * 180 / Math.PI + 360) % 360;   // clockwise from north (the grid's x right, z down)
   return `${fmt(Math.round(d))} blocks ${dirName(b)}, y ${fmt(m[3])}`;
 }
-window.BFMobMap = { dots: () => mdots.length, dotXY: i => mdots[i] && [mdots[i][0], mdots[i][1]], dotData: () => mdots.map(d => [d[0], d[1], d[2][1], d[2][2]]), scale: () => mview.sc, data: () => mm, hidden: () => [...mobHidden] };   // for tests (test/debug-mobmap.js)
+window.BFMobMap = { dots: () => mdots.length, dotXY: i => mdots[i] && [mdots[i][0], mdots[i][1]], dotData: () => mdots.map(d => [d[0], d[1], d[2][1], d[2][2]]), scale: () => mview.sc, fit: () => mm && mZoomFit(mCv.clientWidth, mCv.clientHeight), popped: () => mPop, data: () => mm, hidden: () => [...mobHidden] };   // for tests (test/debug-mobmap.js)
 window.BFPlanet = { me: key => snap && meOn(snap, key) };
 window.BFThreads = { snap: () => snap && { page: snap.page, threads: snap.threads, host: snap.host } };   // for tests (test/debug-threads.js)   // for tests (test/debug-planet.js): the player as a village's map draws them
 

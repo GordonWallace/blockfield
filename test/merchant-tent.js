@@ -36,7 +36,7 @@ module.exports = async (pg) => {
     if (!c) return out;
     // dawn: the leftover-camp rule runs before the merchant wakes
     BF.sky.setTime(0.99);
-    for (let i = 0; i < 3; i++) { BF.explorer.tick(3); run(); }
+    for (let i = 0; i < 3; i++) { BF.explorer.sweep(); run(); }
     ok("its tent still stands at dawn", W.getBlock(c.x, c.y, c.z) === BF.tentId(c.f, 0, 1));
     BF.explorer.strike(A); run();
     ok("packs it up and has it back", tents() === n0 && !A.ex.camp, { tents: tents(), had: n0 });

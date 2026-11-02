@@ -178,6 +178,7 @@ async function run(b, url, mode) {
     }
     check(best > 1, tag('W rides the horse: the simulation\'s horse moved'), { moved: +best.toFixed(2), at: [b1.x, b1.y, b1.z], floor: ground });
     check(dist(p3, b1) < 0.6, tag('the simulation\'s horse is under the player'), { horse: b1, me: p3 });
+    for (let k = 0; k < 4 && dist(from, b1) < 6; k++) { await hold('KeyW', 500); await settle(); b1 = await query('entity', { id: horseId }); }   // ride on a little, for the lead below
     await hold('ShiftLeft', 200); await settle();
     check(await until(() => !BF.player.vehicle, null, 5000), tag('Shift gets off the horse'));
     // a lead: the player walks off and the horse follows
@@ -188,10 +189,17 @@ async function run(b, url, mode) {
     h = await query('entity', { id: horseId });
     check(h.horse.lead === 'player', tag('the horse on the player\'s lead'), h.horse);
     const c0 = await query('entity', { id: horseId });
-    await pg.evaluate(c => { const P = BF.player, p = P.position; const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz) || 1; P.teleport(p.x + dx / d * 6, p.y + 1, p.z + dz / d * 6); }, c0);
+    // the player steps back along the way the horse was just ridden, ground the horse has walked: a led horse walks straight at its holder,
+    // and 6 blocks off in any other direction there may be a tree or a 2-block step it stands against (CI: 1.3 blocks closer in 5 s)
+    const back = dist(from, c0) >= 5 ? from : null;   // (no long straight ride: away from the horse as before)
+    await pg.evaluate(([c, b]) => {
+      const P = BF.player, p = P.position;
+      if (b) { const dx = b.x - c.x, dz = b.z - c.z, d = Math.hypot(dx, dz), k = Math.min(7, d) / d; P.teleport(c.x + dx * k, Math.max(b.y, c.y) + 1, c.z + dz * k); return; }
+      const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz) || 1; P.teleport(p.x + dx / d * 6, p.y + 1, p.z + dz / d * 6);
+    }, [c0, back]);
     await pg.waitForTimeout(5000); await settle();
     const c1 = await query('entity', { id: horseId }), p4 = await me();
-    check(dist(c1, p4) < dist(c0, p4) - 1.5, tag('the led horse follows the player'), { before: +dist(c0, p4).toFixed(2), after: +dist(c1, p4).toFixed(2), c0, c1, p4 });
+    check(dist(c1, p4) < dist(c0, p4) - 1.5, tag('the led horse follows the player'), { before: +dist(c0, p4).toFixed(2), after: +dist(c1, p4).toFixed(2), back: !!back, c0, c1, p4 });
   }
   const errs = await pg.evaluate(() => (BF.client.world.log || []).filter(e => e.l === "ERROR").map(e => e.x).slice(0, 5));
   check(!errs.length, tag('no ERROR in the game log'), errs);

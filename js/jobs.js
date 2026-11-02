@@ -371,13 +371,13 @@ function reservedForMemory(k, m) {
   if (!s || !BF.mobs || (memValid(m) && m.jobMem.prof === s.prof)) return false;
   return reaching(s, o => o !== m && !o.jobsite && memValid(o) && o.jobMem.prof === s.prof).length > 0;
 }
-function claimedByOther(k, m) {
+function claimedByOther(k, m, peek) {
   if (reservedForMemory(k, m)) return true;
   const o = claims.get(k);
   if (o) {
     if (o.mob === m || (o.key && o.key === vkey(m))) return false;
-    if (o.mob && o.mob.dead) { claims.delete(k); return false; }
-    if (!o.key && (!o.mob || o.mob.removed)) { claims.delete(k); return false; }
+    if (o.mob && o.mob.dead) { if (!peek) claims.delete(k); return false; }
+    if (!o.key && (!o.mob || o.mob.removed)) { if (!peek) claims.delete(k); return false; }
     return true;
   }
   const pl = planIndex.get(k);
@@ -394,14 +394,17 @@ function center(o) {
   return o.x != null && o.z != null ? { x: o.x, z: o.z } : null;
 }
 // Unclaimed jobsite blocks (loaded, still standing) within `radius` of a village / position / mob. `forMob` treats its own claims as free.
-function unclaimed(where, radius, forMob) {
+// peek (F3's village panel and the debug screen, js/villagelog.js panelData, js/debugfeed.js): the same list, but a site whose block is
+// gone and a dead or removed villager's claim are only skipped, not dropped, so reading never changes the world. Both tables are the
+// clusters' shared state (C.ownedMap below), so a screen's read dropping one on the leader also made the workers' copies differ (2026-10-30).
+function unclaimed(where, radius, forMob, peek) {
   hook();
   const c = center(where), R = radius || reachOf(where), out = [], W = BF.world;
   if (!c) return out;
   for (const [k, s] of sites) {
     if (Math.hypot(s.x + 0.5 - c.x, s.z + 0.5 - c.z) > R) continue;
-    if (W && W.isLoaded(s.x, s.z) && W.getBlock(s.x, s.y, s.z) !== s.id) { sites.delete(k); continue; }
-    if (claimedByOther(k, forMob || null)) continue;
+    if (W && W.isLoaded(s.x, s.z) && W.getBlock(s.x, s.y, s.z) !== s.id) { if (!peek) sites.delete(k); continue; }
+    if (claimedByOther(k, forMob || null, peek)) continue;
     out.push(s);
   }
   return out;
@@ -614,17 +617,21 @@ function ai(m, dt, out) {
   if (!s) return seekAI(m, dt, out, nav);
   if (m.seek) m.seek = null;
   if (!nav || NO_JOB[m.profession] || m.profession === "builder") return false;
-  const J = m.job || (m.job = { mode: "off", t: rnd(RS(m), 5, 30) });
+  const J = m.job || (m.job = { mode: "off", t: rnd(RS(m), 5, 30), askT: 0 });
   const t = BF.sky ? BF.sky.time : 0.2;
   if (t < WORK_START || t > WORK_END) { if (J.mode !== "off") { J.mode = "off"; m.ai.route = null; endTask(m); } return false; }
   if (J.mode === "off") {
     J.t -= dt;
-    if (J.t > 3 && m.profession === "cartographer" && BF.cartography && BF.cartography.wantsJob(m)) J.t = rnd(RS(m), 1, 3);   // something to craft: go to the table soon
-    if (J.t > 3 && m.profession === "furniture_maker" && BF.furniture && BF.furniture.wantsJob(m)) J.t = rnd(RS(m), 1, 3);    // wool and boards in hand: go make beds
-    if (J.t > 3 && m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.wantsJob(m)) J.t = rnd(RS(m), 1, 3);          // a tool to make or finish
-    if (J.t > 3 && m.profession === "stable_hand" && BF.stables && BF.stables.wantsJob(m)) J.t = rnd(RS(m), 1, 3);            // leather and iron or string in hand: go make tack
-    if (J.t > 3 && m.profession === "fletcher" && BF.fletcher && BF.fletcher.wantsJob(m)) J.t = rnd(RS(m), 1, 3);            // arrows or a bow to make or finish
-    if (J.t > 3 && m.profession === "shepherd" && BF.shepherd && BF.shepherd.wantsSpin(m)) J.t = rnd(RS(m), 1, 3);           // wool to spin into string
+    // whether there is work at the table: asked once a game second (some answers cost a toolsmith's whole plan, ~0.3 ms), not every tick
+    if (J.t > 3 && (J.askT = (J.askT || 0) - dt) <= 0) {
+      J.askT = 1;
+      if (m.profession === "cartographer" && BF.cartography && BF.cartography.wantsJob(m)) J.t = rnd(RS(m), 1, 3);   // something to craft: go to the table soon
+      if (m.profession === "furniture_maker" && BF.furniture && BF.furniture.wantsJob(m)) J.t = rnd(RS(m), 1, 3);    // wool and boards in hand: go make beds
+      if (m.profession === "toolsmith" && BF.toolsmith && BF.toolsmith.wantsJob(m)) J.t = rnd(RS(m), 1, 3);          // a tool to make or finish
+      if (m.profession === "stable_hand" && BF.stables && BF.stables.wantsJob(m)) J.t = rnd(RS(m), 1, 3);            // leather and iron or string in hand: go make tack
+      if (m.profession === "fletcher" && BF.fletcher && BF.fletcher.wantsJob(m)) J.t = rnd(RS(m), 1, 3);            // arrows or a bow to make or finish
+      if (m.profession === "shepherd" && BF.shepherd && BF.shepherd.wantsSpin(m)) J.t = rnd(RS(m), 1, 3);           // wool to spin into string
+    }
     if (J.t > 0) return false;
     if (Math.hypot(s.x + 0.5 - m.position.x, s.z + 0.5 - m.position.z) > 40 || !BF.world.isLoaded(s.x, s.z)) { J.t = rnd(RS(m), 20, 40); return false; }
     if (!nav.takePlan()) { J.t = 0.3; return false; }

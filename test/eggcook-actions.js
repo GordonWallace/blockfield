@@ -38,6 +38,9 @@ module.exports = async (pg) => {
         const x = Math.floor(m.position.x) + ax, z = Math.floor(m.position.z) + az, y = ground(x, z, Math.floor(m.position.y));
         if (W.getBlock(x, y, z) !== 0 || !BF.SOLID[W.getBlock(x, y - 1, z)]) continue;
         if (!BF.DIRS.some(([ex, ez]) => W.getBlock(x + ex, y, z + ez) === 0 && BF.SOLID[W.getBlock(x + ex, y - 1, z + ez)])) continue;   // a free side to stand at
+        // and one it can walk to: a furnace across a wall or fence from it is never used (the villager gives up, "no path", and keeps its eggs)
+        const N = BF.mobs.nav, f = N.feetCell(m);
+        if (!N.findPath(f[0], f[1], f[2], { x, z, at: BF.furnaceUse.beside({ x, y, z }) }, 2500)) continue;
         W.setBlock(x, y, z, BF.B.furnace); BF.emit("blockPlaced", x, y, z, BF.B.furnace);
         return { x, y, z };
       }
@@ -91,7 +94,16 @@ module.exports = async (pg) => {
 
     // ---- 2. B and C, 6 eggs each, one furnace: never both at it, both end up with 6 cooked eggs
     kit(B, [["egg", 6], ["coal", 2], ["bread", 12]]); kit(C, [["egg", 6], ["coal", 2], ["bread", 12]]);
-    for (const m of [B, C]) { m.position.set(F1.x + 0.5 + (m === B ? 2 : -2), F1.y, F1.z + 2.5); m.vel.set(0, 0, 0); }
+    // each on an open cell 2-3 blocks from the furnace with a walk to its side: this furnace stands against a house wall, and a fixed
+    // offset put B inside the wall, from where it was pushed out into the house now and then and found no path to the furnace all day
+    const N = BF.mobs.nav, by = FU.beside(F1), spots = [];
+    for (let r = 2; r <= 3; r++) for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+      if (spots.length >= 2 || Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+      const x = F1.x + dx, z = F1.z + dz, y = [F1.y, F1.y + 1, F1.y - 1].find(y => N.walkCell(x, y, z));
+      if (y != null && N.findPath(x, y, z, { x: F1.x, z: F1.z, at: by }, 2500)) spots.push([x, y, z]);
+    }
+    ok("two open spots near the furnace with a path to it", spots.length === 2, spots.map(p => [p[0] - F1.x, p[1] - F1.y, p[2] - F1.z]));
+    [B, C].forEach((m, k) => { const p = spots[k] || [F1.x, F1.y, F1.z + 2]; m.position.set(p[0] + 0.5, p[1], p[2] + 0.5); m.vel.set(0, 0, 0); });
     BF.sky.setTime(0.06);
     // their cooked eggs stay in their packs while this runs: meals and a child's cost take the cheapest food first, and that is cooked egg
     // (js/villagelife.js edible), so B and C have eaten ahead (satiation) and no one courts meanwhile (a big village has births)

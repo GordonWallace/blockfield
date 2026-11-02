@@ -18,6 +18,11 @@ const { parentPort, workerData } = require("worker_threads");
 const fs = require("fs"), path = require("path"), vm = require("vm");
 const ROOT = path.resolve(__dirname, ".."), JS = path.join(ROOT, "js");
 const idb = require("./idb.js").open(workerData.saves);
+// on a machine with fast and slow cores, this thread on the fast ones and its region workers on the others (server/cores.js place;
+// ./run.sh --no-pin: wherever the system puts them)
+const cores = require("./cores.js");
+const placed = workerData.pin === false ? null : cores.place(1);
+const pinned = !!(placed && cores.pin(placed.leader));
 
 const listeners = { error: [], unhandledrejection: [] };
 Object.assign(globalThis, {
@@ -39,10 +44,13 @@ Object.assign(globalThis, {
 // region workers (spec r15-39, js/rplay.js): followers in worker_threads of their own (server/regionthread.js), as many as the server says
 Object.assign(globalThis, {
   BF_WORKERS: workerData.workers || undefined, BF_SPLIT: workerData.split || undefined,
+  BF_MEM_MB: workerData.memMB || undefined,   // (the machine's memory: the Distant villages' automatic memory limit, js/active.js)
   BF_CORES: require("os").availableParallelism ? require("os").availableParallelism() : require("os").cpus().length,
   BF_REGION_SPAWN: (me, n) => {
     const { Worker } = require("worker_threads");
-    const w = new Worker(path.join(__dirname, "regionthread.js"), { workerData: { me, n, play: true } });
+    const p = pinned ? cores.place(n) : null;
+    const w = new Worker(path.join(__dirname, "regionthread.js"), { workerData: { me, n, play: true, pin: p && p.followers } });
+    if (me === 1 && pinned && BFx() && BFx().glog) BFx().glog.log("INFO", "server", "Region workers: " + (p && p.followers ? "on the slower CPUs " + cores.cpuText(p.followers) : "wherever the system puts them (fewer slower cores than workers)"));
     let fn = null, done = false;
     w.on("message", m => { if (fn) fn(m); });
     w.on("error", e => { if (fn && !done) fn({ error: String(e && e.stack || e) }); });
@@ -61,6 +69,7 @@ const glog = text => BFx().glog.log("INFO", "server", text);
 let riversIn = null;
 function ready() {
   const BF = BFx();
+  if (pinned) glog("Simulation thread on the fastest CPUs " + cores.cpuText(placed.leader) + " (the machine's others are slower; ./run.sh --no-pin turns this off)");
   BF.state.paused = true;   // (a thread waiting for its page ticks nothing: the page's speed message starts it, after its world)
   BF.worker.rivers = () => { const st = riversIn; riversIn = null; return st; };
   // a network solved here goes to the server's cache, for the next world on this planet
@@ -122,13 +131,14 @@ parentPort.on("message", d => {
       else if (d.server === "detach") detach();
       else if (d.server === "state") post(Object.assign({ server: "state", id: d.id }, BF.save.current && BF.save.current.id === d.id ? state() : { meta: null }));
       else if (d.server === "feed") {
-        if (BF.rworkers && BF.rworkers.journal) BF.rworkers.rec(["feed", d.ack == null ? null : d.ack]);   // (region workers: the followers read it too, js/rplay.js)
+        if (BF.rworkers && BF.rworkers.journal) BF.rworkers.rec(["feed", d.ack == null ? null : d.ack]);   // (region workers: the followers take the server's answer too, js/rplay.js)
         post({ server: "feed", part: BF.debugFeed && BF.debugFeed.simPart ? BF.debugFeed.simPart(d.ack) : null });
       }
       else if (d.server === "save") {   // (an export of the world being played or held: saved first)
         if (!BF.save || !BF.save.current) { post({ server: "save", ok: false, why: "no world here" }); return; }
         BF.save.saveNow().then(ok => post({ server: "save", ok: !!ok, why: BF.save.lastError }), e => post({ server: "save", ok: false, why: String(e && e.message || e) }));
       }
+      else if (d.server === "pace") { if (BF.proto.hosted()) BF.proto.hosted().pace(!!d.behind); }   // (the page reads slowly: server/world.js pace)
       else if (d.server === "writeFail") idb.worlds.failWrites(d.n, d.code);   // (test/server-saves.js: a full disk)
       else if (d.server === "shutdown") {
         if (!BF || !BF.save || !BF.save.current) { post({ server: "shutdown", ok: false }); return; }

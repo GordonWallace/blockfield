@@ -25,7 +25,11 @@ const reg = new Map();   // id -> live object
 // Counts the registry's changes (an object put under a key, a key removed, a ghost added or dropped). A mob keeps its last answer for its
 // hottest links (cached below) with the gen and the id it was for, so the answer is reused only while nothing in the registry changed (r15-61).
 let gen = 0;
-// onNew(obj, id): a key registered for the first time (js/rworkers.js: a place made while a region worker thinks goes to the others)
+// gen and the cluster view (hide) changing: lookAt reads through get(), which hides other clusters' mobs; village, slot and home read the
+// registry itself, so a cluster entering or leaving doesn't drop their answers
+let vgen = 0;
+// onNew(obj, id, had): a key registered, or put again with another object (had) (js/rworkers.js, js/cworkers.js: a place made while a
+// worker thinks goes to the others)
 const hooks = { onNew: null };
 // Removed mobs, kept readable for a while (id -> {o, t}): code that held a mob saw it go (m.removed) and acted on that a little later;
 // it still does. After GHOST game seconds a link to it reads undefined.
@@ -48,28 +52,40 @@ function alloc() {
 const bump = n => { if (n >= top) top = n + 1; if (!lim && n >= next) next = n + 1; };
 function get(id) {
   if (id == null) return undefined;
-  let o = reg.get(id);
+  let o = finders.size ? find(id) : undefined;
+  if (o === undefined) o = reg.get(id);
   if (o === undefined && ghosts.size) { const g = ghosts.get(id); o = g && g.o; }
   return hide !== null && o !== undefined && hide(o) ? undefined : o;
 }
-function put(obj, id) {
+// Place keys whose object lives in a record (finder(kind, fn): fn(rest of the key) -> the object or undefined): read there first, the
+// registry only when it has none. Clusters on several workers (js/cworkers.js): a record that came from another worker at a meeting holds
+// objects nobody put here, or new ones in place of those that were, so a link to one (a newborn's bredEntry, js/breeding.js) would not
+// resolve on this copy, or would reach an object the record no longer holds.
+const finders = new Map(), finderFirst = new Set();   // (the kinds' first characters: most keys are passed over without a slice)
+function find(id) {
+  if (typeof id !== "string" || !finderFirst.has(id.charCodeAt(0))) return undefined;
+  const i = id.indexOf(":"), f = i > 0 ? finders.get(id.slice(0, i)) : undefined;
+  const o = f ? f(id.slice(i + 1)) : undefined;
+  return o === null ? undefined : o;
+}
+function put(obj, id, quiet) {
   if (!obj) return obj;
   if (id == null) id = obj.id;
   if (id == null) { id = alloc(); obj.id = id; }
   const had = reg.get(id);
-  if (had && had !== obj) {   // two objects claim one place key (or id): the newer is what links read now
+  if (had && had !== obj && !quiet) {   // (quiet: a copy of a place another cluster worker sent, or one its record holds, js/cworkers.js)   // two objects claim one place key (or id): the newer is what links read now
     stats.collisions++; stats.last = id;
     if (stats.collisions <= 20 && BF.glog) BF.glog.log("WARN", "ids", "Entity id " + id + " was taken over by another object" + (obj.type ? " (" + obj.type + ")" : ""));
   }
-  if (had !== obj) { reg.set(id, obj); gen++; }
-  if (!had && hooks.onNew) hooks.onNew(obj, id);
+  if (had !== obj) { reg.set(id, obj); gen++; vgen++; }
+  if (had !== obj && hooks.onNew) hooks.onNew(obj, id, had);
   return obj;
 }
 function remove(x) {
   const id = x && typeof x === "object" ? x.id : x;
   if (id == null || (typeof x === "object" && reg.get(id) !== x)) return;
   const o = reg.get(id);
-  reg.delete(id); gen++;
+  reg.delete(id); gen++; vgen++;
   const t = now();
   for (const [k, g] of ghosts) { if (t - g.t < GHOST && g.t <= t) break; ghosts.delete(k); }   // oldest first
   if (o && o.removed) ghosts.set(id, { o, t });
@@ -78,9 +94,9 @@ function remove(x) {
 function idOf(v) {
   if (v == null) return null;
   if (typeof v !== "object") return v;
-  if (BF.player && v === BF.player) { if (reg.get("player") !== v) { reg.set("player", v); gen++; } return "player"; }
+  if (BF.player && v === BF.player) { if (reg.get("player") !== v) { reg.set("player", v); gen++; vgen++; } return "player"; }
   if (v.id == null) put(v);
-  else if (!v.removed && !reg.has(v.id)) { reg.set(v.id, v); gen++; }
+  else if (!v.removed && !reg.has(v.id)) { reg.set(v.id, v); gen++; vgen++; }
   return v.id;
 }
 // A place's key from its block cell: the planet's canonical cell, so a place seen across a face edge has one key.
@@ -106,12 +122,12 @@ function link(proto, name, field) {
 function place(proto, name, field, keyOf) {
   REF.add(field);
   Object.defineProperty(proto, name, {
-    get() { const k = this[field]; return k == null ? k : reg.get(k); },
+    get() { const k = this[field]; if (k == null) return k; const o = finders.size ? find(k) : undefined; return o !== undefined ? o : reg.get(k); },
     set(v) {
       if (v == null) { this[field] = v; return; }
       let k = keyOf(v, this);
       if (k == null || k.includes("undefined")) k = idOf(v);   // (a record without a key or cell, as tests make: known by an id of its own)
-      if (reg.get(k) !== v) put(v, k);
+      if (reg.get(k) !== v) put(v, k, finders.size > 0 && find(k) === v);
       this[field] = k;
     },
     enumerable: false, configurable: true,
@@ -183,9 +199,9 @@ cached("home", function () {
 cached("lookAt", function () {
   const id = this.lookAtId;
   if (id == null) return this.lookV;
-  if (this._laK === id && this._laG === gen) return this._laV;
+  if (this._laK === id && this._laG === vgen) return this._laV;
   const o = get(id);
-  if (this._laG !== undefined) { this._laK = id; this._laV = o; this._laG = gen; }
+  if (this._laG !== undefined) { this._laK = id; this._laV = o; this._laG = vgen; }
   return o;
 });
 const CACHE_FIELDS = ["_lvK", "_lvV", "_lvG", "_lsK", "_lsV", "_lsG", "_lhK", "_lhV", "_lhG", "_laK", "_laV", "_laG"];   // (tests: test/entity-ids.js)
@@ -215,6 +231,8 @@ const isRefs = o => { const p = o && typeof o === "object" ? Object.getPrototype
 
 BF.ids = {
   alloc, get, put, remove, idOf, placeKey, link, place, Refs, refs, MobRef, mobRef, isRefs, REF, stats, hooks, CACHE_FIELDS,
+  find: id => finders.size ? find(id) : undefined,
+  finder(kind, fn) { finders.set(kind, fn); finderFirst.add(kind.charCodeAt(0)); },
   get next() { return next; },
   get size() { return reg.size; },
   live: id => reg.get(id),   // the registered object only (no removed mob)
@@ -224,7 +242,7 @@ BF.ids = {
   reuse(obj, id) {
     if (typeof id !== "string" || !/^e\d+$/.test(id) || (reg.has(id) && reg.get(id) !== obj)) return false;
     if (obj.id != null && obj.id !== id && reg.get(obj.id) === obj) reg.delete(obj.id);
-    obj.id = id; reg.set(id, obj); ghosts.delete(id); gen++;
+    obj.id = id; reg.set(id, obj); ghosts.delete(id); gen++; vgen++;
     bump(+id.slice(1));
     return true;
   },
@@ -232,8 +250,8 @@ BF.ids = {
   seen(id) { const n = typeof id === "string" && /^e\d+$/.test(id) ? +id.slice(1) : 0; bump(n); },
   serialize() { return { next: Math.max(next, top) }; },
   deserialize(o) { const n = o && Math.floor(+o.next); if (n > next) next = n; if (n > top) top = n; },
-  reset() { reg.clear(); ghosts.clear(); gen++; next = top = 1; lim = 0; more = null; stats.collisions = 0; stats.last = null; },
-  get hidden() { return hide; }, set hidden(f) { hide = f || null; gen++; },   // (gen: a cached lookAt read under another cluster's view is not reused)
+  reset() { reg.clear(); ghosts.clear(); gen++; vgen++; next = top = 1; lim = 0; more = null; stats.collisions = 0; stats.last = null; },
+  get hidden() { return hide; }, set hidden(f) { hide = f || null; vgen++; },   // (vgen: a cached lookAt read under another cluster's view is not reused)
   // a live object get() doesn't see now (another cluster's, js/ctick.js): not gone, so nothing should be undone because of it
   away(id) { const o = reg.get(id); return !!(o !== undefined && hide !== null && hide(o)); },
   // the counter's state while a cluster runs ({next, lim, more}; set(null): back to the one counter, past every id handed out)

@@ -22,6 +22,7 @@ const BF = (globalThis.BF = globalThis.BF || {});
 const SPEEDS = [1, 3, 5, 10, 100, 1000];
 // Tick length (idea-049 prototype): 0.05 s unless asked otherwise, by ?tick= in the address, BF_TICK in Node's environment or
 // globalThis.BF_TICK before this file loads (0.01 to 1 s). Read once at load: the sim modules size their tick counts from it.
+const SLOW_1X = 0.8;   // at 1x the indicator shows only below this share of 1x (the measure wobbles a little: no flicker)
 const TICK = (() => {
   const g = globalThis;
   let v = g.BF_TICK;
@@ -36,7 +37,7 @@ let acc = 0, acc0 = 0, planned = 0;   // game seconds collected but not yet tick
 
 BF.simNow = () => clock;
 
-// Indicator (hidden at 1x).
+// Indicator (hidden at 1x, unless the simulation runs well short of it).
 let el = null;
 function ui() {
   if (el || !BF.page || !document.body) return el;   // (headless: no badge)
@@ -53,24 +54,26 @@ function show() {
   if (!e) return;
   if (frozen) { e.hidden = false; e.textContent = "❚❚ 0× (frozen)"; return; }
   const s = SPEEDS[idx];
-  e.hidden = s === 1;
-  if (s === 1) return;
-  // when the frame can't fit all the steps, also show the speed actually achieved
-  const slow = eff < s * 0.9;
-  e.textContent = "▶▶ " + s + "×" + (slow ? " (" + (eff < 10 ? eff.toFixed(1) : Math.round(eff)) + "×)" : "");
+  // when the frame can't fit all the steps, also show the speed actually achieved; at 1x only when well short (Gordon 2026-10-29: at 1x
+  // the villagers crawled with nothing on screen saying the simulation ran at a fraction of 1x)
+  const slow = eff < s * (s === 1 ? SLOW_1X : 0.9);
+  e.hidden = s === 1 && !slow;
+  if (e.hidden) return;
+  e.textContent = (s === 1 ? "▶ " : "▶▶ ") + s + "×" + (slow ? " (" + (eff < 10 ? eff.toFixed(1) : Math.round(eff)) + "×)" : "");
 }
 
-// Game log (js/gamelog.js): up to 10x the sim should keep up, so ticks dropped there (the frame budget ran out) are a WARN,
-// summed over a minute of real time and logged at most once a minute. Above 10x dropping is expected and the indicator shows the
-// speed achieved.
-let lost = 0, lostSec = 0, lostSince = 0, droppedAll = 0;   // (droppedAll: every tick dropped this session, BF.warp.dropped)
+// Game log (js/gamelog.js): at 1x the sim should keep up, so ticks dropped there (the frame budget ran out) are a WARN: at once the
+// first time, then summed and logged at most once a minute while it goes on (Gordon, 2026-10-28). Fast-forward short of its speed is
+// expected (only under 1x matters) and the indicator shows the speed achieved.
+let lost = 0, lostSec = 0, lastWarn = -Infinity, droppedAll = 0;   // (droppedAll: every tick dropped this session, BF.warp.dropped)
 function noteDropped(n) {
   const now = performance.now();
   if (n > 0) droppedAll += n;
-  if (n > 0 && SPEEDS[idx] <= 10 && !frozen) { if (!lost) lostSince = now; lost += n; lostSec += n * TICK; }
-  if (lost && now - lostSince >= 60000 && BF.glog) {
-    BF.glog.log("WARN", "tick", "The simulation fell behind: " + lost + " ticks (" + lostSec.toFixed(2) + " s of game time) dropped in the last minute");
-    lost = 0; lostSec = 0;
+  if (n > 0 && SPEEDS[idx] === 1 && !frozen) { lost += n; lostSec += n * TICK; }
+  if (lost && now - lastWarn >= 60000 && BF.glog) {
+    const first = lastWarn === -Infinity;
+    BF.glog.log("WARN", "tick", "The simulation fell behind at 1x: " + lost + " ticks (" + lostSec.toFixed(2) + " s of game time) dropped" + (first ? "" : " in the last minute"));
+    lost = 0; lostSec = 0; lastWarn = now;
   }
 }
 
@@ -104,7 +107,7 @@ BF.warp = {
     noteDropped(planned - run);
     dt = Math.min(MAX_FRAME, dt);
     last = ach != null ? ach : dt > 0 ? Math.max(0, run * TICK + acc - acc0) / dt : 1;   // the speed this frame achieved: game seconds simulated (and carried) per real second
-    eff = frozen ? 0 : idx === 0 ? 1 : eff + (last - eff) * 0.2;   // smoothed game seconds per real second = achieved speed
+    eff = frozen ? 0 : eff + (last - eff) * 0.2;   // smoothed game seconds per real second = achieved speed
     const key = (frozen ? "f" : idx) + ":" + Math.round(eff * 10);
     if (key !== shown) { shown = key; show(); }
   },

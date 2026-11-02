@@ -5,7 +5,7 @@
 //   {boot: {seed, save, settings, rivers}}   the same world as the leader's (rivers: the leader's solved river network, not solved again);
 //                                             answers {booted: hash}
 //   {start: {shared, me, n}}                  joins the leader's mailboxes and barrier (BF.rworkers.setup) at this tick
-//   {cstart: {shared, me, n, only, order, shuffle}}  the cluster tick on with those systems, and joins as a cluster worker (js/cworkers.js)
+//   {cstart: {shared, me, n, only, order, shuffle, meet}}  the cluster tick on with those systems (meet: ticks between meetings), and joins as a cluster worker (js/cworkers.js)
 //   {ticks: k}                                k headless ticks in lockstep with the leader's (chunks stream with no budget, as the leader's)
 //   {hash: true}                              answers {hash: full state hash} (tests)
 //   {stop: true}                              leaves
@@ -63,6 +63,7 @@ if (!isMainThread && workerData && workerData.me != null && !workerData.saves &&
         parentPort.postMessage({ started: true });
       } else if (d.cstart) {
         const s = d.cstart;
+        if (s.meet != null) BF.ctick.setMeet(s.meet);
         BF.ctick.only = s.only; BF.ctick.on = true; BF.ctick.order = s.order || "tick";
         BF.cworkers.shuffle = s.shuffle || 0;
         BF.cworkers.setup({ n: s.n, me: s.me, link: BF.rworkers.attach(s.shared, s.me, s.n), claims: s.shared.claims, pull: !!s.pull, partial: !!s.partial });
@@ -70,7 +71,7 @@ if (!isMainThread && workerData && workerData.me != null && !workerData.saves &&
       } else if (d.ticks) {
         h.tick(d.ticks);
         parentPort.postMessage({ ticked: h.ticks });
-      } else if (d.hash) parentPort.postMessage({ hash: BF.cworkers.partial ? BF.cworkers.gathered(() => BF.stateHash.full()) : BF.stateHash.full(), mismatch: BF.rworkers.mismatch || null, mismatchText: d.text ? BF.rworkers.mismatchText || null : null, audits: BF.rworkers.audits || null, stats: BF.cworkers.active ? BF.cworkers.stats() : BF.rworkers.stats() });
+      } else if (d.hash) parentPort.postMessage({ hash: BF.cworkers.partial ? BF.cworkers.gathered(() => BF.stateHash.full(), "hash") : BF.stateHash.full(), mismatch: BF.rworkers.mismatch || null, mismatchText: d.text ? BF.rworkers.mismatchText || null : null, audits: BF.rworkers.audits || null, stats: BF.cworkers.active ? BF.cworkers.stats() : BF.rworkers.stats() });
       else if (d.stop) process.exit(0);
     } catch (e) { fail(e); }
   });
@@ -81,6 +82,7 @@ if (!isMainThread && workerData && workerData.me != null && !workerData.saves &&
 // context with the thread's navigator and location (so js/active.js and the rest set themselves up as the leader's did), the slash
 // commands (the client's command requests replay here too) and js/rplay.js, whose follower takes the leader's messages.
 if (!isMainThread && workerData && workerData.play) {
+  if (workerData.pin) require("./cores.js").pin(workerData.pin);   // (the slower cores: server/simthread.js, server/cores.js place)
   const { load } = require(path.join(__dirname, "..", "tools", "headless.js"));
   const { BF } = load({ globals: { navigator: globalThis.navigator, location: { search: "", hostname: "localhost", protocol: "node:", href: "node:server/regionthread.js" } },
     files: ["js/coords.js", "js/commands.js", "js/threadload.js", "js/debugfeed.js", "js/rplay.js"] });

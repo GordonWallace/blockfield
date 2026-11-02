@@ -7,7 +7,7 @@
 //     pause menu's button) forces a worker on the next start;
 //   - served without the world server (--no-world), the page picks a Web Worker by itself ("Browser (worker)"), and the alert works there;
 //   - opened as a file, the page runs it ("Browser (this page)", why: a file), and the alert works there;
-//   - on each host a sign's text and the player's food set in the simulation show on the page.
+//   - on each host a sign's text and the player's food set in the simulation show on the page, and the page draws the sign's text.
 // Usage: NODE_PATH=$(npm root -g) node test/hosts.js
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
@@ -96,6 +96,9 @@ async function replicaWorks(pg, label) {
   });
   const seen = await pg.waitForFunction(c => { const g = BF.signs.get(c.x, c.y, c.z); return g && g.text === 'Hosts test sign'; }, cell, { timeout: 15000 }).then(() => true, () => false);
   check(cell.text === 'Hosts test sign' && seen, `${label}: a sign's text written in the simulation is on the page's sign`);
+  // and the page draws it (its copy of the world finds its signs as their chunks come in, bug-097): one text overlay on that sign
+  const drawn = await pg.waitForFunction(c => { const g = BF.signs.groupAt(c.x, c.y, c.z); return g && BF.signs._state.overlays.has(g.key); }, cell, { timeout: 15000 }).then(() => true, () => false);
+  check(drawn, `${label}: the page draws that sign's text`);
   // (as eating does: a request, whose self message goes at once, before the page's next player message could report the old values)
   const sat = await lib.sim(pg, () => { BF.player.saturation = 0.5; BF.player.hunger = 10; BF.proto.flush(); return BF.player.saturation; });
   const got = await pg.waitForFunction(() => BF.player.saturation === 0.5 && BF.player.hunger === 10, null, { timeout: 15000 }).then(() => true, () => false);

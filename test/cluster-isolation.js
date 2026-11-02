@@ -5,7 +5,7 @@
 // on several workers (item C7) it would be a mismatch.
 // Two child processes boot the same world headless (tools/headless.js: seed 3 at the village nearest the spawn, the 3 nearest other
 // villages simulated too, js/active.js fixed set) with the cluster tick on, one in each order, and run in lockstep, interval by
-// interval (a meeting every 20 ticks), loading chunks between intervals. After each interval the state hash's parts (js/statehash.js)
+// interval (a meeting every BF.ctick.MEET ticks), loading chunks between intervals. After each interval the state hash's parts (js/statehash.js)
 // and every mob's and village record's canonical text are compared; the first objects that differ are printed with where their text
 // first differs, so the field names the system.
 // Profiles (BF.ctick.only):
@@ -63,7 +63,7 @@ function child() {
     } else if (msg.do === 'text') process.send({ texts: msg.keys.map(textOf) });
     else if (msg.do === 'probe') {
       // a request from the first cluster's pass to a mob of the last cluster: it must wait for the next meeting
-      const out = { sentAt: null, appliedAt: null, appliedIn: undefined, delivered: null };
+      const out = { sentAt: null, appliedAt: null, appliedIn: undefined, delivered: null, meet: C.MEET };
       const gs = C.groups(), inGroup = k => m => !m.removed && !m.dead && m.cl !== undefined && BF.clusters.groupOf(m.cl) === k;
       const target = BF.mobs.list.find(inGroup(gs[gs.length - 1].key)), sender = BF.mobs.list.find(inGroup(gs[0].key));
       // a crossing request carries what it needs in its data and gets its result through its kind's onResult (no req.then)
@@ -152,7 +152,7 @@ async function parent() {
   for (let i = 0; i < 2; i++) {
     const p = pr[i];
     check(p.groups > 1 && p.target != null && p.sentAt != null, `${NAMES[i]} order: a request sent from one cluster to a mob of another (${p.target}, tick ${p.sentAt})`);
-    check(p.appliedAt != null && p.appliedAt % 20 === 0 && p.appliedAt > p.sentAt && p.appliedIn === null, `${NAMES[i]} order: it applied at the next meeting (tick ${p.appliedAt}, ${p.appliedIn === null ? 'between ticks' : 'in ' + p.appliedIn})`);
+    check(p.appliedAt != null && p.appliedAt % p.meet === 0 && p.appliedAt > p.sentAt && p.appliedIn === null, `${NAMES[i]} order: it applied at the next meeting (tick ${p.appliedAt}, ${p.appliedIn === null ? 'between ticks' : 'in ' + p.appliedIn})`);
     check(p.delivered === p.appliedAt, `${NAMES[i]} order: its result was delivered at the meeting`);
     check(p.stamp && p.stamp[0] === p.sentAt && p.stamp[1] === p.appliedAt, `${NAMES[i]} order: it carried its sender's tick and its due tick (${p.stamp})`);
   }
