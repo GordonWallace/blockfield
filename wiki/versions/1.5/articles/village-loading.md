@@ -37,6 +37,9 @@ The time limit counts everything the simulation's thread does, not just the vill
 
 Each change to these settings, and each village that joins or leaves, with the reason, is an INFO line in the world's [[page:game-log]] (kind *budget*). So is reaching the memory limit or running out of villages within reach. The debug screen's Simulation budget card shows how many villages are simulated (the nearest ones the rule above keeps, plus the extras), the share of each second the simulation needs at normal speed against the limit, the extra villages and the latest decisions.
 
+### Loading villages straight away
+For testing, `/loadvillages <count>` (see [[page:commands]]) or the **Load** button on the debug screen's Simulation budget card starts that many more villages at the next village check, a second or two later, without waiting for them to join one at a time. They are the nearest villages that are not running yet, nearest first, within the distance limit and the memory limit. They are picked whatever the time limit, the time of day or the last join, and a village that recently stopped for the time limit can be picked too. From then on they are extra villages like any other: nothing joins or stops for 60 seconds, then the rules above decide, so if your computer can't run them they stop again, farthest first. With *Nearest only* they stop one every 10 seconds. Each village that joins this way is an INFO line in the game log. If fewer villages could be found than you asked for, an ERROR line says how many joined and why. It doesn't work while the distant villages are off (automated test browsers start with them off).
+
 ## The countdown before a village stops
 When a village would stop, because you moved away, because other villages pushed it out of the nearest four, or because the simulation went over its budget, it does not stop at once. It counts down.
 
