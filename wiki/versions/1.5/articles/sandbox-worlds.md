@@ -2,7 +2,7 @@
 title: Sandbox worlds
 category: World generation
 ---
-A sandbox world is the usual round [[page:the-planet]] with its ground replaced by an empty grass plain. Nothing spawns by itself, there are no villages, trees, water or caves, and nothing gets in the way of building, summoning and trying things out. It is meant for testing: a quick place to look at a new tree, a building or a block, and the home of the scene files, the structure designer and the texture studio.
+A sandbox world is the usual round [[page:the-planet]] with its ground replaced by an empty grass plain. Nothing spawns by itself, there are no villages, trees, water or caves, and nothing gets in the way of building, summoning and trying things out. It is meant for testing: a quick place to look at a new tree, a building or a block, and the home of the scene files, the [[page:structure-designer]] and the texture studio.
 
 ## Starting one
 
@@ -41,7 +41,7 @@ Three scenes come with the game: `empty` (the plain, day, creative), `trees` (on
 The file is `{ "description": "...", "entries": [ ... ] }`. Each entry names its kind by one key and has an offset `"at": [dx, dy, dz]` from the spawn (or from you, for `/scene`): x is east, z is south, and dy 0 is the first block above the grass. Some take a `"facing"` (`north`, `east`, `south` or `west`).
 
 - `{ "tree": "oak", "at": [0, 0, -10], "size": 5 }`: a tree drawn by the world generator's own code, so a changed tree shows as it now grows. Kinds: oak, oak_nest, birch, birch_nest, swamp_oak, jungle_oak, spruce, mega_spruce, jungle, jungle_big, acacia, dark_oak, cherry, mangrove, giant_mushroom, ice_spike, cactus, boulder. `size` is the height; `"red": false` gives a brown giant mushroom.
-- `{ "structure": "house", "at": [12, 0, 0], "facing": "west", "style": 0 }`: a builder's blueprint by type (house, lhouse, smith, well and the rest), or a design saved by the structure designer, centred on the spot with its door to the facing.
+- `{ "structure": "house", "at": [12, 0, 0], "facing": "west", "style": 0 }`: a builder's blueprint by type (house, lhouse, smith, well and the rest), or a design saved by the [[page:structure-designer]], centred on the spot with its door to the facing.
 - `{ "mob": "cow", "at": [5, 0, 5], "count": 3 }`: mobs as `/summon` makes them; `"profession": "farmer"` for a villager, `"child": true` for a child.
 - `{ "fill": "stone", "at": [-3, 0, -3], "to": [3, 2, 3] }`: a box of one block.
 - `{ "block": "planks", "at": [0, 0, 3] }`: one block.

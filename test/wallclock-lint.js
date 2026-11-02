@@ -15,6 +15,7 @@ const FILES = {
   "commands.js": "chat lines fading out",
   "cracks.js": "block-breaking crack animation",
   "debugfeed.js": "the debug screen feed",
+  "designer.js": "the sandbox structure designer's panel (spec idea-051): when each version was made, shown in the panel; builds go through the stamp request",
   "debugoverlay.js": "the F3 overlay's fps counter (spec r15-37 moved it out of main.js)",
   "gamelog.js": "log timestamps",
   "globe.js": "globe drawing stats",
