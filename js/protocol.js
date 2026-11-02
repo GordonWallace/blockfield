@@ -8,7 +8,8 @@
 // socket (b can be transferred); their size is what bytes() counts.
 // Interest: the sim side sends only what the client's view (position and view distance) covers: loaded chunks within the view distance,
 // and the entities, effects and changes in them. Rate: everything is sent by flush(), once a drawn frame after the frame's ticks, and
-// entities only when a tick ran since the last flush: every tick at 1x (a frame holds at most one), the latest state at fast-forward.
+// entities only when a tick ran since the last flush: every tick at 1x (a frame holds at most one), the latest state at fast-forward
+// (off the page's own thread, at most every FLUSH_MS at fast-forward).
 // In-page transport (BF.proto.local, on from the boot): the game is still one thread; the two ends are joined by a direct queue that
 // encodes and decodes every message, and the client keeps a mirror of what it was sent (BF.client.world). Player requests (r15-20) go
 // through it: BF.req.player sends a request message, the sim applies it at once (js/requests.js), and its block changes and result come
@@ -236,6 +237,9 @@ const ckey = (cx, cz) => cx + "," + cz;
 const sectionsOf = c => c.secs.map(s => (typeof s === "number" ? s : s.slice()));
 let liveSim = null;   // the sim end the world's block hook reports to
 const PACE_MS = 500;   // (serve: how often entities go to a page that has fallen behind)
+// (serve: at fast-forward the simulation goes round its loop every tick or two, about 200 times a second on Gordon's test4 with 8 workers
+// at 10x, and working out a flush took 17% of the leader's busy time for a page that draws 60 frames a second: a replica's flushes wait this long)
+const FLUSH_MS = +(globalThis.process && process.env && process.env.BF_FLUSH_MS) || 16;
 function serve(send, opts) {
   opts = opts || {};
   const R = !!opts.replica;
@@ -254,7 +258,7 @@ function serve(send, opts) {
     movedTo: null,            // replica: where self.pos last put the player, until the client's messages say it is there (playerIn)
     moveSeq: 0,               // replica: counts self.pos moves (sent as mv); a player message carrying the latest mv was sent after the client took it
     cursorSent: null, screenSent: null,   // (r15-44: the held stack and the open screen, in every mode)
-    behind: false, entsAt: 0, // the page reads slower than this sends (the world server, pace()): entities go every PACE_MS, the change since the last
+    flushedAt: -1e9, behind: false, entsAt: 0, // the page reads slower than this sends (the world server, pace()): entities go every PACE_MS, the change since the last
   };
   const out = msg => {
     let p;
@@ -281,12 +285,14 @@ function serve(send, opts) {
   function wanted() {
     const W = BF.world, want = new Map();
     if (!S.view || !W) return want;
-    const R = S.view.dist, pcx = Math.floor(S.view.x / 16), pcz = Math.floor(S.view.z / 16);
+    const R = S.view.dist, pcx = Math.floor(S.view.x / 16), pcz = Math.floor(S.view.z / 16), gen = W.chunkGen ? W.chunkGen() : -1, K = S.wantKey;
+    if (K && gen >= 0 && K[0] === gen && K[1] === pcx && K[2] === pcz && K[3] === R) return S.want;   // (until the view moves or a chunk comes or goes)
     for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
       if (dx * dx + dz * dz > (R + 0.5) * (R + 0.5)) continue;
       const c = W.chunkC ? W.chunkC(pcx + dx, pcz + dz) : W.chunks.get(ckey(pcx + dx, pcz + dz));
       if (c && !want.has(c.key)) want.set(c.key, c);
     }
+    S.want = want; S.wantKey = [gen, pcx, pcz, R];
     return want;
   }
   function flushChunks(want, budget) {
@@ -300,7 +306,7 @@ function serve(send, opts) {
     for (const [k, c] of want) {
       if (S.chunks.has(k)) continue;
       if (budget-- <= 0) break;   // the rest on the next flushes
-      out({ t: "chunk", key: k, cx: c.cx, cz: c.cz, lo: c.lo, hi: c.hi, secs: sectionsOf(c) });
+      if (!opts.follower) out({ t: "chunk", key: k, cx: c.cx, cz: c.cz, lo: c.lo, hi: c.hi, secs: sectionsOf(c) });
       S.chunks.set(k, { c, lo: c.lo, hi: c.hi });
     }
   }
@@ -365,6 +371,16 @@ function serve(send, opts) {
   function touchEntities() {
     if (BF.mobs && BF.vlog) for (const m of BF.mobs.list) if (!m.removed && m.type === "villager" && !m.vname && inView(m.position.x, m.position.z)) BF.vlog.nameOf(m);
     if (BF.boats && BF.ids) for (const b of BF.boats.list) if (inView(b.pos.x, b.pos.z)) BF.ids.idOf(b);
+  }
+  // Everything else a flush does on a follower goes nowhere (15% of a follower's busy time, test4 with 8 workers, 2026-11-01): what is due is
+  // dropped. Which chunks are in view (touchEntities' inView) and the touches, which hand out names and ids, stay as they were.
+  function followerFlush() {
+    S.flushes++; ST.flushes++;
+    S.fx = []; S.logs = []; S.cells.clear(); S.editsDue = false; S.hurts = [];
+    flushChunks(wanted(), S.view && S.view.budget != null ? S.view.budget : 16);
+    const t = tickNow(), still = !!((BF.warp && BF.warp.frozen) || (BF.state && BF.state.paused));
+    if (t !== S.tick || S.changed || still) { touchEntities(); S.entsAt = now(); S.changed = false; }
+    S.tick = t;
   }
   function flushEntities(ticked) {
     const add = [], set = [], seen = new Set();
@@ -499,6 +515,9 @@ function serve(send, opts) {
 
   function flush(force) {
     if (!BF.world) return;
+    if (opts.follower) { followerFlush(); return; }
+    if (R && !force && !S.changed && !S.editsDue && BF.warp && BF.warp.speed > 1 && !BF.warp.frozen && !(BF.state && BF.state.paused) && now() - S.flushedAt < FLUSH_MS) return;
+    S.flushedAt = now();
     S.flushes++; ST.flushes++;
     if (S.editsDue) flushEdits();
     const want = wanted();
@@ -508,7 +527,7 @@ function serve(send, opts) {
     // entities: after a tick; after a request applied (changed); and every flush while the world is frozen or paused, when nothing ticks
     // but a request, a command or a test can still move things (no ticks then, so the diff is the only cost)
     const still = !!((BF.warp && BF.warp.frozen) || (BF.state && BF.state.paused));
-    if ((ticked || force || S.changed || still) && (!S.behind || force || now() - S.entsAt >= PACE_MS)) { if (opts.follower) touchEntities(); else flushEntities(ticked); S.entsAt = now(); S.changed = false; }
+    if ((ticked || force || S.changed || still) && (!S.behind || force || now() - S.entsAt >= PACE_MS)) { flushEntities(ticked); S.entsAt = now(); S.changed = false; }
     // replica (r15-43): the sign text store whenever it changed (a few entries; the page draws sign texts from it)
     if (R && BF.signs && BF.signs.ver !== S.signsVer) { S.signsVer = BF.signs.ver; S.fx.push({ kind: "signs", store: BF.signs.serialize() }); }
     if (S.fx.length) {
