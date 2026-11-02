@@ -1,0 +1,16 @@
+{
+ "description": "The plain and nothing else: daytime, clear weather, creative mode.",
+ "entries": [
+  {
+   "commands": [
+    "/time set day",
+    "/weather clear"
+   ]
+  },
+  {
+   "player": {
+    "gameMode": "creative"
+   }
+  }
+ ]
+}

@@ -362,6 +362,12 @@ const BLOCK_DEFS = [
   { name: "feed_trough", jobsite: "pig_farmer", tiles: { top: "feed_trough_top", side: "feed_trough_side", bottom: "planks" }, hardness: 2.5, tool: "axe", creativeTab: "functional",
     render: "model", model: "shape", opaque: false, boxes: [[1, 0, 2, 15, 9, 14]], box: [1, 0, 2, 15, 9, 14], color: "#9a7240" },
   // ---- end pig farmer pack ----
+  // ---- sandbox pack ---- (appended; ids are saved numerically: only ever append after this line; spec idea-050)
+  // 16 reserved test blocks, sandbox_block_1 .. sandbox_block_16: plain full cubes with a numbered placeholder tile, for the texture studio
+  // (spec idea-052) to put textures on. Creative inventory only: they drop nothing and no recipe makes them, so survival never gets one.
+  ...["#cb4d4d", "#cb7c4d", "#cbac4d", "#bccb4d", "#8ccb4d", "#5dcb4d", "#4dcb6d", "#4dcb9c", "#4dcbcb", "#4d9ccb", "#4d6dcb", "#5d4dcb", "#8c4dcb", "#bc4dcb", "#cb4dac", "#cb4d7c"].map((color, i) => ({ name: "sandbox_block_" + (i + 1), tiles: "sandbox_block_" + (i + 1), hardness: 0.5, drop: null,
+    creativeTab: "building", sandbox: i + 1, label: "Sandbox Block " + (i + 1), search: "sandbox test placeholder", color })),
+  // ---- end sandbox pack ----
 ];
 
 const SLAB_HARDNESS_2 = new Set(["stone", "stone_bricks", "sandstone", "cut_sandstone", "red_sandstone", "cut_red_sandstone", "quartz_block", "purpur_block"]);

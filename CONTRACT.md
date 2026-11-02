@@ -1226,3 +1226,17 @@ worldgen.js (`sty` plot, `PIG_POP`), trading.js (table, `PRODUCE`, values, stock
   Every keeper searches 100 blocks (`FIND_R` / `CATCH_R`).
 - **Grass spreading** (js/grass.js, `BF.grass`): `SAMPLES_PER_S` (120) random columns of loaded chunks a sim second; their top block turns from dirt to grass when nothing opaque
   or fluid is on it, sky light above is at least 9 and a grass block is among its 26 neighbours. Farmland, paths and coarse dirt never change.
+
+## Sandbox worlds and scenes (js/flatgen.js, js/sandbox.js; spec idea-050)
+- `BF.state.world` is `"flat"` in a sandbox world, `"planet"` otherwise. It travels in `BF.newWorld` opts (`world`), the save (`data.world`,
+  `meta.world`), the world server's client fields, the protocol's hello settings, the distant-terrain workers' init, and `BF.prepareWorld(seed, world)`.
+- `worldgen.init(noise, {world: "flat"})` installs js/flatgen.js's calls on the same `BF.worldgen` object (generateBand, generateRange, heightAt,
+  surfaceAt, biomeAt, tintAt, villagesNear, treesIn, the river calls, ...); any other init restores the planet's. `BF.worldgen.world` says which.
+  Nothing else in the generator changes, so planet worlds generate exactly as before.
+- `BF.worldgen.drawTree(kind, x, y, z, size, opts)` -> `[[x, y, z, id], ...]`: one tree drawn by chunk generation's own code (`treeKit`).
+- Nothing spawns by itself in a sandbox world (js/mobs.js spawnMonsters, js/wildlife.js roll).
+- Blocks `sandbox_block_1..16` (the sandbox pack, append-only ids): creative only, `drop: null`, `sandbox: n`.
+- A `"stamp"` player request `{label, cells: [x, y, z, id, ...], mobs: [{type, x, y, z, count, variant, child}], clear?: {x, z, r}}` places cells and
+  mobs in one batch (sandbox worlds only; js/sandbox.js applyStamp). Scenes, the structure designer and the texture studio use it.
+- `BF.sandbox` (page): `list`, `load`, `resolve`, `place`, `open`, `openWhenReady`, `clear`, `stamp`, `command` (the page's `/scene`); format of a scene at
+  the top of js/sandbox.js. debug/sandbox.js answers `/sandbox/api/list?dir=scenes|structures|textures` on the game port.
