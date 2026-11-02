@@ -44,6 +44,11 @@
 // order (nearest first, within the distance limit and the memory limit; ones cooling down after leaving for the budget may join too),
 // whatever the measure, the time of day or the hold. They are extras like any other from then on: the next join or leave for the budget
 // waits HOLD seconds as after any join, then the usual rules decide, and they may leave again if the machine can't run them.
+// Force-unloading and manual mode (r15-91, Gordon 2026-11-02): unforce(n) (/unloadvillages, the debug screen) lets the n farthest extras go
+// at the next decision, as the budget lets them go (the unload countdown, capped at WAIT_CAP game seconds), and none of them is picked
+// again for COOL seconds; villages the distance rule keeps (the nearest) aren't extras and stay. setAuto(false) (/autovillages off, the
+// debug screen) stops the automatic joins and leaves (the time limit, "nearest only"'s steps) so they don't undo forced loads and
+// unloads; the distance rule, the distance limit and forcing still work. setAuto(true) starts them again with fresh windows.
 // API: BF.active = { frame(simMs, raw), decide(px, pz, base) -> [{key, v}], isExtra(key), extras(), set({on, budget, memMB, win, hold, morning,
 //                    cool, reach, minFps, settings}, quiet), opts(), peak(), used() -> the measure, pressed() -> the region workers
 //                    should split (PRESS), holdJoins(tick), settings(), choose(field, value, quiet) -> settings, adopt(settings, quiet) -> settings, next(field) ->
@@ -150,6 +155,8 @@ const cooling = new Map();     // village key -> real ms until it may be picked 
 const decisions = [];          // newest last: { day, text }
 let lastLoad = -1e12, lastN = 0, stepAt = -1e12;   // (stepAt: real ms of the last "nearest only" step down)
 let forced = 0;     // villages to force-load at the next decision (force)
+let unforced = 0;   // extras to force-unload at the next decision (unforce)
+let autoOn = true;  // automatic joins and leaves (setAuto)
 let joinHold = -1;   // no join before this tick: a split's trial runs (js/rplay.js clusterOn), judged on the villages it started with
 const VS = () => BF.villageSim;
 const vKey = v => Math.round(v.x) + "," + Math.round(v.z);
@@ -208,6 +215,8 @@ function decide(px, pz, base) {
   }
   const listed = () => { lastN = base.size + extras.size; return [...extras].map(([key, x]) => ({ key, v: x.v })); };
   if (forced > 0 && !(opt.fixed > 0)) forceAdd(px, pz, base, t, ed);
+  if (unforced > 0) forceDrop(t);
+  if (!autoOn) return listed();   // (manual: only what is forced, and the distance rules, change the set)
   if (!(opt.budget > 0)) {   // nearest only: the farthest one each window
     if (extras.size && t - stepAt >= opt.win * 1000) { stepAt = t; drop(farthest(1)[0], "distant villages set to the nearest only"); }
     return listed();
@@ -311,6 +320,30 @@ function forceAdd(px, pz, base, t, ed) {
   if (added < n && BF.glog) BF.glog.log("ERROR", "budget", `Force-loading ${n} villages added ${added}: ${why || "no more villages found"}`);
   decisions.push({ day: +dayNow().toFixed(3), text: `Force-loaded ${added} of ${n} villages; the usual rules decide from here` }); if (decisions.length > 40) decisions.shift();
 }
+// The extras unforce(n) asked to let go: the n farthest (r15-91)
+function forceDrop(t) {
+  const n = unforced;
+  unforced = 0;
+  const go = farthest(n);
+  go.forEach((k, i) => { cooling.set(k, t + opt.cool * 1000); drop(k, `force-unloaded, ${i + 1} of ${n}`); });
+  if (go.length < n && BF.glog) BF.glog.log("ERROR", "budget", `Force-unloading ${n} villages let ${go.length} go: only ${go.length} extra ${go.length === 1 ? "village was" : "villages were"} running (the nearest villages, which the distance rule keeps, can't be unloaded)`);
+}
+function unforce(n) {
+  n = Math.floor(+n);
+  if (!(n >= 1 && n <= FORCE_MAX)) return `the number of villages must be 1 to ${FORCE_MAX}`;
+  if (!opt.on) return "distant villages are off here (an automated browser): BF.active.set({ on: true }) turns them on";
+  if (opt.fixed > 0) return `a fixed set of ${opt.fixed} villages is being measured (--extra)`;
+  unforced = Math.min(FORCE_MAX, unforced + n);
+  if (BF.glog) BF.glog.log("INFO", "budget", `Force-unloading ${n} villages: the ${n === 1 ? "farthest extra village leaves" : n + " farthest extra villages leave"} at the next village check`);
+  return null;
+}
+function setAuto(on) {
+  on = !!on;
+  if (on === autoOn) return false;
+  autoOn = on; underMs = overMs = 0;
+  note(on ? "Automatic village loading and unloading on again: the time limit decides from here" : "Automatic village loading and unloading paused: only forced loads and unloads (and the nearest villages' distance rule) change the set");
+  return true;
+}
 // force(n) -> null, or why it can't (the /loadvillages command)
 function force(n) {
   n = Math.floor(+n);
@@ -353,7 +386,7 @@ function fixedSet(px, pz, base, t, ed) {
 // the villages simulated now (villageSim's set, extras counting down included): from the start and with the budget off too, which the last
 // decision's figure (lastN, 0 before the first) was not
 const simulated = () => (VS() ? VS().count() : lastN);
-const text = () => `Distant villages: ${simulated()} simulated${leavingNow() ? ", " + leaving.size + " unloading" : ""} (${!opt.on ? "off" : opt.budget > 0 ? "up to " + pct(opt.budget) + " of each second" : "nearest only"})`;
+const text = () => `Distant villages: ${simulated()} simulated${leavingNow() ? ", " + leaving.size + " unloading" : ""} (${!opt.on ? "off" : opt.budget > 0 ? "up to " + pct(opt.budget) + " of each second" : "nearest only"}${opt.on && !autoOn ? ", automatic paused" : ""})`;
 // "Automatic, up to 80% of each second (automatic), no distance limit, memory 2000 MB (automatic)": the settings in words (the game log, the menu)
 function describe(s) {
   s = clean(s);
@@ -366,7 +399,7 @@ BF.active = {
   isExtra: key => extras.has(key),
   waitCap: key => (leaving.has(key) && !extras.has(key) ? WAIT_CAP : null), waitWhy: key => leaving.get(key) || null, leaving: () => (leavingNow(), [...leaving.keys()]),
   extras: () => [...extras.keys()],
-  force, forced: () => forced, FORCE_MAX,
+  force, forced: () => forced, FORCE_MAX, unforce, setAuto, isAuto: () => autoOn,
   used, pressed, PRESS,
   holdJoins: tick => { joinHold = tick; },
   peak,
@@ -404,7 +437,7 @@ BF.active = {
   text,
   // the debug screen's Simulation budget card
   feed: () => ({ on: opt.on, budget: opt.budget, used: used(), fps: Math.round(fps), villages: simulated(), extra: VS() && VS().extraCount ? VS().extraCount() : extras.size, extras: [...extras].map(([k, x]) => ({ key: k, name: vname(k), d: Math.round(x.d) })),
-    under: Math.round(underMs / 1000), over: Math.round(overMs / 1000), memMB: opt.memMB, reach: opt.reach, peak: peak(), settings: Object.assign({}, S), forced, log: decisions.slice(-12) }),
+    under: Math.round(underMs / 1000), over: Math.round(overMs / 1000), memMB: opt.memMB, reach: opt.reach, peak: peak(), settings: Object.assign({}, S), forced, unforced, auto: autoOn, log: decisions.slice(-12) }),
   log: () => decisions.slice(),
   // region workers (js/rplay.js): the leader's whole state for a follower's copy as it boots (opt alone isn't enough: the extras, the
   // measure's windows, the clock it measures by and the villages being let go all decide what happens next, and the automatic figures
@@ -412,7 +445,7 @@ BF.active = {
   state() {
     return { opt: Object.assign({}, opt), S: Object.assign({}, S), extras: [...extras].map(([k, x]) => [k, { v: x.v, t: x.t, d: x.d }]), cooling: [...cooling], leaving: [...leaving],
       lastLoad, lastN, slices: slices.map(x => Object.assign({}, x)), slice: Object.assign({}, slice), underMs, overMs, fps, lastClock, fixedAt, emptyAt, memTold: !!decide.memTold, joinHold,
-      hours: [...hours].map(([k, b]) => [k, Object.assign({}, b)]), forced };
+      hours: [...hours].map(([k, b]) => [k, Object.assign({}, b)]), forced, unforced, auto: autoOn };
   },
   load(s) {
     if (!s || !s.opt) return;
@@ -423,8 +456,8 @@ BF.active = {
     lastLoad = s.lastLoad; lastN = s.lastN; slices = (s.slices || []).map(x => Object.assign({}, x)); slice = Object.assign({}, s.slice);
     underMs = s.underMs; overMs = s.overMs; fps = s.fps; lastClock = s.lastClock; fixedAt = s.fixedAt; emptyAt = s.emptyAt; decide.memTold = !!s.memTold; joinHold = s.joinHold != null ? s.joinHold : -1;
     hours = new Map((s.hours || []).map(([k, b]) => [k, Object.assign({}, b)]));
-    forced = s.forced || 0;
+    forced = s.forced || 0; unforced = s.unforced || 0; autoOn = s.auto !== false;
   },
-  reset() { leaving.clear(); fixedAt = null; emptyAt = null; lastClock = null; extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, game: 0, frames: 0 }; fps = 60; decide.memTold = false; hours = new Map(); joinHold = -1; forced = 0; },
+  reset() { leaving.clear(); fixedAt = null; emptyAt = null; lastClock = null; extras.clear(); fp.clear(); cooling.clear(); decisions.length = 0; underMs = overMs = 0; lastLoad = -1e12; lastN = 0; slices = []; slice = { sim: 0, real: 0, game: 0, frames: 0 }; fps = 60; decide.memTold = false; hours = new Map(); joinHold = -1; forced = 0; unforced = 0; autoOn = true; },
 };
 })();

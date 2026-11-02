@@ -5,6 +5,8 @@
 // join has an INFO game log line; asking for more than there are logs an ERROR; afterwards the usual rules decide (a budget forced low lets
 // them go again, through the unload countdown). BF_HOST=page|worker|server: where the simulation runs (checked there with lib.sim).
 // BF_CLUSTERS=1 (server only): the world server with 3 cluster workers split always (debug/server.js --workers 3 --split always --clusters).
+// r15-91: /autovillages off (and the card's Pause / Resume) stops the automatic joins and leaves, so a budget forced low lets nothing go;
+// /unloadvillages N (and the card's Unload) lets the N farthest extras go; asking for more than run logs an ERROR.
 // Usage: NODE_PATH=$(npm root -g) node test/force-villages.js [outPrefix]
 const path = require('path');
 const { chromium } = require(process.env.PW || 'playwright');
@@ -70,16 +72,48 @@ const root = path.resolve(__dirname, '..');
     const err = await wait(() => BF.glog.recent(5000).some(e => e.k === 'budget' && e.l === 'ERROR' && /^Force-loading 50 villages added/.test(e.x)), null, 30000);
     ok('asking for more than there are logs an ERROR', err);
 
-    // 4. afterwards the usual rules: a budget forced low lets the extras go (farthest first, through the countdown)
-    await lib.sim(game, () => { BF.active.set({ budget: 0.0001, win: 1, hold: 2, reach: 3000 }); });
-    const gone = await wait(() => BF.active.extras().length <= 2, null, 120000);
+    // 3b. (r15-91) automatic loading paused: a budget forced low lets nothing go
+    await lib.sim(game, () => { BF.active.set({ reach: 3000 }); });
+    const pa = await game.evaluate(() => { const x = BF.commands.execute('/autovillages off'); return x.done ? x.done : x; });
+    ok('/autovillages off answers ok', pa.ok && /paused/.test(pa.msg), pa);
+    ok('the card shows it paused', await dbg.waitForFunction(() => document.getElementById('c-vauto').textContent === 'paused' && document.getElementById('c-vauto-go').textContent === 'Resume', null, { timeout: 20000 }).then(() => true, () => false));
+    await lib.sim(game, () => { BF.active.set({ budget: 0.0001, win: 1, hold: 2 }); });
+    const held = await lib.sim(game, () => BF.active.extras());
+    await game.waitForTimeout(12000);
+    const still = await lib.sim(game, () => ({ ex: BF.active.extras(), text: BF.active.text() }));
+    ok('paused: over budget, no village leaves by itself', held.length >= 4 && still.ex.length === held.length, { held, still });
+    ok('the pause menu line says automatic is paused', /automatic paused\)$/.test(still.text), still.text);
+    // 3c. force-unload: the farthest extras go, by command and by the debug screen's button
+    const far2 = await lib.sim(game, () => { const p = BF.player.position, ed = BF.villageSim._edgeDist, near = BF.worldgen.villagesNear(p.x, p.z, 4000), key = v => Math.round(v.x) + ',' + Math.round(v.z);
+      return BF.active.extras().map(k => ({ k, d: ed(near.find(v => key(v) === k), p.x, p.z) })).sort((a, b) => b.d - a.d).slice(0, 2).map(e => e.k); });
+    const un = await game.evaluate(() => { const x = BF.commands.execute('/unloadvillages 2'); return x.done ? x.done : x; });
+    ok('/unloadvillages 2 answers ok', un.ok && /Unloading the 2 farthest/.test(un.msg), un);
+    ok('the 2 farthest extras leave', await wait(f => { const ex = BF.active.extras(); return f.every(k => !ex.includes(k)); }, far2, 30000), { far2, now: await lib.sim(game, () => BF.active.extras()) });
+    const n0 = held.length - 2;
+    ok('only those 2', (await lib.sim(game, () => BF.active.extras().length)) === n0);
+    ok('an INFO line for each', await lib.sim(game, () => BF.glog.recent(5000).filter(e => e.l === 'INFO' && /force-unloaded/.test(e.x)).length) === 2);
+    await dbg.fill('#c-vunload-n', '1');
+    await dbg.click('#c-vunload-go');
+    ok('the debug screen\'s Unload button lets 1 more go', await wait(n => BF.active.extras().length === n - 1, n0, 30000));
+    ok('they unload (each through the countdown, at most a game minute)', await wait(ks => ks.every(k => !BF.villageSim.isActive(k)), far2, 120000));
+    await game.evaluate(() => BF.commands.execute('/unloadvillages 50'));
+    ok('asking to unload more extras than run logs an ERROR', await wait(() => BF.glog.recent(5000).some(e => e.k === 'budget' && e.l === 'ERROR' && /^Force-unloading 50 villages let/.test(e.x)), null, 30000));
+    // nothing left to unload? the next steps need some extras: force 3 more (paused, they stay)
+    await game.evaluate(() => BF.commands.execute('/loadvillages 3'));
+    ok('paused, forced loads still work', await wait(() => BF.active.extras().length >= 3, null, 30000));
+
+    // 4. afterwards the usual rules: the debug screen's Resume, and a budget forced low lets the extras go (farthest first, through the countdown)
+    await dbg.click('#c-vauto-go');
+    ok('the debug screen\'s Resume turns automatic loading on again', await wait(() => BF.active.isAuto(), null, 20000));
+    ok('the card shows it on', await dbg.waitForFunction(() => document.getElementById('c-vauto').textContent === 'on', null, { timeout: 20000 }).then(() => true, () => false));
+    const gone = await wait(() => BF.active.extras().length === 0, null, 120000);
     ok('the usual rules resume: over budget, forced villages leave again', gone, await lib.sim(game, () => BF.active.log().slice(-6).map(e => e.text)));
     if (clusters) {
       const h = await lib.sim(game, () => BF.rplay.status());
       ok('still split, the copies never differed', h.split && h.followers === 2 && !h.why, h);
     }
-    const errs = await lib.sim(game, () => BF.glog.recent(5000).filter(e => e.l === 'ERROR' && !/^(worker \d+: )?Force-loading 50/.test(e.x)).map(e => e.k + ' ' + e.x));
-    ok('no other ERROR lines', !errs.length, errs);
+    const errs = await lib.sim(game, () => BF.glog.recent(5000).filter(e => e.l === 'ERROR' && e.k === 'budget' && !/^(worker \d+: )?Force-(un)?loading 50/.test(e.x)).map(e => e.k + ' ' + e.x));
+    ok('no other budget ERROR lines', !errs.length, errs);
   } catch (e) { console.log('FAIL ' + (e && e.stack || e)); fails.push('threw'); }
   console.log(fails.length ? 'FAILED: ' + fails.length : 'ALL PASS');
   await done(fails.length ? 1 : 0);

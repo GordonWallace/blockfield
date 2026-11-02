@@ -774,6 +774,31 @@ def("loadvillages", {
     return `Loading the ${n === 1 ? "nearest village" : n + " nearest villages"} not yet simulated` + (near ? " (Distant villages is set to nearest only, so they unload again one by one)" : "");
   },
 });
+// /unloadvillages <n> and /autovillages <on|off> (r15-91): the n farthest extra villages leave the simulated set at the next village
+// check (js/active.js unforce); automatic joins and leaves paused or on again (setAuto), so they don't undo forced loads and unloads.
+def("unloadvillages", {
+  aliases: ["forceunload"], usage: "/unloadvillages <count>", desc: "Unloads the farthest extra villages now (1 to 50); the nearest villages the distance rule keeps stay", cheat: false,
+  complete: (a, i) => (i === 0 ? ["1", "3", "5", "10"] : null),
+  run(a) {
+    if (a.length !== 1) usage("unloadvillages");
+    if (!BF.active || !BF.active.unforce) fail("Distant villages aren't available here");
+    const n = parseNum(a[0], "count", { int: true, min: 1, max: BF.active.FORCE_MAX });
+    const why = BF.active.unforce(n);
+    if (why) fail("Can't force-unload villages: " + why);
+    return `Unloading the ${n === 1 ? "farthest extra village" : n + " farthest extra villages"}: each stops once its villagers' tasks are done (at most a game minute)`;
+  },
+});
+def("autovillages", {
+  usage: "/autovillages <on|off>", desc: "Pauses (off) or resumes (on) automatic loading and unloading of distant villages, so forced loads and unloads stay as they are", cheat: false,
+  complete: (a, i) => (i === 0 ? ["on", "off"] : null),
+  run(a) {
+    const v = norm(a[0] || "");
+    if (a.length !== 1 || (v !== "on" && v !== "off")) usage("autovillages");
+    if (!BF.active || !BF.active.setAuto) fail("Distant villages aren't available here");
+    const changed = BF.active.setAuto(v === "on");
+    return (v === "on" ? "Automatic village loading and unloading is on" : "Automatic village loading and unloading is paused: only /loadvillages, /unloadvillages and the nearest villages' distance rule change which villages run") + (changed ? "" : " (it already was)");
+  },
+});
 def("say", {
   usage: "/say <message>", desc: "Broadcasts a message", cheat: false,
   run(a, raw) {

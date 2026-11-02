@@ -140,7 +140,7 @@ function warpAfter(wc, ff) {
   const now = Date.now();
   if (ff && typeof ff === "object") { warpNow = { speed: +ff.speed || 0, real: +ff.real || 0 }; warpAt = now; }
   warpOps = warpOps.filter(w => now - w.t < WARP_TTL);
-  return warpOps.filter(w => w.id > (+wc || 0)).map(w => ({ id: w.id, op: w.op, speed: w.speed, n: w.n }));
+  return warpOps.filter(w => w.id > (+wc || 0)).map(w => ({ id: w.id, op: w.op, speed: w.speed, n: w.n, on: w.on }));
 }
 // The open world's game log (js/gamelog.js): {w (world id), name, head (its header line), base (index of lines[0]), lines}, all of it
 // once the game has sent it. Debug screens get it whole when they connect (/events cache, or /glog) and the new entries in each snap.
@@ -335,11 +335,13 @@ function serveDebug(req, res) {
     req.on("end", safe(() => {
       let o; try { o = JSON.parse(body); } catch (e) { res.writeHead(400, cors()).end("bad json"); return; }
       const op = o && o.op, speed = o && +o.speed, n = o && +o.n;
-      const villages = op === "villages" && Number.isInteger(n) && n >= 1 && n <= 50;   // force-load the n nearest villages (r15-90: the Simulation budget card)
-      if (op !== "faster" && op !== "slower" && !villages && !(op === "set" && Number.isFinite(speed) && speed >= 0)) { res.writeHead(400, cors()).end("no step"); return; }
+      const villages = (op === "villages" || op === "unload") && Number.isInteger(n) && n >= 1 && n <= 50;   // force-load the n nearest villages (r15-90: the Simulation budget card) / force-unload the n farthest (r15-91)
+      const auto = op === "auto" && o && typeof o.on === "boolean";   // automatic village loading on or paused (r15-91)
+      if (op !== "faster" && op !== "slower" && !villages && !auto && !(op === "set" && Number.isFinite(speed) && speed >= 0)) { res.writeHead(400, cors()).end("no step"); return; }
       const w = { id: ++warpId, t: Date.now(), op };
       if (op === "set") w.speed = speed;
       if (villages) w.n = n;
+      if (auto) w.on = o.on;
       warpOps.push(w);
       if (warpOps.length > 50) warpOps.shift();
       res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ id: w.id }));
