@@ -160,6 +160,7 @@ function restore(k) {
 function roll(k) {
   rolled.add(k);
   if (BF.cworkers && BF.cworkers.active) rolledNew.push(k);
+  if (BF.state && BF.state.world === "flat") return;   // a sandbox world rolls no wild animals (spec idea-050)
   const [cx, cz] = k.split(",").map(Number), CS = BF.CS;
   let b = null;
   try { b = BF.worldgen.biomeAt(cx * CS + 8, cz * CS + 8); } catch (e) { return; }

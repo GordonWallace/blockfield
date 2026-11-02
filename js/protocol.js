@@ -268,7 +268,7 @@ function serve(send, opts) {
   function hello() {
     const St = BF.state || {};
     out({ t: "hello", v: VERSION, version: BF.VERSION || null, seed: St.seed >>> 0, tick: tickNow(),
-      settings: { gen: St.gen, villages: St.villages, biomeScale: St.biomeScale, gameMode: BF.player && BF.player.gameMode || null } });
+      settings: { gen: St.gen, villages: St.villages, biomeScale: St.biomeScale, world: St.world, gameMode: BF.player && BF.player.gameMode || null } });
     S.invSent = S.cursorSent = S.screenSent = null;   // (self sends the inventory and the screen again)
     if (R) { S.editsDue = true; S.spawnSent = null; S.hurts = []; S.mountSent = "null"; S.signsVer = -1; }
   }

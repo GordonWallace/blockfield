@@ -100,7 +100,7 @@ function resume() {
   return { meta: cur, resumed: true, speed: heldSpeed };
 }
 // what the page needs for its copy of the world being played (js/save.js restoreClient)
-const CLIENT = ["version", "gen", "seed", "biomeScale", "villages", "monsters", "spawn", "rand", "time", "player", "inventory", "weather"];
+const CLIENT = ["version", "gen", "seed", "biomeScale", "world", "villages", "monsters", "spawn", "rand", "time", "player", "inventory", "weather"];
 function state() {
   const BF = BFx(), d = BF.save.snapshot(), out = {};
   for (const k of CLIENT) out[k] = d[k];

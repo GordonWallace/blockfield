@@ -729,6 +729,7 @@ def("locate", {
     if (!/^village(_\w+)?$/.test(what)) fail(what ? `Unknown structure '${what}' (try village)` : "Usage: /locate village");
     const G = BF.worldgen;
     if (!G || !G.nearestVillage) fail("Villages not available");
+    if (BF.state.world === "flat") return "There are no villages in a sandbox world";   // (spec idea-050: said, not an error)
     const p = pos(), v = G.nearestVillage(p.x, p.z);
     if (!v) fail("Could not find a village within reasonable distance");
     const nm = BF.signs && BF.signs.villageName ? BF.signs.villageName(v) : null;
@@ -767,6 +768,18 @@ def("say", {
   },
 });
 
+// Sandbox scenes (spec idea-050, js/sandbox.js): worked out on the page, which fetches the scene files, and placed by one stamp request,
+// so execute() hands /scene to BF.sandbox.command before anything reaches the simulation. Defined here for /help and tab completion.
+let sceneNames = [];
+def("scene", {
+  usage: ["/scene <name>", "/scene list", "/scene clear [radius]"], desc: "Sandbox worlds only: places sandbox/scenes/<name>.json round you; clear puts the plain back (radius 48)",
+  complete: (a, i) => {
+    if (i === 0 && BF.sandbox && BF.page) BF.sandbox.list().then(n => { sceneNames = n; }, () => {});
+    return i === 0 ? ["list", "clear"].concat(sceneNames) : i === 1 && norm(a[0]) === "clear" ? ["16", "48", "96"] : null;
+  },
+  run() { fail("/scene runs on the page: type it in the game's command line"); },
+});
+
 // ---------- execution ----------
 // A command is a request from the player (spec r15-20, js/requests.js player()): applied at once, at the tick boundary it is typed
 // at, so /setblock, /fill, /give, /summon, /kill, /time, /weather and /tp change the world between ticks, in the requests' order,
@@ -774,6 +787,7 @@ def("say", {
 // With the simulation in a worker (r15-38) it runs there (this file is loaded for it) and the answer comes back later: the page echoes
 // the command now and prints the answer when it comes; the result is then {ok: true, pending: true, done} (done: a promise of {ok, msg}).
 function execute(text) {
+  { const a = split(String(text).replace(/^\//, "")); if (a.length && /^(minecraft:)?scene$/i.test(a[0]) && BF.sandbox && BF.page) { print("/" + a.join(" "), "dim"); return BF.sandbox.command(a.slice(1)); } }
   if (!BF.req || !BF.req.player) return run(text);
   const req = BF.req.player("command", null, { text: String(text) });
   if (!req.delivered && req.then) {

@@ -67,9 +67,9 @@ BF.loading = {
   show(text) { loadHeld = text || "Loading the world"; if (!BF.preparing) loadScreen(loadHeld, false); },
   hide() { loadHeld = null; if (!BF.preparing) loadDone(); },
 };
-BF.prepareWorld = function (seed) {
+BF.prepareWorld = function (seed, world) {
   BF.state.gen = 4;
-  BF.worldgen.init(BF.makeNoise(seed >>> 0), { villages: BF.state.villages || 10 });
+  BF.worldgen.init(BF.makeNoise(seed >>> 0), { villages: BF.state.villages || 10, world });   // (world "flat": a sandbox world has no rivers to work out)
   if (BF.worldgen.riversReady()) return Promise.resolve();
   const el = loadScreen("Working out the rivers and lakes", true);
   BF.preparing = true;   // the frame loop waits (the old world is gone: worldgen is the planet's now)
@@ -192,6 +192,11 @@ const startOpts = m && m[2] ? { villages: +m[2] } : {};
 host.start().then(mode => {
   if (mode !== "worker" && BF.proto) BF.proto.local.connect();
   if (BF.player.menu() === "start") BF.player.refreshWorlds();   // the title screen's list is the host's now: the world server's saves, or this browser's
-  BF.prepareWorld(seed).then(() => { BF.newWorld(seed, startOpts); if (mode === "worker") host.demo(seed, startOpts); requestAnimationFrame(frame); });
+  BF.prepareWorld(seed).then(() => {
+    BF.newWorld(seed, startOpts); if (mode === "worker") host.demo(seed, startOpts); requestAnimationFrame(frame);
+    // #sandbox or #sandbox=<scene> (spec idea-050): a fresh sandbox world, saved and played at once, the scene placed at spawn
+    const sb = /^#sandbox(?:=([\w-]{1,64}))?$/.exec(location.hash);
+    if (sb && BF.player.createSandbox) setTimeout(() => BF.player.createSandbox(sb[1] || ""), 0);
+  });
 });
 })();
