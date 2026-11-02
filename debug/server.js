@@ -18,7 +18,7 @@
 // No dependencies: Node's built-in modules only (debug/claude.js uses the Anthropic SDK when it's installed in debug/).
 "use strict";
 const http = require("http"), fs = require("fs"), path = require("path");
-const sandbox = require("./sandbox.js"), claude = require("./claude.js");
+const sandbox = require("./sandbox.js"), claude = require("./claude.js"), texture = require("./texture.js");   // (texture.js adds its routes to sandbox.js)
 
 const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf("--" + name); return i >= 0 && args[i + 1] ? +args[i + 1] : def; };
@@ -445,4 +445,5 @@ console.log(`Blockfield debug server
   Blockfieldpedia: http://${shown}:${GAME_PORT}/wiki/   (the Blockfield wiki)`}${world ? `
   World server: ws://${shown}:${GAME_PORT}/sim   (the simulation runs here; saves in ${SAVES})` : ""}
   Structure designer (sandbox worlds): ${claude.describe()}
+  Texture studio providers: ${texture.status().providers.map(p => p.name + (p.configured ? " (on)" : " (off: " + p.error + ")")).join(", ") || "none"}
 Ctrl+C to stop.`);

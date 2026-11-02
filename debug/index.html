@@ -341,7 +341,7 @@
   <div class="hstat" id="h-clock"></div>
   <span class="warp" id="h-warp" hidden></span>
   <button class="gbtn" id="g-open" title="The game log: everything the game logs, newest first (js/gamelog.js)">Game log<span class="gerr" id="g-errs"></span></button>
-  <button class="gbtn" id="api-open" title="The structure designer's calls to the Claude API: instructions, settings, every message and reply, cost (debug/claude.js, spec idea-051)">API calls<span class="acount" id="api-n"></span></button>
+  <button class="gbtn" id="api-open" title="The sandbox structure designer's and texture studio's calls to the model APIs: instructions, settings, every message and reply, cost (debug/claude.js, spec idea-051)">API calls<span class="acount" id="api-n"></span></button>
   <div class="grow"></div>
   <div class="hstat">Seed <b id="h-seed">-</b></div>
   <div class="hstat">Gen <b id="h-gen">-</b></div>
@@ -1993,7 +1993,7 @@ document.addEventListener("click", e => { if (gMenu && e.target.isConnected && !
 // with a draft starts another round). The API key is never part of it.
 let apiCalls = [], apiOpen = false, apiSel = null, apiFollow = true, apiT = 0;
 const apiOpenKeys = new Set(["system"]);   // which folds are open, kept across redraws
-const API_KIND = { design: "Structure design" };
+const API_KIND = { design: "Structure design", texture: "Texture" };
 const API_STATUS = { running: "running", ok: "done", error: "failed", refused: "refused", problems: "problems left" };
 // The API reports tokens, not dollars: the server works out each round's cost from the model's price list (debug/claude.js PRICE)
 const usd = d => "$" + (d >= 1 ? d.toFixed(2) : d >= 0.01 ? d.toFixed(3) : d.toFixed(5));

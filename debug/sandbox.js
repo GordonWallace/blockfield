@@ -35,17 +35,24 @@ function http(req, res, rel) {
   json(res, 404, { error: "no such sandbox call" });
   return true;
 }
-function save(req, res) {
-  if (!loopback(req) && !ALLOW_LAN) { json(res, 403, { error: "saving only works from this computer (BF_SANDBOX_LAN=1 allows your network)" }); return; }
+// A POST from the game's own page on this computer: guards, then the JSON body to cb (or an error answer). Shared with debug/texture.js.
+function readJson(req, res, max, cb) {
+  if (!loopback(req) && !ALLOW_LAN) { json(res, 403, { error: "this only works from this computer (BF_SANDBOX_LAN=1 allows your network)" }); return; }
   const origin = req.headers.origin, host = req.headers.host;
   if (origin && host && origin.replace(/^https?:\/\//, "") !== host) { json(res, 403, { error: "wrong origin" }); return; }
   if (!/^application\/json\b/.test(req.headers["content-type"] || "")) { json(res, 415, { error: "JSON only" }); return; }
-  let size = 0;
+  let size = 0, over = false;
   const chunks = [];
-  req.on("data", c => { size += c.length; if (size > MAX_SAVE) { req.destroy(); return; } chunks.push(c); });
+  req.on("data", c => { size += c.length; if (size > max) { over = true; req.destroy(); return; } chunks.push(c); });
   req.on("end", () => {
+    if (over) return;
     let b;
     try { b = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch (e) { json(res, 400, { error: "bad JSON" }); return; }
+    cb(b);
+  });
+}
+function save(req, res) {
+  readJson(req, res, MAX_SAVE, b => {
     if (!b || !SAVE_DIRS.includes(b.dir)) { json(res, 400, { error: "dir is one of " + SAVE_DIRS.join(", ") }); return; }
     if (!NAME.test(String(b.name || "")) || b.name === "index") { json(res, 400, { error: "a name is letters, digits, - and _ (64 at most)" }); return; }
     if (!b.data || typeof b.data !== "object") { json(res, 400, { error: "nothing to save" }); return; }
@@ -55,4 +62,4 @@ function save(req, res) {
     json(res, 200, { ok: true, path: "sandbox/" + b.dir + "/" + b.name + ".json" });
   });
 }
-module.exports = { http, list, DIRS, ROOT, NAME, json, route: fn => extra.push(fn) };
+module.exports = { http, list, readJson, DIRS, ROOT, NAME, json, route: fn => extra.push(fn) };

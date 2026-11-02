@@ -49,9 +49,10 @@ function readKey() {
 let KEY = readKey();
 let client = null;
 const getClient = () => client || (client = new Anthropic({ apiKey: KEY }));
-function setClient(fake) { client = fake; KEY = fake ? "test" : readKey(); sdkError = fake ? null : sdkError; recent.length = 0; spends.length = 0; }
+function setClient(fake) { client = fake; meterReset(); KEY = fake ? "test" : readKey(); sdkError = fake ? null : sdkError; }
 
 const recent = [];   // request times this minute
+const meterReset = () => { recent.length = 0; if (typeof spends !== "undefined") spends.length = 0; };
 let day = "", today = 0;
 function allow() {
   const now = Date.now(), d = new Date().toDateString();
@@ -78,17 +79,18 @@ const cost = (u, P) => ((u.input_tokens || 0) * P.input + (u.cache_read_input_to
 const copy = o => JSON.parse(JSON.stringify(o));
 const tell = rec => { for (const f of watchers) { try { f(rec); } catch (e) { /* a watcher's problem, not the call's */ } } };
 // One record per design request, however many API rounds it takes.
-function startCall(kind, model, params, system, messages) {
-  const rec = { id: ++callId, kind, t: Date.now(), model, price: PRICES[model], cost: 0, spent, params, system, messages: copy(messages), earlier: 0, rounds: [], status: "running", ms: 0 };
+function startCall(kind, model, params, system, messages, price) {
+  const rec = { id: ++callId, kind, t: Date.now(), model, price: price !== undefined ? price : PRICES[model] || null, cost: 0, spent, params, system, messages: copy(messages), earlier: 0, rounds: [], status: "running", ms: 0 };
   calls.push(rec);
   if (calls.length > KEEP_CALLS) calls.shift();
   tell(rec);
   return rec;
 }
 // After each API reply: the reply, then whatever goes back to the model next (the list of problems).
-function roundDone(rec, r, ms, next) {
-  rec.messages.push({ role: "assistant", content: copy(r.content), round: rec.rounds.length });
-  const c = cost(r.usage || {}, rec.price);
+// cost: what the round cost when the caller knows better than the price table (another company's provider, debug/providers/)
+function roundDone(rec, r, ms, next, knownCost) {
+  rec.messages.push({ role: "assistant", content: copy(r.content || []), round: rec.rounds.length });
+  const c = knownCost != null ? +knownCost || 0 : rec.price ? cost(r.usage || {}, rec.price) : 0;
   rec.rounds.push({ stop: r.stop_reason, usage: copy(r.usage || {}), cost: c, ms, id: r.id });
   rec.cost = (rec.cost || 0) + c; spent += c; rec.spent = spent; spends.push([Date.now(), c]);
   if (next) rec.messages.push(copy(next));
@@ -266,4 +268,6 @@ function describe() { return KEY ? (sdkError ? "key found, but " + sdkError : "o
 const callLog = () => calls;
 const onCall = f => { watchers.add(f); return () => watchers.delete(f); };
 
-module.exports = { handle, describe, callLog, onCall, validateDesign, designSchema, blueprint, status, setClient, hourSpend, PRICES, DEFAULT_MODEL, MAX_W, MAX_H };
+// Shared with the texture studio (debug/texture.js): one set of caps and one API calls panel for every provider.
+const meter = { allow, startCall, roundDone, endCall, hourSpend, cost, key: () => KEY, sdk: () => (sdkError ? null : Anthropic), client: () => getClient(), PER_HOUR_USD };
+module.exports = { meter, handle, describe, callLog, onCall, validateDesign, designSchema, blueprint, status, setClient, hourSpend, PRICES, DEFAULT_MODEL, MAX_W, MAX_H };
