@@ -116,7 +116,8 @@ let S = null;
   check(ended && !s1.mismatch, 'the trial ended, no difference');
   // (the trial leaves out its first 2 meetings, the handover, and sums the busy ms of the 400 ticks after them: js/rplay.js WARM_MEETS)
   const tr = (await status(pg)).lastTrial;
-  check(tr && tr.from - tr.at === 160 && tr.n >= 300 && tr.after === tr.ms / tr.n, `the trial was judged after the first 2 meetings, on the ticks after them (${JSON.stringify(tr)})`);
+  const meet = await sim(pg, () => BF.ctick.MEET);
+  check(tr && tr.from - tr.at === 2 * meet && tr.n >= 300 && tr.after === tr.ms / tr.n, `the trial was judged after the first 2 meetings, on the ticks after them (${JSON.stringify(tr)})`);
   const errs = (await logLines(pg)).filter(l => /^ERROR/.test(l));
   check(!errs.length, `no ERROR in the workers' and clusters' game log lines${errs.length ? ': ' + errs.slice(0, 3).join(' | ').slice(0, 600) : ''}`);
   for (const l of (await logLines(pg)).slice(-8)) console.log('  log: ' + l.slice(0, 300));
