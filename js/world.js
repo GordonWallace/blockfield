@@ -1030,6 +1030,7 @@ world.update = function (px, pz, budgetMs = 8) {
 };
 
 world.setViewDist = function (d) { world.viewDist = d; lastCenter = null; };
+world.chunkGen = () => CGEN;   // (the chunk set's generation: js/protocol.js wanted)
 world.meshedCount = () => { let n = 0; for (const c of world.chunks.values()) if (c.mesh) n++; return n; };
 
 // ---------- meshing ----------
