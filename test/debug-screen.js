@@ -81,10 +81,16 @@ const start = async () => { const s = await lib.serve({ world: onServer, game: G
   const pc = await dbg.evaluate(() => ({ vss: document.getElementById('c-vss').textContent, ms: document.getElementById('c-perf-ms').textContent, parts: document.querySelectorAll('#c-split span').length, f3: document.getElementById('f3').textContent }));
   ok('Performance card shows the meter ' + JSON.stringify(pc.vss + ' / ' + pc.ms), /^[\d,]+ V·s\/s$/.test(pc.vss) && /ms\/step/.test(pc.ms) && pc.parts === 7 && /\nSim [\d]+ V·s\/s /.test(pc.f3));
   ok('meter on in the game while the screen is open', await lib.sim(game, () => BF.perf.on));
+  // a simulation that missed the screen count (a new world's, or an answer lost while it was busy) is told again, and its meter comes back
+  // on (Gordon, 2026-11-02: the Performance card blank a lot of the time)
+  ok('the meter goes off when the simulation hears no screen is open', await lib.sim(game, () => { BF.debugFeed.ack({ screens: 0 }); BF.perf.frame(); return !BF.perf.on; }));
+  let meterBack = false;
+  for (let i = 0; i < 60 && !meterBack; i++) { await dbg.waitForTimeout(250); meterBack = await lib.sim(game, () => BF.perf.on); }
+  ok('and it comes back on: the simulation is told the count again', meterBack);
   // the Simulation budget card (js/active.js): the villages simulated now, nearest and extra, from the start (bug: 0 until the first decision)
-  const bc = await dbg.evaluate(() => ({ big: document.getElementById('c-budget').textContent, sub: document.getElementById('c-budget-sub').textContent }));
+  const bc = await dbg.evaluate(() => ({ big: document.getElementById('c-budget').textContent, sub: document.getElementById('c-budget-sub').textContent, next: document.getElementById('c-budget-next').textContent }));
   const nSim = await lib.sim(game, () => BF.villageSim.count());
-  ok('Simulation budget card counts the villages simulated ' + JSON.stringify(bc), bc.big === nSim + (nSim === 1 ? ' village' : ' villages') + ' simulated (' + nSim + ' nearest + 0 extra)' && /^simulation needs \d+% of each second at 1x/.test(bc.sub));
+  ok('Simulation budget card counts the villages simulated ' + JSON.stringify(bc), bc.big === nSim + (nSim === 1 ? ' village' : ' villages') + ' simulated (' + nSim + ' nearest + 0 extra)' && /^Needs (\d+|<1)% of each second at 1x/.test(bc.sub) && /^Next village:./.test(bc.next));
   // the state hash card (js/statehash.js, spec r15-24): the game's latest hash and every part
   // (the game hashes again every 10 s and the screen shows it with the next snapshot: wait, up to 15 s, until both show the same one)
   let hs, gh;

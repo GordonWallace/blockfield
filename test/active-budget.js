@@ -13,6 +13,8 @@ module.exports = async (pg) => {
   await lib.sim(pg, () => { globalThis.__running = () => BF.villageSim.areas().filter(a => a.kind === "village").map(a => a.key); });
   const base = await lib.sim(pg, () => ({ on: BF.active.opts().on, n: BF.villageSim.count(), keys: __running(), extras: BF.active.extras().length }));
   ok("off in automated browsers: the distance rule only", base.on === false && base.extras === 0, base);
+  const offWhy = await lib.sim(pg, () => BF.active.blocker());
+  ok("off: the Next village line says so", offWhy.state === "off" && /off/i.test(offWhy.text), offWhy);
 
   // 1. forced high: short windows so the test doesn't wait minutes
   await lib.sim(pg, () => { BF.mobs.spawning = false; BF.active.set({ on: true, budget: 10, win: 1, hold: 2, cool: 600, minFps: 0, reach: 1000, morning: 0 }); });
@@ -32,6 +34,10 @@ module.exports = async (pg) => {
   ok("an extra village's villagers come out (same load path)", people, first);
   const feed = await lib.sim(pg, () => (BF.debugFeed.snapshot || BF.debugFeed.simPart)().budget);   // (off the page the simulation makes its part of the snapshot)
   ok("the debug feed carries the budget and the decision log", !!feed && feed.extras.length >= 2 && feed.log.length >= 2, feed && { villages: feed.villages, extras: feed.extras.length, log: feed.log.length });
+  // the card's Next village line (js/active.js blocker, Gordon 2026-11-02): what holds the next join back, from decide()'s own conditions
+  ok("the feed's Next village line names a limiter", !!feed && !!feed.next && /^(off|fixed|leaving|waiting|full|ready)$/.test(feed.next.state) && feed.next.text.length > 0 && feed.joinAt < feed.leaveAt, feed && { next: feed.next, joinAt: feed.joinAt, leaveAt: feed.leaveAt });
+  const waitWhy = await lib.sim(pg, () => { const was = BF.active.opts().hold; BF.active.set({ hold: 3600 }, true); const b = BF.active.blocker(); BF.active.set({ hold: was }, true); return b; });
+  ok("with an hour between joins, it waits out the time since the last join (or the night)", /^waiting$/.test(waitWhy.state) && /after the last join|Night|Early morning/.test(waitWhy.text), waitWhy);
 
   // 1b. Nearest only: the extras go one a window, the farthest first (a long window here: one goes, the rest wait); switching back to
   // Automatic keeps the rest (Gordon, 2026-10-30: they all went at once)

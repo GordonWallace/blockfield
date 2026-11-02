@@ -468,6 +468,10 @@ function simPart(ack, copy) {
     mobmap: Date.now() - mobMapT >= MOBMAP_EVERY ? (mobMapT = Date.now(), mobMap(pp)) : undefined,
     pick: BF.dayTimeline ? { pv: BF.dayTimeline.pv, key: BF.dayTimeline.picked } : null, day: dayline(),
     view: { vv },   // the villages on the debug screens, as last told (the server sends them again when vv is out of date)
+    // how many debug screens this simulation was told are open (its villager-seconds meter runs while any is): the server, or the page,
+    // tells it again when that's out of date (a new world's simulation, or an answer lost to a busy one, left the meter off: Gordon's
+    // blank Performance card, 2026-11-02)
+    simScreens,
     loadLimits: BF.villageSim && BF.villageSim.LIMITS && BF.mobs.aiTime ? { aiMs: BF.mobs.aiTime(), aiWork: BF.mobs.aiWork ? BF.mobs.aiWork() : 0, maxAiWork: BF.villageSim.LIMITS.aiWork, villages: BF.villageSim.status().split(" ")[0] | 0, maxVillages: BF.villageSim.LIMITS.villages } : null,
     loadErrors: BF.villageSim && BF.villageSim.errors ? BF.villageSim.errors().slice(-30) : [],   // loading errors (js/villagesim.js)
     routes: BF.merchant ? BF.merchant.routes().map(r => Object.assign(r, { an: nameOf(r.a), bn: nameOf(r.b) })) : null,   // caravan routes (js/merchant.js)
@@ -520,6 +524,7 @@ function snapshot() {
     if (remoteErr) { const e = remoteErr; remoteErr = null; throw new Error("in the simulation: " + e); }   // (the screen shows it, as one here)
     part = remote || {};
     remote = null;
+    if (part.simScreens != null && part.simScreens !== screens) passAck({ screens });   // (its meter: see simPart)
     for (const id in part.icons || {}) if (part.icons[id] && !part.icons[id].url) { try { part.icons[id].url = BF.inventory.iconURL ? BF.inventory.iconURL(+id) : BF.textures.icon(+id); } catch (e) { /* none */ } }
   } else part = simPart();
   return Object.assign({ t: Date.now(), n: ++sent, info, text: BF.debugText(info), paused: !!BF.state.paused, hidden: document.hidden }, part, {

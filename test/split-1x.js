@@ -98,6 +98,8 @@ let S = null;
   await sim(pg, () => { BF.active.set({ on: true, budget: 0.02, win: 1 }); return true; });
   const s0 = await status(pg);
   check(/splits when ticks drop or the load stays high/.test(s0.text) || s0.followers === 0, `before: one thinks (${s0.text})`);
+  // the Workers card's Split line (js/rplay.js splitWhy, Gordon 2026-11-02): what has to happen next, before the split
+  check(!!s0.next && /^(waiting|ready|off)$/.test(s0.next.state) && s0.kind === 'clusters', `before: the Split line says what it waits for (${s0.kind}: ${s0.next && s0.next.text})`);
   // (the split and its trial can come and go while a slow host's simulation answers late: the game log says what happened)
   const tr = Date.now();
   const ended = await until(pg, () => BF.glog.entries().some(e => e.k === 'workers' && /the split pays|not worth it/.test(e.x)), 1200000, 'split at 1x and its trial');
@@ -113,9 +115,12 @@ let S = null;
     const more = await until(pg, () => (BF.rworkers.checks || 0) >= 2, 600000, 'checks');
     const s3 = await status(pg);
     check(more && !s3.mismatch, `split kept: the copies were compared ${s3.checks} times and agree`);
+    check(s3.next && s3.next.state === 'split', `the Split line says it paid (${s3.next && s3.next.text})`);
   } else {
     const gone = await until(pg, () => BF.rplay.status().followers === 0, 300000, 'followers stop');
     check(gone && !s2.mismatch, 'not worth it: back to one, the followers stop, no difference');
+    const s4 = await status(pg);
+    check(s4.next && s4.next.state === 'ended' && /start again/.test(s4.next.text), `the Split line says the workers stopped for this world (${s4.next && s4.next.text})`);
   }
   const errs = (await logLines(pg)).filter(l => /^ERROR/.test(l));
   check(!errs.length, `no ERROR in the workers' and clusters' game log lines${errs.length ? ': ' + errs.slice(0, 3).join(' | ').slice(0, 600) : ''}`);
