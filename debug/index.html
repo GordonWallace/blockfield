@@ -351,7 +351,7 @@
     <div class="card" id="c-perf" title="Villager-seconds of game time simulated per real second (js/perf.js): speed times villagers. The split is ms per simulation step by part; streaming is per frame, spread over its steps"><h3>Performance <span class="sub" id="c-perf-st"></span></h3>
       <div class="big" id="c-vss">-</div><div class="sub" id="c-perf-ms"></div><div class="psplit" id="c-split"></div><canvas class="spark" id="s-vss"></canvas></div>
     <div class="card" id="c-budgetcard" title="Distant villages (js/active.js, spec r15-34, the pause menu's settings): villages beyond the nearest four are simulated, nearest first, while the simulation needs less than this share of each real second at 1x, within the distance and memory limits; over it for 10 s, the farthest extra unloads with the countdown"><h3>Simulation budget <span class="sub" id="c-budget-st"></span></h3>
-      <div class="big" id="c-budget">-</div><div class="sub" id="c-budget-sub"></div><div class="bar"><i id="b-budget"></i></div><div class="sub" id="c-budget-ex"></div><div class="sub vload" id="c-vload" title="Force-load villages (r15-90): the nearest villages not yet simulated join now, nearest first (the /loadvillages command); the usual loading rules decide afterwards, so they may unload again if the machine can't run them">Load now <input type="number" id="c-vload-n" min="1" max="50" value="3"> nearest villages <button id="c-vload-go">Load</button> <span id="c-vload-st"></span></div><div class="sub" id="c-budget-log" style="margin-top:6px;max-height:110px;overflow:auto"></div></div>
+      <div class="big" id="c-budget">-</div><div class="sub" id="c-budget-sub"></div><div class="bar"><i id="b-budget"></i></div><div class="sub" id="c-budget-ex"></div><div class="sub vload" id="c-vload" title="Force-load villages (r15-90): the nearest villages not yet simulated join now, nearest first (the /loadvillages command); the usual loading rules decide afterwards, so they may unload again if the machine can't run them">Load now <input type="number" id="c-vload-n" min="1" max="50" value="3"> nearest villages <button id="c-vload-go">Load</button> <span id="c-vload-st"></span></div><div class="sub vload" title="Force-unload villages (r15-93): the farthest extra villages leave now, each once its villagers' tasks are done (at most a game minute), and aren't picked again for 5 minutes (the /unloadvillages command); the nearest villages the distance rule keeps stay">Unload now <input type="number" id="c-vunload-n" min="1" max="50" value="3"> farthest extra villages <button id="c-vunload-go">Unload</button> <span id="c-vunload-st"></span></div><div class="sub vload" title="Automatic loading and unloading (r15-93): paused, the time limit neither adds nor removes villages, so forced loads and unloads stay as they are (the /autovillages command)">Automatic loading and unloading: <b id="c-vauto">-</b> <button id="c-vauto-go">Pause</button> <span id="c-vauto-st"></span></div><div class="sub" id="c-budget-log" style="margin-top:6px;max-height:110px;overflow:auto"></div></div>
     <div class="card" id="c-reqcard" title="The request queue (js/requests.js, spec r15-17): requests applied and refused, and world writes still made directly (by module) until the systems are converted"><h3>Requests</h3>
       <div class="big" id="c-req">-</div><div class="sub" id="c-req-sub"></div><div class="psplit" id="c-direct"></div></div>
     <div class="card" id="c-rtickcard" title="The region tick (js/regiontick.js, spec r15-33): mobs think region by region, and each region's requests apply together; ms per tick by phase over the last 200 ticks, and the regions with the most mobs"><h3>Region tick <span class="sub" id="c-rtick-st"></span></h3>
@@ -926,6 +926,23 @@ $("c-vload-go").addEventListener("click", () => {
     .then(r => { st.textContent = r.ok ? "sent: " + n + " " + (n === 1 ? "village joins" : "villages join") + " at the next village check (see the log below)" : "refused"; })
     .catch(() => { st.textContent = "no debug server"; });
 });
+// force-unloading (r15-93): POST /warp {op: "unload", n} (/unloadvillages); automatic loading paused or on: {op: "auto", on} (/autovillages)
+let vAuto = true;
+$("c-vunload-go").addEventListener("click", () => {
+  const n = Math.round(+$("c-vunload-n").value), st = $("c-vunload-st");
+  if (!(n >= 1 && n <= 50)) { st.textContent = "1 to 50"; return; }
+  st.textContent = "asking…";
+  fetch("warp", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ op: "unload", n }) })
+    .then(r => { st.textContent = r.ok ? "sent: the " + n + " farthest extra " + (n === 1 ? "village leaves" : "villages leave") + " at the next village check" : "refused"; })
+    .catch(() => { st.textContent = "no debug server"; });
+});
+$("c-vauto-go").addEventListener("click", () => {
+  const on = !vAuto, st = $("c-vauto-st");
+  st.textContent = "asking…";
+  fetch("warp", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ op: "auto", on }) })
+    .then(r => { st.textContent = r.ok ? "sent" : "refused"; })
+    .catch(() => { st.textContent = "no debug server"; });
+});
 // the simulation budget (js/active.js): the share of each second the simulation used against the budget, the extra villages, and the decisions
 function renderBudget(b) {
   $("c-budgetcard").hidden = !b;
@@ -937,6 +954,9 @@ function renderBudget(b) {
   $("c-budget-sub").textContent = `simulation needs ${pc(b.used)} of each second at 1x` + (on ? ` (limit ${pc(b.budget)}${b.reach > 0 ? ", within " + b.reach + " blocks" : ""}, memory ${b.memMB} MB)` : "") + ` · ${b.fps} fps` + (on ? ` · ${b.over ? "over for " + b.over + " s" : "under for " + b.under + " s"}` : "") +
     (on && b.peak != null ? ` · busiest hour of the last day ${pc(b.peak)} a village` : "");
   $("b-budget").style.width = Math.min(100, Math.round(on ? b.used / b.budget * 100 : 0)) + "%";
+  if (b.auto != null && b.auto !== vAuto) $("c-vauto-st").textContent = "";
+  vAuto = b.auto !== false;
+  $("c-vauto").textContent = vAuto ? "on" : "paused"; $("c-vauto-go").textContent = vAuto ? "Pause" : "Resume";
   $("c-budget-ex").textContent = b.extras.length ? "Extra: " + b.extras.map(e => `${e.name} (${e.d} blocks)`).join(", ") : "No extra villages";
   $("c-budget-log").innerHTML = b.log.slice().reverse().map(e => `<div>day ${e.day.toFixed(2)} · ${esc(e.text)}</div>`).join("");
 }
