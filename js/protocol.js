@@ -769,7 +769,7 @@ function connect(send, mode) {
   // few frames), aims `lag` ticks behind the newest (a little more than the longest recent wait for the next entities message, so the
   // next is there before the clock gets to it), eases back to that aim, and never runs past the newest: it waits there instead of guessing.
   const HIST_MAX = 48, CADENCE = 6;   // CADENCE: a change this few ticks after the last is drawn from it (animals idling in a pen step every 5 ticks)
-  const DRAW = { lag: 1.5, peak: 1, lastT: -1, lastAt: 0, tickMs: 50, rate: null, winT: -1, winAt: 0, frames: 0, waits: 0, toldAt: -1e9 };
+  const DRAW = { lag: 1.5, peak: 1, lastT: -1, lastAt: 0, tickMs: (BF.warp ? BF.warp.TICK : 0.05) * 1000, rate: null, winT: -1, winAt: 0, frames: 0, waits: 0, toldAt: -1e9 };
   world.draw = (dTicks, realDt) => {
     const T = world.tick;
     if (T < 0) { world.rt = null; return; }
@@ -810,7 +810,7 @@ function connect(send, mode) {
   function arrived(T) {
     const now = typeof performance !== "undefined" ? performance.now() : Date.now(), ck = world.clock;
     const sp = ck && ck.achieved > 0 ? ck.achieved : ck && ck.speed > 0 ? ck.speed : 1;
-    DRAW.tickMs = 50 / Math.max(0.05, sp);
+    DRAW.tickMs = (BF.warp ? BF.warp.TICK : 0.05) * 1000 / Math.max(0.05, sp);   // (a tick's real ms at that speed: the tick length is a setting, idea-049)
     if (DRAW.lastT >= 0 && T > DRAW.lastT) {
       const gap = Math.max(T - DRAW.lastT, (now - DRAW.lastAt) / DRAW.tickMs);
       DRAW.peak = Math.max(gap, DRAW.peak * 0.97);
