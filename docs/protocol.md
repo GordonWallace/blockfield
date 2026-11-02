@@ -26,7 +26,7 @@ Every message is a plain object `{t: type, ...}`. `BF.proto.encode(msg)` turns i
 | `unload` | `keys` | chunks the client has that left the view or were unloaded |
 | `blockChanges` | `tick`, `chunks`: [[key, [[index, id], ...]], ...] | every flush with changes, all chunks in one message; a cell changed several times goes once with its last id. Replica: every chunk's changes, not only those the client has |
 | `edits` | `tick`, `chunks` (as blockChanges) | replica only: every edit the world holds (`world.edits`), at the first flush after each `hello`; it replaces the client's |
-| `entities` | `tick`, `add` [{n, kind, s}], `set` [{n, kind, s}], `gone` [n] | every flush after a tick ran, even with nothing changed (every tick at 1x, the latest state at fast-forward); after a request applied; every flush while frozen or paused |
+| `entities` | `tick`, `add` [{n, kind, s}], `set` [{n, kind, s}], `gone` [n] | every flush after a tick ran, even with nothing changed (every tick at 1x, the latest state at fast-forward: with the simulation off the page's thread, about 30 flushes a second at most then); after a request applied; every flush while frozen or paused |
 | `events` | `tick`, `list` (js/fx.js effect events: puff, heart, crumbs, dust; r15-37: `sound` entries, below) | every flush with events in view |
 | `village` | `list` [{key, name, x, z, people}], `gone` [key] | when a summary changes (checked every 20 flushes that ticked) |
 | `clock` | `tick`, `day`, `time`, `speed`, `frozen`, `achieved`, `weather` (only when it changed) | once a game second, and on a speed change |

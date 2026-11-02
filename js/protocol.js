@@ -9,7 +9,7 @@
 // Interest: the sim side sends only what the client's view (position and view distance) covers: loaded chunks within the view distance,
 // and the entities, effects and changes in them. Rate: everything is sent by flush(), once a drawn frame after the frame's ticks, and
 // entities only when a tick ran since the last flush: every tick at 1x (a frame holds at most one), the latest state at fast-forward
-// (off the page's own thread, at most every FLUSH_MS at fast-forward).
+// (off the page's own thread, at most every FLUSH_MS, about 30 times a second, at fast-forward).
 // In-page transport (BF.proto.local, on from the boot): the game is still one thread; the two ends are joined by a direct queue that
 // encodes and decodes every message, and the client keeps a mirror of what it was sent (BF.client.world). Player requests (r15-20) go
 // through it: BF.req.player sends a request message, the sim applies it at once (js/requests.js), and its block changes and result come
@@ -237,9 +237,10 @@ const ckey = (cx, cz) => cx + "," + cz;
 const sectionsOf = c => c.secs.map(s => (typeof s === "number" ? s : s.slice()));
 let liveSim = null;   // the sim end the world's block hook reports to
 const PACE_MS = 500;   // (serve: how often entities go to a page that has fallen behind)
-// (serve: at fast-forward the simulation goes round its loop every tick or two, about 200 times a second on Gordon's test4 with 8 workers
-// at 10x, and working out a flush took 17% of the leader's busy time for a page that draws 60 frames a second: a replica's flushes wait this long)
-const FLUSH_MS = +(globalThis.process && process.env && process.env.BF_FLUSH_MS) || 16;
+// (serve: at fast-forward the simulation goes round its loop every tick or two, and working out a flush took 17% of the leader's busy time on
+// Gordon's test4 with 8 workers, about 200 flushes a second. A replica's flushes at fast-forward wait this long: 2% more ticks a second, the
+// leader 9 points less busy at 10x. An action the player took, a new client, a paused or frozen world and a forced flush don't wait.)
+const FLUSH_MS = 33;
 function serve(send, opts) {
   opts = opts || {};
   const R = !!opts.replica;
