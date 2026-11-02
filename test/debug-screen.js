@@ -83,10 +83,13 @@ const start = async () => { const s = await lib.serve({ world: onServer, game: G
   ok('meter on in the game while the screen is open', await lib.sim(game, () => BF.perf.on));
   // a simulation that missed the screen count (a new world's, or an answer lost while it was busy) is told again, and its meter comes back
   // on (Gordon, 2026-11-02: the Performance card blank a lot of the time)
-  ok('the meter goes off when the simulation hears no screen is open', await lib.sim(game, () => { BF.debugFeed.ack({ screens: 0 }); BF.perf.frame(); return !BF.perf.on; }));
-  let meterBack = false;
-  for (let i = 0; i < 60 && !meterBack; i++) { await dbg.waitForTimeout(250); meterBack = await lib.sim(game, () => BF.perf.on); }
-  ok('and it comes back on: the simulation is told the count again', meterBack);
+  // (with the simulation in the page, the page's own count drives the meter: nothing to tell)
+  if (await lib.sim(game, () => typeof BF.debugFeed.ack === 'function')) {
+    ok('the meter goes off when the simulation hears no screen is open', await lib.sim(game, () => { BF.debugFeed.ack({ screens: 0 }); BF.perf.frame(); return !BF.perf.on; }));
+    let meterBack = false;
+    for (let i = 0; i < 60 && !meterBack; i++) { await dbg.waitForTimeout(250); meterBack = await lib.sim(game, () => BF.perf.on); }
+    ok('and it comes back on: the simulation is told the count again', meterBack);
+  }
   // the Simulation budget card (js/active.js): the villages simulated now, nearest and extra, from the start (bug: 0 until the first decision)
   const bc = await dbg.evaluate(() => ({ big: document.getElementById('c-budget').textContent, sub: document.getElementById('c-budget-sub').textContent, next: document.getElementById('c-budget-next').textContent }));
   const nSim = await lib.sim(game, () => BF.villageSim.count());
