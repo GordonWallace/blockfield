@@ -221,6 +221,29 @@
   .gent.DEBUG .gx { color: var(--muted); }
   .ghead { padding: 6px 16px; color: var(--muted); border-bottom: 1px solid var(--edge); font-size: 12px; }
   .gmore { padding: 6px 16px; color: var(--faint); font-size: 12px; }
+  /* ---------- API calls (debug/claude.js): opened from the header ---------- */
+  .gbtn .acount { color: var(--info); margin-left: 6px; } .gbtn .acount.run { color: var(--warn); }
+  #apipanel .ph .gbtn { margin-left: 2px; }
+  .api { display: grid; grid-template-columns: 260px minmax(0, 1fr); height: 70vh; min-height: 320px; }
+  .alist { overflow: auto; border-right: 1px solid var(--edge); }
+  .aitem { padding: 7px 12px; border-bottom: 1px solid var(--edge); cursor: pointer; border-left: 3px solid transparent; font-size: 12px; }
+  .aitem:hover { background: var(--card2); } .aitem.sel { background: var(--card2); border-left-color: var(--accent); }
+  .aitem .at { display: flex; gap: 8px; } .aitem .at b { font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .aitem .as { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ast { font-size: 11px; } .ast.ok { color: var(--accent2); } .ast.running { color: var(--warn); } .ast.error, .ast.refused { color: var(--danger); } .ast.problems { color: var(--warn); }
+  .adetail { overflow: auto; padding: 12px 16px 20px; font-size: 12px; }
+  .ahead { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 10px; color: var(--muted); } .ahead b { color: var(--ink); font-weight: 500; }
+  .aerr { color: var(--danger); margin: 6px 0 10px; }
+  .adetail details { border: 1px solid var(--edge); border-radius: 8px; margin: 8px 0; background: var(--bg2); }
+  .adetail summary { cursor: pointer; padding: 6px 10px; color: var(--muted); } .adetail summary b { color: var(--ink); font-weight: 500; }
+  .adetail pre { margin: 0; padding: 8px 10px; white-space: pre-wrap; word-break: break-word; font: 12px/1.45 var(--mono); color: var(--ink); max-height: 50vh; overflow: auto; }
+  .amsg { border: 1px solid var(--edge); border-left: 3px solid var(--info); border-radius: 8px; margin: 8px 0; background: var(--bg2); }
+  .amsg.assistant { border-left-color: var(--accent); }
+  .amsg > .ar { padding: 5px 10px; color: var(--muted); border-bottom: 1px solid var(--edge); font-size: 11px; } .amsg > .ar b { color: var(--ink); font-weight: 500; }
+  .ablk { border-top: 1px dashed var(--edge); } .ablk:first-of-type { border-top: 0; }
+  .ablk > .bt { padding: 4px 10px 0; font-size: 11px; color: var(--faint); }
+  .ablk.thinking pre { color: var(--muted); font-style: italic; } .ablk.tool_use .bt, .ablk.tool_result .bt { color: var(--warn); }
+  .aearlier { opacity: 0.75; }
   #log { max-height: calc(100vh - 210px); min-height: 300px; overflow: auto; padding: 4px 0; }
   .ent { display: grid; grid-template-columns: 112px 1fr; gap: 10px; padding: 5px 16px; border-left: 3px solid transparent; font-size: 12px; }
   .ent time { color: var(--faint); }
@@ -318,6 +341,7 @@
   <div class="hstat" id="h-clock"></div>
   <span class="warp" id="h-warp" hidden></span>
   <button class="gbtn" id="g-open" title="The game log: everything the game logs, newest first (js/gamelog.js)">Game log<span class="gerr" id="g-errs"></span></button>
+  <button class="gbtn" id="api-open" title="The structure designer's calls to the Claude API: instructions, settings, every message and reply, cost (debug/claude.js, spec idea-051)">API calls<span class="acount" id="api-n"></span></button>
   <div class="grow"></div>
   <div class="hstat">Seed <b id="h-seed">-</b></div>
   <div class="hstat">Gen <b id="h-gen">-</b></div>
@@ -341,6 +365,13 @@
       <button class="gbtn" id="g-x" title="Close the game log">Close</button></div>
     <div class="filters" id="g-filters"></div>
     <div id="glog"><div class="empty">No game log yet: load a saved world in the game.</div></div>
+  </div>
+  <div class="panel" id="apipanel" hidden>
+    <div class="ph"><h2>API calls</h2><span class="sub" id="api-count"></span><div class="grow"></div>
+      <button class="gbtn" id="api-follow" title="Show each new call as it comes in">Follow newest</button>
+      <button class="gbtn" id="api-copy" title="Copy the shown call as JSON: system prompt, settings, messages and replies">Copy</button>
+      <button class="gbtn" id="api-x" title="Close the API calls">Close</button></div>
+    <div class="api"><div class="alist" id="api-list"></div><div class="adetail" id="api-detail"></div></div>
   </div>
   <section class="cards">
     <div class="card"><h3>Frame rate</h3><div class="big" id="c-fps">-</div><div class="sub" id="c-calls"></div><canvas class="spark" id="s-fps"></canvas></div>
@@ -505,6 +536,8 @@ function connect() {
   es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); forgetWorld(); pageSeed = c.seed ?? null; pageWid = c.wid ?? null; if (c.day !== undefined) dayData = c.day; Object.assign(layouts, c.layouts); Object.assign(logs, c.logs); Object.assign(details, c.details); Object.assign(icons, c.icons || {}); Object.assign(econ, c.econ || {}); logDirty = true; } catch (err) { console.error(err); } });
   es.addEventListener("cache", e => { try { const c = JSON.parse(e.data); if (c.glog !== undefined) glogSet(c.glog); } catch (err) { console.error(err); } });
   es.addEventListener("snap", e => { try { onSnap(JSON.parse(e.data)); } catch (err) { console.error(err); } });
+  es.addEventListener("claudecalls", e => { try { apiSet(JSON.parse(e.data)); } catch (err) { console.error(err); } });
+  es.addEventListener("claudecall", e => { try { apiIn(JSON.parse(e.data)); } catch (err) { console.error(err); } });
   es.addEventListener("alerts", e => { try { const o = JSON.parse(e.data); alerts = o.alerts || []; alertErr = null; renderAlerts(); } catch (err) { console.error(err); } });
   if (window.BFHist) BFHist.attach(es, { pick: k => { pinned = k; if (snap) onSnap(snap); } });   // the History panel (debug/vhist-view.js)
   es.onerror = () => { serverUp = false; status(); };
@@ -1953,6 +1986,105 @@ $("g-filters").addEventListener("click", e => {
   gSave(); gRender(true);
 });
 document.addEventListener("click", e => { if (gMenu && e.target.isConnected && !e.target.closest("#g-filters details.ft")) { const d = $(gMenu); gMenu = null; if (d) d.open = false; } });
+
+// ---------------------------------------------------------------- API calls (debug/claude.js)
+// Every call the sandbox structure designer (spec idea-051) makes to the Claude API, kept by the server for this run (newest 60): one entry per design
+// request, with the system prompt, request settings, the messages sent and each reply, round by round (the server's list of problems
+// with a draft starts another round). The API key is never part of it.
+let apiCalls = [], apiOpen = false, apiSel = null, apiFollow = true, apiT = 0;
+const apiOpenKeys = new Set(["system"]);   // which folds are open, kept across redraws
+const API_KIND = { design: "Structure design" };
+const API_STATUS = { running: "running", ok: "done", error: "failed", refused: "refused", problems: "problems left" };
+// The API reports tokens, not dollars: the server works out each round's cost from the model's price list (debug/claude.js PRICE)
+const usd = d => "$" + (d >= 1 ? d.toFixed(2) : d >= 0.01 ? d.toFixed(3) : d.toFixed(5));
+function apiSet(list) { apiCalls = Array.isArray(list) ? list : []; apiRender(true); }
+function apiIn(rec) {
+  const i = apiCalls.findIndex(c => c.id === rec.id);
+  if (i >= 0) apiCalls[i] = rec; else { apiCalls.push(rec); if (apiCalls.length > 60) apiCalls.shift(); }
+  apiRender(apiSel === rec.id || apiFollow);
+}
+const apiTok = c => { let i = 0, o = 0; for (const r of c.rounds || []) { i += r.usage.input_tokens || 0; o += r.usage.output_tokens || 0; } return { i, o }; };
+function apiLastUser(c) { const ms = c.messages || []; const m = ms[c.earlier >= 0 ? c.earlier : 0]; return m && typeof m.content === "string" ? m.content : ""; }
+function apiRender(detail) {
+  const run = apiCalls.filter(c => c.status === "running").length;
+  $("api-n").textContent = apiCalls.length ? String(apiCalls.length) : ""; $("api-n").classList.toggle("run", !!run);
+  if (!apiOpen) return;
+  if (performance.now() - apiT < 250) { if (!apiRender.t) apiRender.t = setTimeout(() => { apiRender.t = 0; apiRender(true); }, 300); return; }
+  apiT = performance.now();
+  if (apiFollow && apiCalls.length) apiSel = apiCalls[apiCalls.length - 1].id;
+  $("api-follow").classList.toggle("on", apiFollow);
+  const spent = apiCalls.reduce((m, c) => Math.max(m, c.spent || 0), 0);
+  $("api-count").textContent = apiCalls.length ? apiCalls.length + (apiCalls.length === 1 ? " call" : " calls") + (run ? ", " + run + " running" : "") + " \u00B7 " + usd(spent) + " since the server started" : "";
+  const list = $("api-list"), top = list.scrollTop;
+  list.innerHTML = apiCalls.length ? apiCalls.slice().reverse().map(c => {
+    const t = apiTok(c);
+    return `<div class="aitem${c.id === apiSel ? " sel" : ""}" data-id="${c.id}"><div class="at"><b>${esc(API_KIND[c.kind] || c.kind)}</b><span class="ast ${esc(c.status)}">${esc(API_STATUS[c.status] || c.status)}</span></div>` +
+      `<div class="as">${esc(new Date(c.t).toLocaleTimeString())} \u00B7 ${c.rounds.length} round${c.rounds.length === 1 ? "" : "s"} \u00B7 ${usd(c.cost || 0)} \u00B7 ${fmt(t.i)} in / ${fmt(t.o)} out${c.ms ? " \u00B7 " + (c.ms / 1000).toFixed(1) + " s" : ""}</div>` +
+      `<div class="as">${esc((c.params && c.params.mayor ? c.params.mayor + ": " : "") + apiLastUser(c).slice(0, 90))}</div></div>`;
+  }).join("") : `<div class="empty">No API calls yet.</div>`;
+  list.scrollTop = top;
+  if (detail) apiDetail();
+}
+const apiFold = (key, sum, body, cls = "") => `<details data-k="${esc(key)}"${apiOpenKeys.has(key) ? " open" : ""} class="${cls}"><summary>${sum}</summary>${body}</details>`;
+const apiPre = t => `<pre>${esc(t)}</pre>`;
+function apiText(t) { const s = String(t); if (/^\s*[{[]/.test(s)) { try { return JSON.stringify(JSON.parse(s), null, 2); } catch (e) {} } return s; }
+function apiBlock(b) {
+  if (typeof b === "string") return `<div class="ablk text">${apiPre(apiText(b))}</div>`;
+  const t = b && b.type;
+  if (t === "text") return `<div class="ablk text">${apiPre(apiText(b.text))}</div>`;
+  if (t === "thinking") return `<div class="ablk thinking"><div class="bt">thinking</div>${apiPre(b.thinking || "(no thinking text returned)")}</div>`;
+  if (t === "redacted_thinking") return `<div class="ablk thinking"><div class="bt">thinking (redacted)</div></div>`;
+  if (t === "tool_use") return `<div class="ablk tool_use"><div class="bt">tool call: ${esc(b.name)}</div>${apiPre(JSON.stringify(b.input))}</div>`;
+  if (t === "tool_result") return `<div class="ablk tool_result"><div class="bt">tool result${b.is_error ? " (error)" : ""}</div>${apiPre(typeof b.content === "string" ? b.content : JSON.stringify(b.content, null, 2))}</div>`;
+  return `<div class="ablk"><div class="bt">${esc(t || "block")}</div>${apiPre(JSON.stringify(b, null, 2))}</div>`;
+}
+function apiMsg(c, m, i) {
+  let head;
+  if (m.role === "assistant" && m.round != null) {
+    const r = c.rounds[m.round] || {}, u = r.usage || {};
+    head = `<b>Model reply</b> \u00B7 round ${m.round + 1} \u00B7 stop: ${esc(r.stop)} \u00B7 ${fmt(u.input_tokens || 0)} in / ${fmt(u.output_tokens || 0)} out \u00B7 ${usd(r.cost || 0)} \u00B7 ${((r.ms || 0) / 1000).toFixed(1)} s`;
+  } else if (m.role === "assistant") head = `<b>Model</b> (earlier reply, sent back as history)`;
+  else if (Array.isArray(m.content)) head = `<b>Sent back</b> (tool results)`;
+  else if (c.kind === "mayor") head = `<b>The game</b> (why the mayor was woken, and its briefing)`;
+  else head = i < (c.earlier || 0) ? `<b>Request</b> (earlier message, sent as history)` : i === c.earlier ? `<b>Request</b>` : `<b>Sent back</b> (the server's check of the blueprint)`;
+  const body = Array.isArray(m.content) ? m.content.map(apiBlock).join("") : apiBlock(m.content);
+  return `<div class="amsg ${m.role}${i < (c.earlier || 0) ? " aearlier" : ""}"><div class="ar">${head}</div>${body}</div>`;
+}
+function apiDetail() {
+  const el = $("api-detail"), c = apiCalls.find(x => x.id === apiSel);
+  if (!c) { el.innerHTML = `<div class="empty">${apiCalls.length ? "Pick a call on the left." : "The structure designer hasn't called the API yet. It's on only when the server has an API key (see debug/claude.js). Press G in a sandbox world and ask for a design: each call shows up here."}</div>`; return; }
+  const top = el.scrollTop, same = el.dataset.id === String(c.id), p = c.params || {}, t = apiTok(c);
+  const cached = (c.rounds || []).reduce((a, r) => a + ((r.usage && r.usage.cache_read_input_tokens) || 0), 0);
+  const set = [`model: ${c.model}`, `max_tokens: ${p.max_tokens}`, `effort: ${p.effort}`].concat(p.tool_choice ? [`tool_choice: ${p.tool_choice}`] : [], p.format ? ["output format: json_schema (structured outputs)"] : [],
+    p.mayor ? [`mayor: ${p.mayor}`] : [], p.cache_control ? [`prompt caching: ${p.cache_control} (${fmt(cached)} input tokens read from the cache)`] : []);
+  const earlier = (c.messages || []).slice(0, Math.max(0, c.earlier || 0)), rest = (c.messages || []).slice(Math.max(0, c.earlier || 0));
+  el.innerHTML =
+    `<div class="ahead"><span><b>${esc(API_KIND[c.kind] || c.kind)}</b> #${c.id}</span><span class="ast ${esc(c.status)}">${esc(API_STATUS[c.status] || c.status)}</span>` +
+    `<span>${esc(new Date(c.t).toLocaleString())}</span><span><b>${c.rounds.length}</b> round${c.rounds.length === 1 ? "" : "s"}</span>` +
+    `<span><b>${fmt(t.i)}</b> in / <b>${fmt(t.o)}</b> out tokens</span><span title="Worked out from the tokens at ${c.price ? "$" + c.price.input + " in / $" + c.price.output + " out per million tokens" : "the model's price"}: the API reports tokens, not dollars"><b>${usd(c.cost || 0)}</b></span>${c.ms ? `<span><b>${(c.ms / 1000).toFixed(1)}</b> s</span>` : ""}</div>` +
+    (c.error ? `<div class="aerr">${esc(c.error)}</div>` : "") +
+    (c.problems && c.problems.length ? `<div class="aerr" style="color:var(--warn)">Problems left after the last draft: ${esc(c.problems.join("; "))}</div>` : "") +
+    apiFold("settings", `<b>Request settings</b>`, apiPre(set.join("\n"))) +
+    apiFold("system", `<b>System prompt</b> (${fmt(c.system.length)} characters)`, apiPre(c.system)) +
+    (p.tools ? apiFold("tools", `<b>Tools</b> (${p.tools.map(x => esc(x.name)).join(", ")})`, apiPre(JSON.stringify(p.tools, null, 2))) : "") +
+    (p.format ? apiFold("schema", `<b>Output schema</b>`, apiPre(JSON.stringify(p.format.schema, null, 2))) : "") +
+    (earlier.length ? apiFold("earlier", `<b>Earlier in the chat</b> (${earlier.length} message${earlier.length === 1 ? "" : "s"} sent as history)`, earlier.map((m, i) => apiMsg(c, m, i)).join("")) : "") +
+    rest.map((m, i) => apiMsg(c, m, i + earlier.length)).join("") +
+    (c.status === "running" ? `<div class="sub" style="padding:6px 2px">${(c.messages || []).length && c.messages[c.messages.length - 1].role === "assistant" ? "Waiting for the game to answer the tool call" : "Waiting for the model"}\u2026</div>` : "");
+  el.dataset.id = c.id;
+  el.scrollTop = same ? top : 0;
+}
+$("api-open").addEventListener("click", () => { apiOpen = !apiOpen; $("apipanel").hidden = !apiOpen; $("api-open").classList.toggle("on", apiOpen); if (apiOpen) { apiT = 0; apiRender(true); scrollTo({ top: 0 }); } });
+$("api-x").addEventListener("click", () => { apiOpen = false; $("apipanel").hidden = true; $("api-open").classList.remove("on"); });
+$("api-follow").addEventListener("click", () => { apiFollow = !apiFollow; apiT = 0; apiRender(true); });
+$("api-list").addEventListener("click", e => { const it = e.target.closest(".aitem"); if (!it) return; apiSel = +it.dataset.id; apiFollow = apiSel === (apiCalls.length && apiCalls[apiCalls.length - 1].id); apiT = 0; apiRender(true); });
+$("api-detail").addEventListener("toggle", e => { const d = e.target; if (d.dataset && d.dataset.k) { if (d.open) apiOpenKeys.add(d.dataset.k); else apiOpenKeys.delete(d.dataset.k); } }, true);
+$("api-copy").addEventListener("click", () => {
+  const c = apiCalls.find(x => x.id === apiSel), b = $("api-copy"); if (!c) return;
+  const t = JSON.stringify(c, null, 2);
+  const fallback = () => { const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); let ok = false; try { ok = document.execCommand("copy"); } catch (e) {} ta.remove(); gFlash(b, ok ? "Copied" : "Copy failed"); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(() => gFlash(b, "Copied"), fallback); else fallback();
+});
 
 $("raw").addEventListener("toggle", () => { if (snap) $("f3").textContent = snap.text; });
 addEventListener("resize", () => { if (snap) { renderTop(snap); if (curV) drawMap(snap); } });

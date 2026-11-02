@@ -180,6 +180,9 @@ function place(scene, opts) {
   opts = opts || {};
   const name = opts.name || "scene";
   if (!on()) { glog("ERROR", "Scene \"" + name + "\" not placed: this isn't a sandbox world"); return Promise.resolve({ ok: false, why: "Scenes only work in sandbox worlds" }); }
+  return preload(scene).then(() => placeLoaded(scene, opts, name));
+}
+function placeLoaded(scene, opts, name) {
   const o = origin(opts.origin), r = resolve(scene, o, name), flat = [];
   for (const c of r.cells) flat.push(c[0], c[1], c[2], c[3]);
   return stamp({ label: "scene " + name, cells: flat, mobs: r.mobs }).then(res => runCommands(r.cmds).then(() => {
@@ -206,6 +209,14 @@ function list() {
     .then(j => j.names || [], () => fetch("sandbox/scenes/index.json", { cache: "no-cache" }).then(r => r.json()).then(j => j.names || []).catch(() => []));
 }
 function toast(text) { if (BF.player && BF.player.actionBar) BF.player.actionBar(text); if (BF.commands) BF.commands.print(text, "err"); }
+// the library designs a scene names (sandbox/structures/<name>.json, spec idea-051), fetched before it is worked out; a missing one is
+// left for resolve() to report
+function preload(scene) {
+  const want = new Set();
+  for (const e of (scene && (scene.entries || scene)) || []) if (e && typeof e.structure === "string" && /^[\w-]{1,64}$/.test(e.structure) && !S.structures[e.structure]) want.add(e.structure);
+  if (!want.size || typeof fetch === "undefined") return Promise.resolve();
+  return Promise.all([...want].map(n => fetch("sandbox/structures/" + n + ".json", { cache: "no-cache" }).then(r => (r.ok ? r.json() : null)).then(d => { if (d && d.layers) S.structures[n] = d; }, () => {})));
+}
 function open(name, opts) {
   return load(name).then(sc => place(sc, Object.assign({ name }, opts || {})), e => {
     const m = "Scene \"" + name + "\" not found: " + (e && e.message || e);

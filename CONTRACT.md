@@ -1240,3 +1240,17 @@ worldgen.js (`sty` plot, `PIG_POP`), trading.js (table, `PRODUCE`, values, stock
   mobs in one batch (sandbox worlds only; js/sandbox.js applyStamp). Scenes, the structure designer and the texture studio use it.
 - `BF.sandbox` (page): `list`, `load`, `resolve`, `place`, `open`, `openWhenReady`, `clear`, `stamp`, `command` (the page's `/scene`); format of a scene at
   the top of js/sandbox.js. debug/sandbox.js answers `/sandbox/api/list?dir=scenes|structures|textures` on the game port.
+- Scenes fetch the library designs their `structure` entries name (`sandbox/structures/<name>.json`) before they are worked out (`BF.sandbox.structures`,
+  `BF.sandbox.designCells` set by js/designer.js).
+
+## Sandbox structure designer (js/housedesign.js, js/designer.js, debug/claude.js; spec idea-051)
+- `BF.blueprints.custom({cells: [[x, y, z, id, ph?]], label, house, wood}, rot)`: a blueprint from cells drawn elsewhere, through the same `assemble()` as
+  `get()` (builder blueprints are unchanged). Not cached.
+- `BF.houseDesign` (page): `palette()`, `toBlueprint(design)` -> `{bp, cells (grid frame), materials, warnings}`, `fromCells(cells, name)` -> `{design, warnings}`,
+  `frontOf(result)`, `Preview`. A design: `{name, summary, notes, width, depth, legend: [{symbol, block}], layers: [{label, rows}]}`; a legend block is a
+  palette name or (kept from a capture) a game block name.
+- `BF.designer` (page, sandbox worlds, key G): `request`, `build`, `rebuild`, `clear`, `capture`, `save`, `library`, `loadLibrary`, `showVersion`, `restore`;
+  builds go through the `"stamp"` request. `BF.designer.api(path, body)` is the one door to the server (tests replace it).
+- Game port: `GET /claude/status`, `POST /claude/blueprint {request, palette, previous?, model?}` (loopback, own origin, JSON; key server side; models and
+  prices in debug/claude.js PRICES; $1 per rolling hour by default), `POST /sandbox/api/save {dir: structures|textures, name, data}`. Debug port:
+  `/claude-calls` and the `claudecalls` / `claudecall` events (the API calls panel).
