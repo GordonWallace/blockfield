@@ -2704,7 +2704,12 @@ function buildSepGridRef() {
   }
   chunkCells = REF_CHUNK.size;
 }
+// Separation pushes go into the velocity, which the next update eases back toward the wanted one: the push a mob ends up moving at is the
+// impulse over the easing (6 * dt / 0.5 at 0.05 s ticks). At longer ticks the impulse grows with dt while the easing can't pass 1, so
+// pressed mobs (pens) were shoved about twice as fast at 0.2 s: scale the impulse so the push speed stays what 0.05 s gives (idea-049).
+const sepScale = dt => dt === 0.05 ? 1 : 0.05 / 0.5 * (1 - Math.pow(0.5, dt / 0.05)) / dt;
 function separate(m, dt) {
+  const ss = sepScale(dt);
   const gx = Math.floor(m.position.x / 2), gz = Math.floor(m.position.z / 2);
   const plain = gridFast && inSquare(m.position.x, m.position.z, GRID_EDGE);
   for (let cz = gz - 1; cz <= gz + 1; cz++) for (let cx = gx - 1; cx <= gx + 1; cx++) {
@@ -2717,7 +2722,7 @@ function separate(m, dt) {
     if (Math.abs(dx) > min || Math.abs(dz) > min) continue;
     if (m.position.y > o.position.y + o.height || o.position.y > m.position.y + m.height) continue;
     const d = Math.hypot(dx, dz) || 0.01;
-    m.vel.x += (dx / d) * 6 * dt; m.vel.z += (dz / d) * 6 * dt;
+    m.vel.x += (dx / d) * 6 * dt * ss; m.vel.z += (dz / d) * 6 * dt * ss;
   }
   }
   if (playerLives()) {
@@ -2726,7 +2731,7 @@ function separate(m, dt) {
     const min = m.halfWidth + (p.halfWidth || 0.3);
     if (Math.abs(dx) < min && Math.abs(dz) < min && m.position.y < p.position.y + (p.height || 1.8) && p.position.y < m.position.y + m.height) {
       const d = Math.hypot(dx, dz) || 0.01;
-      m.vel.x += (dx / d) * 8 * dt; m.vel.z += (dz / d) * 8 * dt;
+      m.vel.x += (dx / d) * 8 * dt * ss; m.vel.z += (dz / d) * 8 * dt * ss;
     }
   }
 }
