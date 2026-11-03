@@ -11,7 +11,6 @@
 const path = require('path'), cp = require('child_process'), fs = require('fs'), os = require('os');
 const seeds = String(process.argv[2] || '9,3').split(',').map(Number), seconds = +(process.argv[3] || 300);
 let seed = seeds[0];
-const EVERY = 60 * 20;
 
 if (process.argv[4] === '--child') {
   const k = +process.argv[5], dump = process.argv[6];
@@ -32,10 +31,10 @@ if (process.argv[4] === '--child') {
   let deferred = 0;
   const later = BF.mobs.later;
   BF.mobs.later = (m, check, body) => { const r = later(m, check, body); if (BF.rand.thinker && BF.rand.thinker !== m) deferred++; return r; };
-  const ticks = seconds * 20;
+  const TPS = Math.round(1 / BF.warp.TICK), EVERY = 60 * TPS, ticks = seconds * TPS;   // (ticks a game second: the tick length is a setting, idea-049)
   for (let i = 1; i <= ticks; i++) {
     h.tick(1);
-    if (i % EVERY === 0 || i === ticks) { const H = h.stateHash(); checks.push({ t: i / 20, hash: H.hash, parts: H.parts }); }
+    if (i % EVERY === 0 || i === ticks) { const H = h.stateHash(); checks.push({ t: i / TPS, hash: H.hash, parts: H.parts }); }
   }
   const texts = {};
   for (const p of BF.stateHash.PARTS) texts[p] = BF.stateHash.text(p);
