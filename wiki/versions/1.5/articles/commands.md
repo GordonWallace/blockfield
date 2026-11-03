@@ -28,7 +28,7 @@ Commands let you change the world and yourself. They are meant for building, tes
   - `/tp up <blocks>`: straight up, that many blocks above the ground (or sea) where you are, flying. `/tp up 25000` takes you off the planet.
   - `/tp ground`: back down to the surface where you are.
   - A teleport keeps the compass direction you face. A spot past a corner, where no face lies flat, lands on the nearest point.
-- `/time set <day|noon|sunset|night|midnight|sunrise|ticks>`: Sets the time of day.
+- `/time set <day|noon|sunset|night|midnight|sunrise|ticks>`: Moves the clock forward to the next time it is that time of day, like sleeping: if that time has already passed today, the clock moves on to tomorrow, so `/time set day` always goes to the next morning. Each jump is written to the [[page:game-log]] as an INFO line (kind *command*).
 - `/time add <ticks>`: Moves the clock on, rolling over into new days.
 - `/time query <daytime|day|gametime>`: Prints the time of day in ticks, the day number, or the total time.
 - `/gamemode <survival|creative>`: Switches game mode. `s`, `c`, `0` and `1` also work, and so does `/gm`. Adventure and spectator are not available.
