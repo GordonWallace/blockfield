@@ -65,4 +65,4 @@ The world moves in **ticks** of 0.05 seconds of game time, 20 a second at 1x, at
 
 ## Commands
 
-`/time set` jumps the clock, `/time add` moves it on and `/weather` switches the weather; see [[page:commands]].
+`/time set` jumps the clock forward (to tomorrow if that time of day has already passed), `/time add` moves it on and `/weather` switches the weather; see [[page:commands]].
