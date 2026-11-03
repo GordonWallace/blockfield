@@ -1575,8 +1575,8 @@ function growTick() {
   let dt, cells;
   if (g) {
     // per cluster group (js/ctick.js): once a second on the tick counter, the group's own cells
-    if (BF.rand.tick % 20 !== 0) return;
-    dt = 1;
+    if (!BF.warp.every(1)) return;
+    dt = BF.warp.ticksOf(1) * BF.warp.TICK;
     cells = [];
     for (const k of growing) { const i = k.indexOf(","), j = k.lastIndexOf(","); if (cellGroup(+k.slice(0, i), +k.slice(j + 1)) === g.key) cells.push(k); }
   } else {

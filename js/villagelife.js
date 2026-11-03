@@ -1708,13 +1708,13 @@ function tick(dt) {
   // numbered by it too, the same in every cluster
   const C = BF.ctick, f = C && C.filter;
   let step;
-  if (f) { if (BF.rand.tick % 10 !== 0) return; step = 10 * BF.warp.TICK; }
+  if (f) { if (!BF.warp.every(0.5)) return; step = BF.warp.ticksOf(0.5) * BF.warp.TICK; }
   else { acc += dt; if (acc < 0.5) return; step = acc; }
   if (!BF.mobs || !BF.food) return;
   if (!f) acc = 0;
   const now = dayNow(), t = skyT(), day = BF.sky ? BF.sky.day || 0 : 0;
   if (!agesHooked && BF.on) { agesHooked = true; BF.on("newWorld", () => villageAges.clear()); }
-  if (f) pass = BF.rand.tick / 10; else pass++;
+  if (f) pass = BF.rand.tick / BF.warp.ticksOf(0.5); else pass++;
   const scanned = new Set();
   for (const m of BF.regions.ofType("villager")) {   // (the villagers only, r15-32)
     if (m.type !== "villager" || m.dead || m.removed || !Array.isArray(m.inv)) continue;

@@ -398,7 +398,7 @@ function tick(dt) {
   hook();
   // clusters (spec r15-39b, js/ctick.js): each cluster the chests in its regions, every 2 game seconds on the tick counter
   const C = BF.ctick && BF.ctick.filter ? BF.ctick : null;
-  if (C) { if (BF.rand.tick % 40 !== 7) return; }
+  if (C) { if (!BF.warp.every(2, 7)) return; }
   else { if ((tickT -= dt) > 0) return; tickT = 2; }
   if (!INV() || !INV().chests) return;
   const now = dayNow();

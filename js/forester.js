@@ -157,7 +157,7 @@ function growTree(x, y, z) {
 function growTick() {
   hook();
   if (BF.ctick && BF.ctick.filter) {   // clusters (spec r15-39b, js/ctick.js): every cluster its own foresters, every 5 game seconds on the tick counter
-    if (BF.rand.tick % 100 === 9 && BF.mobs) for (const m of BF.regions.ofType("villager")) if (m.profession === "forester" && !m.dead && !m.removed && Array.isArray(m.inv)) saw(m, state(m));
+    if (BF.warp.every(5, 9) && BF.mobs) for (const m of BF.regions.ofType("villager")) if (m.profession === "forester" && !m.dead && !m.removed && Array.isArray(m.inv)) saw(m, state(m));
     return;
   }
   const now = nowS();
@@ -176,7 +176,7 @@ function sapTick() {
   hook();
   const CC = W().clusterCells, g = CC && CC.cur();
   let dt;
-  if (g) { if (BF.rand.tick % 20 !== 0) return; dt = 1; }
+  if (g) { if (!BF.warp.every(1)) return; dt = BF.warp.ticksOf(1) * BF.warp.TICK; }
   else {
     const now = nowS();
     if (now - sapLast < 1) return;

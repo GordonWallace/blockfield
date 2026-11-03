@@ -272,7 +272,7 @@ function serve(send, opts) {
 
   function hello() {
     const St = BF.state || {};
-    out({ t: "hello", v: VERSION, version: BF.VERSION || null, seed: St.seed >>> 0, tick: tickNow(),
+    out({ t: "hello", v: VERSION, version: BF.VERSION || null, seed: St.seed >>> 0, tick: tickNow(), tickLen: BF.warp ? BF.warp.TICK : 0.05,
       settings: { gen: St.gen, villages: St.villages, biomeScale: St.biomeScale, gameMode: BF.player && BF.player.gameMode || null } });
     S.invSent = S.cursorSent = S.screenSent = null;   // (self sends the inventory and the screen again)
     if (R) { S.editsDue = true; S.spawnSent = null; S.hurts = []; S.mountSent = "null"; S.signsVer = -1; }
@@ -769,7 +769,7 @@ function connect(send, mode) {
   // few frames), aims `lag` ticks behind the newest (a little more than the longest recent wait for the next entities message, so the
   // next is there before the clock gets to it), eases back to that aim, and never runs past the newest: it waits there instead of guessing.
   const HIST_MAX = 48, CADENCE = 6;   // CADENCE: a change this few ticks after the last is drawn from it (animals idling in a pen step every 5 ticks)
-  const DRAW = { lag: 1.5, peak: 1, lastT: -1, lastAt: 0, tickMs: (BF.warp ? BF.warp.TICK : 0.05) * 1000, rate: null, winT: -1, winAt: 0, frames: 0, waits: 0, toldAt: -1e9 };
+  const DRAW = { lag: 1.5, peak: 1, lastT: -1, lastAt: 0, tickLen: BF.warp ? BF.warp.TICK : 0.05, tickMs: (BF.warp ? BF.warp.TICK : 0.05) * 1000, rate: null, winT: -1, winAt: 0, frames: 0, waits: 0, toldAt: -1e9 };
   world.draw = (dTicks, realDt) => {
     const T = world.tick;
     if (T < 0) { world.rt = null; return; }
@@ -810,7 +810,7 @@ function connect(send, mode) {
   function arrived(T) {
     const now = typeof performance !== "undefined" ? performance.now() : Date.now(), ck = world.clock;
     const sp = ck && ck.achieved > 0 ? ck.achieved : ck && ck.speed > 0 ? ck.speed : 1;
-    DRAW.tickMs = (BF.warp ? BF.warp.TICK : 0.05) * 1000 / Math.max(0.05, sp);   // (a tick's real ms at that speed: the tick length is a setting, idea-049)
+    DRAW.tickMs = DRAW.tickLen * 1000 / Math.max(0.05, sp);   // (a tick's real ms at that speed: the simulation's tick length, idea-049)
     if (DRAW.lastT >= 0 && T > DRAW.lastT) {
       const gap = Math.max(T - DRAW.lastT, (now - DRAW.lastAt) / DRAW.tickMs);
       DRAW.peak = Math.max(gap, DRAW.peak * 0.97);
@@ -836,7 +836,12 @@ function connect(send, mode) {
   function clear() { world.chunks.clear(); world.entities.clear(); world.villages.clear(); world.clock = null; world.log = []; world.tick = -1; world.rt = null; DRAW.lastT = -1; DRAW.winT = -1; DRAW.rate = null; }
   const LOG_KEEP = 500;
   const ON = {
-    hello(m) { C.hello = m; clear(); C.lastView = null; world.gen++; },
+    hello(m) {
+      C.hello = m; clear(); C.lastView = null; world.gen++;
+      const mine = BF.warp ? BF.warp.TICK : 0.05;   // the simulation's tick length wins (idea-049): the page draws its ticks
+      if (m.tickLen > 0) { DRAW.tickLen = world.tickLen = m.tickLen; DRAW.tickMs = m.tickLen * 1000; }
+      if (m.tickLen > 0 && Math.abs(m.tickLen - mine) > 1e-9) glog("WARN", "The simulation runs ticks of " + m.tickLen + " s but this page was opened with " + mine + " s (?tick=); drawing follows the simulation's " + m.tickLen + " s");
+    },
     chunk(m) { world.chunks.set(m.key, { cx: m.cx, cz: m.cz, key: m.key, lo: m.lo, hi: m.hi, secs: m.secs }); },
     unload(m) { for (const k of m.keys) world.chunks.delete(k); },
     blockChanges(m) {

@@ -144,7 +144,7 @@ const frame = BF.tload.wrap(function frameBody(now) {   // (timed: the page thre
   // drawing between the last two ticks (r15-10): the sky at the interpolated game time, entities at lerp(prev, cur, alpha)
   const alpha = W.alpha, drawnDt = Math.max(0, W.renderNow() - drawn0);
   if (remote) host.sky(W.frozen ? 0 : drawnDt);   // the worker's clock and weather
-  if (remote && BF.client) BF.client.world.draw(drawnDt / W.TICK, raw);   // the entities' drawing clock, a little behind the newest tick the page has (js/protocol.js, bug-098)
+  if (remote && BF.client) BF.client.world.draw(drawnDt / (BF.client.world.tickLen || W.TICK), raw);   // the entities' drawing clock, a little behind the newest tick the page has (js/protocol.js, bug-098)
   BF.sky.draw(alpha, drawnDt);
   BF.inventory.simFrame(dt);   // the simulation's screens (js/playerinv.js; in a worker a no-op here, the worker runs its own)
   if (!host.worker) BF.maps.simFrame();   // the held map fills in (js/maps.js; the worker runs its own)

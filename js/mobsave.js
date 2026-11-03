@@ -200,12 +200,12 @@ function golem(vkey) {
 function done(key) { villagers.delete(key); }
 
 // Brings back wild and hostile mobs once the player is near their spot (called from the mobs update). With clusters (spec r15-39b, C2:
-// js/ctick.js) once per cluster, each its own spots' (by region: BF.mobs.cl), every 10 ticks by the tick counter.
+// js/ctick.js) once per cluster, each its own spots' (by region: BF.mobs.cl), every half game second by the tick counter.
 function update(dt) {
   if (!wild.length) return;
   if (!exact()) { wild = []; return; }
   const CL = BF.mobs && BF.mobs.cl, c = !!(CL && CL.owned());
-  if (c) { if (BF.rand.tick % 10 !== 0) return; }
+  if (c) { if (!BF.warp.every(0.5)) return; }
   else {
     wildT -= dt;
     if (wildT > 0) return;

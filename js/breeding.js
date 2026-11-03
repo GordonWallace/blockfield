@@ -448,7 +448,7 @@ function tick(dt) {
   const C = BF.ctick && BF.ctick.filter ? BF.ctick : null;
   updateLoves(dt, C);
   updateGrow(dt, C);
-  if (C) { if (BF.rand.tick % 20 !== 2) return; }
+  if (C) { if (!BF.warp.every(1, 2)) return; }
   else { S.timer -= dt; if (S.timer > 0) return; S.timer = 1; }
   for (const rec of BF.mobs.villages.values()) {
     if (!rec.members || (C && !C.mineVillage(rec.key))) continue;
