@@ -68,6 +68,31 @@ const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/debug
   await dbg.click('#ff [data-speed="1"]');
   ok('back to 1x', await until(game, () => BF.warp.speed === 1));
 
+  // bug-113: with the game's tab in the background (the debug screen in front of it in the same window) the page runs no frames, but a
+  // step still reaches the game, and the world server (which goes on there) at once; a worker or the page pauses while hidden and takes
+  // the speed when the tab is back. Hidden emulated: document.hidden, and frames held until the tab comes back.
+  await game.evaluate(() => {
+    const raf = window.requestAnimationFrame.bind(window), held = [];
+    window.__bg = { raf, held };
+    window.requestAnimationFrame = f => { held.push(f); return 0; };
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await game.waitForTimeout(1000);
+  await dbg.keyboard.press('ArrowRight');
+  ok('a step reaches a game whose tab is in the background', await until(game, () => BF.warp.speed === 3, null, 5000), await game.evaluate(() => BF.warp.speed));
+  if (lib.host() === 'server') ok('the world server runs at 3x with the tab still in the background', await simAt(3, 5000), await simSpeed());
+  await game.evaluate(() => {
+    delete document.hidden; delete document.visibilityState;
+    window.requestAnimationFrame = window.__bg.raf;
+    for (const f of window.__bg.held.splice(0)) window.requestAnimationFrame(f);
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  ok('the simulation runs at 3x once the tab is back', await simAt(3), await simSpeed());
+  await dbg.click('#ff [data-speed="1"]');
+  ok('back to 1x again', await until(game, () => BF.warp.speed === 1));
+
   // the game log
   const lines = await lib.sim(game, () => BF.glog.recent(1e5).map(e => BF.glog.text([e])).filter(t => /from the debug screen/.test(t)));
   // (the first steps can come before the world the page starts, whose log begins afresh: not counted)

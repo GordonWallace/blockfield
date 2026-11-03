@@ -6,7 +6,7 @@
 //   (--alerts <file> keeps the debug screen's alerts somewhere other than debug/.alerts.json)
 //   (--saves <dir> keeps the world server's saves somewhere other than saves/; --no-world runs no world server; --test lets a test page
 //   run code in the simulation, BFT.sim: tests only, never on a server others can reach; --workers N: the world server's region workers
-//   per world, spec r15-39, default 1: none besides the simulation thread; --split always|never: split the regions' thinking always / never, js/rplay.js; --clusters: the split shares the clusters instead (spec r15-39b, js/cworkers.js); --no-pin: the simulation thread and its workers wherever the system puts them (server/cores.js place: else on Linux with fast and slow cores, the simulation thread on the fast ones); --verify N (tests): compare the workers' copies every N split ticks; --coarse on|off: far villages coarse or full detail whatever each world's option, js/gameopts.js)
+//   per world, spec r15-39, default 1: none besides the simulation thread; --split always|never: split always / never (auto: when it pays), js/rplay.js; the split shares the clusters (spec r15-39b, js/cworkers.js; --clusters, the old flag, still accepted); --regions: the old split of the regions' thinking each tick (spec r15-39), deprecated (Gordon, 2026-11-02: it never pays); --no-pin: the simulation thread and its workers wherever the system puts them (server/cores.js place: else on Linux with fast and slow cores, the simulation thread on the fast ones); --verify N (tests): compare the workers' copies every N split ticks; --coarse on|off: far villages coarse or full detail whatever each world's option, js/gameopts.js)
 // It also runs the world server (spec r15-41, server/world.js): the game's simulation in this process, with the page as its client
 // over a WebSocket on the game port (/sim). Ctrl+C saves its worlds before stopping.
 // The game page it serves gets window.BF_DEBUG_FEED set, which turns on js/debugfeed.js; the game POSTs snapshots to
@@ -140,7 +140,7 @@ function warpAfter(wc, ff) {
   const now = Date.now();
   if (ff && typeof ff === "object") { warpNow = { speed: +ff.speed || 0, real: +ff.real || 0 }; warpAt = now; }
   warpOps = warpOps.filter(w => now - w.t < WARP_TTL);
-  return warpOps.filter(w => w.id > (+wc || 0)).map(w => ({ id: w.id, op: w.op, speed: w.speed }));
+  return warpOps.filter(w => w.id > (+wc || 0)).map(w => ({ id: w.id, op: w.op, speed: w.speed, n: w.n, on: w.on }));
 }
 // The open world's game log (js/gamelog.js): {w (world id), name, head (its header line), base (index of lines[0]), lines}, all of it
 // once the game has sent it. Debug screens get it whole when they connect (/events cache, or /glog) and the new entries in each snap.
@@ -334,10 +334,14 @@ function serveDebug(req, res) {
     req.on("data", c => { body += c; if (body.length > 1e3) req.destroy(); });
     req.on("end", safe(() => {
       let o; try { o = JSON.parse(body); } catch (e) { res.writeHead(400, cors()).end("bad json"); return; }
-      const op = o && o.op, speed = o && +o.speed;
-      if (op !== "faster" && op !== "slower" && !(op === "set" && Number.isFinite(speed) && speed >= 0)) { res.writeHead(400, cors()).end("no step"); return; }
+      const op = o && o.op, speed = o && +o.speed, n = o && +o.n;
+      const villages = (op === "villages" || op === "unload") && Number.isInteger(n) && n >= 1 && n <= 50;   // force-load the n nearest villages (r15-90: the Simulation budget card) / force-unload the n farthest (r15-93)
+      const auto = op === "auto" && o && typeof o.on === "boolean";   // automatic village loading on or paused (r15-93)
+      if (op !== "faster" && op !== "slower" && !villages && !auto && !(op === "set" && Number.isFinite(speed) && speed >= 0)) { res.writeHead(400, cors()).end("no step"); return; }
       const w = { id: ++warpId, t: Date.now(), op };
       if (op === "set") w.speed = speed;
+      if (villages) w.n = n;
+      if (auto) w.on = o.on;
       warpOps.push(w);
       if (warpOps.length > 50) warpOps.shift();
       res.writeHead(200, cors({ "Content-Type": "application/json" })).end(JSON.stringify({ id: w.id }));
@@ -418,8 +422,9 @@ const gameServers = NO_GAME ? [] : listen(serveGame, GAME_PORT, "game");
 // The world server (spec r15-41, server/world.js): the simulation in this process, the page its client over ws://<game>/sim.
 // --no-world leaves it out (the page then runs the simulation itself); --saves <dir> keeps its saved worlds somewhere other than saves/.
 const si = args.indexOf("--saves"), SAVES = si >= 0 && args[si + 1] ? path.resolve(args[si + 1]) : path.join(ROOT, "saves");
+if (args.includes("--regions")) console.log("--regions: the old region workers (spec r15-39) are deprecated and will go; clusters are the default for --workers (Gordon, 2026-11-02)");
 const world = NO_GAME || args.includes("--no-world") ? null : require("../server/world.js").start({
-  servers: gameServers, saves: SAVES, test: args.includes("--test"), workers: opt("workers", 0), coarse: args.includes("--coarse") ? args[args.indexOf("--coarse") + 1] : null, split: args.includes("--split") ? args[args.indexOf("--split") + 1] : null, kind: args.includes("--clusters") ? "clusters" : null, pin: !args.includes("--no-pin"), verify: opt("verify", 0), version: readBuild().version, build: { commit: readBuild().commit, branch: readBuild().branch }, debug: { push: take, screens: () => clients.size } });
+  servers: gameServers, saves: SAVES, test: args.includes("--test"), workers: opt("workers", 0), coarse: args.includes("--coarse") ? args[args.indexOf("--coarse") + 1] : null, split: args.includes("--split") ? args[args.indexOf("--split") + 1] : null, kind: args.includes("--regions") ? "regions" : "clusters", pin: !args.includes("--no-pin"), verify: opt("verify", 0), version: readBuild().version, build: { commit: readBuild().commit, branch: readBuild().branch }, debug: { push: take, screens: () => clients.size } });
 let stopping = false;
 const stop = () => {
   if (stopping) process.exit(1);   // (a second Ctrl+C: at once)

@@ -397,8 +397,11 @@ H.sky = function (drawnDt) {
   }
   S.advance(0);   // the light level and the weather's drawing for that time (no clock, no weather steps)
 };
+// The speed (and pause) to the worker or the world server now, not with the next frame: a fast-forward step from the debug screen
+// (js/debugfeed.js) can come while the tab is in the background, where no frames run; the world server goes on there (bug-113).
+H.speedNow = function () { if (H.worker && !H.crashed) speedNow(); };
 // a hidden tab: the simulation pauses at once (the page's frames have stopped)
-document.addEventListener("visibilitychange", () => { if (H.worker && !H.crashed) speedNow(); });
+document.addEventListener("visibilitychange", H.speedNow);
 
 // ---- a crash
 // the world server's connection closed by itself (the server stopped, or crashed): the same overlay, with the game log's newest lines

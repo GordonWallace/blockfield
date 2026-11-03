@@ -280,6 +280,8 @@ let hooked = false;
 // Fast-forward steps from the debug screen (debug/warp.js: its arrow keys and buttons; debug/server.js /warp): the server answers with
 // the steps after wc, the id of the last one applied here, which each snapshot reports. The page's clock (BF.warp, js/timewarp.js) is the
 // one to step whatever runs the simulation: it sends its speed on to a worker or the world server (js/simhost.js).
+// The same channel carries the Simulation budget card's force-load ({op: "villages", n}, r15-90), run as the /loadvillages command, its
+// force-unload ({op: "unload", n}: /unloadvillages) and its automatic loading switch ({op: "auto", on}: /autovillages, r15-93).
 let wc = 0;
 function applyWarp(list) {
   const W = BF.warp;
@@ -288,12 +290,28 @@ function applyWarp(list) {
     if (!w || !(w.id > wc)) continue;
     wc = w.id;
     if (BF.player && BF.player.menu && BF.player.menu()) continue;   // the title screen: no game to speed up (the arrow keys do nothing there either)
+    if (w.op === "villages") {   // force-load villages (r15-90): the /loadvillages command, run wherever the simulation is
+      if (BF.glog) BF.glog.log("INFO", "budget", "Force-loading " + w.n + " villages from the debug screen");
+      if (BF.commands) BF.commands.execute("/loadvillages " + (w.n | 0));
+      continue;
+    }
+    if (w.op === "unload") {   // force-unload villages (r15-93): /unloadvillages
+      if (BF.glog) BF.glog.log("INFO", "budget", "Force-unloading " + w.n + " villages from the debug screen");
+      if (BF.commands) BF.commands.execute("/unloadvillages " + (w.n | 0));
+      continue;
+    }
+    if (w.op === "auto") {   // automatic village loading paused or on again (r15-93): /autovillages
+      if (BF.commands) BF.commands.execute("/autovillages " + (w.on ? "on" : "off"));
+      continue;
+    }
     const was = W.speed;
     if (w.op === "faster") W.faster();
     else if (w.op === "slower") W.slower();
     else if (w.op === "set") { const i = W.SPEEDS.indexOf(+w.speed); if (+w.speed === 0) W.freeze(); else if (i >= 0) W.set(i); }
-    if (BF.glog && W.speed !== was) BF.glog.log("INFO", "warp", "Fast-forward " + was + "x -> " + W.speed + "x from the debug screen");
+    if (BF.glog && W.speed !== was) BF.glog.log("INFO", "warp", "Fast-forward " + was + "x -> " + W.speed + "x from the debug screen" + (document.hidden ? " (game tab in the background)" : ""));
   }
+  // on to the simulation now: the game loop that would send it runs no frames while this tab is in the background (bug-113)
+  if (BF.simHost && BF.simHost.speedNow) BF.simHost.speedNow();
 }
 // On the world server the steps come straight from the debug server (GET /warp?wc=), not with the world server's answers: those wait on the
 // simulation and reach the page behind everything else it sends, seconds late at fast-forward.
@@ -466,6 +484,10 @@ function simPart(ack, copy) {
     mobmap: Date.now() - mobMapT >= MOBMAP_EVERY ? (mobMapT = Date.now(), mobMap(pp)) : undefined,
     pick: BF.dayTimeline ? { pv: BF.dayTimeline.pv, key: BF.dayTimeline.picked } : null, day: dayline(),
     view: { vv },   // the villages on the debug screens, as last told (the server sends them again when vv is out of date)
+    // how many debug screens this simulation was told are open (its villager-seconds meter runs while any is): the server, or the page,
+    // tells it again when that's out of date (a new world's simulation, or an answer lost to a busy one, left the meter off: Gordon's
+    // blank Performance card, 2026-11-02)
+    simScreens,
     loadLimits: BF.villageSim && BF.villageSim.LIMITS && BF.mobs.aiTime ? { aiMs: BF.mobs.aiTime(), aiWork: BF.mobs.aiWork ? BF.mobs.aiWork() : 0, maxAiWork: BF.villageSim.LIMITS.aiWork, villages: BF.villageSim.status().split(" ")[0] | 0, maxVillages: BF.villageSim.LIMITS.villages } : null,
     loadErrors: BF.villageSim && BF.villageSim.errors ? BF.villageSim.errors().slice(-30) : [],   // loading errors (js/villagesim.js)
     routes: BF.merchant ? BF.merchant.routes().map(r => Object.assign(r, { an: nameOf(r.a), bn: nameOf(r.b) })) : null,   // caravan routes (js/merchant.js)
@@ -518,6 +540,7 @@ function snapshot() {
     if (remoteErr) { const e = remoteErr; remoteErr = null; throw new Error("in the simulation: " + e); }   // (the screen shows it, as one here)
     part = remote || {};
     remote = null;
+    if (part.simScreens != null && part.simScreens !== screens) passAck({ screens });   // (its meter: see simPart)
     for (const id in part.icons || {}) if (part.icons[id] && !part.icons[id].url) { try { part.icons[id].url = BF.inventory.iconURL ? BF.inventory.iconURL(+id) : BF.textures.icon(+id); } catch (e) { /* none */ } }
   } else part = simPart();
   return Object.assign({ t: Date.now(), n: ++sent, info, text: BF.debugText(info), paused: !!BF.state.paused, hidden: document.hidden }, part, {
@@ -608,7 +631,21 @@ function serverAck(o) {
 
 BF.debugFeed = { url: URL_, urls: URLS, snapshot, simPart, update, serverAck, live: () => told && screens > 0 };   // live: a debug screen is watching the feed
 // The game loop (requestAnimationFrame) stops while the game's tab is in the background, e.g. when the debug screen is opened
-// as another tab in the same window. A timer keeps the feed going then (browsers still run it about once a second), so the
-// debug screen can say the game is in the background instead of waiting for it.
-setInterval(() => { if (document.hidden) update(); }, 1000);
+// as another tab in the same window. A timer keeps the feed going then, so the debug screen can say the game is in the background
+// instead of waiting for it, and its fast-forward steps still reach the world server, which goes on there (bug-113). The timer runs in
+// a small worker: a background tab's own timers fire at most once a second, and once a minute after five minutes (Chrome), so a step
+// clicked on the debug screen waited for the game's tab to come back. With the world server the feed goes at its usual pace (its page
+// part is small); otherwise once a second, as before (the simulation is paused while the tab is hidden).
+let beat = 0;
+function hiddenTick() {
+  if (!document.hidden) return;
+  if (onServer() || ++beat % 4 === 0) update();
+}
+try {
+  const src = URL.createObjectURL(new Blob(["setInterval(() => postMessage(0), 250);"], { type: "text/javascript" }));
+  new Worker(src).onmessage = hiddenTick;
+} catch (e) {   // no worker here (a page opened as a file): the page's timer, throttled in the background
+  console.warn("debug feed: no timer worker, a background game tab takes debug-screen steps late:", e);
+  setInterval(hiddenTick, 250);
+}
 })();

@@ -39,7 +39,7 @@
 // while an interval is open the leader holds it for the next meeting (at most MEET ticks): a slash command, waking up (the next
 // morning), the monster options, the Distant villages settings, a test's eval (hold, js/simworker.js).
 // API: BF.rplay = { setup({workers, cores, spawn, split, kind}), begin(world), end(why), loopStart(), frame(raw), flush(), hold(fn, packet) -> true when it waits for the
-//   next meeting, lagging() -> true when the leader runs no ticks this frame (its followers too far behind), status(), text(), follower(post),
+//   next meeting, lagging() -> true when the leader runs no ticks this frame (its followers too far behind), status() (next: splitWhy, what has to happen for the split), text(), follower(post),
 //   (tests) testCrash(me), testSlow(ms), testSolo() }
 //   spawn(me, n) -> {post(msg), on(fn(msg)), terminate()}: a follower (server/regionthread.js, the world server's Node threads; r15-77 dropped the browser's)
 (() => {
@@ -94,7 +94,7 @@ function clusterOn(sh, me, n, link, verify) {
 function setup(o) {
   const cores = Math.max(1, o.cores | 0 || 2);
   L.want = o.workers > 0 ? Math.max(1, o.workers | 0) : 1;
-  if (!(o.workers > 0)) L.why = "region workers start only when asked (?workers=N; " + cores + " cores here)";
+  if (!(o.workers > 0)) L.why = "workers start only when asked: Cluster workers in the pause menu, or --workers N; " + cores + " cores here";
   L.spawn = o.spawn || null;
   L.three = o.three || null;
   L.policy = o.split === "always" || o.split === "never" ? o.split : "auto";
@@ -109,6 +109,7 @@ function setup(o) {
 // "load", data, meta, rivers}, taken right after the leader made or restored it (before anything else happens to it).
 function begin(world) {
   end();
+  L.ended = null;
   if (L.want <= 1) { if (L.why && !L.saidWhy) { L.saidWhy = true; log("INFO", "One worker: " + L.why); } return; }
   const n = L.want, epoch = ++L.epoch;
   if (!world.rivers && BF.worldgen.riverState) world.rivers = BF.worldgen.riverState();   // (the followers don't solve them again)
@@ -323,12 +324,56 @@ function end(why, level) {
     for (const f of L.list) { try { f.h.post({ end: true }); } catch (e) { /* gone */ } try { f.h.terminate(); } catch (e) { /* gone */ } }
     log(level || (why ? "ERROR" : "INFO"), "Region workers stopped" + (why ? ": " + why + "; the world goes on with one" : ""));
   }
+  if (why && L.list.length) L.ended = { why, trial: L.lastTrial ? { after: L.lastTrial.after, solo: L.lastTrial.solo } : null };   // (status: splitWhy)
   L.list = []; L.split = false; L.link = null; L.shared = null; L.world = null; L.crashed = null;
+}
+// What has to happen for the split, in words, for the debug screen's Workers card (Gordon, 2026-11-02: "a clear indicator of what has to
+// happen to split into clusters ... relative to the current status"). The same conditions as frame(), read without changing anything, in
+// the order they bind: under auto a split needs the plain tick measured, then the load trigger, then the followers caught up.
+// -> { state: "off" | "ended" | "waiting" | "ready" | "trial" | "split", text }
+function splitWhy() {
+  const t = now(), W = BF.warp, f1 = v => (v == null ? "?" : v.toFixed(1)), pc = f => Math.round(f * 100) + "%";
+  if (L.want <= 1) return { state: "off", text: "One worker, so nothing to split" + (L.why ? " (" + L.why + ")" : " (Cluster workers in the pause menu, or ./run.sh --workers N)") };
+  if (!L.list.length) {
+    if (!L.ended) return { state: "off", text: "No followers for this world yet" };
+    const tr = L.ended.trial;
+    return { state: "ended", text: "Workers stopped for this world: " + L.ended.why + (tr && tr.after != null ? " (" + f1(tr.after) + " ms a tick split, " + f1(tr.solo) + " on one)" : "") + ". They start again when a world is next loaded" };
+  }
+  if (L.split) {
+    const tr = L.trial;
+    if (tr && L.ticks < tr.from) return { state: "trial", text: "On trial: handing over the clusters, " + (tr.from - L.ticks) + " ticks until the " + (tr.end - tr.from) + " measured ticks start" };
+    if (tr) return { state: "trial", text: "On trial: " + Math.max(0, L.ticks - tr.from) + " of " + (tr.end - tr.from) + " ticks, " + f1(tr.n ? tr.ms / tr.n : null) + " ms a tick split against " + f1(tr.solo) + " on one" +
+      (L.policy === "auto" ? "; stays split under " + f1(tr.solo != null ? tr.solo * 0.9 : null) + " ms" : "; kept anyway (--split " + L.policy + ")") };
+    const lt = L.lastTrial;
+    return { state: "split", text: (L.policy === "auto" ? "Split: it paid" : "Split: kept by --split " + L.policy) + (lt && lt.after != null ? " (" + f1(lt.after) + " ms a tick against " + f1(lt.solo) + " on one)" : "") };
+  }
+  if (L.policy === "never") return { state: "off", text: "Never splits (--split never)" };
+  if (L.endAfter) return { state: "waiting", text: "Stopping the workers at the next meeting: " + L.endAfter.why };
+  if (clustered()) return { state: "waiting", text: "Going back to one at the next meeting" };
+  if (L.ready < L.list.length) return { state: "waiting", text: "Followers starting: " + L.ready + " of " + L.list.length + " ready" };
+  const behind = Math.max(0, ...L.list.map(f => L.ticks - f.ticks));
+  const caught = behind <= LAG || (L.soloMs != null && behind * L.soloMs <= LAG_MS);
+  const late = { state: "waiting", text: "Followers catching up: " + behind + " ticks behind, must be " + LAG + " or fewer (or " + LAG_MS / 1000 + " s of replay" + (L.soloMs != null ? ", now " + (behind * L.soloMs / 1000).toFixed(1) + " s" : "") + ")" };
+  if (L.policy === "auto") {
+    if (L.ticks < L.retryAt) return { state: "waiting", text: "The last split didn't pay: tries again in " + (L.retryAt - L.ticks) + " ticks" };
+    if (L.kind === "clusters" && L.plainTicks < PLAIN_TICKS) return { state: "waiting", text: "Measuring one thread first: " + L.plainTicks + " of " + PLAIN_TICKS + " ticks" + (L.plainMs != null ? " (" + f1(L.plainMs) + " ms a tick)" : "") };
+    const busy = (L.busySince != null && t - L.busySince >= BUSY_MS) || (L.loadSince != null && t - L.loadSince >= LOAD_MS);
+    if (!busy) {
+      if (!W || BF.state.paused) return { state: "waiting", text: "Paused: splits only while the game runs" };
+      if (W.speed > 1) return { state: "waiting", text: "Fast-forwarding: splits after " + BUSY_MS / 1000 + " s of dropped ticks (" + (L.busySince != null ? "dropping for " + ((t - L.busySince) / 1000).toFixed(1) + " s" : "keeping up now") + ")" };
+      const A = BF.active, line = A && A.pressAt ? A.pressAt() : 0.65, used = A && A.used ? A.used() : 0;
+      return { state: "waiting", text: "At 1x: splits after " + LOAD_MS / 1000 + " s with the simulation needing " + pc(line) + " or more of each second (now " + pc(used) + ", " +
+        (L.loadSince != null ? Math.floor((t - L.loadSince) / 1000) : 0) + " of " + LOAD_MS / 1000 + " s)" };
+    }
+  }
+  if (!caught) return late;
+  return { state: "ready", text: "Splits at the next check" };
 }
 function status() {
   const s = RW.active ? RW.stats() : clustered() ? BF.cworkers.stats() : null;
   return { want: L.want, followers: L.list.length, ready: L.ready, split: L.split, policy: L.policy, ticks: L.ticks,
-    behind: L.list.map(f => L.ticks - f.ticks), loads: L.list.map(f => f.load || null), soloMs: L.soloMs, splitMs: L.splitMs, why: L.why || null, worst: L.worst, splitAt: L.splitAt, lastTrial: L.lastTrial || null, stats: s };
+    behind: L.list.map(f => L.ticks - f.ticks), loads: L.list.map(f => f.load || null), soloMs: L.soloMs, splitMs: L.splitMs, why: L.why || null, worst: L.worst, splitAt: L.splitAt, lastTrial: L.lastTrial || null, stats: s,
+    kind: L.kind, ended: L.ended || null, next: splitWhy() };
 }
 // The F3 / debug screen line.
 function text() {

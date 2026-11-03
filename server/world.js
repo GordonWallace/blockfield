@@ -111,10 +111,11 @@ class Sim {
 function start(o) {
   const worlds = IDB.open(o.saves).worlds, rivers = riverCache(o.saves);
   for (const [a, b] of worlds.tidy()) say("renamed folder " + JSON.stringify(a) + " to " + JSON.stringify(b) + " (its world's name)");
-  // region workers per world (spec r15-39, js/rplay.js): --workers N, else one, the simulation thread alone (while one thinks, every
-  // follower still replays every tick on its own copy, about a core each, and the split hasn't paid; clusters, r15-39b, take over)
+  // workers per world (js/rplay.js): --workers N, else one, the simulation thread alone (while one thinks, every follower still replays
+  // every tick on its own copy, about a core each). The split shares the clusters (spec r15-39b); --regions (kind "regions") is the old
+  // split of the regions' thinking each tick (spec r15-39), deprecated 2026-11-02 (it never paid: 28-49 ms a tick split against 3-10 on one)
   const workers = o.workers > 0 ? Math.floor(o.workers) : 1;
-  const srv = { saves: o.saves, build: o.build || null, coarse: o.coarse === "on" || o.coarse === "off" ? o.coarse : null, pin: o.pin !== false, workers, split: o.split || null, kind: o.kind === "clusters" ? "clusters" : null, verify: o.verify || 0, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
+  const srv = { saves: o.saves, build: o.build || null, coarse: o.coarse === "on" || o.coarse === "off" ? o.coarse : null, pin: o.pin !== false, workers, split: o.split || null, kind: o.kind === "regions" ? "regions" : "clusters", verify: o.verify || 0, client: null, active: null, held: null, spare: null, feedAck: null, page: null, icons: new Map(), wantIcons: new Map(), iconsDue: new Map(), iconsAsked: false, tests: [], stopping: false };
   // The page's Cluster workers setting (js/simhost.js workers: {workers: {n: "auto" | N}} before its boot, and again when the player changes
   // it): the worker count for the worlds started from then on, clusters split over them (spec r15-39b) when more than one. --workers on
   // the command line wins (benchmarks and tests).
@@ -408,8 +409,10 @@ function start(o) {
     fedAt = Date.now();
     feeding = true;
     try {
-      const r = await s.ask("feed", { ack: srv.feedAck }, 5000);
+      const told = srv.feedAck;
       srv.feedAck = null;
+      const r = await s.ask("feed", { ack: told }, 5000);
+      if (told && (!r || r.error)) srv.feedAck = Object.assign({}, told, srv.feedAck);   // (not heard: again with the next ask)
       if (r && r.error) { debug.push({ t: Date.now(), n: ++feedN, error: "in the simulation: " + String(r.error).split("\n").slice(0, 3).join("\n") }); return; }   // (the screen shows it, as a page's)
       if (!r || !r.part) return;
       const part = r.part, pg = srv.page || {};
@@ -434,6 +437,10 @@ function start(o) {
         if (Object.keys(simA).length) srv.feedAck = simA;
         if (Object.keys(pageA).length) toPage({ feedAck: pageA });
       }
+      // the simulation's own count of the screens open (its villager-seconds meter runs while any is, js/perf.js): told only when the
+      // page's count changed, a new world's simulation (held to active) or an answer lost to a busy one never heard, and the meter
+      // stayed off: the screen's Performance card blank (Gordon, 2026-11-02)
+      if (debug.screens && part.simScreens != null && part.simScreens !== debug.screens()) srv.feedAck = Object.assign(srv.feedAck || {}, { screens: debug.screens() });
       if (srv.wantIcons.size && srv.client && !srv.iconsAsked) { srv.iconsAsked = [...srv.wantIcons.keys()]; toPage({ feedAck: { icons: srv.iconsAsked } }); }   // (the ids asked for: false when none is out)
     } finally { feeding = false; }
   }

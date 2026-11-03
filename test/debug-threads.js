@@ -100,7 +100,7 @@ async function run(b, label, srv, query) {
 
 (async () => {
   const b = await chromium.launch();
-  const srv = await lib.serve({ world: true, args: ['--workers', '3', '--split', 'always'] });
+  const srv = await lib.serve({ world: true, args: ['--workers', '3', '--regions', '--split', 'always'] });
   await run(b, 'server', { url: srv.url, debug: srv.debugUrl }, '?sim=server&workers=3');
   srv.stop();
   await b.close();
