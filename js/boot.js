@@ -99,6 +99,9 @@ function simFrame(raw) {
   let ms = performance.now() - t0;
   const TL = !BF.page && BF.tload && BF.tload.total ? BF.tload : null;
   if (TL) { const b = TL.total(); if (lastBusy != null && b >= lastBusy) ms = Math.max(ms, b - lastBusy); lastBusy = b; }
+  // (split over cluster workers: the busiest thread, a follower's if it is busier: js/rplay.js busiest. Journaled below as it is, so the
+  // followers' budgets decide alike)
+  if (BF.rplay && BF.rplay.busiest) { const f = BF.rplay.busiest(); if (f > 0) ms = Math.max(ms, f * raw * 1000); }
   if (RJ) RJ.rec(["a", ms, raw]);
   if (BF.active) BF.active.frame(ms, raw);
   return done;

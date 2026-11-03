@@ -369,6 +369,16 @@ function splitWhy() {
   if (!caught) return late;
   return { state: "ready", text: "Splits at the next check" };
 }
+// The busiest follower's share of its thread now (js/threadload.js, sent about once a second), while the clusters are split, else 0:
+// the simulation budget measures the leader's thread (js/boot.js simFrame), and a split runs villages on the followers, so a follower
+// at its limit while the leader had room let villages keep joining (and a leader at its limit held them back while followers idled:
+// Gordon's game, 2026-11-03). The budget takes the busiest thread of all.
+function busiest() {
+  if (!L.split || !L.list.length) return 0;
+  let b = 0;
+  for (const f of L.list) if (f.load && f.load.busy > b) b = f.load.busy;
+  return b;
+}
 function status() {
   const s = RW.active ? RW.stats() : clustered() ? BF.cworkers.stats() : null;
   return { want: L.want, followers: L.list.length, ready: L.ready, split: L.split, policy: L.policy, ticks: L.ticks,
@@ -562,5 +572,5 @@ const testSlow = ms => { RW.rec(["slow", +ms || 0]); flush(); };
 // (tests) back to one now (split=always splits again once the followers are ready)
 const testSolo = () => { if (L.split) toSolo("a test"); };
 
-BF.rplay = { setup, begin, end, frame, loopStart, flush, hold, lagging, status, text, follower, player, testCrash, testSlow, testSolo, MAX, TRIAL, VERIFY };
+BF.rplay = { setup, begin, end, frame, loopStart, flush, hold, lagging, status, busiest, text, follower, player, testCrash, testSlow, testSolo, MAX, TRIAL, VERIFY };
 })();

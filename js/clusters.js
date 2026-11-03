@@ -27,7 +27,13 @@ const BF = (globalThis.BF = globalThis.BF || {});
 let MEET = 160;      // ticks between meetings (eight game seconds. A meeting costs about the same however long the interval: Gordon chose 40
                      // on 2026-10-28, 80 on 2026-10-30, when 8 workers on test4 went from 0.83 to 1.05 of one thread, then 160 on 2026-11-02,
                      // 18% faster than 80 on the laptop at 100x (test4, 8 workers); setMeet: benchmarks)
-const REACH = 600;   // blocks from a village's centre that its cluster reaches at most (half the usual distance to the next, plus some)
+const REACH = 256;   // blocks from a village's centre that its cluster reaches at most: the village, its fields and pens (its chunks
+                     // load out to about 120 blocks), and a margin. It was 600 (half the usual distance to the next village, plus some),
+                     // but every region in the player's view takes its base into the player's group, which runs on the first worker, so a
+                     // village whose outskirts merely reached into the view went there whole: Gordon's game, 2026-11-03, 17 villages, the
+                     // first worker holding 173 regions at 57% busy with 3 workers holding no village. The land between villages is
+                     // the wild clusters' now (cheap: few mobs, no village), and the player's group takes only the villages whose own land
+                     // is in view.
 const CELL = 8;      // regions along a side of a wild cluster (512 blocks)
 const VIEW_PAD = 48; // blocks past the view distance that still go in the player's group (plus how far it moved since the last meeting)
 const MAX_RUN = 512; // a move further than this between meetings is a jump (a teleport), not a speed: it adds nothing
