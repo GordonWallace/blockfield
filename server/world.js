@@ -409,8 +409,10 @@ function start(o) {
     fedAt = Date.now();
     feeding = true;
     try {
-      const r = await s.ask("feed", { ack: srv.feedAck }, 5000);
+      const told = srv.feedAck;
       srv.feedAck = null;
+      const r = await s.ask("feed", { ack: told }, 5000);
+      if (told && (!r || r.error)) srv.feedAck = Object.assign({}, told, srv.feedAck);   // (not heard: again with the next ask)
       if (r && r.error) { debug.push({ t: Date.now(), n: ++feedN, error: "in the simulation: " + String(r.error).split("\n").slice(0, 3).join("\n") }); return; }   // (the screen shows it, as a page's)
       if (!r || !r.part) return;
       const part = r.part, pg = srv.page || {};
@@ -435,6 +437,10 @@ function start(o) {
         if (Object.keys(simA).length) srv.feedAck = simA;
         if (Object.keys(pageA).length) toPage({ feedAck: pageA });
       }
+      // the simulation's own count of the screens open (its villager-seconds meter runs while any is, js/perf.js): told only when the
+      // page's count changed, a new world's simulation (held to active) or an answer lost to a busy one never heard, and the meter
+      // stayed off: the screen's Performance card blank (Gordon, 2026-11-02)
+      if (debug.screens && part.simScreens != null && part.simScreens !== debug.screens()) srv.feedAck = Object.assign(srv.feedAck || {}, { screens: debug.screens() });
       if (srv.wantIcons.size && srv.client && !srv.iconsAsked) { srv.iconsAsked = [...srv.wantIcons.keys()]; toPage({ feedAck: { icons: srv.iconsAsked } }); }   // (the ids asked for: false when none is out)
     } finally { feeding = false; }
   }

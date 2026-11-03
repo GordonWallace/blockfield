@@ -362,28 +362,29 @@ const save = {
     }
     const t0 = performance.now();
     // cluster workers in play (js/rplay.js, js/cworkers.js): each worker's copy is current only for its own clusters, so the save waits for
-    // the next meeting (at most a game second), where every worker sends its mobs and the world is taken whole (the followers alike)
+    // the next meeting (at most BF.ctick.MEET ticks: 8 game seconds since #733; the game goes on meanwhile), where every worker sends its mobs and the world is taken whole (the followers alike)
     const CW = BF.cworkers;
     if (CW && CW.active && BF.rworkers && BF.rworkers.journal) {
       BF.rworkers.rec(["sm"]);
       const name = save.current.name;
       return new Promise(res => CW.whenMet(ok => {
+        const tm = performance.now();   // (the wait for the meeting, apart from the gathering: the log line)
         if (!ok) { slog("ERROR", "Saving world \"" + name + "\" failed (the cluster workers stopped first); the previous save is kept"); res(false); return; }
         let data;
         try { data = CW.gathered(() => snapshot({ quiet: true }), "save"); } catch (e) { console.error(e); res(false); return; }
-        res(save.current ? write(data, performance.now()) : false);
+        res(save.current ? write(data, performance.now(), tm) : false);
       }));
     }
     let data0;
     try { data0 = snapshot(); } catch (e) { console.error(e); return Promise.resolve(false); }
     return write(data0, performance.now());
-    function write(data, t1) {
+    function write(data, t1, tm) {
     const meta = Object.assign({}, save.current, { lastPlayed: Date.now(), gameMode: data.player && data.player.gameMode || save.current.gameMode, seed: data.seed, gen: data.gen, biomeScale: data.biomeScale || 1, villages: data.villages || 1, monsters: data.monsters || save.current.monsters, version: data.version, game: BF.VERSION, time: data.time });
     save.current = meta;
     return tx(["worlds", "data"], "readwrite", t => { t.objectStore("worlds").put(meta); t.objectStore("data").put(data, meta.id); })
       .then(() => {
         save.lastSaved = Date.now(); save.lastError = null;
-        slog("DEBUG", "Saved world \"" + meta.name + "\" in " + Math.round(performance.now() - t0) + " ms (" + Math.round(t1 - t0) + " ms to gather it)");
+        slog("DEBUG", "Saved world \"" + meta.name + "\" in " + Math.round(performance.now() - t0) + " ms (" + (tm != null ? Math.round(tm - t0) + " ms waiting for the workers' meeting, " + Math.round(t1 - tm) : Math.round(t1 - t0)) + " ms to gather it)");
         BF.emit("worldSaved", meta); return true;
       })
       .catch(e => {

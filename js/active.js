@@ -53,7 +53,7 @@
 //                    cool, reach, minFps, settings}, quiet), opts(), peak(), used() -> the measure, pressed() -> the region workers
 //                    should split (PRESS), holdJoins(tick), settings(), choose(field, value, quiet) -> settings, adopt(settings, quiet) -> settings, next(field) ->
 //                    the value after the current one, auto() -> {share, memMB}, describe(settings) -> text, text(), feed(), log(), reset(),
-//                    BUDGETS, CHOICES, DEFAULT }
+//                    blocker() -> {state, text}: what holds the next join back, BUDGETS, CHOICES, DEFAULT }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -147,7 +147,8 @@ const used = () => slices.length ? slices.reduce((s, x) => s + x.frac, 0) / slic
 // The region workers' split at 1x (js/rplay.js, Gordon 2026-10-30: the workers must start when the simulation's thread gets busy): the
 // measure (the last 10 s) at or over PRESS of each second, or at the join line, where the limit holds villages back (a lower limit)
 const PRESS = 0.65;
-const pressed = () => slices.length >= 10 && used() >= (opt.on && opt.budget > 0 ? Math.min(PRESS, joinAt()) : PRESS);
+const pressAt = () => (opt.on && opt.budget > 0 ? Math.min(PRESS, joinAt()) : PRESS);
+const pressed = () => slices.length >= 10 && used() >= pressAt();
 
 // ---- the extras
 const extras = new Map();      // village key -> { v, t (real ms when it joined), d (edge distance at the last decision) }
@@ -267,6 +268,48 @@ function decide(px, pz, base) {
     }
   }
   return listed();
+}
+// What holds the next village back now, in words, for the debug screen's Simulation budget card (Gordon, 2026-11-02: "a clear indication of
+// what the current limiter is for adding more villages"). The same conditions as decide(), read without changing anything (the screen's
+// reads must not: test/feed-readonly.js), the one that binds longest first. -> { state: "off" | "fixed" | "leaving" | "waiting" | "full" |
+// "ready", text }
+function blocker() {
+  const t = now(), win = opt.win, pctS = f => pct(Math.max(0, f));
+  if (forced > 0) return { state: "ready", text: `Loading ${forced} more ${forced === 1 ? "village" : "villages"} now (asked for from the debug screen or /loadvillages)` };
+  if (!opt.on) return { state: "off", text: "Budget off: only the nearest villages are simulated" };
+  if (!(opt.budget > 0)) return { state: "off", text: "Distant villages set to Nearest only" + (extras.size ? `: ${extras.size} extra still to let go, one every ${win} s` : "") };
+  if (opt.fixed > 0) return { state: "fixed", text: `A fixed set of ${opt.fixed} extra villages (a benchmark): the budget doesn't decide` };
+  if (unforced > 0) return { state: "leaving", text: `Unloading ${unforced} more extra ${unforced === 1 ? "village" : "villages"} now (asked for from the debug screen or /unloadvillages)` };
+  if (!autoOn) return { state: "off", text: "Automatic loading paused: villages join or leave only when asked (Load now, Unload now, or /autovillages to resume)" };
+  const f = used(), p = peak();
+  let going = 0;
+  for (const k of leaving.keys()) if (!extras.has(k) && VS() && VS().isActive(k)) going++;
+  const base = Math.max(0, simulated() - extras.size - going), running = base + extras.size + going, share = running ? f / running : 0;
+  const want = p != null ? Math.max(f, running * p) : f, each = p != null ? Math.max(share, p) : share;
+  const by = p != null ? ` (${pctS(want)} expected in the day's busiest hour)` : "";
+  if (overMs > 0) return extras.size
+    ? { state: "leaving", text: `Over the leave line (${pctS(leaveAt())}): at ${pctS(f)} for ${Math.round(overMs / 1000)} of ${win} s, then the farthest extra leaves` }
+    : { state: "full", text: `Over the leave line (${pctS(leaveAt())}) at ${pctS(f)}, with no extra villages to let go` };
+  if (BF.rand && BF.rand.tick < joinHold) return { state: "waiting", text: `A workers' split trial is running: joins wait ${joinHold - BF.rand.tick} more ticks` };
+  if (p == null) {
+    const sky = BF.sky, isNight = !!(sky && sky.isNight && sky.isNight()), early = !!(sky && sky.time < opt.morning);
+    if (isNight || early) {
+      const hr = Math.floor(dayNow() * 24);
+      let seen = 0;
+      for (const [k, b] of hours) if (k >= hr - 23 && k < hr && b.n >= 3) seen++;
+      return { state: "waiting", text: `${isNight ? "Night" : "Early morning"}: no joins until a whole day has been measured (${seen} of ${PEAK_HOURS} game hours so far)` };
+    }
+  }
+  if (BF.warp && BF.warp.speed === 1 && fps < opt.minFps) return { state: "waiting", text: `Frame rate ${Math.round(fps)} fps, under ${opt.minFps} at 1x` };
+  if (want >= joinAt()) return { state: "full", text: `At ${pctS(f)}${by}: joins only below ${pctS(joinAt())}` };
+  if (want + each > opt.budget) return { state: "full", text: `At ${pctS(f)}${by}: one more village (about ${pctS(each)}) would pass the ${pctS(opt.budget)} limit` };
+  const held = opt.hold * 1000 - (t - lastLoad);
+  if (held > 0) return { state: "waiting", text: `Waiting ${Math.ceil(held / 1000)} s more after the last join (${opt.hold} s between joins, so its cost shows first)` };
+  if (underMs < win * 1000) return { state: "waiting", text: `Under the join line (${pctS(joinAt())}) for ${Math.round(underMs / 1000)} of ${win} s` };
+  if (decide.memTold) return { state: "full", text: `Memory limit: the extra villages' chunk data would pass ${opt.memMB} MB` };
+  if (emptyAt && t - emptyAt.t < COOL_EMPTY) return { state: "full", text: `No more villages within ${Math.round(emptyAt.r)} blocks` + (opt.reach > 0 && emptyAt.r >= opt.reach ? " (the distance limit)" : "") };
+  const room = each > 0 ? Math.min(ADD_MAX, Math.floor((opt.budget - want) / each)) : ADD_MAX;
+  return { state: "ready", text: `Ready: up to ${room} ${room === 1 ? "village joins" : "villages join"} at the next check` };
 }
 // the n farthest extras, farthest first (by their distance at this decision)
 const farthest = n => [...extras].sort((a, b) => b[1].d - a[1].d || (a[0] < b[0] ? -1 : 1)).slice(0, n).map(e => e[0]);
@@ -400,7 +443,7 @@ BF.active = {
   waitCap: key => (leaving.has(key) && !extras.has(key) ? WAIT_CAP : null), waitWhy: key => leaving.get(key) || null, leaving: () => (leavingNow(), [...leaving.keys()]),
   extras: () => [...extras.keys()],
   force, forced: () => forced, FORCE_MAX, unforce, setAuto, isAuto: () => autoOn,
-  used, pressed, PRESS,
+  used, pressed, pressAt, PRESS,
   holdJoins: tick => { joinHold = tick; },
   peak,
   opts: () => Object.assign({}, opt),
@@ -437,8 +480,10 @@ BF.active = {
   text,
   // the debug screen's Simulation budget card
   feed: () => ({ on: opt.on, budget: opt.budget, used: used(), fps: Math.round(fps), villages: simulated(), extra: VS() && VS().extraCount ? VS().extraCount() : extras.size, extras: [...extras].map(([k, x]) => ({ key: k, name: vname(k), d: Math.round(x.d) })),
-    under: Math.round(underMs / 1000), over: Math.round(overMs / 1000), memMB: opt.memMB, reach: opt.reach, peak: peak(), settings: Object.assign({}, S), forced, unforced, auto: autoOn, log: decisions.slice(-12) }),
+    under: Math.round(underMs / 1000), over: Math.round(overMs / 1000), memMB: opt.memMB, reach: opt.reach, peak: peak(), settings: Object.assign({}, S), forced, unforced, auto: autoOn, log: decisions.slice(-12),
+    joinAt: joinAt(), leaveAt: leaveAt(), win: opt.win, unloading: [...leaving.keys()].filter(k => !extras.has(k) && VS() && VS().isActive(k)).length, next: blocker() }),
   log: () => decisions.slice(),
+  blocker,
   // region workers (js/rplay.js): the leader's whole state for a follower's copy as it boots (opt alone isn't enough: the extras, the
   // measure's windows, the clock it measures by and the villages being let go all decide what happens next, and the automatic figures
   // are the leader's machine's)

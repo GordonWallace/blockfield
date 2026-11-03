@@ -41,6 +41,12 @@
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 12px; }
   .cards > .card { max-height: 300px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--edge2) transparent; }
   .card { background: linear-gradient(180deg, var(--card2), var(--card)); border: 1px solid var(--edge); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+  /* what holds the next step back (the next village join, the workers' split): js/active.js blocker, js/rplay.js splitWhy */
+  .next { margin: 8px 0 4px; padding: 5px 8px; border-left: 3px solid var(--faint); background: rgba(255, 255, 255, 0.04); border-radius: 0 4px 4px 0; color: var(--ink); font-size: 12px; }
+  .next b { font-weight: 500; color: var(--muted); margin-right: 4px; }
+  .next[data-state=ready], .next[data-state=split] { border-color: var(--accent); } .next[data-state=waiting], .next[data-state=trial], .next[data-state=leaving] { border-color: var(--warn); } .next[data-state=full], .next[data-state=ended] { border-color: var(--danger); }
+  .bar > s { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); opacity: 0.55; text-decoration: none; }
+  .bar > i.mid { background: var(--warn); } .bar > i.hot { background: var(--danger); }
   .vload { margin-top: 6px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
   .vload input { width: 48px; background: transparent; border: 1px solid var(--edge2); border-radius: 5px; padding: 1px 4px; font: 12px var(--mono); color: var(--ink); }
   .vload button { background: transparent; border: 1px solid var(--edge2); border-radius: 5px; padding: 1px 8px; font: 12px var(--mono); color: var(--muted); cursor: pointer; }
@@ -58,7 +64,7 @@
   .psplit .wsw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
   canvas.cores { display: block; width: 100%; height: 46px; margin-top: 4px; }
   .mleg .rleg { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); margin-right: 8px; } .mleg .rleg i { width: 10px; height: 9px; border-radius: 2px; display: inline-block; }
-  .bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.07); overflow: hidden; margin-top: 6px; } .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
+  .bar { position: relative; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.07); overflow: hidden; margin-top: 6px; } .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
   .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
   .chip { font-size: 11px; padding: 1px 7px; border-radius: 99px; background: rgba(255, 255, 255, 0.06); color: var(--muted); white-space: nowrap; } .chip b { color: var(--ink); font-weight: 500; }
 
@@ -351,13 +357,13 @@
     <div class="card" id="c-perf" title="Villager-seconds of game time simulated per real second (js/perf.js): speed times villagers. The split is ms per simulation step by part; streaming is per frame, spread over its steps"><h3>Performance <span class="sub" id="c-perf-st"></span></h3>
       <div class="big" id="c-vss">-</div><div class="sub" id="c-perf-ms"></div><div class="psplit" id="c-split"></div><canvas class="spark" id="s-vss"></canvas></div>
     <div class="card" id="c-budgetcard" title="Distant villages (js/active.js, spec r15-34, the pause menu's settings): villages beyond the nearest four are simulated, nearest first, while the simulation needs less than this share of each real second at 1x, within the distance and memory limits; over it for 10 s, the farthest extra unloads with the countdown"><h3>Simulation budget <span class="sub" id="c-budget-st"></span></h3>
-      <div class="big" id="c-budget">-</div><div class="sub" id="c-budget-sub"></div><div class="bar"><i id="b-budget"></i></div><div class="sub" id="c-budget-ex"></div><div class="sub vload" id="c-vload" title="Force-load villages (r15-90): the nearest villages not yet simulated join now, nearest first (the /loadvillages command); the usual loading rules decide afterwards, so they may unload again if the machine can't run them">Load now <input type="number" id="c-vload-n" min="1" max="50" value="3"> nearest villages <button id="c-vload-go">Load</button> <span id="c-vload-st"></span></div><div class="sub vload" title="Force-unload villages (r15-93): the farthest extra villages leave now, each once its villagers' tasks are done (at most a game minute), and aren't picked again for 5 minutes (the /unloadvillages command); the nearest villages the distance rule keeps stay">Unload now <input type="number" id="c-vunload-n" min="1" max="50" value="3"> farthest extra villages <button id="c-vunload-go">Unload</button> <span id="c-vunload-st"></span></div><div class="sub vload" title="Automatic loading and unloading (r15-93): paused, the time limit neither adds nor removes villages, so forced loads and unloads stay as they are (the /autovillages command)">Automatic loading and unloading: <b id="c-vauto">-</b> <button id="c-vauto-go">Pause</button> <span id="c-vauto-st"></span></div><div class="sub" id="c-budget-log" style="margin-top:6px;max-height:110px;overflow:auto"></div></div>
+      <div class="big" id="c-budget">-</div><div class="next" id="c-budget-next"></div><div class="sub" id="c-budget-sub"></div><div class="bar" title="The share of each second the simulation needs at 1x; the marks are the join and leave lines"><i id="b-budget"></i><s id="b-budget-join"></s><s id="b-budget-leave"></s></div><div class="sub" id="c-budget-more"></div><div class="sub" id="c-budget-ex" style="margin-top:4px"></div><div class="sub vload" id="c-vload" title="Force-load villages (r15-90): the nearest villages not yet simulated join now, nearest first (the /loadvillages command); the usual loading rules decide afterwards, so they may unload again if the machine can't run them">Load now <input type="number" id="c-vload-n" min="1" max="50" value="3"> nearest villages <button id="c-vload-go">Load</button> <span id="c-vload-st"></span></div><div class="sub vload" title="Force-unload villages (r15-93): the farthest extra villages leave now, each once its villagers' tasks are done (at most a game minute), and aren't picked again for 5 minutes (the /unloadvillages command); the nearest villages the distance rule keeps stay">Unload now <input type="number" id="c-vunload-n" min="1" max="50" value="3"> farthest extra villages <button id="c-vunload-go">Unload</button> <span id="c-vunload-st"></span></div><div class="sub vload" title="Automatic loading and unloading (r15-93): paused, the time limit neither adds nor removes villages, so forced loads and unloads stay as they are (the /autovillages command)">Automatic loading and unloading: <b id="c-vauto">-</b> <button id="c-vauto-go">Pause</button> <span id="c-vauto-st"></span></div><div class="sub" id="c-budget-log" style="margin-top:6px;max-height:110px;overflow:auto"></div></div>
     <div class="card" id="c-reqcard" title="The request queue (js/requests.js, spec r15-17): requests applied and refused, and world writes still made directly (by module) until the systems are converted"><h3>Requests</h3>
       <div class="big" id="c-req">-</div><div class="sub" id="c-req-sub"></div><div class="psplit" id="c-direct"></div></div>
     <div class="card" id="c-rtickcard" title="The region tick (js/regiontick.js, spec r15-33): mobs think region by region, and each region's requests apply together; ms per tick by phase over the last 200 ticks, and the regions with the most mobs"><h3>Region tick <span class="sub" id="c-rtick-st"></span></h3>
       <div class="big" id="c-rtick">-</div><div class="sub" id="c-rtick-sub"></div><div class="psplit" id="c-rtick-ms"></div><div class="psplit" id="c-rtick-regions"></div></div>
-    <div class="card" id="c-wkcard" hidden title="Region workers (js/rplay.js, js/rworkers.js, spec r15-39): followers keep copies of the world; while the simulation can't keep up and splitting pays, each worker thinks its share of the regions. Regions and mobs per worker, ms per tick by phase"><h3>Workers <span class="sub" id="c-wk-st"></span></h3>
-      <div class="big" id="c-wk">-</div><div class="sub" id="c-wk-sub"></div><div class="psplit" id="c-wk-ms"></div><div class="psplit" id="c-wk-per"></div></div>
+    <div class="card" id="c-wkcard" hidden title="Workers (js/rplay.js, js/cworkers.js, spec r15-39b): followers keep copies of the world; once the simulation can't keep up and a split pays, the clusters are shared out over the workers (--regions: the old region split). The Split line says what has to happen next. Groups and ms a tick per worker, ms a meeting by phase"><h3>Workers <span class="sub" id="c-wk-st"></span></h3>
+      <div class="big" id="c-wk">-</div><div class="next" id="c-wk-next"></div><div class="sub" id="c-wk-sub"></div><div class="psplit" id="c-wk-ms"></div><div class="psplit" id="c-wk-per"></div></div>
     <div class="card" id="c-thcard" title="Threads and cores (js/threadload.js): each of the game's threads measures the share of the wall clock it spends working (a browser can't see which core a thread runs on); the bars are the last minute's average, the number after it the last second. Worker colours match the Mobs map's Regions overlay. The cores are the computer the debug server runs on, from the operating system"><h3>Threads <span class="sub" id="c-th-st"></span></h3>
       <div class="big" id="c-th">-</div><div class="sub" id="c-th-sub"></div><div class="psplit" id="c-th-list"></div>
       <div class="sub" id="c-cores-sub" style="margin-top:8px"></div><canvas class="cores" id="c-cores"></canvas></div>
@@ -864,13 +870,17 @@ function renderThreads(s) {
 
 // region workers (js/rplay.js, spec r15-39): how many, split or one thinking, regions and mobs per worker, ms per tick by phase
 function renderWorkers(w) {
-  $("c-wkcard").hidden = !w || w.want <= 1;
-  if (!w || w.want <= 1) return;
+  $("c-wkcard").hidden = !w;
+  if (!w) return;
   const st = w.stats, n = w.followers + 1, f1 = v => (v == null ? "?" : v.toFixed(1));
   const cl = !!(st && Array.isArray(st.groups));   // cluster workers (js/cworkers.js stats): each worker's groups and ms a tick, the meeting's phases
-  $("c-wk").innerHTML = `${fmt(w.followers ? n : 1)} <small>${w.split ? (cl ? "splitting the clusters" : "splitting the regions") : "workers, one thinking"}</small>`;
-  $("c-wk-st").textContent = w.policy === "auto" ? "" : "split " + w.policy;
-  $("c-wk-sub").textContent = !w.followers ? "none for this world" : `${w.ready}/${w.followers} followers ready \u00B7 ${Math.max(0, ...w.behind)} ticks behind \u00B7 ${f1(w.soloMs)} ms a tick on one` + (w.splitMs != null ? `, ${f1(w.splitMs)} split` : "");
+  const nx = w.next || { state: "off", text: w.text || "" };
+  $("c-wk-next").dataset.state = nx.state;
+  $("c-wk-next").innerHTML = `<b>Split:</b>${esc(nx.text)}`;
+  $("c-wk").innerHTML = `${fmt(w.followers ? n : w.want > 1 ? w.want : 1)} <small>${w.split ? (cl ? "workers, splitting the clusters" : "workers, splitting the regions") : w.followers ? "workers, one thinking" : w.want > 1 ? "workers asked for" : "worker"}</small>`;
+  $("c-wk-st").textContent = w.want > 1 ? (w.kind === "regions" ? "regions (old)" : "clusters") + (w.policy === "auto" ? "" : " \u00B7 split " + w.policy) : "";
+  if (!w.followers) { $("c-wk-sub").textContent = ""; $("c-wk-ms").innerHTML = ""; $("c-wk-per").innerHTML = ""; return; }
+  $("c-wk-sub").textContent = `${w.ready}/${w.followers} followers ready \u00B7 ${Math.max(0, ...w.behind)} ticks behind \u00B7 ${f1(w.soloMs)} ms a tick on one` + (w.splitMs != null ? `, ${f1(w.splitMs)} split` : "");
   const ms = !st ? [] : cl ? Object.entries(st.perMeeting || {}).map(([k, v]) => [k + " a meeting", v]) : Object.entries(st.ms || {}), mx = Math.max(0.001, ...ms.map(e => e[1]));
   $("c-wk-ms").innerHTML = ms.map(([k, v]) => `<span>${esc(k)}</span><i style="width:${Math.round(v / mx * 100)}%"></i><b>${v.toFixed(2)} ms</b>`).join("");
   if (cl) {
@@ -947,13 +957,24 @@ $("c-vauto-go").addEventListener("click", () => {
 function renderBudget(b) {
   $("c-budgetcard").hidden = !b;
   if (!b) return;
-  const pc = f => Math.round(f * 100) + "%", on = b.on && b.budget > 0;
-  $("c-budget-st").textContent = on ? "budget " + pc(b.budget) : "off";
+  const pc = f => (f > 0 && f < 0.01 ? "<1" : Math.round(f * 100)) + "%", on = b.on && b.budget > 0;
+  $("c-budget-st").textContent = on ? "limit " + pc(b.budget) : "off";
   const ex = b.extra != null ? b.extra : b.extras.length;
   $("c-budget").innerHTML = `${b.villages} <small>${b.villages === 1 ? "village" : "villages"} simulated (${b.villages - ex} nearest + ${ex} extra)</small>`;
-  $("c-budget-sub").textContent = `simulation needs ${pc(b.used)} of each second at 1x` + (on ? ` (limit ${pc(b.budget)}${b.reach > 0 ? ", within " + b.reach + " blocks" : ""}, memory ${b.memMB} MB)` : "") + ` · ${b.fps} fps` + (on ? ` · ${b.over ? "over for " + b.over + " s" : "under for " + b.under + " s"}` : "") +
-    (on && b.peak != null ? ` · busiest hour of the last day ${pc(b.peak)} a village` : "");
-  $("b-budget").style.width = Math.min(100, Math.round(on ? b.used / b.budget * 100 : 0)) + "%";
+  // the one thing that holds the next village back now (js/active.js blocker)
+  const nx = b.next || { state: on ? "waiting" : "off", text: "" };
+  $("c-budget-next").dataset.state = nx.state;
+  $("c-budget-next").innerHTML = `<b>Next village:</b>${esc(nx.text)}`;
+  const join = b.joinAt != null ? b.joinAt : null, leave = b.leaveAt != null ? b.leaveAt : null;
+  $("c-budget-sub").textContent = `Needs ${pc(b.used)} of each second at 1x` + (on ? `, limit ${pc(b.budget)}` + (join != null ? ` (joins under ${pc(join)}, leaves over ${pc(leave)})` : "") : "");
+  // the bar: the whole second, the join and leave lines marked
+  const bar = $("b-budget");
+  bar.style.width = Math.min(100, Math.round(b.used * 100)) + "%";
+  bar.className = on && leave != null && b.used >= leave ? "hot" : on && join != null && b.used >= join ? "mid" : "";
+  for (const [id, v] of [["b-budget-join", join], ["b-budget-leave", leave]]) { $(id).hidden = !on || v == null; if (on && v != null) $(id).style.left = Math.min(99, v * 100) + "%"; }
+  const set = b.peak != null ? b.peak * b.villages : null;
+  $("c-budget-more").textContent = [on ? (b.peak != null ? `busiest hour of the last day: ${pc(b.peak)} a village, about ${pc(set)} for these ${b.villages}` : "busiest hour: not measured yet (a whole day first)") : null,
+    `${b.fps} fps`, on ? `memory ${b.memMB} MB` : null, on ? (b.reach > 0 ? `within ${b.reach} blocks` : "no distance limit") : null].filter(Boolean).join(" \u00B7 ");
   if (b.auto != null && b.auto !== vAuto) $("c-vauto-st").textContent = "";
   vAuto = b.auto !== false;
   $("c-vauto").textContent = vAuto ? "on" : "paused"; $("c-vauto-go").textContent = vAuto ? "Pause" : "Resume";
@@ -965,7 +986,7 @@ function renderBudget(b) {
 function renderPerf(p) {
   $("c-perf").classList.toggle("stale", !!(p && p.stale));
   $("c-perf-st").textContent = !p ? "" : p.stale ? "paused" : (p.speed >= 10 ? Math.round(p.speed) : p.speed.toFixed(1)) + "x";   // the game speed it ran at
-  if (!p || p.vss == null) { $("c-vss").textContent = "-"; $("c-perf-ms").textContent = ""; $("c-split").innerHTML = ""; return; }
+  if (!p || p.vss == null) { $("c-vss").textContent = "-"; $("c-perf-ms").textContent = "the meter starts once the simulation hears this screen is open"; $("c-split").innerHTML = ""; spark($("s-vss"), [], "#e8c46a", 1, 120); return; }
   $("c-vss").innerHTML = `${fmt(Math.round(p.vss))} <small>V·s/s</small>`;
   $("c-perf-ms").textContent = `${p.msPerStep.toFixed(2)} ms/step \u00B7 ${fmt(Math.round(p.mobss))} mob-s/s \u00B7 ${p.villagers} villagers, ${p.mobs} mobs`;
   const sp = Object.entries(p.split || {}), max = Math.max(1e-6, ...sp.map(e => e[1]));
