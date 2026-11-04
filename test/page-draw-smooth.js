@@ -5,7 +5,8 @@
 // weather with a zero time step, so the drops' clock never moved. Checks, over 20 s of frames near the boot village in the rain:
 //  - the drawn path of every mob in view: a step backwards against the one before, a stop in the middle of a walk and a hop (a step more
 //    than 2.5 times both its neighbours) are each under 1% of the moving frames (before the fix, 3% / 4% / 1% on the world server);
-//  - the drawing clock (BF.client.world.rt) stays behind the newest tick and seldom has to wait there;
+//  - the drawing clock (BF.client.world.rt) stays behind the newest tick, or at most world.ext ticks past it (drawing mobs on along their
+//    last step, r15-95), and seldom has to wait there;
 //  - the rain's shader clock moves on.
 // On the page host the old alpha rule still draws (no drawing clock): the rain check runs there too.
 // Usage: NODE_PATH=$(npm root -g) node test/run.js /tmp/pd test/page-draw-smooth.js [--host page|worker|server]
@@ -27,7 +28,7 @@ module.exports = async (pg) => {
     const t0 = performance.now();
     const f = () => {
       frames++;
-      if (M.rt != null && M.rt <= M.tick) behind++;
+      if (M.rt != null && M.rt <= M.tick + (M.ext || 0) + 1e-9) behind++;
       for (const e of M.entities.values()) if (e.kind === "mob") {
         const p = BF.mobView.drawPos(e);
         let t = tracks.get(e.n);
@@ -59,7 +60,7 @@ module.exports = async (pg) => {
     ok("drawn steps backwards under 1%", pc(r.back) < 1, pc(r.back));
     ok("stops mid-walk under 1%", pc(r.stall) < 1, pc(r.stall));
     ok("hops under 1%", pc(r.hop) < 1, pc(r.hop));
-    ok("the drawing clock runs, behind the newest tick", r.rt && r.behind === r.frames, { behind: r.behind, frames: r.frames });
+    ok("the drawing clock runs, behind the newest tick or at most world.ext past it", r.rt && r.behind === r.frames, { behind: r.behind, frames: r.frames });
     ok("the drawing clock seldom waits at the newest tick", r.draw && r.draw.waits <= r.draw.frames * 0.05, r.draw);
   } else ok("in the page: no drawing clock (the alpha rule)", !r.rt, r.rt);
   if (fails.length) throw new Error("FAILED: " + fails.join("; "));
