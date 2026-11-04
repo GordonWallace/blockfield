@@ -369,6 +369,23 @@ function splitWhy() {
   if (!caught) return late;
   return { state: "ready", text: "Splits at the next check" };
 }
+// While the clusters are split, the followers' busy shares of their threads now (js/threadload.js, sent about once a second), for the
+// simulation budget (js/boot.js simFrame, js/active.js): max, the busiest follower's (the budget measures the busiest thread of all: the
+// leader's alone let villages keep joining with a follower at its limit, and held them back with the leader at its limit while
+// followers idled: Gordon's game, 2026-11-03); land, the least busy follower's, where a village that joins goes (js/cworkers.js plan
+// puts a new group on the least loaded); each, the followers' share per village they hold (their whole time, meetings included, so
+// it errs high). null when not split.
+function loads() {
+  if (!L.split || !L.list.length) return null;
+  let max = 0, land = Infinity, sum = 0, seen = 0;
+  for (const f of L.list) { if (!f.load) continue; const b = f.load.busy; seen++; sum += b; if (b > max) max = b; if (b < land) land = b; }
+  if (!seen) return null;
+  let held = 0;
+  const CW = BF.cworkers, CL = BF.clusters;
+  if (CW && CW.active && CW.workerOf && CL && BF.mobs && BF.mobs.villages) for (const r of BF.mobs.villages.values()) if (CW.workerOf(CL.groupOf("v:" + r.key)) > 0) held++;
+  return { max, land, each: held > 0 ? sum / held : 0 };
+}
+const busiest = () => { const l = loads(); return l ? l.max : 0; };
 function status() {
   const s = RW.active ? RW.stats() : clustered() ? BF.cworkers.stats() : null;
   return { want: L.want, followers: L.list.length, ready: L.ready, split: L.split, policy: L.policy, ticks: L.ticks,
@@ -463,7 +480,7 @@ function follower(post) {
       case "ug": BF.world.replay.drops(o[1]); break;
       case "d": BF.world.replay.extendDown(o[1], o[2], o[3]); break;
       case "v": RW.clock = o[3]; BF.villageSim.update(o[1], o[2]); break;
-      case "a": if (BF.active) BF.active.frame(o[1], o[2]); break;
+      case "a": if (BF.active) BF.active.frame(o[1], o[2], o[3], o[4], o[5]); break;
       case "b": if (BF.active) BF.active.set(o[1], true); if (o.length > 2 && BF.gameOpts) BF.gameOpts.override(o[2]); break;   // (the player changed the distant-village settings: the leader's simworker.js journals them)
       case "f": BF.inventory.simFrame(o[1]); BF.maps.simFrame(); BF.player.simRide(o[1]); break;
       case "s": BF.save.snapshot(); break;
@@ -562,5 +579,5 @@ const testSlow = ms => { RW.rec(["slow", +ms || 0]); flush(); };
 // (tests) back to one now (split=always splits again once the followers are ready)
 const testSolo = () => { if (L.split) toSolo("a test"); };
 
-BF.rplay = { setup, begin, end, frame, loopStart, flush, hold, lagging, status, text, follower, player, testCrash, testSlow, testSolo, MAX, TRIAL, VERIFY };
+BF.rplay = { setup, begin, end, frame, loopStart, flush, hold, lagging, status, busiest, loads, text, follower, player, testCrash, testSlow, testSolo, MAX, TRIAL, VERIFY };
 })();

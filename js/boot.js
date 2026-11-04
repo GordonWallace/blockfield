@@ -99,8 +99,14 @@ function simFrame(raw) {
   let ms = performance.now() - t0;
   const TL = !BF.page && BF.tload && BF.tload.total ? BF.tload : null;
   if (TL) { const b = TL.total(); if (lastBusy != null && b >= lastBusy) ms = Math.max(ms, b - lastBusy); lastBusy = b; }
-  if (RJ) RJ.rec(["a", ms, raw]);
-  if (BF.active) BF.active.frame(ms, raw);
+  // split over cluster workers (js/rplay.js loads): the measure is the busiest thread, a follower's if it is busier; joins go by the
+  // least busy follower's (land) and its time per village (each), with this thread's own. Journaled as they are, so the followers'
+  // budgets decide alike
+  const own = ms, lo = BF.rplay && BF.rplay.loads ? BF.rplay.loads() : null, k = raw * 1000;
+  if (lo) ms = Math.max(ms, lo.max * k);
+  const land = lo ? lo.land * k : -1, each = lo ? lo.each * k : -1;
+  if (RJ) RJ.rec(["a", ms, raw, own, land, each]);
+  if (BF.active) BF.active.frame(ms, raw, own, land, each);
   return done;
 }
 BF.simFrame = raw => { const n = simFrame(raw); BF.warp.done(n, n * BF.warp.TICK, raw); return n; };
