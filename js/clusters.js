@@ -6,9 +6,9 @@
 //   base clusters  "v:<village key>" for each simulated village (js/mobs.js village records); a 64-block region (js/regions.js) belongs
 //                  to the nearest village's cluster within REACH blocks of its centre, else to the wild cluster of its CELL x CELL
 //                  regions block, "w:<face>:<a>:<b>";
-//   groups         base clusters merged for one meeting interval: every base with a region within the player's view (and a margin that
-//                  grows with the player's speed) goes
-//                  in one group, the player's, so everything the player can see or touch runs together. A group is what runs on one
+//   groups         base clusters merged for one meeting interval: every base with a region within the player's reach (the view, at most
+//                  TOUCH blocks, and a margin that grows with the player's speed) goes in one group, the player's, so everything the
+//                  player can touch runs together (what it sees further out comes from the workers that run it: js/protocol.js viewOut). A group is what runs on one
 //                  worker; its key is its smallest base key. Merges are decided from the world's state only (the player's position,
 //                  the village records), never from timing, so every worker count draws the same groups;
 //   a mob's base   its village's ("v:<key>") when it belongs to a simulated village (a member, a pen animal, a stable's horse, an animal
@@ -36,6 +36,15 @@ const REACH = 256;   // blocks from a village's centre that its cluster reaches 
                      // is in view.
 const CELL = 8;      // regions along a side of a wild cluster (512 blocks)
 const VIEW_PAD = 48; // blocks past the view distance that still go in the player's group (plus how far it moved since the last meeting)
+const TOUCH = 96;    // ...but no further than this: the land the player can reach or be reached from before the next meeting (a monster
+                     // chasing from 40 blocks, plus the 25 or so it walks in a meeting's 8 game seconds). Past it, a cluster in view runs
+                     // where the plan puts it, and its worker sends what its mobs and cells do in the client's view (js/protocol.js
+                     // viewOut): Gordon's laptop, 2026-11-03, 60 villages at view 32: 13 villages in the player's group, the first worker at
+                     // 47% busy against 33-37% on the others
+// STREAM: off (BF_STREAM=0 in the world server's environment, or BF.clusters.setStream(false) through a test's eval, which every copy
+// runs; it takes effect at the next meeting) puts everything in view in the player's group again and the followers send nothing: the
+// same build measured both ways (Gordon, 2026-11-04: keep it only if it costs little)
+let STREAM = !(globalThis.process && process.env && process.env.BF_STREAM === "0");
 const MAX_RUN = 512; // a move further than this between meetings is a jump (a teleport), not a speed: it adds nothing
 
 let villages = [];               // [key, x, z] of the simulated villages at the last meeting, by key
@@ -122,7 +131,8 @@ function rebuild() {
   // meetings, and slow to answer what the player does to them)
   const pp = BF.player && BF.player.position, was = player;
   const run = pp && was ? P().distance(was, { x: pp.x, z: pp.z }) : 0;
-  player = pp ? { x: pp.x, z: pp.z, r: ((BF.world && BF.world.viewDist) || 8) * (BF.CS || 16) + VIEW_PAD + (run <= MAX_RUN ? run : 0) } : null;
+  const vr = ((BF.world && BF.world.viewDist) || 8) * (BF.CS || 16) + VIEW_PAD, rr = run <= MAX_RUN ? run : 0;
+  player = pp ? { x: pp.x, z: pp.z, r: Math.min(vr, STREAM ? TOUCH : Infinity) + rr, view: vr + rr } : null;
   regionBase.clear();
   // every mob by its summary; the animals villagers are working on (as js/rworkers.js claims) go with their villages
   claimed = new Map();
@@ -141,6 +151,11 @@ function rebuild() {
   if (player && BF.regions) for (const k of BF.regions.around(player.x, player.z, player.r)) near.add(ofRegion(k));
   for (const v of villages) if (near.has("v:" + v[0])) bases.add("v:" + v[0]);
   for (const b of near) bases.add(b);
+  // and every base in view past that is a group of its own (with STREAM: the plan puts it on a worker), so the chunks that load there
+  // as the player looks round belong to a group: land in no group goes to the first group, and the tables that file things by base
+  // (js/horses.js recGroup: the records of horses rolled on a chunk there) never sent it (cluster-view: horses at the view's edge on one
+  // copy only)
+  if (player && BF.regions && player.view > player.r) for (const k of BF.regions.around(player.x, player.z, player.view)) bases.add(ofRegion(k));
   const sorted = [...bases].sort();
   const pkey = near.size ? [...near].sort()[0] : null;
   groupOfBase = new Map();
@@ -163,5 +178,5 @@ function stats() {
 const text = () => { const s = stats(); return "Clusters: " + s.groups.length + " (" + s.groups.map(g => g.key + (g.player ? "*" : "") + " " + g.mobs).join(", ") + ")"; };
 function reset() { villages = []; player = null; regionBase.clear(); groupOfBase = new Map(); groupList = []; meetings = 0; claimed = null; remote = null; }
 
-BF.clusters = { get MEET() { return MEET; }, setMeet(n) { MEET = n; }, REACH, rebuild, ofRegion, groupOf, groups: () => groupList, baseOf, place, summary, set remote(r) { remote = r; }, of: m => m.cl, villageOf, stats, text, reset };
+BF.clusters = { get MEET() { return MEET; }, setMeet(n) { MEET = n; }, REACH, TOUCH, get stream() { return STREAM; }, setStream(on) { STREAM = !!on; }, rebuild, ofRegion, groupOf, groups: () => groupList, baseOf, place, summary, set remote(r) { remote = r; }, of: m => m.cl, villageOf, stats, text, reset };
 })();

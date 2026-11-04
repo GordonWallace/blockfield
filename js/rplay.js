@@ -157,6 +157,7 @@ function onFollower(f, epoch, m) {
   if (m.errorLine && BF.glog) BF.glog.log("ERROR", m.errorLine[0], "worker " + f.me + ": " + m.errorLine[1]);
   if (m.ticks != null) f.ticks = m.ticks;
   if (m.load) f.load = m.load;   // its thread's busy share (js/threadload.js), about once a second
+  if (m.view) { const h = BF.proto.hosted && BF.proto.hosted(); if (h && h.viewIn) h.viewIn(f.me, m.view); }   // (what its clusters changed in the client's view: js/protocol.js viewIn)
   if (m.hashAt != null) soloCheck(f, m);
   if (m.textOf != null) soloText(f, m);
   if (m.trail) soloTrail(f, m);
@@ -390,7 +391,7 @@ function status() {
   const s = RW.active ? RW.stats() : clustered() ? BF.cworkers.stats() : null;
   return { want: L.want, followers: L.list.length, ready: L.ready, split: L.split, policy: L.policy, ticks: L.ticks,
     behind: L.list.map(f => L.ticks - f.ticks), loads: L.list.map(f => f.load || null), soloMs: L.soloMs, splitMs: L.splitMs, why: L.why || null, worst: L.worst, splitAt: L.splitAt, lastTrial: L.lastTrial || null, stats: s,
-    kind: L.kind, ended: L.ended || null, next: splitWhy() };
+    kind: L.kind, ended: L.ended || null, next: splitWhy(), view: (BF.proto.hosted && BF.proto.hosted() && BF.proto.hosted().S.vin) || null };
 }
 // The F3 / debug screen line.
 function text() {
@@ -523,9 +524,9 @@ function follower(post) {
             if (o[0] === "p" && EVAL.test(o[1].h)) { TL.end(); await new Promise(r => setTimeout(r, 0)); TL.begin(); }
           }
           BF.proto.flush();
-          const t = now();
-          if (t - loadT >= TL.SAMPLE) { loadT = t; post({ ticks, load: TL.report() }); }
-          else post({ ticks });
+          const t = now(), view = host && host.viewOut ? host.viewOut() : null;   // (its clusters' changes in the client's view: js/protocol.js viewOut)
+          if (t - loadT >= TL.SAMPLE) { loadT = t; post(view ? { ticks, load: TL.report(), view } : { ticks, load: TL.report() }); }
+          else post(view ? { ticks, view } : { ticks });
         } else if (d.textAt != null) { const t = kept.get(d.textAt); if (t) { const o = {}; for (const k of d.parts) o[k] = t[k]; post({ textOf: d.textAt, texts: o }); } }
         else if (d.trailOf) post({ trail: BF.world.trailOf(d.trailOf) });
         else if (d.end) { if (RW.active) RW.pause(); if (clustered()) BF.cworkers.stop(); queue.length = 0; }

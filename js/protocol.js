@@ -359,8 +359,72 @@ function serve(send, opts) {
     for (const L of BF.horses.leads()) (leads || (leads = new Map())).set(L.mob, L.lead);
   }
   const same = (a, b) => a === b || (Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i]));
+  // ---- the followers' view (clusters split over workers, js/rplay.js): a follower runs its own clusters, and the leader's copies of
+  // their mobs and cells are stale between meetings (every 8 game seconds), so each follower sends what its clusters change in the
+  // client's view (viewOut) and the leader sends that on (viewIn, each). That lets only the land the player can touch (js/clusters.js
+  // TOUCH) run on the leader, rather than everything in view (Gordon's laptop, 2026-11-03: 60 villages, view 32, 13 of them on the leader
+  // at 47% busy against 33-37% on each follower). A mob born on a follower shows from the next meeting.
+  const VSKIP = new Set(["riding", "rider", "lead"]);   // (other entities by the follower's protocol numbers: the leader's own stay)
+  const vsent = new Map();   // follower: mob id -> { s: the state sent, m }
+  const vcells = new Map();  // follower: chunk key -> Map(index -> id), its cells changed in view since the last viewOut
+  const ov = new Map();      // leader: mob id -> { w: the follower, s: its fields as last sent, or null: hidden (out of its view, or removed) }
+  const CWa = () => (BF.cworkers && BF.cworkers.active && BF.clusters && BF.clusters.stream ? BF.cworkers : null);
+  const ownerOf = (CW, m) => CW.workerOf(BF.clusters.groupOf(m.cl !== undefined ? m.cl : BF.clusters.baseOf(m))) | 0;
+  // follower: -> null, or { set: [[id, changed fields]], gone: [id] (out of view, removed, or no longer its own), cells: [[key, [[i, id]]]] }
+  function viewOut() {
+    const CW = CWa(), set = [], gone = [], cells = [];
+    if (CW && BF.mobs) {
+      const seen = new Set();
+      for (const m of BF.mobs.list) {
+        if (m.removed || m.id == null || !inView(m.position.x, m.position.z) || ownerOf(CW, m) !== CW.me) continue;
+        const s = stateOf("mob", m), had = vsent.get(m.id);
+        seen.add(m.id);
+        let d = null;
+        for (const f in s) if (!VSKIP.has(f) && (!had || !same(s[f], had.s[f]))) (d || (d = {}))[f] = s[f];
+        if (d) set.push([m.id, d]);
+        vsent.set(m.id, { s, m });
+      }
+      for (const id of [...vsent.keys()]) if (!seen.has(id)) { gone.push(id); vsent.delete(id); }
+      for (const [k, c] of vcells) cells.push([k, [...c]]);
+    } else if (vsent.size) { gone.push(...vsent.keys()); vsent.clear(); }
+    vcells.clear();
+    return set.length || gone.length || cells.length ? { set, gone, cells } : null;
+  }
+  // leader: a follower's viewOut
+  function viewIn(w, v) {
+    if (!v) return;
+    const st = S.vin || (S.vin = { msgs: 0, mobs: 0, gone: 0, cells: 0 });   // (counts for benchmarks: js/rplay.js status().view)
+    st.msgs++; st.mobs += (v.set || []).length; st.gone += (v.gone || []).length; for (const c of v.cells || []) st.cells += c[1].length;
+    for (const [id, d] of v.set || []) {
+      const e = ov.get(id);
+      if (e && e.w === w && e.s) Object.assign(e.s, d); else ov.set(id, { w, s: d });
+    }
+    for (const id of v.gone || []) ov.set(id, { w, s: null });
+    for (const [k, list] of v.cells || []) {
+      if (!S.chunks.has(k)) continue;
+      let m = S.cells.get(k);
+      if (!m) S.cells.set(k, (m = new Map()));
+      for (const [i, id] of list) m.set(i, id);
+    }
+    S.changed = true;
+  }
+  // leader: a mob's fields from its follower (undefined: its own state; null: not drawn), while that follower runs it
+  function viewOf(CW, m) {
+    const e = ov.get(m.id);
+    if (!e) return undefined;
+    if (e.w !== ownerOf(CW, m)) { ov.delete(m.id); return undefined; }   // (it changed worker at a meeting: its copy here is current, or another's)
+    return e.s;
+  }
   function each(fn) {
-    if (BF.mobs) for (const m of BF.mobs.list) if (!m.removed) fn("mob", m, m.position.x, m.position.z);
+    const CW = ov.size ? CWa() : null;
+    if (!CW && ov.size) ov.clear();
+    if (BF.mobs) for (const m of BF.mobs.list) {
+      if (m.removed) continue;
+      const v = CW ? viewOf(CW, m) : undefined;
+      if (v === null) continue;
+      if (v) fn("mob", m, v.x != null ? v.x : m.position.x, v.z != null ? v.z : m.position.z, v);
+      else fn("mob", m, m.position.x, m.position.z);
+    }
     if (BF.drops) for (const d of BF.drops.list) fn("drop", d, d.pos.x, d.pos.z);
     if (BF.mobs && BF.mobs.arrowList) for (const a of BF.mobs.arrowList()) fn("arrow", a, a.pos.x, a.pos.z);
     if (BF.boats) for (const b of BF.boats.list) fn("boat", b, b.pos.x, b.pos.z);
@@ -377,6 +441,16 @@ function serve(send, opts) {
   // dropped. Which chunks are in view (touchEntities' inView) and the touches, which hand out names and ids, stay as they were.
   function followerFlush(force) {
     S.flushes++; ST.flushes++;
+    // (its own clusters' cell changes in view, for viewOut: only cells of regions it runs, since the others' come here at a meeting, older
+    // than what their owners have sent the client since)
+    const CW = S.cells.size ? CWa() : null;
+    if (CW) for (const [k, c] of S.cells) {
+      const r = S.chunks.get(k);
+      if (!r || !r.c || CW.workerOf(BF.clusters.groupOf(BF.clusters.ofRegion(BF.regions.keyOf(r.c.cx * 16 + 8, 0, r.c.cz * 16 + 8)))) !== CW.me) continue;
+      let m = vcells.get(k);
+      if (!m) vcells.set(k, (m = new Map()));
+      for (const [i, id] of c) m.set(i, id);
+    }
     S.fx = []; S.logs = []; S.cells.clear(); S.editsDue = false; S.hurts = [];
     flushChunks(wanted(), S.view && S.view.budget != null ? S.view.budget : 16);
     const t = tickNow(), still = !!((BF.warp && BF.warp.frozen) || (BF.state && BF.state.paused));
@@ -386,9 +460,9 @@ function serve(send, opts) {
   function flushEntities(ticked) {
     const add = [], set = [], seen = new Set();
     readLeads();
-    each((kind, o, x, z) => {
+    each((kind, o, x, z, v) => {
       if (!inView(x, z)) return;
-      const n = nOf(o), s = stateOf(kind, o), had = S.ents.get(n);
+      const n = nOf(o), s = v ? Object.assign(stateOf(kind, o), v) : stateOf(kind, o), had = S.ents.get(n);
       seen.add(n);
       if (!had) { add.push({ n, kind, s }); S.ents.set(n, { kind, o, s }); return; }
       let d = null;
@@ -633,11 +707,11 @@ function serve(send, opts) {
   function interest() {
     const m = new Map();
     readLeads();
-    each((kind, o, x, z) => { if (inView(x, z)) m.set(nOf(o), { kind, s: stateOf(kind, o) }); });
+    each((kind, o, x, z, v) => { if (inView(x, z)) m.set(nOf(o), { kind, s: v ? Object.assign(stateOf(kind, o), v) : stateOf(kind, o) }); });
     return { entities: m, chunks: wanted() };
   }
   const pace = on => { S.behind = !!on; };
-  const sim = { receive, flush, reset, hello, pace, onBlock, onFx: e => S.fx.push(e), onLog: e => S.logs.push(e), S, interest, nOf, replica: R };
+  const sim = { receive, flush, reset, hello, pace, onBlock, onFx: e => S.fx.push(e), onLog: e => S.logs.push(e), S, interest, nOf, replica: R, viewOut, viewIn, ov };
   liveSim = sim;
   return sim;
 }
