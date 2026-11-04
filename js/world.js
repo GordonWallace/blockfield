@@ -651,24 +651,55 @@ function buildChunk(cx, cz) {
 }
 function createChunk(cx, cz) { return installChunk(buildChunk(cx, cz)); }
 // With the cluster tick on, a chunk made during an interval waits for the next meeting (js/world.js heldNow): built now, installed then.
+// Cluster workers (js/rplay.js) build it when the leader does too (journal op "cb"), so at the meeting each only installs it: building
+// them all at the meeting held every worker up there (Gordon's game, 2026-11-03: about 80 chunks a meeting at 2 ms each on the
+// followers, the leader waiting 250-350 ms for them; at 1x the followers are mostly idle during the interval, r15-95).
 const heldChunks = new Map();   // key -> built chunk
+const heldEdits = new WeakMap(); // built chunk -> the chunk's edits it was built from ([cell, block id], null for none)
 let heldUnloads = false;        // the plan left chunks to unload until the meeting
 function holdChunk(cx, cz) {
   const key = ckey(cx, cz);
-  if (!heldChunks.has(key)) heldChunks.set(key, buildChunk(cx, cz));
+  if (heldChunks.has(key)) return;
+  const RJ = BF.rworkers && BF.rworkers.journal ? BF.rworkers : null;
+  if (RJ) RJ.rec(["cb", cx, cz]);   // (the followers build it now too)
+  const c = buildChunk(cx, cz), e = world.edits.get(key);
+  heldEdits.set(c, e ? [...e] : null);
+  heldChunks.set(key, c);
+}
+// the held chunk c still comes out as building it now would: its edits haven't changed since (by content: a cell edited again keeps
+// the count; each worker checks its own copy, so a follower's edits that differed from the leader's when it built are caught too)
+function heldFresh(c) {
+  const was = heldEdits.get(c), e = world.edits.get(c.key);
+  if (!e || !e.size) return !was || !was.length;
+  if (!was || was.length !== e.size) return false;
+  for (const [i, id] of was) if (e.get(i) !== id) return false;
+  return true;
 }
 function installHeld() {
   if (!heldChunks.size) return;
   const list = [...heldChunks.values()];
   heldChunks.clear();
   const RJ = BF.rworkers && BF.rworkers.journal ? BF.rworkers : null;
+  let n = 0, rebuilt = 0;
   for (const c of list) {
     if (world.chunks.has(c.key)) continue;
-    const e = world.edits.get(c.key);
-    if (RJ) RJ.rec(["c", c.cx, c.cz]);   // (the followers make it too: js/rplay.js; built from the same edits, it comes out the same)
-    installChunk((e ? e.size : -1) === c.eSig ? c : buildChunk(c.cx, c.cz));   // (edited meanwhile: built again)
+    if (RJ) RJ.rec(["c", c.cx, c.cz]);   // (the followers install theirs too: js/rplay.js; built from the same edits, it comes out the same)
+    const ok = heldFresh(c);
+    if (!ok) rebuilt++;
+    installChunk(ok ? c : buildChunk(c.cx, c.cz));   // (edited meanwhile: built again)
+    n++;
   }
-  if (BF.glog) BF.glog.log("DEBUG", "chunks", "Loaded " + list.length + " chunk" + (list.length > 1 ? "s" : "") + " held for the cluster meeting");
+  if (RJ) RJ.rec(["cbx"]);   // (the followers drop what they still hold: one the leader found loaded already)
+  if (BF.glog) BF.glog.log("DEBUG", "chunks", "Loaded " + n + " chunk" + (n !== 1 ? "s" : "") + " held for the cluster meeting" + (rebuilt ? " (" + rebuilt + " edited meanwhile, built again)" : ""));
+}
+// a follower: the leader's "c" for a chunk it held takes the copy built at its "cb"
+function replayCreate(cx, cz) {
+  const key = ckey(cx, cz);
+  if (world.chunks.has(key)) { heldChunks.delete(key); return world.chunks.get(key); }
+  const c = heldChunks.get(key);
+  if (!c) return createChunk(cx, cz);
+  heldChunks.delete(key);
+  return installChunk(heldFresh(c) ? c : buildChunk(cx, cz));
 }
 function installChunk(c) {
   const cx = c.cx, cz = c.cz, key = c.key, e = world.edits.get(key);
@@ -762,7 +793,9 @@ world.onChunkDrops = fn => dropL.push(fn);
 function jrec(op, key) { const RJ = BF.rworkers; if (RJ && RJ.journal) RJ.rec([op, key]); }
 // The followers' side of the journal (js/rplay.js): what the leader's streaming did, done the same way
 world.replay = {
-  create: (cx, cz) => (world.chunks.has(ckey(cx, cz)) ? world.chunks.get(ckey(cx, cz)) : createChunk(cx, cz)),
+  create: replayCreate,
+  hold: (cx, cz) => { if (!world.chunks.has(ckey(cx, cz))) holdChunk(cx, cz); },   // ("cb": built now, installed at the leader's "c")
+  heldDone: () => heldChunks.clear(),   // ("cbx": the leader installed what it held)
   extendDown: (cx, cz, lo) => { const c = world.chunks.get(ckey(cx, cz)); if (c && c.lo > lo) extendDown(c, lo); },
   drops,
 };
