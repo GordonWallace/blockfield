@@ -114,10 +114,10 @@ let S = null;
   check(split && !!splitLine, `the clusters split (${((Date.now() - t0) / 1000).toFixed(0)} s; ${splitLine.slice(0, 160) || s1.text})`);
   const ended = await until(pg, () => BF.glog.entries().some(e => e.k === 'workers' && /the split pays|not worth it/.test(e.x)), 600000, 'trial');
   check(ended && !s1.mismatch, 'the trial ended, no difference');
-  // (the trial leaves out its first 2 meetings, the handover, and sums the busy ms of the 400 ticks after them: js/rplay.js WARM_MEETS)
+  // (the trial leaves out its first 2 meetings, the handover, and sums the busy ms of the 20 game s of ticks after them: js/rplay.js WARM_MEETS)
   const tr = (await status(pg)).lastTrial;
-  const meet = await sim(pg, () => BF.ctick.MEET);
-  check(tr && tr.from - tr.at === 2 * meet && tr.n >= 300 && tr.after === tr.ms / tr.n, `the trial was judged after the first 2 meetings, on the ticks after them (${JSON.stringify(tr)})`);
+  const meet = await sim(pg, () => BF.ctick.MEET), tk = await sim(pg, () => BF.warp.TICK);
+  check(tr && tr.from - tr.at === 2 * meet && tr.n * tk >= 15 && tr.after === tr.ms / tr.n, `the trial was judged after the first 2 meetings, on the ticks after them (${JSON.stringify(tr)})`);
   const errs = (await logLines(pg)).filter(l => /^ERROR/.test(l));
   check(!errs.length, `no ERROR in the workers' and clusters' game log lines${errs.length ? ': ' + errs.slice(0, 3).join(' | ').slice(0, 600) : ''}`);
   for (const l of (await logLines(pg)).slice(-8)) console.log('  log: ' + l.slice(0, 300));

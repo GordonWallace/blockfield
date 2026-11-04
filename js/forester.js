@@ -109,7 +109,9 @@ function hook() {
     const creative = !!(BF.inventory && BF.inventory.isCreative && BF.inventory.isCreative());
     fallAbove(x, y, z, !creative);
   });
-  BF.on("newWorld", () => { saps.clear(); notTree.clear(); growLast = sawT = sapLast = 0; });
+  // (claims too: a world loaded after another kept the trees and spots the last world's foresters had claimed, on the copy that played
+  // it only, so its region workers picked other spots, idea-049)
+  BF.on("newWorld", () => { saps.clear(); notTree.clear(); claims.clear(); growLast = sawT = sapLast = 0; });
 }
 
 // Tree shapes: [logs, leaves] as [dx, dy, dz] lists around the sapling cell (dy 0 = the sapling's own cell).

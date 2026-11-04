@@ -146,6 +146,8 @@ function area(m) {
 
 // ---------------------------------------------------------------- surface stone
 const claims = new Map();   // "x,y,z" -> miner, so two miners do not dig the same block
+// (emptied with a new world: a loaded world kept the claims of the world played before on the copy that played it, and only there)
+BF.onLoad(() => { if (BF.on) BF.on("newWorld", () => claims.clear()); });
 const pk = (x, y, z) => x + "," + y + "," + z;
 // several workers (clusters, js/cworkers.js): a claim is its miner's cluster's, sent at meetings by the miner's id
 BF.onLoad(() => { const C = BF.ctick; if (C && C.ownedMap) C.ownedMap("miner.claims", claims, (k, m) => C.ofMob(m), m => m.id, id => BF.ids.live(id) || null); });
