@@ -312,7 +312,7 @@ H.world = function (op, args) {
   // names its key.
   const st = !H.server && BF.worldgen.riverState ? BF.worldgen.riverState() : null;
   if (st) BF.proto.worker.w.postMessage({ rivers: st });
-  const a = Object.assign({ rivers: st ? st.seed : null }, args);
+  const a = Object.assign({ rivers: st ? st.seed : null, speed: BF.warp.speed }, args);   // (the speed the world starts at: 0 frozen, js/simworker.js startSpeed)
   sentPlayer = ""; lastClock = null; sentSpeed = sentPause = null;
   return new Promise(resolve => BF.client.worldOp(op, a, r => {
     if (r && r.resumed && r.speed != null) {   // a world the server held paused, picked again: it goes on at the speed it had

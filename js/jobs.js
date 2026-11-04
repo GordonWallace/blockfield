@@ -310,6 +310,8 @@ function scanChunk(cx, cz, c) {
 }
 function dropChunk(cx, cz) {
   const CS = BF.CS;
+  const b = BF.world.chunkBucket && BF.world.chunkBucket("jobs.sites", add => { for (const [k, s] of sites) add(Math.floor(s.x / CS), Math.floor(s.z / CS), k); });   // (a batch of chunks: js/world.js chunkBucket)
+  if (b) { for (const k of b.get(cx + "," + cz) || []) sites.delete(k); return; }
   for (const [k, s] of sites) if (Math.floor(s.x / CS) === cx && Math.floor(s.z / CS) === cz) sites.delete(k);
 }
 function addSite(x, y, z, id) { const p = profOfBlock(id); if (p) sites.set(pk(x, y, z), { x, y, z, id, prof: p }); }

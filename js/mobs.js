@@ -199,8 +199,9 @@ function ownTables() {
     CC.onMeeting("darkStamp", d => { stampCell(Math.floor(d.x / CELL) + "," + Math.floor(d.z / CELL), d.t); });
     const darkOf = k => { const i = k.indexOf(","); return CC.cellGroup(+k.slice(0, i) * CELL + CELL / 2, +k.slice(i + 1) * CELL + CELL / 2); };
     C.owned("mobs.darkStamps", {
-      snap: g => { const o = []; for (const [k, v] of darkStamps) if (darkOf(k) === g) o.push([k, v]); return o; },
-      apply: (g, a) => { for (const k of [...darkStamps.keys()]) if (darkOf(k) === g) darkStamps.delete(k); for (const [k, v] of a || []) darkStamps.set(k, v); },
+      // (the stamps by group once a swap step, js/ctick.js keysOf, not every stamp tested for every group: r15-95)
+      snap: g => { const o = []; for (const k of C.keysOf(darkStamps, g, darkOf)) o.push([k, darkStamps.get(k)]); return o; },
+      apply: (g, a) => { for (const k of C.keysOf(darkStamps, g, darkOf)) darkStamps.delete(k); for (const [k, v] of a || []) darkStamps.set(k, v); C.applied(darkStamps, g); },
     });
   }
   C.owned("mobs.aiBy", { snap: g => aiBy.get(g) || null, apply: (g, v) => { if (v) aiBy.set(g, v); else aiBy.delete(g); } });
@@ -3575,8 +3576,12 @@ BF.mobs = {
     BF.world.onChunkUnload((cx, cz) => {
       const k = cx + "," + cz, inChunk = m => cellOf(m) === k;
       const cur = dropping && dropping.ks.has(k) ? dropping.cur : partial() ? BF.cworkers.fetch(list, m => !m.removed && inChunk(m)) : null;
-      for (let i = list.length - 1; i >= 0; i--) {
-        const m = list[i];
+      // (a batch of chunks: the mobs sorted by chunk once, js/world.js chunkBucket; each still in the list and in this chunk, last first)
+      const b = BF.world.chunkBucket("mobs", add => { for (const m of list) { const c = cellOf(m), i = c.indexOf(","); add(+c.slice(0, i), +c.slice(i + 1), m); } });
+      const some = b ? b.get(k) || [] : list;
+      for (let i = some.length - 1; i >= 0; i--) {
+        const m = some[i];
+        if (b && m.removed) continue;
         if (cur ? cur.has(m) && inChunk(m) : inChunk(m)) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
       }
       for (let i = arrows.length - 1; i >= 0; i--) {

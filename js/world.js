@@ -538,6 +538,24 @@ world.applyEdits = function (chunks, full, replayed) {
 };
 
 // Calls cb(lx, y, lz, id) for every block of chunk c (optionally only y in [ya, yb]) whose flag[id] > thr (default 0).
+// A section none of whose blocks is flagged is skipped by the ids it holds (worked out once per chunk version: idsOf), so the chunk-load
+// hooks that each look for their few kinds of block (block entities, farmland, furnaces, beehives, saplings, job sites, signs) don't each
+// read all of a chunk's blocks: about 0.2 ms a chunk on Gordon's laptop, and a meeting installs hundreds at once (r15-95).
+const secIds = new WeakMap();   // chunk -> {ver, secs: [section, ids it holds] per section}
+const seenId = new Uint32Array(65536);
+let seenStamp = 0;
+function idsOf(c, si) {
+  if (world.replica || typeof c.ver !== "number") return null;   // (the page's copy: its blocks can change under it, from the simulation)
+  let e = secIds.get(c);
+  if (!e || e.ver !== c.ver) secIds.set(c, (e = { ver: c.ver, secs: [] }));
+  const s = c.secs[si], had = e.secs[si];
+  if (had && had[0] === s) return had[1];
+  if (++seenStamp === 0xffffffff) { seenId.fill(0); seenStamp = 1; }
+  const ids = [];
+  for (let i = 0; i < 4096; i++) { const id = s[i]; if (seenId[id] !== seenStamp) { seenId[id] = seenStamp; ids.push(id); } }
+  e.secs[si] = [s, ids];
+  return ids;
+}
 world.scanFlagged = function (c, flag, cb, thr, ya, yb) {
   thr = thr || 0;
   const lo = ya == null ? c.y0 : Math.max(c.y0, ya), hi = yb == null ? c.y1 - 1 : Math.min(c.y1 - 1, yb);
@@ -549,6 +567,8 @@ world.scanFlagged = function (c, flag, cb, thr, ya, yb) {
       for (let i = 0; i < 4096; i++) { const y = by + (i >> 8); if (y >= lo && y <= hi) cb(i & 15, y, (i >> 4) & 15, s); }
       continue;
     }
+    const ids = idsOf(c, si);
+    if (ids) { let any = false; for (let j = 0; j < ids.length; j++) if (flag[ids[j]] > thr) { any = true; break; } if (!any) continue; }
     for (let i = 0; i < 4096; i++) {
       const id = s[i];
       if (!(flag[id] > thr)) continue;
@@ -651,24 +671,56 @@ function buildChunk(cx, cz) {
 }
 function createChunk(cx, cz) { return installChunk(buildChunk(cx, cz)); }
 // With the cluster tick on, a chunk made during an interval waits for the next meeting (js/world.js heldNow): built now, installed then.
+// Cluster workers (js/rplay.js) build it when the leader does too (journal op "cb"), so at the meeting each only installs it: building
+// them all at the meeting held every worker up there (Gordon's game, 2026-11-03: about 80 chunks a meeting at 2 ms each on the
+// followers, the leader waiting 250-350 ms for them; at 1x the followers are mostly idle during the interval, r15-95).
 const heldChunks = new Map();   // key -> built chunk
+const heldEdits = new WeakMap(); // built chunk -> the chunk's edits it was built from ([cell, block id], null for none)
 let heldUnloads = false;        // the plan left chunks to unload until the meeting
 function holdChunk(cx, cz) {
   const key = ckey(cx, cz);
-  if (!heldChunks.has(key)) heldChunks.set(key, buildChunk(cx, cz));
+  if (heldChunks.has(key)) return;
+  const RJ = BF.rworkers && BF.rworkers.journal ? BF.rworkers : null;
+  if (RJ) RJ.rec(["cb", cx, cz]);   // (the followers build it now too)
+  const c = buildChunk(cx, cz), e = world.edits.get(key);
+  if (BF.skyLight && BF.skyLight.prepare) BF.skyLight.prepare(c);   // (its own sky light now too: installing it only seeds its borders)
+  heldEdits.set(c, e ? [...e] : null);
+  heldChunks.set(key, c);
+}
+// the held chunk c still comes out as building it now would: its edits haven't changed since (by content: a cell edited again keeps
+// the count; each worker checks its own copy, so a follower's edits that differed from the leader's when it built are caught too)
+function heldFresh(c) {
+  const was = heldEdits.get(c), e = world.edits.get(c.key);
+  if (!e || !e.size) return !was || !was.length;
+  if (!was || was.length !== e.size) return false;
+  for (const [i, id] of was) if (e.get(i) !== id) return false;
+  return true;
 }
 function installHeld() {
   if (!heldChunks.size) return;
   const list = [...heldChunks.values()];
   heldChunks.clear();
   const RJ = BF.rworkers && BF.rworkers.journal ? BF.rworkers : null;
+  let n = 0, rebuilt = 0;
   for (const c of list) {
     if (world.chunks.has(c.key)) continue;
-    const e = world.edits.get(c.key);
-    if (RJ) RJ.rec(["c", c.cx, c.cz]);   // (the followers make it too: js/rplay.js; built from the same edits, it comes out the same)
-    installChunk((e ? e.size : -1) === c.eSig ? c : buildChunk(c.cx, c.cz));   // (edited meanwhile: built again)
+    if (RJ) RJ.rec(["c", c.cx, c.cz]);   // (the followers install theirs too: js/rplay.js; built from the same edits, it comes out the same)
+    const ok = heldFresh(c);
+    if (!ok) rebuilt++;
+    installChunk(ok ? c : buildChunk(c.cx, c.cz));   // (edited meanwhile: built again)
+    n++;
   }
-  if (BF.glog) BF.glog.log("DEBUG", "chunks", "Loaded " + list.length + " chunk" + (list.length > 1 ? "s" : "") + " held for the cluster meeting");
+  if (RJ) RJ.rec(["cbx"]);   // (the followers drop what they still hold: one the leader found loaded already)
+  if (BF.glog) BF.glog.log("DEBUG", "chunks", "Loaded " + n + " chunk" + (n !== 1 ? "s" : "") + " held for the cluster meeting" + (rebuilt ? " (" + rebuilt + " edited meanwhile, built again)" : ""));
+}
+// a follower: the leader's "c" for a chunk it held takes the copy built at its "cb"
+function replayCreate(cx, cz) {
+  const key = ckey(cx, cz);
+  if (world.chunks.has(key)) { heldChunks.delete(key); return world.chunks.get(key); }
+  const c = heldChunks.get(key);
+  if (!c) return createChunk(cx, cz);
+  heldChunks.delete(key);
+  return installChunk(heldFresh(c) ? c : buildChunk(cx, cz));
 }
 function installChunk(c) {
   const cx = c.cx, cz = c.cz, key = c.key, e = world.edits.get(key);
@@ -752,9 +804,25 @@ function drops(ops) {
   for (const [, k] of ops) { const c = world.chunks.get(k); if (c) cells.push([c.cx, c.cz]); }
   const ends = [];
   for (const fn of dropL) { const e = fn(cells); if (e) ends.push(e); }
+  buckets = new Map();
   try { for (const [op, k] of ops) (op === "u" ? unload : purge)(k); }
-  finally { for (const e of ends) e(); }
+  finally { buckets = null; for (const e of ends) e(); }
 }
+// world.chunkBucket(name, build) -> chunk key -> [items], or null outside a drops batch: an unload hook that looks through a whole
+// collection for the items in its chunk (the mobs, the block entities, farmland, job sites...) sorts the collection by chunk once a batch
+// instead (build(add): add(cx, cz, item) for each item, in the collection's order), and takes its chunk's part, checking each item is
+// still there. With the player moving at view 32 a meeting drops about 370 chunks at once, and every worker ran each such hook over
+// everything for each of them: about 800 ms a meeting on Gordon's laptop (2026-11-04, r15-95), every worker waiting for the slowest.
+let buckets = null;
+world.chunkBucket = (name, build) => {
+  if (!buckets) return null;
+  let b = buckets.get(name);
+  if (!b) {
+    buckets.set(name, (b = new Map()));
+    build((cx, cz, item) => { const k = cx + "," + cz; let a = b.get(k); if (!a) b.set(k, (a = [])); a.push(item); });
+  }
+  return b;
+};
 // fn(cells) before streaming drops those chunks ([cx, cz] each; their unload hooks run next, one a chunk); it may return a function, called after
 const dropL = [];
 world.onChunkDrops = fn => dropL.push(fn);
@@ -762,7 +830,9 @@ world.onChunkDrops = fn => dropL.push(fn);
 function jrec(op, key) { const RJ = BF.rworkers; if (RJ && RJ.journal) RJ.rec([op, key]); }
 // The followers' side of the journal (js/rplay.js): what the leader's streaming did, done the same way
 world.replay = {
-  create: (cx, cz) => (world.chunks.has(ckey(cx, cz)) ? world.chunks.get(ckey(cx, cz)) : createChunk(cx, cz)),
+  create: replayCreate,
+  hold: (cx, cz) => { if (!world.chunks.has(ckey(cx, cz))) holdChunk(cx, cz); },   // ("cb": built now, installed at the leader's "c")
+  heldDone: () => heldChunks.clear(),   // ("cbx": the leader installed what it held)
   extendDown: (cx, cz, lo) => { const c = world.chunks.get(ckey(cx, cz)); if (c && c.lo > lo) extendDown(c, lo); },
   drops,
 };
@@ -932,7 +1002,13 @@ let loadQ = 0;   // chunks still to generate or mesh for the view (queueLength w
 world.update = function (px, pz, budgetMs = 8) {
   const pcx = Math.floor(px / CS), pcz = Math.floor(pz / CS);
   const hold = heldNow();
-  if (!hold) { installHeld(); if (heldUnloads) { heldUnloads = false; lastCenter = null; } }
+  if (!hold) {
+    const n = heldChunks.size;
+    installHeld(); if (heldUnloads) { heldUnloads = false; lastCenter = null; }
+    // (cluster workers: the installs go to the followers now, so they put theirs in while this one plans; otherwise they went with the
+    // plan's drops, at the exchange there, and the leader waited there for all their installs: about 150 ms a meeting, r15-95)
+    if (n && BF.rplay && BF.rplay.flush) BF.rplay.flush();
+  }
   const RJ = BF.rworkers && BF.rworkers.journal ? BF.rworkers : null;   // the region workers' journal (js/rworkers.js): the followers do what streaming did here
   if (RJ && BF.villageSim) RJ.rec(["v", px, pz, RJ.stamp()]);
   if (BF.villageSim && !world.replica && BF.villageSim.update(px, pz)) lastCenter = null;   // simulated-village set changed: re-plan
@@ -1403,9 +1479,11 @@ function ownCellsNow(name, coll, enc, dec) {
       return { put, gone: g };
     },
     apply(gk, o) {
+      const before = C.keysOf(coll, gk, of);   // (the group's keys before the puts: after them the table's size has changed, and asking
+                                               // again sorted the whole table by group once more for every group, r15-95)
       if (o.all) {
         const keep = new Set(isMap ? o.put.map(it => it[0]) : o.put);
-        for (const k of C.keysOf(coll, gk, of)) if (!keep.has(k)) { coll.delete(k); had.delete(k); }
+        for (const k of before) if (!keep.has(k)) { coll.delete(k); had.delete(k); }
       }
       for (const k of o.gone) { coll.delete(k); had.delete(k); }
       for (const it of o.put) if (isMap) put1(it[0], it[1]); else put1(it);
@@ -1413,7 +1491,7 @@ function ownCellsNow(name, coll, enc, dec) {
       // due, a fluid cell queued) and its owner never had or has dealt with: dropped, or this worker would deal with them again the day
       // the group comes to it, as the group's owner never did (farmland stamped there and nowhere else: cluster-play at meetings every
       // 80 ticks, when the workers went back to one)
-      if (!isMap) for (const k of C.keysOf(coll, gk, of)) if (!had.has(k)) coll.delete(k);
+      if (!isMap) for (const k of before) if (coll.has(k) && !had.has(k)) coll.delete(k);   // (the puts are all in had)
       C.applied(coll, gk);
     },
   });

@@ -262,18 +262,81 @@ function seed(c) {
   }
 }
 
+// ---------- a chunk's own light worked out before it is installed (r15-95) ----------
+// With the cluster tick on, a chunk loaded during an interval is built then and installed at the next meeting (js/world.js holdChunk),
+// on every cluster worker; its sky light at installing took about 1.4 ms of the 2.6 a chunk cost (Gordon's game, 2026-11-04: about 450
+// chunks a meeting at view 32 with the player moving, so every worker stood still for about a second). prepare(c) works out the light
+// that comes from within the chunk while it is held (the column pass, then the fill within its own 16 x 16 columns), and installing it
+// only seeds what crosses its borders. The fill keeps the brightest level each cell can get, so filling the chunk's own part first and
+// the borders after reaches the same light as all at once (as chunks loading in any order do: test/skylight-held.js compares).
+const prepared = new WeakSet();
+let lq = new Int32Array(1 << 15), lh = 0, lt = 0;   // (cells within the held chunk: (y - y0) << 8 | lz << 4 | lx)
+function pushLocal(i) { if (lt === lq.length) lq = grow(lq, lq.length * 2); lq[lt++] = i; }
+sky.prepare = function (c) {
+  columnPass(c);
+  lh = lt = 0;
+  const y0 = c.y0, y1 = c.y1;
+  for (let lz = 0; lz < CS; lz++) for (let lx = 0; lx < CS; lx++) {
+    const fl = floorOf[lz * CS + lx];
+    let hi = fl;
+    if (lx > 0) hi = Math.max(hi, floorOf[lz * CS + lx - 1]);
+    if (lx < CS - 1) hi = Math.max(hi, floorOf[lz * CS + lx + 1]);
+    if (lz > 0) hi = Math.max(hi, floorOf[(lz - 1) * CS + lx]);
+    if (lz < CS - 1) hi = Math.max(hi, floorOf[(lz + 1) * CS + lx]);
+    for (let y = fl; y < hi && y < y1; y++) pushLocal(((y - y0) << 8) | (lz << 4) | lx);
+    for (let y = fl - 1; y >= y0; y--) { if (sget(c, lx, y, lz) <= 1) break; pushLocal(((y - y0) << 8) | (lz << 4) | lx); }
+  }
+  while (lh < lt) {
+    const i = lq[lh++], lx = i & 15, lz = (i >> 4) & 15, y = (i >> 8) + y0;
+    const L = sget(c, lx, y, lz);
+    if (L <= 1) continue;
+    for (let d = 0; d < 6; d++) {
+      const nx = lx + DX[d], ny = y + DY[d], nz = lz + DZ[d];
+      if (nx < 0 || nx >= CS || nz < 0 || nz >= CS || ny < y0 || ny >= y1) continue;   // (across a border: at installing)
+      const a = ATT[blockAt(c, nx, ny, nz)];
+      if (a === 255) continue;
+      const v = step(L, a, d === 3);
+      if (v <= sget(c, nx, ny, nz)) continue;
+      sset(c, nx, ny, nz, v);
+      pushLocal(((ny - y0) << 8) | (nz << 4) | nx);
+    }
+  }
+  lh = lt = 0;
+  prepared.add(c);
+};
+// Installing a prepared chunk: only light crossing its borders is left. Each pair of cells across a border (within both bands: above a
+// band is open sky, which never spreads sideways, below it dark) where one is brighter than the other can take seeds the fill from the
+// brighter one. (seed() would also queue every lit cell under leaves and water again, a few thousand a chunk at sea, which found nothing
+// to do there but looked up their neighbours: most of the time it took.)
+function installPrepared(c) {
+  const ox = c.cx * CS, oz = c.cz * CS, W = world(), cl = {};
+  for (let d = 0; d < 4; d++) for (let t = 0; t < CS; t++) {
+    const lx = d === 0 ? 0 : d === 1 ? CS - 1 : t, lz = d === 2 ? 0 : d === 3 ? CS - 1 : t;
+    W.cell(ox + (d === 0 ? -1 : d === 1 ? CS : t), oz + (d === 2 ? -1 : d === 3 ? CS : t), cl);
+    const n = cl.c;
+    if (!n || !n.sky || n === c) continue;
+    const top = Math.min(c.y1, n.y1), bot = Math.max(c.y0, n.y0);
+    for (let y = bot; y < top; y++) {
+      const v = sget(c, lx, y, lz), u = sget(n, cl.lx, y, cl.lz);
+      if (v > u + 1) pushAdd(ox + lx, y, oz + lz);
+      else if (u > v + 1) pushAdd(cl.x, y, cl.z);
+    }
+  }
+}
+
 // ---------- hooks called by world.js ----------
 // A chunk was created (blocks and edits in place): compute its sky light and exchange light with loaded neighbours.
 sky.onChunkCreated = function (c) {
   reset();
-  columnPass(c);
-  seed(c);
+  if (prepared.has(c)) { prepared.delete(c); installPrepared(c); }
+  else { columnPass(c); seed(c); }
   propagate();
   flush();
 };
 // Sections were added below the band: recompute the chunk (light only grows, so neighbours need no removal).
 sky.onExtended = function (c) {
   if (!c.sky) return;
+  prepared.delete(c);
   sky.onChunkCreated(c);
 };
 // The band grew upward: the new sections are open air.
@@ -316,7 +379,7 @@ sky.get = function (x, y, z) {
 // Throws everything away and recomputes all loaded chunks (tests / debugging); returns ms taken.
 sky.recomputeAll = function () {
   const t0 = performance.now(), W = world();
-  for (const c of W.chunks.values()) c.sky = undefined;
+  for (const c of W.chunks.values()) { c.sky = undefined; prepared.delete(c); }
   for (const c of W.chunks.values()) sky.onChunkCreated(c);
   for (const c of W.chunks.values()) if (c.mesh !== undefined) W._dirty.add(c.key);
   return performance.now() - t0;

@@ -101,7 +101,10 @@ function hook() {
   for (let i = 0; i < SAPF.length; i++) if (SAPF[i]) SCANF[i] = 1;
   const scan = (cx, cz, c) => { const CS = BF.CS; BF.world.scanFlagged(c, SCANF, (lx, y, lz, id) => addSap(cx * CS + lx, y, cz * CS + lz, id)); };
   BF.world.onChunkLoad(scan);
-  BF.world.onChunkUnload((cx, cz) => { const CS = BF.CS; for (const [k, s] of saps) if (Math.floor(s.x / CS) === cx && Math.floor(s.z / CS) === cz) saps.delete(k); });
+  BF.world.onChunkUnload((cx, cz) => { const CS = BF.CS;
+    const b = BF.world.chunkBucket && BF.world.chunkBucket("forester.saps", add => { for (const [k, s] of saps) add(Math.floor(s.x / CS), Math.floor(s.z / CS), k); });   // (a batch of chunks: js/world.js chunkBucket)
+    if (b) { for (const k of b.get(cx + "," + cz) || []) saps.delete(k); return; }
+    for (const [k, s] of saps) if (Math.floor(s.x / CS) === cx && Math.floor(s.z / CS) === cz) saps.delete(k); });
   for (const c of BF.world.chunks.values()) scan(c.cx, c.cz, c);
   BF.on("blockPlaced", (x, y, z, id) => addSap(x, y, z, id));
   BF.on("blockBroken", (x, y, z, id) => {   // the player chops a log: the tree above falls (js/player.js emits this)

@@ -46,7 +46,10 @@ function hook() {
   FLAG = new Uint8Array((BF.MAX_BLOCK || 4095) + 1); for (const b of BF.blocks) if (b && BF.isFurnace(b.id)) FLAG[b.id] = 1;
   const scan = (cx, cz, c) => { const CS = BF.CS; BF.world.scanFlagged(c, FLAG, (lx, y, lz) => furnaces.set(pk(cx * CS + lx, y, cz * CS + lz), { x: cx * CS + lx, y, z: cz * CS + lz })); };
   BF.world.onChunkLoad(scan);
-  if (BF.world.onChunkUnload) BF.world.onChunkUnload((cx, cz) => { const CS = BF.CS; for (const [k, f] of furnaces) if (Math.floor(f.x / CS) === cx && Math.floor(f.z / CS) === cz) furnaces.delete(k); });
+  if (BF.world.onChunkUnload) BF.world.onChunkUnload((cx, cz) => { const CS = BF.CS;
+    const b = BF.world.chunkBucket && BF.world.chunkBucket("furnaceuse", add => { for (const [k, f] of furnaces) add(Math.floor(f.x / CS), Math.floor(f.z / CS), k); });   // (a batch of chunks: js/world.js chunkBucket)
+    if (b) { for (const k of b.get(cx + "," + cz) || []) furnaces.delete(k); return; }
+    for (const [k, f] of furnaces) if (Math.floor(f.x / CS) === cx && Math.floor(f.z / CS) === cz) furnaces.delete(k); });
   for (const c of BF.world.chunks.values()) scan(c.cx, c.cz, c);
   BF.on("blockPlaced", (x, y, z, id) => { if (BF.isFurnace(id)) furnaces.set(pk(x, y, z), { x, y, z }); });
   BF.on("blockBroken", (x, y, z) => furnaces.delete(pk(x, y, z)));

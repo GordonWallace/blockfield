@@ -243,6 +243,8 @@ function hook() {
   BF.world.onChunkLoad(scanChunk);
   BF.world.onChunkUnload((cx, cz) => {
     const CS = BF.CS;
+    const b = BF.world.chunkBucket && BF.world.chunkBucket("farmland", add => { for (const [k, p] of tracked) add(Math.floor(p[0] / CS), Math.floor(p[2] / CS), k); });   // (a batch of chunks: js/world.js chunkBucket)
+    if (b) { for (const k of b.get(cx + "," + cz) || []) if (tracked.has(k)) untrack(k); return; }
     for (const [k, p] of tracked) if (Math.floor(p[0] / CS) === cx && Math.floor(p[2] / CS) === cz) untrack(k);
   });
   for (const c of BF.world.chunks.values()) scanChunk(c.cx, c.cz, c);
