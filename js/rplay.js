@@ -25,7 +25,8 @@
 // brings every copy the client's packets and the chunks, and goes out every tick while they meet. Back to one: at the next meeting every
 // worker takes the whole world (cworkers.leave) and the leader goes on running every cluster, the followers replaying it; the cluster
 // tick goes off only when the followers go (end: the copies' tables are in different orders after a split, which only the plain tick
-// reads). A save waits for the next meeting (js/save.js). With ?verify=N the copies' gathered hashes are compared every N / 20 meetings;
+// reads). A save waits for the next meeting (js/save.js). With ?verify=N the copies' gathered hashes are compared every N / BF.ctick.MEET
+// meetings (8 or more: spread over them, a slice a meeting, js/cworkers.js checkSlice);
 // a difference goes back to one after the next meeting. A split that doesn't pay (auto) goes back to one, and then the followers go:
 // the cluster tick on one with followers attached was 3.2 times slower than the plain tick on test4 (2026-10-29), and only their going
 // turns it off. The first split waits until the plain tick has been measured for PLAIN_TICKS (not while the world loads: a trial on

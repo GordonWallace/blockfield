@@ -15,6 +15,7 @@
 // Mobs have no stable ids yet (r15-13): a reference to a mob is its id when it has one, else its type and name (villagers have names).
 // Hashing only reads: it never draws random numbers or changes the world.
 // API: BF.stateHash() -> hex (16 digits); BF.stateHash.parts() -> { part: hex }; BF.stateHash.full() -> { hash, parts, day, ms };
+//      BF.stateHash.some(keys, pred) -> { hash, parts } (those parts only; pred(mob) narrows the mobs part);
 //      BF.stateHash.PARTS; BF.stateHash.text(part) (a part's canonical text, to find where two worlds differ); BF.stateHash.canon(v) (the canonical text of a value, for tests); BF.stateHash.last (the newest full());
 //      BF.stateHash.update() (the main loop: logs the hash when a game day starts)
 (() => {
@@ -113,9 +114,9 @@ function editsText() {
   }
   return o.join("|");
 }
-function mobsText() {
+function mobsText(pred) {
   const L = BF.mobs ? BF.mobs.list : [];
-  return L.filter(m => !m.removed).map(m => BF.cworkers.row("hash", m)).sort().join("\n");
+  return L.filter(m => !m.removed && (!pred || pred(m))).map(m => BF.cworkers.row("hash", m)).sort().join("\n");
 }
 // A mob's line of the mobs part. A row (js/cworkers.js gathered): with clusters on workers, worked out by its runner, refs on there too.
 function mobLine(m) {
@@ -205,6 +206,21 @@ function full() {
   return r;
 }
 
+// Some parts' hashes, and the hash of those (in the order given): some(keys, pred) with pred(mob) keeping only those mobs in the mobs
+// part. js/cworkers.js check: the copy check spread over the meetings of its period, a slice a meeting (r15-95).
+function some(keys, pred) {
+  const parts = {};
+  refsOn();
+  try {
+    for (const k of keys) {
+      let s;
+      try { s = k === "mobs" ? mobsText(pred) : PARTS[k](); } catch (e) { s = "error:" + e.message; }
+      parts[k] = hashStr(s);
+    }
+  } finally { refsOff(); }
+  return { hash: hashStr(keys.map(k => k + "=" + parts[k]).join(";")), parts };
+}
+
 // ---------------------------------------------------------------- the game log: the hash as each game day starts
 let lastDay = null, hooked = false;
 function update() {
@@ -226,6 +242,6 @@ function editsDiff(p, q, max = 8) {
   return out;
 }
 const stateHash = () => full().hash;
-Object.assign(stateHash, { PARTS: Object.keys(PARTS), parts: () => full().parts, full, text: partText, canon: text, hashStr, update, editsDiff, last: null });
+Object.assign(stateHash, { PARTS: Object.keys(PARTS), parts: () => full().parts, full, some, text: partText, canon: text, hashStr, update, editsDiff, last: null });
 BF.stateHash = stateHash;
 })();
