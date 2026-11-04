@@ -62,10 +62,29 @@ let busyRun = 0;   // (busyNow() when tRun was set)
 const C = () => BF.ctick;
 // every exchange by what it is for (stats().x): how many, ms in all, ms of it waiting at the barrier for the other workers
 const X = {};
+// Every exchange carries what it is for and its number since the split (xSeq), and each worker checks that the others are at the same
+// one: the barrier only counts arrivals, so a worker that skipped an exchange (it decided something from a copy that differed) used to
+// pair its next one with the others' and read the wrong messages, or leave them waiting 120 s for it (Gordon's 2026-11-04 freeze,
+// reports/bug-118.md). Out of step now stops the workers at once, with an ERROR naming where each one was.
+let xSeq = 0;
+const XSEP = "\u0001";
 function xchange(tag, msg) {
   if (CW.preExchange) CW.preExchange();   // (play: the leader's journal out first, js/rplay.js)
-  const L = CW.link, t0 = now(), w0 = L.waitMs, all = L.exchange(msg), x = X[tag] || (X[tag] = { n: 0, ms: 0, wait: 0 });
+  const L = CW.link, t0 = now(), w0 = L.waitMs, at = tag + "#" + (++xSeq), raw = L.exchange(at + XSEP + msg), x = X[tag] || (X[tag] = { n: 0, ms: 0, wait: 0 });
   x.n++; x.ms += now() - t0; x.wait += L.waitMs - w0;
+  const all = new Array(raw.length);
+  let off = null;
+  for (let w = 0; w < raw.length; w++) {
+    const i = raw[w].indexOf(XSEP), theirs = i < 0 ? "?" : raw[w].slice(0, i);
+    if (theirs !== at) (off || (off = [])).push("worker " + w + " at " + theirs);
+    all[w] = i < 0 ? raw[w] : raw[w].slice(i + 1);
+  }
+  if (off) {
+    const text = "Cluster workers out of step: worker " + CW.me + " at " + at + ", " + off.join(", ") + " (a meeting's decision differed between the copies)";
+    if (BF.glog) BF.glog.log("ERROR", "workers", text);
+    L.stop();
+    const e = new Error(text); e.rw = true; throw e;
+  }
   return all;
 }
 // (tests, CW.prof an object: ms a part of the collect took, summed)
@@ -692,7 +711,7 @@ function setup(o) {
   const off = Object.keys(K.SYSTEMS).filter(k => !K.SYSTEMS[k] && (!K.only || K.only.has(k)));
   if (o.n > 1 && off.length) throw new Error("cluster workers need every running system converted (js/ctick.js SYSTEMS); not yet: " + off.join(", "));
   if (o.n > 1 && !K.on) throw new Error("cluster workers need the cluster tick on (BF.ctick.on)");
-  CW.n = o.n; CW.me = o.me; CW.link = o.link; CW.active = o.n > 1;
+  CW.n = o.n; CW.me = o.me; CW.link = o.link; CW.active = o.n > 1; xSeq = 0;
   if (CW.active && K.warmed) K.warmed();   // (started after the cluster tick's first meeting: every system set up here now, js/ctick.js warm)
   // (the tables that send only changes start from nothing sent, and the first swap sends each group's whole part, which the others take
   // as it is, the keys it no longer has dropped too: a key dropped in the first interval was in no list of what was sent, so only the

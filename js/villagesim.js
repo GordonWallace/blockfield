@@ -279,9 +279,15 @@ function endLeisure(key) {
   if (ended.length) vlogLine(rec, "Unloaded: " + ended.join(", ") + " stopped and went home");
 }
 // Trips towards or from a village end when it is forced off.
+// (partial copies, js/cworkers.js: only the worker running a merchant knows its trip, so the merchants on a trip to or from the village
+// come current everywhere first and every worker ends the same trips. Read from each worker's own copy, only the worker running the
+// merchant ended its trip and dropped its pin, and the copies' village sets went apart: Gordon's 2026-11-04 freeze, reports/bug-118.md)
+const onTrip = key => m => m.type === "villager" && !!m.mc && !!m.mc.trip && (m.mc.trip.home === key || m.mc.trip.dest === key);
 function forceTrips(key, why) {
   if (!BF.merchant || !BF.merchant.forceHome) return;
-  for (const m of BF.regions.ofType("villager").slice()) if (m.mc && m.mc.trip && (m.mc.trip.home === key || m.mc.trip.dest === key)) {
+  const sent = BF.cworkers && BF.cworkers.partial && BF.cworkers.active ? BF.cworkers.fetch(BF.mobs.list, onTrip(key)) : null;
+  const list = sent ? [...sent].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) : BF.regions.ofType("villager").slice();
+  for (const m of list) if (onTrip(key)(m)) {
     BF.merchant.forceHome(m, why);
     logError("forced-stop", { village: key, who: nameOf(m), task: "caravan trip", action: "went home with its cargo", why });
   }
@@ -534,6 +540,7 @@ BF.villageSim = {
   keepKeys,
   update,
   pin, unpin, corridor,
+  _forceTrips: forceTrips,   // (tests: test/cluster-workers.js --trips)
   pins: () => pins,
   count: () => active.size,   // villages simulated now (js/mobs.js: the A* searches a tick hands out)
   simulated: () => [...active.values()].map(e => e.v),   // every village simulated now (the minimum, pins and the budget's extras)
