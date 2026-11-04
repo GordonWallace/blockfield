@@ -89,7 +89,10 @@ async function run(b, url, mode) {
     // Shift: out (a request), beside the boat
     await hold('ShiftLeft', 200); await settle(); await pg.waitForTimeout(300); await settle();
     const out = await riding(), s2 = await query('entity', { id: boatId }), p2 = await me();
-    check(!out && !s2.ridden && dist(p2, s2) > 0.4 && dist(p2, s2) < 3, tag('Shift gets out, beside the boat'), { riding: out, sim: s2.ridden, d: +dist(p2, s2).toFixed(2) });
+    // (on land js/boats.js exitSpot picks the nearest free block centre, which can be the boat's own cell when the boat stopped near its
+    // centre: so beside it means on a block centre within 3 blocks, not a set distance away; that depended on where the rowing stopped)
+    const cen = v => Math.abs(v - Math.floor(v) - 0.5) < 0.02;
+    check(!out && !s2.ridden && dist(p2, s2) < 3 && cen(p2.x) && cen(p2.z), tag('Shift gets out, beside the boat'), { riding: out, sim: s2.ridden, d: +dist(p2, s2).toFixed(2), at: [+p2.x.toFixed(2), +p2.z.toFixed(2)] });
 
     // the save keeps the player in the boat
     await req('player.mount', null, { id: boatId });
