@@ -404,13 +404,15 @@ function met(groups) {
 // queued at the same point of the leader's journal on every worker, so they all run it at the same meeting (fn(true); fn(false) if the
 // workers stop first). leave(): at the end of the
 // next meeting every worker takes every mob's current copy (partial copies) and goes on as one with a whole world (js/rplay.js back to
-// one). CW.verify n (tests): every n meetings the workers compare their gathered state hashes; a difference sets rworkers.mismatch.
+// one). CW.verify n: every n meetings the workers compare their gathered state hashes (n of SPREAD or more, as in play: spread over
+// those meetings, a slice each, checkSlice); a difference sets rworkers.mismatch.
 let atMet = [], leaving = false;
 let whole1 = false;   // the first swap after setup: every owned table's whole parts (snap(g, true))
 function whenMet(fn) { atMet.push(fn); }
 function leave() { if (CW.active) leaving = true; }
 function afterMet() {
-  if (CW.verify && meetings % CW.verify === 0) check();
+  if (CW.verify >= SPREAD) checkSlice(meetings % CW.verify, CW.verify);
+  else if (CW.verify && meetings % CW.verify === 0) check();
   const fns = atMet;
   atMet = [];
   for (const fn of fns) fn(true);
@@ -428,16 +430,59 @@ function afterMet() {
 }
 function check() {
   const t0 = now(), h = gathered(() => BF.stateHash.full(), "hash");
-  const all = xchange("verify", JSON.stringify([h.hash, h.parts]));
+  const all = compare(h, "");
   if (all.every(x => JSON.parse(x)[0] === h.hash)) note("the copies of the world agree at tick " + BF.rand.tick + " (hash " + h.hash + ", checked in " + Math.round(now() - t0) + " ms)");
-  const [h0, p0] = JSON.parse(all[0]);
   RW().checks = (RW().checks || 0) + 1;
+}
+// The copy check spread over the CW.verify (n) meetings of its period (n of SPREAD or more: in play every 6000 ticks, 37 meetings), a
+// slice a meeting, every worker taking the same one by the meeting count: the village records, then the villagers' save state, then
+// every other part but the mobs (with the rows those read of every mob), then the mobs by id over the meetings left (only their "hash"
+// rows sent). Hashing it all at one meeting cost about 650 ms on every copy at one meeting in 37 on Gordon's laptop (test4, 8 workers,
+// r15-95); a slice is a few percent of that. A difference shows at the meeting of its slice; "the copies agree" once a whole round
+// (slice 0 to n - 1) did.
+const SPREAD = 8, ALONE = [["villages"], ["villagers"]];
+let round = null;   // the round so far: { tick (its first meeting's), ms (all its slices'), max (the slowest slice's), bad }
+function checkSlice(s, n) {
+  if (s === 0 || !round) round = { tick: BF.rand.tick, ms: 0, max: 0, bad: false, s };
+  const t0 = now(), { keys, only } = sliceOf(s, n);
+  const h = gathered(() => BF.stateHash.some(keys, only.mobs), "hash", only);
+  const all = compare(h, " (the copy check's slice " + (s + 1) + " of " + n + ")");
+  const ms = now() - t0;
+  round.ms += ms; round.max = Math.max(round.max, ms);
+  if (!all.every(x => JSON.parse(x)[0] === h.hash)) round.bad = true;
+  if (s !== n - 1) return;
+  // (a round begun part way, after setup or a change of n, compared only some slices: not counted)
+  if (round.s === 0) {
+    RW().checks = (RW().checks || 0) + 1;
+    if (!round.bad) note("the copies of the world agree, every part compared over the " + n + " meetings from tick " + round.tick + " to " + BF.rand.tick + " (" + Math.round(round.ms) + " ms in all, at most " + Math.round(round.max) + " ms a meeting)");
+  }
+  round = null;
+}
+// Slice s of n: { keys (the parts it hashes), only (the rows it gathers: withRows) } (test/cluster-rows.js compares each with whole mobs)
+function sliceOf(s, n) {
+  const A = ALONE.length, kinds = k => k !== "hash";
+  if (s < A) return { keys: ALONE[s], only: { kinds } };
+  if (s === A) { const not = new Set(["mobs"].concat(...ALONE)); return { keys: BF.stateHash.PARTS.filter(k => !not.has(k)), only: { kinds } }; }
+  const M = n - A - 1, i = s - A - 1;
+  return { keys: ["mobs"], only: { kinds: k => k === "hash", mobs: m => idSlot(m.id, M) === i } };
+}
+// (a mob's slice by its id, "e<number>" (js/ids.js): the same on every worker, and the mobs about evenly over the slices)
+function idSlot(id, M) {
+  const t = String(id);
+  let h = 0;
+  for (let i = 0; i < t.length; i++) h = (Math.imul(h, 31) + t.charCodeAt(i)) >>> 0;
+  return h % M;
+}
+// Every worker's hashes against the first worker's: a difference sets rworkers.mismatch and is an ERROR. Returns what each sent.
+function compare(h, what) {
+  const all = xchange("verify", JSON.stringify([h.hash, h.parts]));
+  const [h0, p0] = JSON.parse(all[0]);
   for (let w = 1; w < all.length; w++) {
     const [hw, pw] = JSON.parse(all[w]);
     if (hw === h0) continue;
     const parts = Object.keys(p0).filter(k => p0[k] !== pw[k]);
     if (!RW().mismatch) RW().mismatch = { tick: BF.rand.tick, worker: w, parts };
-    err("worker " + w + "'s world differs from the first worker's at the meeting at tick " + BF.rand.tick + " (" + parts.join(", ") + ")");
+    err("worker " + w + "'s world differs from the first worker's at the meeting at tick " + BF.rand.tick + " (" + parts.join(", ") + ")" + what);
   }
   // CW_DUMP=<folder> (Node; a debug tool): when the copies differ, every worker writes the differing parts' texts there as
   // <part>-w<worker>.txt (gathered, as the hash was), to diff
@@ -446,6 +491,7 @@ function check() {
     const fs = process.getBuiltinModule("fs"), parts = Object.keys(p0).filter(k => all.some(x => JSON.parse(x)[1][k] !== p0[k]));
     for (const k of parts) { const t = gathered(() => BF.stateHash.text(k)); try { fs.writeFileSync(dump + "/" + k + "-w" + CW.me + ".txt", String(t)); } catch (e) { err("CW_DUMP: " + e.message); } }
   }
+  return all;
 }
 // Carried parts (partial copies): what only the worker running a group needs, kept in a system's own list rather than an owned table
 // (js/bees.js: the bees that are out, which every meeting sent whole to every worker before). At a handover each worker gives what it
@@ -760,15 +806,15 @@ function hourly() {
 function makeShared(n, bytes) { return Object.assign(RW().makeShared(n, bytes || 128 << 20), { claims: new SharedArrayBuffer(8) }); }
 // gathered(fn) (every worker at once, between intervals): fn() with every mob's current copy here (each worker sends the ones it runs),
 // then the stale copies put back as they were; for the tests (test/cluster-workers.js) and the copies' texts (CW_DUMP).
-// gathered(fn, use) (use "save": js/save.js snapshot; "hash": the copy check, BF.stateHash.full): no mob is sent whole. Each worker works
+// gathered(fn, use, only) (use "save": js/save.js snapshot; "hash": the copy check, BF.stateHash.full or a slice of it; only: withRows): no mob is sent whole. Each worker works
 // out the rows registered for that use (BF.mobRows) of the mobs it runs, sends them, and fn reads every mob's through row(kind, m): its own
 // worked out here, a stale copy's as its runner sent it. Sending a mob whole cost about 4.6 KB and decoding, filling in and putting it
 // back on every worker (Gordon's test4 with 8 workers: about 1 s at each autosave and 1.5 s at each copy check, every worker waiting);
 // its rows are what fn would read of it, and every worker works out its own mobs' at once. So whatever fn reads of a mob must go through
 // row() (test/cluster-rows.js compares both ways).
-function gathered(fn, use) {
+function gathered(fn, use, only) {
   if (!CW.partial) return fn();
-  if (use) return withRows(fn, use);
+  if (use) return withRows(fn, use, only);
   const R = RW();
   R.refs();
   const list = [...mine].filter(m => !m.removed);
@@ -807,10 +853,12 @@ function rowOf(f, kind, m) {
   try { const v = f(m); return v === undefined ? null : v; }
   catch (e) { err("working out mob " + m.id + "'s " + kind + " row failed (" + (e && e.message || e) + ")"); return { [FAILED]: String(e && e.message || e) }; }
 }
-function withRows(fn, use) {
-  const kinds = [...ROWS.keys()].filter(k => ROWS.get(k).uses.includes(use)).sort(), fns = kinds.map(k => ROWS.get(k).fn);
-  const out = [];
-  let go = () => { for (const m of mine) if (!m.removed) out.push(m.id, fns.map((f, i) => rowOf(f, kinds[i], m))); };
+// only (the copy check's slices, checkSlice): { kinds(kind) -> whether to send that kind, mobs(m) -> whether to send that mob's }: what
+// fn reads of a mob outside them is worked out here, from a stale copy, so fn must read only those.
+function withRows(fn, use, only) {
+  const kinds = [...ROWS.keys()].filter(k => ROWS.get(k).uses.includes(use) && (!only || !only.kinds || only.kinds(k))).sort(), fns = kinds.map(k => ROWS.get(k).fn);
+  const out = [], keep = only && only.mobs;
+  let go = () => { for (const m of mine) if (!m.removed && (!keep || keep(m))) out.push(m.id, fns.map((f, i) => rowOf(f, kinds[i], m))); };
   for (const k of kinds) { const a = ROWS.get(k).around, inner = go; if (a) go = () => a(inner); }   // (a kind's setup: js/statehash.js refs)
   go();
   const all = xchange("rows." + use, JSON.stringify(out));
@@ -893,6 +941,6 @@ function views(ms, fn) {
 }
 // current(m): this worker's copy of m is current (partial copies: it runs m, or every copy is current)
 const current = m => !CW.partial || mine.has(m) || (atMeeting && !holder.has(m.id));
-Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, current, gathered, row, fetch, views, whenMet, leave, carry, pull: false, partial: false, verify: 0 });
+Object.assign(CW, { setup, stop, owns, claim, sync, met, stats, text, workerOf, makeShared, current, gathered, row, fetch, views, whenMet, leave, carry, sliceOf, SPREAD, pull: false, partial: false, verify: 0 });
 BF.cworkers = CW;
 })();
