@@ -479,15 +479,15 @@ BF.onLoad(() => { if (BF.ctick) BF.ctick.warm(tables); });   // (cluster workers
 function tables() {
   if (tabled || !BF.ctick || !BF.ctick.owned) return;
   tabled = true;
-  const K = BF.ctick, plain = o => JSON.parse(JSON.stringify(o));
+  const K = BF.ctick, plain = o => JSON.parse(JSON.stringify(o)), byGroup = (hid, r) => recGroup(K, r);
   // a group's part: its records' ids, and those that changed since they were last sent or got (had: hid -> the JSON every worker has)
   const had = new Map();
   K.owned("horses.records", {
     reset() { had.clear(); },
     snap: (gk, all) => {
       const keys = [], put = [];
-      for (const r of recs.values()) {
-        if (recGroup(K, r) !== gk) continue;
+      for (const hid of K.keysOf(recs, gk, byGroup)) {   // (sorted by group once a swap step: js/ctick.js keysOf, r15-95)
+        const r = recs.get(hid);
         keys.push(r.hid);
         const c = plain(Object.assign({}, r, { mobId: r.mobId })); c.cl = r.cl;
         const t = JSON.stringify(c);
@@ -499,7 +499,7 @@ function tables() {
       if (!a) return;
       const keep = new Set(a.keys);
       let gone = 0, fresh = false;
-      for (const r of [...recs.values()]) if (!keep.has(r.hid) && recGroup(K, r) === gk) { recs.delete(r.hid); had.delete(r.hid); gone++; }
+      for (const hid of K.keysOf(recs, gk, byGroup)) if (!keep.has(hid)) { recs.delete(hid); had.delete(hid); gone++; }
       if (gone || a.put.length) recsV++;
       for (const e of a.put) {
         had.set(e.hid, JSON.stringify(e));
@@ -510,6 +510,7 @@ function tables() {
         const m = r.mob; if (m && m.horse && m.horse !== r && m.horse.hid === r.hid) m.horse = r;   // a mob that came over carries a copy: the record is the one
       }
       // back in hid order (the order they were made in), so the horses tick in the same order as on a worker that never sent them
+      K.applied(recs, gk);
       if (!fresh) return;
       const all = [...recs.values()].sort((p, q) => p.hid - q.hid);
       recs.clear(); for (const r of all) recs.set(r.hid, r);

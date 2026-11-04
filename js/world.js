@@ -538,6 +538,24 @@ world.applyEdits = function (chunks, full, replayed) {
 };
 
 // Calls cb(lx, y, lz, id) for every block of chunk c (optionally only y in [ya, yb]) whose flag[id] > thr (default 0).
+// A section none of whose blocks is flagged is skipped by the ids it holds (worked out once per chunk version: idsOf), so the chunk-load
+// hooks that each look for their few kinds of block (block entities, farmland, furnaces, beehives, saplings, job sites, signs) don't each
+// read all of a chunk's blocks: about 0.2 ms a chunk on Gordon's laptop, and a meeting installs hundreds at once (r15-95).
+const secIds = new WeakMap();   // chunk -> {ver, secs: [section, ids it holds] per section}
+const seenId = new Uint32Array(65536);
+let seenStamp = 0;
+function idsOf(c, si) {
+  if (world.replica || typeof c.ver !== "number") return null;   // (the page's copy: its blocks can change under it, from the simulation)
+  let e = secIds.get(c);
+  if (!e || e.ver !== c.ver) secIds.set(c, (e = { ver: c.ver, secs: [] }));
+  const s = c.secs[si], had = e.secs[si];
+  if (had && had[0] === s) return had[1];
+  if (++seenStamp === 0xffffffff) { seenId.fill(0); seenStamp = 1; }
+  const ids = [];
+  for (let i = 0; i < 4096; i++) { const id = s[i]; if (seenId[id] !== seenStamp) { seenId[id] = seenStamp; ids.push(id); } }
+  e.secs[si] = [s, ids];
+  return ids;
+}
 world.scanFlagged = function (c, flag, cb, thr, ya, yb) {
   thr = thr || 0;
   const lo = ya == null ? c.y0 : Math.max(c.y0, ya), hi = yb == null ? c.y1 - 1 : Math.min(c.y1 - 1, yb);
@@ -549,6 +567,8 @@ world.scanFlagged = function (c, flag, cb, thr, ya, yb) {
       for (let i = 0; i < 4096; i++) { const y = by + (i >> 8); if (y >= lo && y <= hi) cb(i & 15, y, (i >> 4) & 15, s); }
       continue;
     }
+    const ids = idsOf(c, si);
+    if (ids) { let any = false; for (let j = 0; j < ids.length; j++) if (flag[ids[j]] > thr) { any = true; break; } if (!any) continue; }
     for (let i = 0; i < 4096; i++) {
       const id = s[i];
       if (!(flag[id] > thr)) continue;
@@ -982,7 +1002,13 @@ let loadQ = 0;   // chunks still to generate or mesh for the view (queueLength w
 world.update = function (px, pz, budgetMs = 8) {
   const pcx = Math.floor(px / CS), pcz = Math.floor(pz / CS);
   const hold = heldNow();
-  if (!hold) { installHeld(); if (heldUnloads) { heldUnloads = false; lastCenter = null; } }
+  if (!hold) {
+    const n = heldChunks.size;
+    installHeld(); if (heldUnloads) { heldUnloads = false; lastCenter = null; }
+    // (cluster workers: the installs go to the followers now, so they put theirs in while this one plans; otherwise they went with the
+    // plan's drops, at the exchange there, and the leader waited there for all their installs: about 150 ms a meeting, r15-95)
+    if (n && BF.rplay && BF.rplay.flush) BF.rplay.flush();
+  }
   const RJ = BF.rworkers && BF.rworkers.journal ? BF.rworkers : null;   // the region workers' journal (js/rworkers.js): the followers do what streaming did here
   if (RJ && BF.villageSim) RJ.rec(["v", px, pz, RJ.stamp()]);
   if (BF.villageSim && !world.replica && BF.villageSim.update(px, pz)) lastCenter = null;   // simulated-village set changed: re-plan
@@ -1453,9 +1479,11 @@ function ownCellsNow(name, coll, enc, dec) {
       return { put, gone: g };
     },
     apply(gk, o) {
+      const before = C.keysOf(coll, gk, of);   // (the group's keys before the puts: after them the table's size has changed, and asking
+                                               // again sorted the whole table by group once more for every group, r15-95)
       if (o.all) {
         const keep = new Set(isMap ? o.put.map(it => it[0]) : o.put);
-        for (const k of C.keysOf(coll, gk, of)) if (!keep.has(k)) { coll.delete(k); had.delete(k); }
+        for (const k of before) if (!keep.has(k)) { coll.delete(k); had.delete(k); }
       }
       for (const k of o.gone) { coll.delete(k); had.delete(k); }
       for (const it of o.put) if (isMap) put1(it[0], it[1]); else put1(it);
@@ -1463,7 +1491,7 @@ function ownCellsNow(name, coll, enc, dec) {
       // due, a fluid cell queued) and its owner never had or has dealt with: dropped, or this worker would deal with them again the day
       // the group comes to it, as the group's owner never did (farmland stamped there and nowhere else: cluster-play at meetings every
       // 80 ticks, when the workers went back to one)
-      if (!isMap) for (const k of C.keysOf(coll, gk, of)) if (!had.has(k)) coll.delete(k);
+      if (!isMap) for (const k of before) if (coll.has(k) && !had.has(k)) coll.delete(k);   // (the puts are all in had)
       C.applied(coll, gk);
     },
   });

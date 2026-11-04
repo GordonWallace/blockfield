@@ -381,6 +381,7 @@ function candidates(px, pz, base, t, ed, need = 1, anyCool = false) {
   for (;;) {
     let near = [];
     try { near = BF.worldgen.villagesNear(px, pz, r + 200) || []; } catch (e) { near = []; }
+    warmR = r + 200;
     for (const v of near) {
       if (!v || v.minX == null) continue;
       const k = vKey(v);
@@ -454,12 +455,17 @@ const FORCE_MAX = 50;
 
 // set({fixed: n}) (measuring, tools/headless.js --extra n): the n nearest villages within reach on top of the minimum, whatever the time
 // they take, so runs and workers compare alike (the budget reads real time); the memory limit still holds.
-let fixedAt = null;   // [x, z, n] the fixed set was picked for (the search is wide: done again only when the player moved a chunk)
+let fixedAt = null;
+// The village search's radius last time, for warm(px, pz): the layouts of the villages the player is moving towards, worked out between
+// meetings (worldgen caches them; pure) rather than at the meeting where the search meets them, on every cluster worker (about 30 ms a
+// meeting with the player flying, Gordon's laptop 2026-11-04, r15-95)
+let warmR = 0;
+function warm(px, pz) { if (warmR > 0) try { BF.worldgen.villagesNear(px, pz, warmR + 400); } catch (e) { /* (none) */ } }   // [x, z, n] the fixed set was picked for (the search is wide: done again only when the player moved a chunk)
 function fixedSet(px, pz, base, t, ed) {
   if (fixedAt && Math.abs(fixedAt[0] - px) < 16 && Math.abs(fixedAt[1] - pz) < 16 && fixedAt[2] === opt.fixed) { lastN = base.size + extras.size; return [...extras].map(([key, x]) => ({ key, v: x.v })); }
   fixedAt = [px, pz, opt.fixed];
   let near = [];
-  try { near = BF.worldgen.villagesNear(px, pz, (opt.reach > 0 ? opt.reach : 4000) + 200) || []; } catch (e) { near = []; }
+  try { near = BF.worldgen.villagesNear(px, pz, (warmR = (opt.reach > 0 ? opt.reach : 4000) + 200)) || []; } catch (e) { near = []; }
   const cand = [];
   for (const v of near) {
     if (!v || v.minX == null) continue;
@@ -498,6 +504,7 @@ BF.active = {
   force, forced: () => forced, FORCE_MAX, unforce, setAuto, isAuto: () => autoOn,
   used, pressed, pressAt, PRESS,
   holdJoins: tick => { joinHold = tick; },
+  warm,
   peak,
   opts: () => Object.assign({}, opt),
   // tests and the pause menu (a budget chosen there is remembered)
