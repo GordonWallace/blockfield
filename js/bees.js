@@ -450,13 +450,16 @@ function release(dt) {
 
 let acc = 0, lureT = 0, lp = [];
 // ---------------------------------------------------------------- clusters (spec r15-39b item C4, js/ctick.js)
-// With the cluster tick on, each group runs its own homes (by the cluster of the home's region) and the bees out of them (a bee keeps its
-// home's cluster, b.cl, while it is out, even when its home is broken), at most CAP bees out per group. Only the player's group's bees
+// With the cluster tick on, each group runs its own homes (by the cluster of the home's region) and the bees out of them (a bee goes with
+// its home's group as the last meeting worked it out, and keeps its home's cluster, b.cl, once its home is broken), at most CAP bees out
+// per group. (A bee kept b.cl even with its home: when a village joined, the land round it, a home's region with it, went from the wild
+// cluster to the village's at a meeting, and a bee out since went on in the wild one's group, on another worker, putting honey into a home
+// its own group didn't send: cluster-view, the copies' bees differed.) Only the player's group's bees
 // follow the player's flower. Housekeeping runs in the group's first pass after each meeting (once a second), the lure scan by the tick counter.
 const cluster = () => BF.herd && BF.herd.cluster();
 const homeBase = h => BF.clusters.ofRegion(BF.regions.keyOf(h.x, 0, h.z));
 const homeMine = (C, h) => BF.clusters.groupOf(homeBase(h)) === C.cur.key;
-const beeGroup = b => BF.clusters.groupOf(b.cl !== undefined ? b.cl : b.home ? homeBase(b.home) : "w:none");
+const beeGroup = b => BF.clusters.groupOf(b.home ? homeBase(b.home) : b.cl !== undefined ? b.cl : "w:none");
 const beeMine = (C, b) => beeGroup(b) === C.cur.key;
 // Each group's bees out: a bee's group changes only at meetings (it keeps its home's cluster while out), so they are listed at the first
 // use after one (BF.ctick.epoch), in bees order; a new bee goes at the end of its group's, as it does in bees; a gone one stays in until
