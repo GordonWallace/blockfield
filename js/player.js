@@ -23,6 +23,7 @@ let started = false;          // start screen dismissed
 let locked = false;           // pointer lock active
 let lockWorked = false;       // pointer lock succeeded at least once
 let dragMode = false;         // fallback look mode (no pointer lock)
+let noLockApi = false;        // drag mode because the canvas had no requestPointerLock then (a click asks again once it has one)
 let lockAsked = null;         // the latest lock request: "gesture" (a click or key behind it) or "none"
 let menuOpen = null;          // null | "start" | "pause" | "death"
 let waitingForChunk = true;   // spawn: no physics until the ground is loaded
@@ -723,7 +724,7 @@ function requestLock() {
   lockOnEscUp = escRelock = false;
   if (ev && ev.type === "keydown" && ev.key === "Escape") { lockOnEscUp = true; return; }
   const cv = canvas();
-  if (!cv.requestPointerLock) { dragMode = true; return; }
+  if (!cv.requestPointerLock) { dragMode = noLockApi = true; return; }
   const ua = navigator.userActivation;
   lockAsked = !ua || ua.isActive ? "gesture" : "none";   // (a refusal of a request with no click or key behind it isn't a browser without the lock)
   try {
@@ -871,6 +872,9 @@ function bindInput() {
   let drag = null;
   cv.addEventListener("pointerdown", e => {
     if (e.pointerType === "touch" || !started || menuOpen || invOpen()) return;
+    // drag mode only for want of requestPointerLock, which the canvas has now (test/run.js takes it away, test/planet-drag.js gives it
+    // back after the game may have asked): this click asks for the lock
+    if (dragMode && noLockApi && !lockWorked && cv.requestPointerLock && e.button === 0) { dragMode = noLockApi = false; }
     if (e.button !== 0 && locked === false && dragMode) return; // right / middle click must not start a look-drag
     if (!locked && !dragMode && !offPlanet) requestLock();
     if (!locked) drag = { x: e.clientX, y: e.clientY, id: e.pointerId };
