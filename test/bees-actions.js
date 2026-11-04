@@ -283,7 +283,8 @@ module.exports = async (pg) => {
     }
     BE.housekeeping();
     const homes = BE.loadedHomes(), have = homes.reduce((n, h) => n + h.bees, 0), allowed = homes.reduce((n, h) => n + h.allow, 0);
-    const byDist = homes.slice().sort((a, b) => a.dist - b.dist), firstShut = byDist.findIndex(h => h.allow < h.bees);
+    const pd = h => BF.planet.distance(h, BF.player.position);   // (as housekeeping measures it: a home doesn't keep its distance, js/bees.js)
+    const byDist = homes.slice().sort((a, b) => pd(a) - pd(b)), firstShut = byDist.findIndex(h => h.allow < h.bees);
     const nearestFirst = firstShut >= 0 && byDist.slice(firstShut + 1).every(h => h.allow === 0);
     ok("with more than 600 bees to share, the allowances add up to exactly 600, nearest homes first", have > BE.CAP && allowed === BE.CAP && nearestFirst,
       { have, allowed, homes: homes.length, extra: extra.length, shut: byDist.filter(h => h.allow === 0).length });
