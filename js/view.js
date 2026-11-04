@@ -137,7 +137,7 @@ view.begin = function (scene, camera) {
   s.on = !!(BF.player && BF.player.position);
   if (!s.on) { if (BF.world.roundK) BF.world.roundK.value = 0; if (axis) axis.visible = false; return; }
   if (!tmpM) { tmpM = new THREE.Matrix4(); sphR = new THREE.Matrix4(); }
-  const pp = BF.player.position, f = P.face(pp.x, pp.z);
+  const pp = BF.player.viewPos ? BF.player.viewPos() : BF.player.position, f = P.face(pp.x, pp.z);   // (the detached view's position, r15-98)
   if (f < 0) { s.on = false; return; }
   const N = P.N, cam = camera.position;
   s.f = f; s.eyeU = cam.x - P.W * f - N; s.eyeV = cam.z - N; s.eyeY = cam.y;
@@ -147,7 +147,7 @@ view.begin = function (scene, camera) {
   s.ground = view.groundAt(cam.x, cam.z); s.above = s.eyeY - s.ground;
   s.kAlt = smooth(ALT0, ALT1, s.above);
   s.k = view.debug.sphere ? 1 : Math.max(view.roundAt(cam.x, cam.z), s.kAlt);
-  s.offPlanet = !!(BF.player.offPlanet);
+  s.offPlanet = !!(BF.player.offPlanet) && !BF.player.detached;
   BF.world.roundK.value = s.k;
   setPlacements();
   setupClip(scene, camera);
@@ -210,7 +210,7 @@ function setupClip(scene, camera) {
   const s = state, h = Math.max(0, s.eyeY - BF.SEA), above = Math.max(0, s.above);
   const horizon = Math.sqrt(h * (2 * BF.planet.R + h)), r = ((BF.world && BF.world.viewDist) || 6) * 16;
   const kf = smooth(ALT0, ALT0 + 500, above);
-  if (kf > 0 && scene.fog && !(BF.player && BF.player.headInWater)) {
+  if (kf > 0 && scene.fog && !(BF.player && BF.player.headInWater && !BF.player.detached)) {
     // (from where sky.js leaves it: past the distant rings once they are built, so climbing through ALT0 never pulls the fog in)
     const low = Math.max(r, BF.lod && BF.lod.radius ? BF.lod.radius() : 0) * 0.95 + above;
     const far = lerpLog(low, Math.max(low, horizon * 1.25 + 1), kf) * (1 + 1e4 * smooth(ALT1, 4 * ALT1, above));
@@ -249,7 +249,7 @@ view.axis = () => axis;
 
 const v3a = typeof THREE !== "undefined" ? new THREE.Vector3() : null, v3b = v3a && new THREE.Vector3();
 function aimCamera(camera, fr) {
-  const s = state, k = s.k, M = s.M, yaw = BF.player.yaw, pitch = BF.player.pitch;
+  const s = state, k = s.k, M = s.M, PL = BF.player, yaw = PL.viewYaw != null ? PL.viewYaw : PL.yaw, pitch = PL.viewPitch != null ? PL.viewPitch : PL.pitch;
   const du = -Math.sin(yaw), dv = -Math.cos(yaw);
   // the facing on the sphere: grid step (du, dv) in the tangent plane, then into render space
   const up = fr.up, h = [fr.eu[0] * du + fr.ev[0] * dv, fr.eu[1] * du + fr.ev[1] * dv, fr.eu[2] * du + fr.ev[2] * dv];

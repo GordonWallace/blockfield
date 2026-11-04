@@ -374,6 +374,7 @@ H.frame = function () {
   st.mv = moveSeen;   // the last move the simulation made that the page has taken up
   const ride = P.rideReport();   // the boat or saddled horse the page steers (r15-44 part 2)
   if (ride) st.ride = ride;
+  if (P.detView) st.det = P.detView;   // the detached view (r15-98): for the debug screen's map
   const k = JSON.stringify(st);
   if (k !== sentPlayer) { sentPlayer = k; C.player(st); }
   speedNow();

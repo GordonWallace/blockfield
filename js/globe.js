@@ -75,7 +75,7 @@ function dispose(m) {
 const eye = [0, 0, 0];
 let eyeR = 0;
 function where() {
-  const P = BF.planet, p = BF.player && BF.player.position;
+  const P = BF.planet, p = BF.player && (BF.player.viewPos ? BF.player.viewPos() : BF.player.position);   // (the detached view's, r15-98)
   if (!p) return false;
   const g = P.grid(p.x, p.z);
   if (g.f < 0) return false;
@@ -155,7 +155,7 @@ globe.update = function () {
   if (!globe.active) return;
   if (BF.sampler.inline && !BF.lodInline) { off(); return; }   // the workers failed: as the rings
   if (!where()) return;
-  const P = BF.planet, p = BF.player.position;
+  const P = BF.planet, p = (BF.player.viewPos ? BF.player.viewPos() : BF.player.position);
   const k = BF.view.kAt(p.x, p.y, p.z), on = k > 0 && !globe.hidden;   // hidden: for tests of the rings alone
   // the horizon from the eye, plus how far a mountain past it still shows
   const h = Math.max(eyeR, P.R), horizon = Math.acos(Math.min(1, P.R / h)) + Math.acos(Math.min(1, P.R / (P.R + PEAK))) + 0.01;

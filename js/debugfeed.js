@@ -289,6 +289,10 @@ function applyWarp(list) {
   for (const w of list) {
     if (!w || !(w.id > wc)) continue;
     wc = w.id;
+    if (w.op === "detach") {   // the detached view on or off (r15-98): the page's own, whatever runs the simulation
+      if (BF.player && BF.player.toggleDetach) { const r = BF.player.toggleDetach("debug screen"); if (BF.player.actionBar && r.msg) BF.player.actionBar(r.msg); }
+      continue;
+    }   // (also from the pause menu: the game tab is often paused while the debug screen has the mouse; detach() refuses on the title screen)
     if (BF.player && BF.player.menu && BF.player.menu()) continue;   // the title screen: no game to speed up (the arrow keys do nothing there either)
     if (w.op === "villages") {   // force-load villages (r15-90): the /loadvillages command, run wherever the simulation is
       if (BF.glog) BF.glog.log("INFO", "budget", "Force-loading " + w.n + " villages from the debug screen");
@@ -390,6 +394,15 @@ function mobMap(pp) {
     regions.push(r);
   }
   const out = { kinds, acts, mobs, chunks, villages, regions, workers: workerCount(), region: BF.regions ? BF.regions.REGION : 0, player: [r1(pp.x), r1(pp.z), +(BF.player.yaw || 0).toFixed(2)], cs: CS };
+  // the detached view (r15-98): [x, z, yaw] in the map's frame (the facing worked out from a point ahead of it, so a view on a
+  // neighbouring face points the right way); left out when attached or on the face opposite the player's
+  const dv = BF.player.detView;
+  if (dv) {
+    const q = inF(dv[0], dv[1]), vx = q && q.x, vz = q && q.z, ah = q && inF(dv[0] - Math.sin(dv[2]) * 4, dv[1] - Math.cos(dv[2]) * 4);
+    if (ah) out.view = [r1(vx), r1(vz), +Math.atan2(-(ah.x - vx), -(ah.z - vz)).toFixed(2), Math.round(dv[3] || 0)];
+    else out.view = null;
+    out.detached = true;
+  }
   if (F >= 0) {
     const x0 = P.W * F + P.N;
     Object.assign(out, { face: F, sq: [x0, P.N, x0 + P.N, 2 * P.N], north: northAt(pp.x, pp.z) });

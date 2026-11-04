@@ -45,6 +45,7 @@ let target = null;            // current block raycast hit
 //   canBoard(v), exitSpot(v, hw, h) -> {x, y, z}, onLeave(v) (e.g. a boat lets its mob passenger out too).
 // Shift held when it was boarded must be let go first.
 let vehicle = null, rideShift = false;
+let det = null;   // the detached view (r15-98): {pos, vel, yaw, pitch, at} while the camera flies apart from the body; null when attached
 let offPlanet = false;        // the planet, above layer 20,000: the camera faces the planet and dragging turns it (js/view.js)
 // Render distances (chunks). The planet keeps block data only near the player and far chunks as meshes (js/world.js, spec r14-07), so the
 // largest is the default; automated browsers (the tests) start at world.js's 6, so their timings don't change.
@@ -818,13 +819,13 @@ function bindInput() {
     if (menuOpen || invOpen() || P.dead) return;
     if (wantLock && !locked && !dragMode) requestLock();   // a key press is a user gesture: take the mouse back that Escape's re-lock missed
     if (c === "KeyZ" && !e.repeat && !e.ctrlKey && !e.metaKey && locked) { releaseMouse(); return; }
-    if (c === "KeyQ" && !e.ctrlKey && !e.metaKey) throwSelected(); // holding Q keeps throwing at the key-repeat rate, as in Minecraft
+    if (c === "KeyQ" && !det && !e.ctrlKey && !e.metaKey) throwSelected(); // holding Q keeps throwing at the key-repeat rate, as in Minecraft
     if (e.repeat) { keys.add(c); return; }
     const now = performance.now();
-    if (c === "Space") {
+    if (c === "Space" && !det) {   // (detached, r15-98: Space only lifts the view)
       if (now - lastSpaceTap < 300) { flying = !flying; vel.y = 0; lastSpaceTap = 0; } else lastSpaceTap = now;
     }
-    if (c === "KeyW") {
+    if (c === "KeyW" && !det) {
       wTaps = now - lastWTap < 300 ? wTaps + 1 : 1;
       if (wTaps >= 2) sprinting = true;
       lastWTap = now;
@@ -864,7 +865,7 @@ function bindInput() {
 
   // (a lock that lands off the planet anyway, say one requested just before climbing past 20,000, is let go next frame; until then
   // a drag with the button held still turns the planet)
-  document.addEventListener("mousemove", e => { if (!locked) return; if (!offPlanet) look(e.movementX, e.movementY); else if (e.buttons & 1) turnPlanet(e.movementX, e.movementY); });
+  document.addEventListener("mousemove", e => { if (!locked) return; if (det || !offPlanet) look(e.movementX, e.movementY); else if (e.buttons & 1) turnPlanet(e.movementX, e.movementY); });
 
   // Drag-to-look fallback when there is no pointer lock (mouse or pen; touch handled separately)
   let drag = null;
@@ -922,6 +923,7 @@ function logClick(e, action, aim) {
 }
 
 function look(dx, dy) {
+  if (det) { det.yaw -= dx * 0.0024; det.pitch = clamp(det.pitch - dy * 0.0024, -1.55, 1.55); return; }   // the detached view turns, the body doesn't (r15-98)
   if (offPlanet) return;   // off-planet the mouse drags the planet instead
   yaw -= dx * 0.0024;
   pitch = clamp(pitch - dy * 0.0024, -1.55, 1.55);
@@ -1180,7 +1182,7 @@ function updateViewModel(dt) {
     const c = Math.cos(pitch), n = Math.sin(pitch), wy = -MAP_VM.down - by * 0.5, wz = -MAP_VM.fwd;
     vm.position.set(MAP_VM.side + bx * 0.5, wy * c + wz * n, -wy * n + wz * c);
     vm.rotation.set(-MAP_VM.tilt - pitch, 0, 0);
-    vm.visible = started && !P.dead && !offPlanet;
+    vm.visible = started && !P.dead && !offPlanet && !det;
     return;
   }
   // drawing a bow: the drawn sprite, turned so the arrow points ahead towards the crosshair, brought in and up a little
@@ -1194,7 +1196,7 @@ function updateViewModel(dt) {
   const dr = bowSt >= 0 ? Math.min(1, drawT * 6) : 0, shake = bowSt === 2 ? Math.sin(drawT * 40) * 0.003 : 0;   // a full draw trembles slightly
   vm.position.set(0.48 + bx - s * 0.12 - (eating ? 0.25 : 0) - dr * 0.2, -0.42 - by + s * 0.08 + eat + (eating ? 0.12 : 0) + dr * 0.1 + shake, -0.72 - s * 0.12 + dr * 0.08);
   vm.rotation.set(-s * 0.9, s * 0.4, 0);
-  vm.visible = started && !P.dead && !offPlanet;
+  vm.visible = started && !P.dead && !offPlanet && !det;
 }
 function swing() { if (swingT <= 0.08) swingT = 0.25; }
 
@@ -1551,6 +1553,7 @@ function tryAttack() {
   return true;
 }
 function primaryDown() {
+  if (det) return;   // (detached view, r15-98: the body does nothing)
   updateTarget();
   if (tryAttack()) { mouseL = false; return; }
   swing();
@@ -1818,6 +1821,7 @@ function respawnPoint() {
 
 // Right click: open a crafting table, start eating, or place a block. Returns true if something happened.
 function secondaryDown() {
+  if (det) return false;
   updateTarget();
   const mh = mobHit(), bh = boatHit();
   if (bh && (!target || bh.dist < target.dist) && (!mh || bh.dist < mh.dist)) {   // right click on a boat: get in (js/boats.js)
@@ -2107,6 +2111,7 @@ P.heal = function (n) { if (!P.dead) P.health = Math.min(P.maxHealth, P.health +
 
 const DEATH_MSG = { killed: "You were killed", fell: "You hit the ground too hard", drowned: "You drowned", starved: "You starved to death", slain: "You were slain", lightning: "You were struck by lightning", hurt: "You died" };
 function die() {
+  if (det) attach("you died");
   dismount();
   P.dead = true; P.health = 0;
   resetBreak(); mouseL = mouseR = false; keys.clear(); eatT = 0; drawT = 0; flying = false; turbo = false;
@@ -2546,8 +2551,111 @@ function turnPlanet(dx, dy) {
 P.turnPlanet = turnPlanet;   // tests
 P.showMenu = name => showScreen(name || null);   // tests: a menu shown or closed as a player would, without starting play (test/budget-menu.js)
 
+// ---------- detached view (r15-98, Gordon 2026-11-04) ----------
+// A debugging view: the camera leaves the body and flies on its own (noclip, the normal flying keys and the mouse), while everything
+// else goes on as if the player never moved. The body holds still where it was (no physics: it stays in the air if it was in the air);
+// the position the simulation gets in the player messages, saves, village loading and clusters' player group (js/clusters.js), mob
+// spawning and the chunks the simulation loads all stay at the body. Only what is drawn follows the view: the camera, the floating
+// origin and face frame (js/view.js), distant terrain (js/lod.js, js/globe.js), the weather and sounds, the entities the simulation sends
+// (the protocol's view message, js/protocol.js), and with the simulation in a worker or on the world server the page's own copy of the
+// terrain (js/main.js; that copy is the page's, so the simulation loads nothing for it). In the page (?sim=page) the page's world is the
+// simulation's, so there only what is already loaded and meshed is drawn.
+// Hurts still reach the body; dying, loading a world or a save puts the view back. The command /detach (js/commands.js) and the debug
+// screen's Mobs map button toggle it; the map shows both (js/debugfeed.js mobMap: player and view).
+// Game log: INFO "view" on detaching and attaching (where, why), ERROR when a detach is refused.
+const DET_SPEED = CFLY, DET_SPRINT = CFLY_SPRINT;
+const NO_KEYS = new Set();
+function detLog(level, text) { if (BF.glog) BF.glog.log(level, "view", text); }
+const whereStr = p => Math.round(p.x) + " " + Math.round(p.y) + " " + Math.round(p.z);
+function detach(why) {
+  if (det) return { ok: true, msg: "The view is already detached" };
+  const no = !started ? "no game is being played" : P.dead ? "you are dead" : null;
+  if (no) { detLog("ERROR", "Couldn't detach the view (" + (why || "command") + "): " + no); return { ok: false, msg: "Can't detach the view: " + no }; }
+  const eye = BF.camera ? BF.camera.position : null;
+  det = { pos: new THREE.Vector3(pos.x, pos.y + eyeOffset, pos.z), vel: { x: 0, y: 0, z: 0 }, yaw, pitch, at: pos.clone() };
+  if (eye && Number.isFinite(eye.x)) det.pos.set(eye.x, eye.y, eye.z);
+  vel.x = vel.y = vel.z = 0; sprinting = false; turbo = false; mouseL = mouseR = false; resetBreak(); eatT = 0; drawT = 0;
+  target = null; if (outline) outline.visible = false;
+  P.detView = detPose();
+  detLog("INFO", "View detached at " + whereStr(pos) + " (" + (why || "command") + "): the game keeps the player there while the view flies");
+  emit("viewDetached", { x: pos.x, y: pos.y, z: pos.z });
+  return { ok: true, msg: "View detached: fly with the usual keys; the game keeps you at " + whereStr(pos) + ". /detach again to come back" };
+}
+function attach(why) {
+  if (!det) return { ok: true, msg: "The view is not detached" };
+  const from = det.pos;
+  det = null; P.detView = null;
+  keys.clear();
+  if (BF.world && !BF.world.isLoaded(pos.x, pos.z)) waitingForChunk = true;   // (the page's copy may have let the body's chunks go: hold still until they are back)
+  syncCamera(0.016);
+  detLog("INFO", "View attached again at the player, " + whereStr(pos) + " (" + (why || "command") + "; the view was at " + whereStr(from) + ")");
+  emit("viewAttached", { x: pos.x, y: pos.y, z: pos.z });
+  return { ok: true, msg: "View back at the player" };
+}
+function detPose() { return det ? [Math.round(det.pos.x * 10) / 10, Math.round(det.pos.z * 10) / 10, Math.round(det.yaw * 100) / 100, Math.round(det.pos.y)] : null; }
+// The view's flight: creative flying without collisions; speed grows with the height above the ground as creative flight does.
+function detFly(dt) {
+  const k = invOpen() || menuOpen ? NO_KEYS : touchKeys.size ? new Set([...keys, ...touchKeys]) : keys;
+  let fwd = (k.has("KeyW") || k.has("ArrowUp") ? 1 : 0) - (k.has("KeyS") || k.has("ArrowDown") ? 1 : 0);
+  let strafe = (k.has("KeyD") ? 1 : 0) - (k.has("KeyA") ? 1 : 0);
+  if (stick.id != null) { fwd = -stick.y; strafe = stick.x; }
+  const fast = k.has("ControlLeft") || k.has("ControlRight") || k.has("KeyR");
+  const sx = -Math.sin(det.yaw), sz = -Math.cos(det.yaw);
+  let mx = sx * fwd - sz * strafe, mz = sz * fwd + sx * strafe;
+  const ml = Math.hypot(mx, mz);
+  if (ml > 1) { mx /= ml; mz /= ml; }
+  const d = det.pos, v = det.vel;
+  let speed = fast ? DET_SPRINT : DET_SPEED, vert = 0.75;
+  if (k.has("KeyR") && fwd > 0) speed = DET_SPEED * TURBO_MULT;
+  let ground = BF.SEA;
+  try { if (BF.view && BF.view.groundAt) ground = BF.view.groundAt(d.x, d.z); } catch (_) {}
+  const above = d.y - ground;
+  if (above > 150) { speed *= above / 150; vert = 1; }
+  const a = 1 - Math.exp(-10 * dt);
+  v.x += (mx * speed - v.x) * a; v.z += (mz * speed - v.z) * a;
+  const vy = (k.has("Space") ? 1 : 0) - (k.has("ShiftLeft") || k.has("ShiftRight") ? 1 : 0);
+  v.y += (vy * speed * vert - v.y) * a;
+  d.x += v.x * dt; d.y += v.y * dt; d.z += v.z * dt;
+  const top = (BF.view && BF.view.OFF ? BF.view.OFF : 20000) - 100;   // (below off-planet mode: that is the body's)
+  if (d.y > top) { d.y = top; if (v.y > 0) v.y = 0; }
+  if (d.y < BF.MIN_Y + 1) { d.y = BF.MIN_Y + 1; if (v.y < 0) v.y = 0; }
+  if (BF.planet && BF.planet.canon) recanonAt(d, det, v);   // across a face edge: on from the same spot of the next face, turned
+}
+function detUpdate(dt) {
+  if (!P.dead) {
+    if (isTouch) touchUpdate();
+    if (invOpen() && keys.size) keys.clear();
+    survivalTick(dt);   // the body still gets hungry, drowns and heals where it is
+  }
+  if (det) detFly(dt);   // (dying put the view back)
+  bobAmt = 0;
+  syncCamera(dt);
+  updateParticles(dt);
+  updateViewModel(dt);
+  updateOverlays(dt);
+  if (det) P.detView = detPose();
+}
+function detCamera() {
+  if (!BF.camera) return;
+  BF.camera.position.set(det.pos.x, det.pos.y, det.pos.z);
+  BF.camera.rotation.set(det.pitch, det.yaw, 0, "YXZ");
+  if (BF.camera.fov !== BASE_FOV) { fov = BASE_FOV; BF.camera.fov = fov; BF.camera.updateProjectionMatrix(); }
+}
+P.detach = detach;
+P.attach = attach;
+P.toggleDetach = why => (det ? attach(why) : detach(why));
+// (tests) puts the detached view at x, y, z (atlas), looking yaw / pitch when given; false when attached
+P.setView = function (x, y, z, y2, p2) { if (!det) return false; det.pos.set(x, y, z); det.vel.x = det.vel.y = det.vel.z = 0; if (y2 != null) det.yaw = y2; if (p2 != null) det.pitch = p2; P.detView = detPose(); syncCamera(0.016); return true; };
+P.detView = null;   // [x, z, yaw, y] of the detached view, or null. Off the page (a worker, the world server) it comes with the player messages (js/protocol.js).
+Object.defineProperty(P, "detached", { get: () => !!det, enumerable: true });
+// Where things are drawn from: the detached view's position, else the body's. viewYaw / viewPitch: its look.
+P.viewPos = () => (det ? det.pos : pos);
+Object.defineProperty(P, "viewYaw", { get: () => (det ? det.yaw : yaw), enumerable: true });
+Object.defineProperty(P, "viewPitch", { get: () => (det ? det.pitch : pitch), enumerable: true });
+
 // ---------- camera ----------
 function syncCamera(dt) {
+  if (det) { detCamera(); return; }
   const want = vehicle ? vehicle.ctl.sitEye(vehicle) : sneaking ? SNEAK_EYE : EYE;
   eyeOffset += (want - eyeOffset) * Math.min(1, dt * 14);
   if (!BF.camera) return;   // headless (js/boot.js): no camera
@@ -2682,6 +2790,7 @@ P.serialize = function () {
   };
 };
 P.deserialize = function (o) {
+  if (det) attach("another world or save loaded");
   o = o || {};
   const num = (v, d) => (typeof v === "number" && isFinite(v) ? v : d);
   if (o.gameMode) setGameMode(o.gameMode);
@@ -2725,6 +2834,7 @@ P.update = function (dt) {
   if (hurtCd > 0) hurtCd -= dt;
   if (attackCd > 0) attackCd -= dt;
 
+  if (det) { detUpdate(dt); return; }   // the view flies, the body holds still where it was (r15-98)
   // coming down through the chunk ceiling (js/world.js) onto chunks not loaded yet, which read as solid again: hold still until they are
   if (wasHigh && !BF.world.high && !BF.world.isLoaded(pos.x, pos.z)) waitingForChunk = true;
   wasHigh = BF.world.high;
