@@ -768,39 +768,82 @@ function connect(send, mode) {
   // at the rate the ticks have been arriving (so a simulation a little under its speed doesn't leave it waiting at the newest tick every
   // few frames), aims `lag` ticks behind the newest (a little more than the longest recent wait for the next entities message, so the
   // next is there before the clock gets to it), eases back to that aim, and never runs past the newest: it waits there instead of guessing.
+  // r15-95: at play speeds (up to 2x) the cluster workers' meetings stop the ticks for a few tenths of a second every 8 game seconds, and
+  // the mobs stood still that long. There the clock is elastic: it runs at the ticks' rate over the last several seconds (meetings
+  // included, so a sim at 0.92x is drawn a little slow all the time instead of stopping at each meeting), remembers the longest recent
+  // wait for half a minute (the next meeting comes within that), eases back to its aim slowly, and when it gets to the newest tick anyway
+  // it goes on up to EXT_MS past it: a mob that moved in the newest tick is drawn on along its last step (world.k above 1; js/mobview.js
+  // eases out the difference once the real states come). Faster than 2x, as before.
   const HIST_MAX = 48, CADENCE = 6;   // CADENCE: a change this few ticks after the last is drawn from it (animals idling in a pen step every 5 ticks)
-  const DRAW = { lag: 1.5, peak: 1, lastT: -1, lastAt: 0, tickLen: BF.warp ? BF.warp.TICK : 0.05, tickMs: (BF.warp ? BF.warp.TICK : 0.05) * 1000, rate: null, winT: -1, winAt: 0, frames: 0, waits: 0, toldAt: -1e9 };
+  const EXT_MS = 500, EXT_MAX = 12, SLOW = 2;
+  const DRAW = { lag: 1.5, peak: 1, lastT: -1, lastAt: 0, tickLen: BF.warp ? BF.warp.TICK : 0.05, tickMs: (BF.warp ? BF.warp.TICK : 0.05) * 1000, rate: null, winT: -1, winAt: 0, frames: 0, waits: 0, toldAt: -1e9, sp: 1, slow: true };
+  world.ext = 0;   // how many ticks past the newest the clock may draw (on along the last step)
   world.draw = (dTicks, realDt) => {
     const T = world.tick;
     if (T < 0) { world.rt = null; return; }
-    const aim = T - DRAW.lag;
+    const aim = T - DRAW.lag, ext = world.ext = DRAW.slow ? Math.min(EXT_MAX, EXT_MS / DRAW.tickMs) : 0;
     realDt = Math.max(0, Math.min(0.25, realDt || 0));
-    if (world.rt == null || world.rt > T + 1 || world.rt < aim - 20 - DRAW.lag) world.rt = aim;   // (a new world, a load, a long stall)
+    if (world.rt == null || world.rt > T + 1 + ext || world.rt < aim - 20 - DRAW.lag) world.rt = aim;   // (a new world, a load, a long stall)
     else if (dTicks > 0) {
       world.rt += DRAW.rate != null ? DRAW.rate * realDt : dTicks;
-      world.rt += (aim - world.rt) * (1 - Math.exp(-realDt / 0.5));
+      world.rt += (aim - world.rt) * (1 - Math.exp(-realDt / (DRAW.slow ? 4 : 0.5)));
     }
     DRAW.frames++;
     if (world.rt >= T && dTicks > 0) DRAW.waits++;
-    if (world.rt > T) world.rt = T;
+    if (world.rt > T + ext) world.rt = T + ext;
     return world.place(world.rt);
   };
   // every entity with recent states drawn at clock rt (draw(), each frame; tests call it to hold the clock somewhere)
+  // (r15-95) A mob drawn on along its last step past the newest tick is drawn from its real states again once they come: the difference
+  // between where that step would have taken it by now and where it is drawn now goes into r.ox / oy / oz, which the renderer adds,
+  // eased out over about SETTLE_MS, so a mob that turned or stopped meanwhile glides back on its way instead of jumping.
+  const SETTLE_MS = 300;
+  const lin = (a, b, k) => a + (b - a) * k;
+  function settle(r, now) {
+    if (r.ox) {
+      const f = Math.exp(-(now - r.ot) / SETTLE_MS);
+      r.ox *= f; r.oy *= f; r.oz *= f;
+      if (Math.abs(r.ox) + Math.abs(r.oy) + Math.abs(r.oz) < 1e-3) r.ox = r.oy = r.oz = 0;
+    }
+    r.ot = now;
+    const e = r.ex, on = r.k > 1;
+    if (e && !(on && r.prev === e.p && r.xt === e.t)) {   // (it was drawn on along a step that is no longer the one drawn)
+      const p = r.prev, B = r.k < 1 && r.to || r, k = p ? r.k : 1;
+      const x = p ? lin(p.x, B.x, k) : r.x, y = p ? lin(p.y, B.y, k) : r.y, z = p ? lin(p.z, B.z, k) : r.z;
+      const q = Math.min(world.rt - e.t, e.ext) / e.d, dx = lin(e.ax, e.bx, 1 + q) - x, dy = lin(e.ay, e.by, 1 + q) - y, dz = lin(e.az, e.bz, 1 + q) - z;
+      if (dx * dx + dy * dy + dz * dz < 16) { r.ox = (r.ox || 0) + dx; r.oy = (r.oy || 0) + dy; r.oz = (r.oz || 0) + dz; }
+    }
+    r.ex = on ? { p: r.prev, t: r.xt, d: r.xt - r.prev.t, ext: world.ext, ax: r.prev.x, ay: r.prev.y, az: r.prev.z, bx: r.x, by: r.y, bz: r.z } : null;
+  }
   world.place = rt => {
     world.rt = rt;
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
     for (const r of world.entities.values()) {
       const h = r.hist;
       if (!h) continue;
-      let i = 0;
-      while (i + 1 < h.length && h[i + 1].t <= rt) i++;
-      if (i > 0) { h.splice(0, i); i = 0; }   // (the states before the clock's are done with)
-      if (h.length < 2 || rt >= h[h.length - 1].t) { r.prev = null; r.to = null; r.k = 1; if (h.length > 1) h.splice(0, h.length - 1); continue; }
-      const A = h[0], B = h[1];
-      r.prev = A; r.to = B === h[h.length - 1] ? null : B;   // (to null: its current fields)
-      r.k = rt <= A.t ? 0 : (rt - A.t) / (B.t - A.t);
+      placeOne(r, h, rt);
+      if (r.kind === "mob" && (r.ex || r.ox || r.k > 1)) settle(r, now);
     }
     return rt;
   };
+  function placeOne(r, h, rt) {
+    let i = 0;
+    while (i + 2 < h.length && h[i + 1].t <= rt) i++;   // (the last two kept: the clock may go past the newest, on along the last step)
+    if (i > 0) { h.splice(0, i); i = 0; }   // (the states before the clock's are done with)
+    const L = h[h.length - 1];
+    if (h.length >= 2 && rt > L.t) {
+      // past its last state: on along its last step if it moved in the newest tick, for at most world.ext ticks; else where it is
+      const P = h[h.length - 2], d = L.t - P.t;
+      if (world.ext > 0 && L.t >= world.tick - 1 && d > 0 && d <= 2) { r.prev = P; r.to = null; r.k = 1 + Math.min(rt - L.t, world.ext) / d; r.xt = L.t; }
+      else { r.prev = null; r.to = null; r.k = 1; }
+      if (h.length > 2) h.splice(0, h.length - 2);
+      return;
+    }
+    if (h.length < 2 || rt >= L.t) { r.prev = null; r.to = null; r.k = 1; if (h.length > 2) h.splice(0, h.length - 2); return; }
+    const A = h[0], B = h[1];
+    r.prev = A; r.to = B === h[h.length - 1] ? null : B;   // (to null: its current fields)
+    r.k = rt <= A.t ? 0 : (rt - A.t) / (B.t - A.t);
+  }
   // the lag in ticks, the arrival rate (ticks a second), and the frames drawn / those that waited at the newest tick since the last call
   world.drawStats = () => { const o = { lag: DRAW.lag, rate: DRAW.rate, frames: DRAW.frames, waits: DRAW.waits }; DRAW.frames = DRAW.waits = 0; return o; };
   world.drawLag = () => DRAW.lag;
@@ -811,9 +854,11 @@ function connect(send, mode) {
     const now = typeof performance !== "undefined" ? performance.now() : Date.now(), ck = world.clock;
     const sp = ck && ck.achieved > 0 ? ck.achieved : ck && ck.speed > 0 ? ck.speed : 1;
     DRAW.tickMs = DRAW.tickLen * 1000 / Math.max(0.05, sp);   // (a tick's real ms at that speed: the simulation's tick length, idea-049)
+    const set = ck && ck.speed > 0 ? ck.speed : 1;
+    if (set !== DRAW.sp) { DRAW.sp = set; DRAW.slow = set <= SLOW; DRAW.rate = null; DRAW.winT = -1; DRAW.peak = 1; }   // (a new speed: measured again)
     if (DRAW.lastT >= 0 && T > DRAW.lastT) {
       const gap = Math.max(T - DRAW.lastT, (now - DRAW.lastAt) / DRAW.tickMs);
-      DRAW.peak = Math.max(gap, DRAW.peak * 0.97);
+      DRAW.peak = Math.max(gap, DRAW.peak * (DRAW.slow ? Math.exp(-(now - DRAW.lastAt) / 30000) : 0.97));
       DRAW.lag = Math.max(1.5, Math.min(DRAW.peak + 0.5, Math.max(2, 400 / DRAW.tickMs)));
       // the game log: the page drawing far behind (the ticks arriving very unevenly), at most once a minute
       if (DRAW.lag * DRAW.tickMs > 250 && now - DRAW.toldAt > 60000) {
@@ -823,8 +868,8 @@ function connect(send, mode) {
     }
     if (DRAW.winT < 0 || T < DRAW.winT || now - DRAW.winAt > 3000) { DRAW.winT = T; DRAW.winAt = now; DRAW.rate = null; }
     else if (now - DRAW.winAt >= 500) {
-      const r = (T - DRAW.winT) * 1000 / (now - DRAW.winAt);
-      DRAW.rate = DRAW.rate == null ? r : DRAW.rate + (r - DRAW.rate) * 0.3;
+      const r = (T - DRAW.winT) * 1000 / (now - DRAW.winAt), w = DRAW.slow ? 1 - Math.exp(-(now - DRAW.winAt) / 10000) : 0.3;
+      DRAW.rate = DRAW.rate == null ? r : DRAW.rate + (r - DRAW.rate) * w;
       DRAW.winT = T; DRAW.winAt = now;
     }
     if (T !== DRAW.lastT) { DRAW.lastT = T; DRAW.lastAt = now; }

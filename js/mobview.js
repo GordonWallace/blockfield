@@ -525,12 +525,19 @@ function tickK(m) {
   return dx * dx + dy * dy + dz * dz > 16 ? 1 : M.k(m, a);
 }
 const mix = (a, b, k) => (typeof a === "number" ? a + (b - a) * k : b);
+// (off the page: what is left of the step drawn on through a meeting, eased out by js/protocol.js world.place, r15-95)
+const settle = (m, out) => { if (m.ox) { out.x += m.ox; out.y += m.oy; out.z += m.oz; } return out; };
 function drawState(m, out) {
   const k = tickK(m), p = m.prev, P = k < 1 && m.to || m;   // (off the page: between prev and to at the drawing clock, js/protocol.js)
+  if (k > 1) {   // (off the page, the drawing clock past the newest tick: on along its last step, js/protocol.js world.place)
+    out.x = mix(p.x, m.x, k); out.y = mix(p.y, m.y, k); out.z = mix(p.z, m.z, k); out.yaw = m.yaw; out.headYaw = m.headYaw; out.headPitch = m.headPitch;
+    out.walkPhase = mix(p.walkPhase, m.walkPhase, k); out.walkAmt = m.walkAmt; out.age = mix(p.age, m.age, k);
+    return settle(m, out);
+  }
   if (k >= 1) {
     out.x = m.x; out.y = m.y; out.z = m.z; out.yaw = m.yaw; out.headYaw = m.headYaw; out.headPitch = m.headPitch;
     out.walkPhase = m.walkPhase; out.walkAmt = m.walkAmt; out.age = m.age;
-    return out;
+    return settle(m, out);
   }
   out.x = mix(p.x, P.x, k); out.y = mix(p.y, P.y, k); out.z = mix(p.z, P.z, k);
   let dy = P.yaw - (typeof p.yaw === "number" ? p.yaw : P.yaw);
@@ -538,7 +545,7 @@ function drawState(m, out) {
   out.yaw = P.yaw - dy * (1 - k);
   out.headYaw = mix(p.headYaw, P.headYaw, k); out.headPitch = mix(p.headPitch, P.headPitch, k);
   out.walkPhase = mix(p.walkPhase, P.walkPhase, k); out.walkAmt = mix(p.walkAmt, P.walkAmt, k); out.age = mix(p.age, P.age, k);
-  return out;
+  return settle(m, out);
 }
 const _ds = Object.assign({}, D);
 // Where a mob is drawn this frame (labels over villagers, js/villagepanel.js; leads, js/entityview.js). m: its entity in the mirror.

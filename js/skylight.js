@@ -316,10 +316,19 @@ function installPrepared(c) {
     const n = cl.c;
     if (!n || !n.sky || n === c) continue;
     const top = Math.min(c.y1, n.y1), bot = Math.max(c.y0, n.y0);
-    for (let y = bot; y < top; y++) {
-      const v = sget(c, lx, y, lz), u = sget(n, cl.lx, y, cl.lz);
-      if (v > u + 1) pushAdd(ox + lx, y, oz + lz);
-      else if (u > v + 1) pushAdd(cl.x, y, cl.z);
+    for (let y0 = bot; y0 < top; y0 += 16) {   // (bands are whole sections)
+      // (a section of one level on both sides, open sky over the ground or dark under it, as most are: one comparison for its 16)
+      const a = c.sky[(y0 >> 4) - c.lo], b = n.sky[(y0 >> 4) - n.lo];
+      if (typeof a === "number" && typeof b === "number") {
+        if (a > b + 1) for (let y = y0; y < y0 + 16; y++) pushAdd(ox + lx, y, oz + lz);
+        else if (b > a + 1) for (let y = y0; y < y0 + 16; y++) pushAdd(cl.x, y, cl.z);
+        continue;
+      }
+      for (let y = y0; y < y0 + 16; y++) {
+        const v = sget(c, lx, y, lz), u = sget(n, cl.lx, y, cl.lz);
+        if (v > u + 1) pushAdd(ox + lx, y, oz + lz);
+        else if (u > v + 1) pushAdd(cl.x, y, cl.z);
+      }
     }
   }
 }
