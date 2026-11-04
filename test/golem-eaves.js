@@ -44,7 +44,7 @@ module.exports = async (pg, out) => {
     const pv = gs.map(() => 0);
     const step = () => {
       BF.sky.setTime(0.1); zb.position.set(X0 + 15.5, Y0, Z0 + 15.5); zb.vel.set(0, 0, 0); zb.fire = 0;
-      M.update(0.05); BF.world.tickSim(); P.set(X0 + 15, Y0 + 12, Z0 + 15); T += 0.05;
+      M.update(BF_TK); BF.world.tickSim(); P.set(X0 + 15, Y0 + 12, Z0 + 15); T += 0.05;
       gs.forEach((g, i) => {
         if (g.vel.y > 7 && pv[i] <= 0.5) jumps++;
         pv[i] = g.vel.y;

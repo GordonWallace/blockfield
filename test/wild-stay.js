@@ -11,7 +11,7 @@ module.exports = async (pg) => {
     const M = BF.mobs, S = BF.sky, W = BF.world, p = BF.player.position;
     for (let i = 0; i < 3000 && (i < 300 || W.queueLength > 0); i++) { W.update(p.x, p.z, 40); if (i % 50 === 0) await new Promise(r => setTimeout(r, 0)); }
     const animal = m => !m.dead && !m.removed && !m.hostile && m.type !== "villager" && !(m.def && (m.def.golem || m.def.village));
-    for (let i = 0; i < 200; i++) M.update(0.05);   // the first-generation rolls of the loaded chunks
+    for (let i = 0; i < 200; i++) M.update(BF_TK);   // the first-generation rolls of the loaded chunks
     // where each new mob came from: a chunk's first-generation roll or stored mobs coming back (js/wildlife.js), a saved horse coming back,
     // or anything else (which, for a grown animal, is a spontaneous spawn)
     // (kept in a WeakMap, not on the mob: js/mobsave.js snapOf copies a mob's own fields into a stored wild mob's snapshot, so a tag on
@@ -27,7 +27,7 @@ module.exports = async (pg) => {
     let late = 0, back = 0;
     const steps = Math.round(3 * 1200 / 0.05);
     for (let i = 0; i < steps; i++) {
-      S.advance(0.05); M.update(0.05);
+      S.advance(BF_TK); M.update(BF_TK);
       if (i % 50 === 0) W.update(p.x, p.z, 4);
       if (i % 200 === 0) {
         for (const m of M.list) if (animal(m) && !seen.has(m)) {

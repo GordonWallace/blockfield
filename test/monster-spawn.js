@@ -56,7 +56,7 @@ module.exports = async (pg) => {
     let over = [], most = [];
     const capsOf = new Map();
     for (let i = 0; i < 3600; i++) {
-      S.update(0.05); M.update(0.05);
+      S.update(BF_TK); M.update(BF_TK);
       if (i % 20 === 0) for (const A of L.areas()) {   // a second's worth: count again, as the areas are rebuilt
         const name = A.kind + ":" + A.key, caps = capsOf.get(name) || [];
         caps.push(A.cap); if (caps.length > 10) caps.shift(); capsOf.set(name, caps);

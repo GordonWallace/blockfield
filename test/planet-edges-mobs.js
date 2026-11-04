@@ -55,7 +55,7 @@ module.exports = async (pg) => {
           if (W.getBlock(a.x, yy, a.z) !== want) W.setBlock(a.x, yy, a.z, want);
         }
       }
-      globalThis.__clearMobs = () => { for (const m of BF.mobs.list.slice()) { const q = P.local(c0, m.position); if (Math.hypot(q.x - c0.x, q.z - c0.z) < 40) BF.mobs.kill(m); } for (let i = 0; i < 30; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); };
+      globalThis.__clearMobs = () => { for (const m of BF.mobs.list.slice()) { const q = P.local(c0, m.position); if (Math.hypot(q.x - c0.x, q.z - c0.z) < 40) BF.mobs.kill(m); } for (let i = 0; i < 30; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver()); };
       globalThis.__clearMobs();
       BF.mobs.spawning = false;
       const p = cc(-8, 8);
@@ -75,14 +75,14 @@ module.exports = async (pg) => {
       list[3].penVillage = { x: anchor.x, z: anchor.z, key: "test-edge" };   // as a village's own animal: kept in face A's frame
       for (let k = -3; k <= 7; k++) {
         const c = cc(k, 0); PL.teleport(c.x, y, c.z);
-        for (let i = 0; i < 12; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+        for (let i = 0; i < 12; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
         await new Promise(r => setTimeout(r, 20));
       }
-      for (let i = 0; i < 160; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+      for (let i = 0; i < 160; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
       const pp = PL.position;
       const out = list.map(m => ({ k: +kOf(m.position).toFixed(1), onB: onB(m.position), d: +P.distance(m.position, pp).toFixed(1), face: P.face(m.position.x, m.position.z) }));
       for (const m of list) BF.mobs.kill(m);
-      for (let i = 0; i < 30; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+      for (let i = 0; i < 30; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
       BF.inventory.setSlot(0, null);
       return { cows: out, f };
     }, [y, f]);
@@ -98,9 +98,9 @@ module.exports = async (pg) => {
       const z0 = cc(-5, 3), z = BF.mobs.spawn("zombie", z0.x, y, z0.z);
       const hp0 = PL.health;
       let close = false;
-      for (let i = 0; i < 200 && !close; i++) { (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); PL.teleport(p.x, y, p.z); if (P.distance(z.position, PL.position) < 1.6) close = true; if (i % 20 === 0) await new Promise(r => setTimeout(r, 10)); }
+      for (let i = 0; i < 200 && !close; i++) { (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver()); PL.teleport(p.x, y, p.z); if (P.distance(z.position, PL.position) < 1.6) close = true; if (i % 20 === 0) await new Promise(r => setTimeout(r, 10)); }
       const out = { close, onB: onB(z.position), k: +kOf(z.position).toFixed(1), d: +P.distance(z.position, PL.position).toFixed(1), hurt: PL.health < hp0 };
-      BF.mobs.kill(z); for (let i = 0; i < 30; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+      BF.mobs.kill(z); for (let i = 0; i < 30; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
       PL.health = 20;
       return out;
     }, [y]);
@@ -112,11 +112,11 @@ module.exports = async (pg) => {
       const p = cc(8, 8); PL.teleport(p.x, y, p.z);
       const c = cc(-2, 3);
       const d = BF.drops.spawn(BF.I.cobblestone, 1, c.x, y + 0.2, c.z, { vel: new THREE.Vector3(h[0] * 9, 1, h[1] * 9), pickupDelay: 0 });
-      for (let i = 0; i < 40; i++) BF.drops.update(0.05);
+      for (let i = 0; i < 40; i++) BF.drops.update(BF_TK);
       const out = { onB: onB(d.pos), k: +kOf(d.pos).toFixed(1) };
       PL.teleport(d.pos.x, y, d.pos.z);
       const n0 = BF.inventory.count ? BF.inventory.count(BF.I.cobblestone) : null;
-      for (let i = 0; i < 20; i++) { BF.drops.update(0.05); BF.req.apply(); BF.req.deliver(); }   // picking up is a "pickup" request (spec r15-22): applied here, as a tick would
+      for (let i = 0; i < 20; i++) { BF.drops.update(BF_TK); BF.req.apply(); BF.req.deliver(); }   // picking up is a "pickup" request (spec r15-22): applied here, as a tick would
       out.picked = !BF.drops.list.includes(d);
       return out;
     }, [y]);
@@ -136,14 +136,14 @@ module.exports = async (pg) => {
       PL.dismount();
       const h0 = cc(-6, 3), horse = BF.horses.spawn(h0.x, y, h0.z, { tamed: true, stats: { hp: 20, speed: 9, jump: 3 } });
       horse.horse.saddle = true;
-      for (let i = 0; i < 20; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+      for (let i = 0; i < 20; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
       PL.teleport(h0.x + 1, y, h0.z); PL.setLook(yaw0, 0);
       PL.mount(horse);
       out.mounted = PL.vehicle === horse;
-      for (let t = 0; t < 3 && kOf(horse.position) < 5; t += 0.05) { PL.ride(1, 0, 0.05); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); }
+      for (let t = 0; t < 3 && kOf(horse.position) < 5; t += 0.05) { PL.ride(1, 0, 0.05); (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver()); }
       out.horse = { onB: onB(horse.position), k: +kOf(horse.position).toFixed(1), fwd: +fwdDot(PL.yaw).toFixed(3), riderOnB: onB(PL.position), seated: Math.hypot(PL.position.x - horse.position.x, PL.position.z - horse.position.z) < 0.5 };
       PL.dismount();
-      BF.mobs.kill(horse); for (let i = 0; i < 30; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+      BF.mobs.kill(horse); for (let i = 0; i < 30; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
       return out;
     }, [y]);
     const bt = ride.boat || {}, hs = ride.horse || {};
@@ -169,12 +169,12 @@ module.exports = async (pg) => {
         const w = cc(kw, 2), cow = BF.mobs.spawn("cow", w.x, y, w.z), hp0 = cow.hp;
         const c = cc(kc, 0), cr = BF.mobs.spawn("creeper", c.x, y, c.z);
         for (let i = 0; i < 400 && !cr.exploded && !cr.removed; i++) {
-          (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); PL.teleport(p.x, y, p.z);
+          (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver()); PL.teleport(p.x, y, p.z);
           if (i % 20 === 0) await new Promise(r => setTimeout(r, 5));
         }
         const out = { exploded: !!cr.exploded, player: PL.health, cow: cow.dead ? 0 : cow.hp, cow0: hp0 };
         if (!cow.dead) BF.mobs.kill(cow); if (!cr.removed) BF.mobs.kill(cr);
-        for (let i = 0; i < 30; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+        for (let i = 0; i < 30; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
         for (let k = -6; k <= 6; k++) for (let j = -6; j <= 6; j++) for (let yy = y - 2; yy < y; yy++) {   // mend the floor (the channel's water too)
           const a = globalThis.__at(k, j), want = yy === y - 1 && j <= -5 && j >= -8 ? BF.B.water : BF.B.stone;
           if (BF.world.getBlock(a.x, yy, a.z) !== want) BF.world.setBlock(a.x, yy, a.z, want);
@@ -192,7 +192,7 @@ module.exports = async (pg) => {
       const P = BF.planet, cc = globalThis.__cc, a = cc(-2, 4), b = cc(1, 4);
       const ma = BF.mobs.spawn("cow", a.x, y, a.z), mb = BF.mobs.spawn("cow", b.x, y, b.z), s = BF.herd.birthSpot(ma, mb);
       const out = { a: +P.distance(s, ma.position).toFixed(2), b: +P.distance(s, mb.position).toFixed(2), k: +globalThis.__kOf(s).toFixed(2) };
-      BF.mobs.kill(ma); BF.mobs.kill(mb); for (let i = 0; i < 30; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+      BF.mobs.kill(ma); BF.mobs.kill(mb); for (let i = 0; i < 30; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
       return out;
     }, [y]);
     check(born.a < 2 && born.b < 2, `${tag}: young of a pair astride the edge is born between them (bug-089) ${JSON.stringify(born)}`);
@@ -209,12 +209,12 @@ module.exports = async (pg) => {
       for (let i = 0; i < 400 && !got; i++) {
         if (v.ai.mode !== "walk") { const q = P.local(v.position, P.canon(tgt.x, tgt.z)); v.ai.mode = "walk"; v.ai.tx = q.x; v.ai.tz = q.z; }   // (re-expressed by the mob itself when it crosses)
         v.ai.t = 30;
-        (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+        (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
         if (P.distance(v.position, P.canon(tgt.x, tgt.z)) < 0.8) got = true;
         if (i % 40 === 0) await new Promise(r => setTimeout(r, 10));
       }
       const out = { straight, len: route && route.length, got, onB: onB(v.position), k: +kOf(v.position).toFixed(1) };
-      BF.mobs.kill(v); for (let i = 0; i < 30; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+      BF.mobs.kill(v); for (let i = 0; i < 30; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
       return out;
     }, [y]);
     check(walk.straight, `${tag}: a route planned across the edge is straight (${walk.len} cells)`);

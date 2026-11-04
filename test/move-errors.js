@@ -52,7 +52,7 @@ module.exports = async (pg, out) => {
     const mine = () => (BF.glog ? BF.glog.recent(400) : []).filter(e => e.k === "move" && !old.has(e) && e.p && e.p[0] >= X0 - 2 && e.p[0] <= X0 + N && e.p[2] >= Z0 - 2 && e.p[2] <= Z0 + N).map(e => e.l + " " + e.x);
     let T = 0;
     try {
-      while (T < 60) { BF.sky.setTime(0.1); M.update(0.05); BF.world.tickSim(); P.set(X0 + 12, Y0 + 1, Z0 + 20); T += 0.05; }
+      while (T < 60) { BF.sky.setTime(0.1); M.update(BF_TK); BF.world.tickSim(); P.set(X0 + 12, Y0 + 1, Z0 + 20); T += 0.05; }
     } finally { W.moveBox = mb; }
     res.room = { push: +push.toFixed(2), by, who: m.profession, log: mine(), at: [m.position.x - X0, m.position.z - Z0].map(v => +v.toFixed(1)) };
     m.position.set(X0 + 12.5, Y0, Z0 + 20.5); m.vel.set(0, 0, 0);

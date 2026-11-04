@@ -87,9 +87,9 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
       const key = globalThis.__rec.key = Math.round(v.x) + ',' + Math.round(v.z);
       BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
       const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-      for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
+      for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(BF_TK); }
       BF.sky.setTime(0.02);
-      for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
+      for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(BF_TK); }
       const h = globalThis.__pf(), P = h && BF.pigFarmer.styOf(h);
       return { key, pop: v.pop, pf: !!h, sty: P ? { pigs: P.pigs ? P.pigs.length : null, limit: P.limit, cells: P.cells } : null };
     }, v);
@@ -105,7 +105,7 @@ const DAYS = +(process.argv[2] || 14), SEED = +(process.argv[3] || 1);
     R.pf = h;
   });
   console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: sty ${JSON.stringify(setup.sty)}`);
-  const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
+  const h = BF_TK, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
   const t0 = Date.now();
   for (let s = 0; s < total; s += PER) {
     await lib.sim(pg, ([n, h, key]) => {

@@ -93,9 +93,9 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
       const key = globalThis.__rec.key = Math.round(v.x) + ',' + Math.round(v.z);
       BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
       const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-      for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
+      for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(BF_TK); }
       BF.sky.setTime(0.02);
-      for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
+      for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(BF_TK); }
       const profs = {};
       for (const m of BF.mobs.list) if (m.type === 'villager' && m.village && m.village.key === key && !m.dead) profs[m.profession] = (profs[m.profession] || 0) + 1;
       return { key, pop: v.pop, profs };
@@ -145,7 +145,7 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
   }
   if (setup.err) { console.log('FAIL ' + setup.err); await pg.done(); await b.close(); process.exitCode = 1; return; }
   console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: ${JSON.stringify(setup.profs)}, surface gravel ${setup.gravelPlaced}, coop ${setup.flock} chickens`);
-  const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
+  const h = BF_TK, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
   const t0 = Date.now();
   for (let s = 0; s < total; s += PER) {
     await sim(pg, ([n, h, key]) => {

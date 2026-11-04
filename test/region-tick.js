@@ -57,7 +57,7 @@ async function boot(b, n) {
   }
   return pg;
 }
-const advance = (pg, steps) => pg.evaluate(k => { for (let i = 0; i < k; i++) BF.simStep(0.05); return BF.stateHash.full(); }, steps);
+const advance = (pg, steps) => pg.evaluate(k => { for (let i = 0; i < k; i++) BF.simStep(BF_TK); return BF.stateHash.full(); }, steps);
 
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -117,7 +117,7 @@ const advance = (pg, steps) => pg.evaluate(k => { for (let i = 0; i < k; i++) BF
     const before = cells.map(c => W.getBlock(...c)), parts0 = window.__blasts.parts, late0 = window.__blasts.late;
     const up = M.update;
     M.update = function () { M.update = up; const r = up.apply(this, arguments); M.explode(cr); return r; };
-    try { BF.simStep(0.05); } finally { M.update = up; }
+    try { BF.simStep(BF_TK); } finally { M.update = up; }
     const broke = cells.filter((c, i) => before[i] && !W.getBlock(...c));
     const west = broke.filter(c => G.keyOf(c[0], c[1], c[2]) !== k).length, east = broke.length - west;
     const r = { parts: window.__blasts.parts - parts0, late: window.__blasts.late - late0, west, east, hp: [z1.hp, z2.hp], exploded: !!cr.exploded, removed: !!cr.removed };

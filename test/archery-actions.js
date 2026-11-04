@@ -43,7 +43,7 @@ module.exports = async (pg, out) => {
   await settle(); await pg.waitForTimeout(500); await settle();
   const { x0, y0, z0 } = o;
   // the simulation's step: pins, then the mobs (arrows among them)
-  const step = (n = 1) => sim(n => { const A = globalThis.__arch, M = BF.mobs; for (let i = 0; i < n; i++) { for (const [m, x, y, z] of A.pins) { m.position.set(x, y, z); m.vel.set(0, 0, 0); if (m.ai) m.ai.fleeT = 0; } M.update(0.05); } }, n);
+  const step = (n = 1) => sim(n => { const A = globalThis.__arch, M = BF.mobs; for (let i = 0; i < n; i++) { for (const [m, x, y, z] of A.pins) { m.position.set(x, y, z); m.vel.set(0, 0, 0); if (m.ai) m.ai.fleeT = 0; } M.update(BF_TK); } }, n);
   // the page's player: home on the pad, aimed at a point (offsets from the pad's corner), a draw held for sec then released
   const home = async () => { await pg.evaluate(() => { const A = window.__archAt, P = BF.player; P.teleport(A.x0 + 0.5, A.y0 + 0.01, A.z0 + 0.5); for (let i = 0; i < 4; i++) P.update(0.05); }); await settle(); };
   const aim = (dx, dy, dz) => pg.evaluate(([dx, dy, dz]) => { const A = window.__archAt, P = BF.player, e = P.eyePos(), tx = A.x0 + dx - e.x, ty = A.y0 + dy - e.y, tz = A.z0 + dz - e.z; P.setLook(Math.atan2(-tx, -tz), Math.atan2(ty, Math.hypot(tx, tz))); }, [dx, dy, dz]);

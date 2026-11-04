@@ -14,7 +14,7 @@ module.exports = async (pg) => {
   // helpers where the simulation is (spec r15-43; again after the reload, which may start a new thread there): a fixed-step run with
   // the village kept loaded, and the reference audit
   const helpers = () => lib.sim(pg, () => {
-    const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.boats) BF.boats.update(h); BF.world.tickSim(); };
+    const step = (h = BF_TK) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.boats) BF.boats.update(h); BF.world.tickSim(); };
     globalThis.IDT = {
       run: sec => { for (let t = 0; t < sec; t += 0.05) step(); },
       load: async (x, z) => {

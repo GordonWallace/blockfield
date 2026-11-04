@@ -8,8 +8,8 @@ module.exports = async (pg, out) => {
   await lib.sim(pg, () => {
     const S = globalThis.__sm = { lines: [] };
     S.ok = (name, cond, extra) => S.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
-    S.step = (h = 0.05) => { const W = BF.warp; W.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-    S.run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) S.step(h); };
+    S.step = (h = BF_TK) => { const W = BF.warp; W.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
+    S.run = (sec, h = BF_TK) => { for (let t = 0; t < sec; t += h) S.step(h); };
     S.day = () => BF.sky.day + BF.sky.time;
     S.load = async (x, z) => {
       BF.player.teleport(x + 0.5, BF.worldgen.heightAt(Math.floor(x), Math.floor(z)) + 2, z + 0.5);

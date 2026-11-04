@@ -8,7 +8,7 @@ module.exports = async (pg) => {
   const vgPage = await pg.evaluate(() => BFT.village(v => v.ground === 1 && BF.worldgen.heightAt(v.x, v.z) >= BF.SEA + 20, 6000));   // (the page's planet: BFT is not in the simulation)
   const res = await require('./lib').sim(pg, async vgPage => {   // (where the simulation is: spec r15-43)
     const R = { lines: [], info: {} }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
-    const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
+    const step = (h = BF_TK) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
     const I = BF.I, B = BF.B, T = BF.trades, inv = T.inv, W = BF.world, GM = BF.glassmaker;
     const c = (m, n) => inv.count(m.inv, I[n]);
     BF.state.paused = true;

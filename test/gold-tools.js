@@ -65,7 +65,7 @@ module.exports = async (pg) => {
     }
 
     // ---- in a running village: shears and hoe wear as they are used
-    const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
+    const step = (h = BF_TK) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     BF.state.paused = true;
     BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });   // the harness planet seed: its rivers are worked out in this page already
     BF.mobs.spawning = false;

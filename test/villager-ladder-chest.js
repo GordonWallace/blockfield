@@ -11,7 +11,7 @@ module.exports = async (pg, out) => {
     const cs = S.chestsIn(S.bedHouse(m), m.bed).filter(p => S.usable(p, S.keyOf(m))), up = cs.filter(p => p.y >= m.bed.y + 3); return up.length && up.length === cs.length; }); };
   for (let i = 0; i < 120 && !(await lib.sim(pg, upstairs)); i++) await pg.waitForTimeout(500);
   const step = (t0, t1, secs, k, fill) => lib.sim(pg, async ([t0, t1, secs, k, fill]) => {
-    const dt = 0.05, n = Math.round(secs / dt), m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k);
+    const dt = BF_TK, n = Math.round(secs / dt), m = BF.mobs.list.find(m => BF.storage.keyOf(m) === k);
     let top = -1e9;
     for (let i = 0; i < n; i++) { BF.sky.setTime(t0 + (t1 - t0) * i / n); (BF.mobs.update(dt), BF.req.apply(), BF.req.deliver()); if (m && fill && i % 20 === 0 && !(m.store && m.store.stage)) for (let j = 0; j < m.inv.length; j++) if (!m.inv[j]) m.inv[j] = { id: j % 3 ? BF.I.rotten_flesh : BF.I.cobblestone, count: 64 };   // meals and breeding use up food: keep it full until it sets off
       if (m) top = Math.max(top, m.position.y); if (m && globalThis.__dbg && i % 20 === 0) console.log("[t]", (i * dt).toFixed(0), m.store && m.store.stage, m.ai.routeKind, m.ai.route && m.ai.ri + "/" + m.ai.route.length, m.position.y.toFixed(2), BF.villagerStatus.text(m)); if (i % 400 === 0) await new Promise(r => setTimeout(r, 0)); }

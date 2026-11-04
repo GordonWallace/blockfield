@@ -46,7 +46,7 @@ const OUT = process.argv[4] || null;
     for (const c of cands) {
       const k = Math.round(c.x) + ',' + Math.round(c.z);
       BF.player.spawn(c.x + 0.5, (c.y || BF.worldgen.heightAt(c.x, c.z)) + 3, c.z + 0.5);
-      for (let i = 0; i < 400; i++) { BF.world.update(c.x, c.z, 60); if (i % 4 === 0) step(0.05); }
+      for (let i = 0; i < 400; i++) { BF.world.update(c.x, c.z, 60); if (i % 4 === 0) step(BF_TK); }
       const rec = BF.mobs.villages && BF.mobs.villages.get(k), wg = rec && rec.wg;
       const x0 = wg ? wg.minX : c.x - 20, x1 = wg ? wg.maxX : c.x + 20, z0 = wg ? wg.minZ : c.z - 20, z1 = wg ? wg.maxZ : c.z + 20;
       let span = null;
@@ -57,7 +57,7 @@ const OUT = process.argv[4] || null;
     }
     if (scanOnly || !v) return { seen, key };
     BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
-    for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
+    for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(BF_TK); }
     BF.sky.setTime(0.02);
     const R = globalThis.__rec = { key, swims: 0, routed: 0, visits: 0, visitors: {}, days: [] };
     const Br = BF.bridges, swim0 = Br.noteSwim, rec0 = Br.record;
@@ -116,7 +116,7 @@ const OUT = process.argv[4] || null;
   console.log(`village ${setup.key} ${JSON.stringify(setup.profs)}`);
   const t0 = Date.now();
   await lib.sim(pg, () => globalThis.__day());
-  const h = 0.05, DAY = Math.round(1200 / h), PER_CALL = Math.round(DAY / 6);
+  const h = BF_TK, DAY = Math.round(1200 / h), PER_CALL = Math.round(DAY / 6);
   for (let s = 0, d = 0; s < DAYS * DAY; s += PER_CALL) {
     await lib.sim(pg, ([n, h, v]) => {
       for (let i = 1; i <= n; i++) {

@@ -75,9 +75,9 @@ const DAYS = +(process.argv[2] || 15), SEED = +(process.argv[3] || 123);   // se
       const key = globalThis.__rec.key = Math.round(v.x) + ',' + Math.round(v.z);
       BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
       const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
-      for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
+      for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(BF_TK); }
       BF.sky.setTime(0.02);
-      for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
+      for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(BF_TK); }
       return { key, pop: v.pop, glassmaker: !!globalThis.__gm() };
     }, v);
     if (r.glassmaker) { setup = r; break; }
@@ -91,7 +91,7 @@ const DAYS = +(process.argv[2] || 15), SEED = +(process.argv[3] || 123);   // se
     R.start = globalThis.__glassTotal(); R.sandStart = BF.trades.inv.count(gm.inv, BF.I.sand); R.gm = gm;
   });
   console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}`);
-  const h = 0.05, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
+  const h = BF_TK, total = Math.round(DAYS * 1200 / h), PER = Math.round(200 / h);
   const t0 = Date.now();
   for (let s = 0; s < total; s += PER) {
     await sim(pg, ([n, h, key]) => {

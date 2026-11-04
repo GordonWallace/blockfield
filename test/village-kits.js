@@ -11,8 +11,8 @@ module.exports = async (pg) => {
   const res = await lib.sim(pg, async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const I = BF.I, T = BF.trades, names = a => a.filter(Boolean).map(s => BF.items[s.id].name + "x" + s.count);
-    const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-    const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
+    const step = (h = BF_TK) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
+    const run = (sec, h = BF_TK) => { for (let t = 0; t < sec; t += h) step(h); };
     BF.state.paused = true;
 
     // ---- rosters (village generator 9 is the default for new worlds; 3 to 9 have the same rosters but 4 adds a coop and its poultry keeper,

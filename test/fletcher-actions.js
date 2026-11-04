@@ -14,8 +14,8 @@ module.exports = async (pg, out) => {
     const c = (m, n) => inv.count(m.inv, I[n]);
     const names = a => a.filter(Boolean).map(s => BF.items[s.id].name + " x" + s.count);
     const fmt = o => o.buy.map(b => b.n + " " + BF.items[b.id].name).join("+") + " > " + o.sell.n + " " + BF.items[o.sell.id].name;
-    const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-    const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
+    const step = (h = BF_TK) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
+    const run = (sec, h = BF_TK) => { for (let t = 0; t < sec; t += h) step(h); };
     BF.state.paused = true;
     BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });   // the harness planet seed: its rivers are worked out in this page already
     BF.mobs.spawning = false;

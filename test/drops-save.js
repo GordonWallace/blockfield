@@ -6,7 +6,7 @@ module.exports = async (pg, out) => {
   // (where the simulation is: spec r15-43; BF.newWorld there starts its own worlds, the page keeps drawing the boot world)
   const res = await lib.sim(pg, async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
-    const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) BF.drops.update(h); };
+    const run = (sec, h = BF_TK) => { for (let t = 0; t < sec; t += h) BF.drops.update(h); };
     // off the page the simulation's own loop also streams chunks, round the player the page reports each frame (the boot world's
     // spawn, far from here), and unloads what this test loads: while it runs, only this test's calls stream (put back at the end)
     const update = BF.world.update; let mine = false;
@@ -73,7 +73,7 @@ module.exports = async (pg, out) => {
     BF.mobs.spawning = false;
     for (let i = 0; i < 400 && !BF.world.isLoaded(gx, gz); i++) { BF.world.update(gx, gz, 8); await new Promise(r => setTimeout(r, 10)); }
     BF.drops.spawn(BF.I.cobblestone, 7, gx + 0.5, gy + 2, gz + 0.5, { pickupDelay: 999 });
-    for (let t = 0; t < 20; t += 0.05) BF.drops.update(0.05);
+    for (let t = 0; t < 20; t += 0.05) BF.drops.update(BF_TK);
     await BF.save.saveNow();
     BF.drops.clear();
   });

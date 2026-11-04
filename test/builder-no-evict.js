@@ -9,7 +9,7 @@ module.exports = async (pg) => {
   await require('./lib').toVillage(pg);
   const r = await sim(() => {
     const M = BF.mobs, Bd = BF.builder, r = {};
-    M.spawning = false; for (let i = 0; i < 100; i++) { BF.sky.setTime(0.2); M.update(0.05); }
+    M.spawning = false; for (let i = 0; i < 100; i++) { BF.sky.setTime(0.2); M.update(BF_TK); }
     const vs = M.list.filter(m => m.type === "villager" && !m.dead && !m.child && m.village);
     const A = vs.find(m => m.profession === "builder"), O = A && vs.find(m => m !== A && m.village === A.village);
     if (!A || !O) return { err: "no builder and neighbour" };
@@ -21,7 +21,7 @@ module.exports = async (pg) => {
     O.bed = bed; O.sleeping = true; A.bed = null;
     r.claimed = Bd.claimHome(A, e);
     r.Obed = !!O.bed && O.bed.x === bed.x && O.bed.z === bed.z; r.Abed = A.bed ? [A.bed.x, A.bed.y, A.bed.z] : null;
-    for (let i = 0; i < 40; i++) { BF.sky.setTime(0.9); M.update(0.05); }
+    for (let i = 0; i < 40; i++) { BF.sky.setTime(0.9); M.update(BF_TK); }
     r.Oalive = M.list.includes(O) && !O.removed;
     // a bed nobody holds: the builder takes it as its own
     const e2 = Object.assign({}, e, { ox: e.ox + 40, _bp: null });

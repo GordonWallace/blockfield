@@ -47,7 +47,7 @@ module.exports = async (pg, out) => {
       let T = 0, up = false, maxX = -1e9;
       for (; T < 25; T += 0.05) {
         m.ai.mode = "walk"; m.ai.tx = X0 + 16.5; m.ai.tz = Z0 + 9.5; m.ai.t = 5; m.ai.target = false; m.ai.detour = null;
-        BF.sky.setTime(0.1); BF.mobs.update(0.05); BF.req.apply(); BF.req.deliver(); P.set(X0 + 10, Y0 + 15, Z0 + 10);
+        BF.sky.setTime(0.1); BF.mobs.update(BF_TK); BF.req.apply(); BF.req.deliver(); P.set(X0 + 10, Y0 + 15, Z0 + 10);
         maxX = Math.max(maxX, m.position.x);
         if (m.position.x >= roofX + 0.2 && m.position.y >= Y0 + 2 - 0.01 && m.onGround) up = true;
       }

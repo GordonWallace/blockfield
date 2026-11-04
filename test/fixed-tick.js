@@ -1,9 +1,9 @@
 // @ci integration suite=world timeout=420 hosts=worker,server
 // Fixed simulation tick (spec r15-10): NODE_PATH=$(npm root -g) node test/run.js /tmp/ft test/fixed-tick.js [--host page|worker|server]
 // (the ticks are run where the simulation is, spec r15-43; the drawing between them is the page's, from the protocol's mirror)
-// The world simulation runs in ticks of exactly 0.05 s at every speed and frame rate, and mobs are drawn between the last two ticks:
-// - at 1x for 10 real seconds the sim clock advances 10 s (± 0.1) in ticks of exactly 0.05;
-// - forced 30 fps and 120 fps frames give the same world after 200 ticks (mob position checksum, from the same start, seeded random);
+// The world simulation runs in ticks of exactly BF.warp.TICK (0.2 s by default, idea-049) at every speed and frame rate, and mobs are drawn between the last two ticks:
+// - at 1x for 10 real seconds the sim clock advances 10 s (± 0.1) in ticks of exactly TICK;
+// - forced 30 fps and 120 fps frames give the same world after 10 game seconds of ticks (mob position checksum, from the same start, seeded random);
 // - frames at 1000x never run a tick of any other size, and drop (not owe) the ticks the budget can't fit;
 // - a mob is drawn between where the previous tick and the latest left it (off the page, at the client's drawing clock: bug-098).
 const lib = require('./lib');
@@ -11,9 +11,10 @@ module.exports = async (pg, out) => {
   await pg.evaluate(() => BF.player.start());
   await pg.waitForTimeout(3000);
   const fails = [];
+  const TK = await lib.sim(pg, () => BF.warp.TICK);
   const check = (ok, what) => { console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails.push(what); };
 
-  // ---- 1x for 10 real seconds: ticks of exactly 0.05, the clock keeps real time. Headless frames can be slower than the
+  // ---- 1x for 10 real seconds: ticks of exactly TICK, the clock keeps real time. Headless frames can be slower than the
   // accumulator's 0.25 s cap per frame (MAX_FRAME), so the clock is compared with the real time the frames counted.
   const t0 = await lib.sim(pg, () => {
     BF.warp.reset();
@@ -33,18 +34,18 @@ module.exports = async (pg, out) => {
   });
   const simS = t1.sim - t0.sim, realS = (t1.real - t0.real) / 1000;
   console.log(JSON.stringify({ dropped: t1.dropped - t0.dropped, simS: +simS.toFixed(3), realS: +realS.toFixed(3), counted: +t1.counted.toFixed(3), frames: t1.frames, slowFrames: t1.slow, ticks: t1.n, badTicks: t1.bad }));
-  check(t1.bad === 0 && t1.n > 0, "every mob update at 1x is one 0.05 s tick (" + t1.n + " ticks)");
-  check(Math.abs(simS - t1.n * 0.05) < 1e-6, "the clock moved by exactly the ticks run");
-  const lostS = (t1.dropped - t0.dropped) * 0.05;   // ticks the 40 ms frame budget couldn't fit (headless software rendering is slow)
+  check(t1.bad === 0 && t1.n > 0, "every mob update at 1x is one " + TK + " s tick (" + t1.n + " ticks)");
+  check(Math.abs(simS - t1.n * TK) < 1e-6, "the clock moved by exactly the ticks run");
+  const lostS = (t1.dropped - t0.dropped) * TK;   // ticks the 40 ms frame budget couldn't fit (headless software rendering is slow)
   check(Math.abs(simS + lostS - t1.counted) <= 0.1, "at 1x the sim clock keeps the frames' real time: " + simS.toFixed(3) + " s run + " + lostS.toFixed(2) + " s dropped for " + t1.counted.toFixed(3) + " s counted (" + realS.toFixed(3) + " s real, " + t1.slow + " of " + t1.frames + " frames over the 0.25 s cap)");
   // (the first frame counts time from before the hooks went in: up to one frame's worth, which off the page includes the eval's round trip)
   if (!t1.slow && !lostS) check(Math.abs(simS - realS) <= 0.1 + t1.first, "with no frame over the cap and none dropped, it keeps real time (" + simS.toFixed(3) + " s for " + realS.toFixed(3) + " s, first frame " + t1.first.toFixed(3) + " s)");
 
-  // ---- the same 200 ticks at 30 fps and at 120 fps (forced frame times, each run synchronous so no real frame interleaves).
+  // ---- the same 10 game seconds of ticks (200 at 0.05 s) at 30 fps and at 120 fps (forced frame times, each run synchronous so no real frame interleaves).
   // The world as a whole can't be put back to the same start between two runs yet (villages, wildlife, horse herds and the job modules
   // keep their own state and timers, and draw from Math.random: seeded randomness is r15-14, the world hash and replay test r15-24),
   // so this checks what the fixed tick is responsible for: (1) every frame rate makes exactly the same sequence of simulation calls,
-  // all with h = 0.05; (2) mobs moved by physics alone (thrown, falling, knocked back; no AI steering) end up identical, to the bit.
+  // all with h = TICK; (2) mobs moved by physics alone (thrown, falling, knocked back; no AI steering) end up identical, to the bit.
   // Away from any village, on dry land.
   const spot = await lib.sim(pg, () => {
     const s0 = BF.spawnPoint || BF.player.position, s = { x: Math.floor(s0.x), z: Math.floor(s0.z) };
@@ -69,13 +70,14 @@ module.exports = async (pg, out) => {
     // the calls the game loop makes into the simulation, in order, with their step
     const SYS = [[BF.sky, "advance"], [BF.mobs, "update"], [BF.drops, "update"], [BF.boats, "update"], [BF.inventory, "simTick"], [BF.world, "tickSim"], [BF.dayTimeline, "update"]].filter(([o, k]) => o && o[k]);
     let trace = null;
+    const N = Math.round(10 / BF.warp.TICK);   // ticks in 10 game seconds (200 at 0.05 s, 50 at 0.2 s)
     const orig = SYS.map(([o, k]) => o[k]);
     SYS.forEach(([o, k], i) => { const f = orig[i]; o[k] = function (h) { if (trace) trace.push(k + ":" + h); return f.apply(this, arguments); }; });
     function calls(fps) {
       BF.warp.reset();
       trace = [];
       let ticks = 0, frames = 0;
-      while (ticks < 200 && frames < 10000) { ticks += BF.simFrame(1 / fps); frames++; }
+      while (ticks < N && frames < 10000) { ticks += BF.simFrame(1 / fps); frames++; }
       const t = trace; trace = null;
       return { fps, ticks, frames, trace: t };
     }
@@ -101,7 +103,7 @@ module.exports = async (pg, out) => {
       BF.warp.reset();
       let ticks = 0;
       const dt = 1 / fps;
-      while (ticks < 200) { for (const m of ms) { m.knockT = 1; m.ai.fleeT = 0; m.invuln = 99; } ticks += BF.simFrame(dt); }
+      while (ticks < N) { for (const m of ms) { m.knockT = 1; m.ai.fleeT = 0; m.invuln = 99; } ticks += BF.simFrame(dt); }
       const pos = ms.map(m => [m.type, m.position.x, m.position.y, m.position.z, m.vel.x, m.vel.y, m.vel.z, !!m.onGround]);
       for (const m of ms) BF.mobs.discard(m);
       return pos;
@@ -110,22 +112,22 @@ module.exports = async (pg, out) => {
       const a = calls(30), b = calls(120), c = calls(144);
       const pa = thrown(30), pb = thrown(120);
       return { a: { ...a, trace: a.trace.length }, b: { ...b, trace: b.trace.length }, c: { ...c, trace: c.trace.length },
-        sameCalls: a.trace.join() === b.trace.join() && a.trace.join() === c.trace.join(), allTick: a.trace.every(x => /:0\.05$|:undefined$/.test(x)),
-        first: a.trace.slice(0, SYS.length), pa, pb, samePos: JSON.stringify(pa) === JSON.stringify(pb), simEnd: BF.simNow() - clock0 };
+        sameCalls: a.trace.join() === b.trace.join() && a.trace.join() === c.trace.join(), allTick: a.trace.every(x => x.endsWith(":" + BF.warp.TICK) || x.endsWith(":undefined")), N,
+        first: a.trace.slice(0, SYS.length), diff: (() => { const i = a.trace.findIndex((x, j) => x !== b.trace[j] || x !== c.trace[j]); return i < 0 ? null : [i, a.trace.slice(i, i + 8), b.trace.slice(i, i + 8), c.trace.slice(i, i + 8)]; })(), pa, pb, samePos: JSON.stringify(pa) === JSON.stringify(pb), simEnd: BF.simNow() - clock0 };
     } finally {
       SYS.forEach(([o, k], i) => { o[k] = orig[i]; });
       BF.state.paused = false;
     }
   });
-  console.log(JSON.stringify({ a: det.a, b: det.b, c: det.c, first: det.first, pa: det.pa.slice(0, 3), pb: det.pb.slice(0, 3) }));
-  check(det.a.ticks === 200 && det.b.ticks === 200 && det.c.ticks === 200, "30, 120 and 144 fps all ran exactly 200 ticks (" + det.a.frames + ", " + det.b.frames + ", " + det.c.frames + " frames)");
-  check(det.sameCalls && det.allTick && det.a.trace > 200, "every frame rate makes the same " + det.a.trace + " simulation calls in the same order, each with h = 0.05");
+  console.log(JSON.stringify({ a: det.a, b: det.b, c: det.c, first: det.first, diff: det.diff, pa: det.pa.slice(0, 3), pb: det.pb.slice(0, 3) }));
+  check(det.a.ticks === det.N && det.b.ticks === det.N && det.c.ticks === det.N, "30, 120 and 144 fps all ran exactly " + det.N + " ticks (" + det.a.frames + ", " + det.b.frames + ", " + det.c.frames + " frames)");
+  check(det.sameCalls && det.allTick && det.a.trace > det.N, "every frame rate makes the same " + det.a.trace + " simulation calls in the same order, each with h = " + TK);
   const firstDiff = det.pa.findIndex((p, i) => JSON.stringify(p) !== JSON.stringify(det.pb[i]));
-  check(det.pa.length === 8 && det.samePos && det.pa.some(p => p[7]), "thrown mobs end up exactly where they were at the other frame rate after 200 ticks (" + det.pa.length + " mobs, " +
+  check(det.pa.length === 8 && det.samePos && det.pa.some(p => p[7]), "thrown mobs end up exactly where they were at the other frame rate after " + det.N + " ticks (" + det.pa.length + " mobs, " +
     det.pa.filter(p => p[7]).length + " landed" + (firstDiff >= 0 ? ", first difference " + JSON.stringify(det.pa[firstDiff]) + " vs " + JSON.stringify(det.pb[firstDiff]) : "") + ")");
   if (!det.samePos) for (let i = 0; i < det.pa.length; i++) if (JSON.stringify(det.pa[i]) !== JSON.stringify(det.pb[i])) console.log("  differs:", JSON.stringify(det.pa[i]), JSON.stringify(det.pb[i]));
 
-  // ---- 1000x: still only 0.05 s ticks; a slow frame drops what it can't fit instead of owing it
+  // ---- 1000x: still only TICK-long ticks; a slow frame drops what it can't fit instead of owing it
   const ff = await lib.sim(pg, () => {
     BF.state.paused = true;
     const W = BF.warp, hs = [], up = BF.mobs.update;
@@ -133,18 +135,18 @@ module.exports = async (pg, out) => {
     try {
       W.set(W.SPEEDS.indexOf(1000));
       const n1 = BF.simFrame(0.1), a1 = W.alpha;   // asks for 100 s = 2000 ticks: at most 1000, within the budget
-      const n2 = BF.simFrame(0.001);               // 1 s more: up to 20 ticks, nothing owed from the frame before
+      const n2 = BF.simFrame(0.001);               // 1 s more: up to a game second of ticks, nothing owed from the frame before
       W.reset();
       const a0 = W.alpha, n3 = BF.simFrame(0.01), n4 = BF.simFrame(0.04);   // 1x: whatever fraction was left, plus 0.01 s, then 0.04 s
-      const want3 = Math.floor((a0 * 0.05 + 0.01) / 0.05 + 1e-9), want4 = Math.floor((a0 * 0.05 + 0.05) / 0.05 + 1e-9) - want3;
-      const wantAlpha = ((a0 * 0.05 + 0.05) - (want3 + want4) * 0.05) / 0.05;
+      const T = W.TICK, want3 = Math.floor((a0 * T + 0.01) / T + 1e-9), want4 = Math.floor((a0 * T + 0.05) / T + 1e-9) - want3;
+      const wantAlpha = ((a0 * T + 0.05) - (want3 + want4) * T) / T;
       return { n1, a1, n2, a0, n3, n4, want3, want4, alpha: W.alpha, wantAlpha, bad: hs.filter(h => h !== W.TICK).length, last: W.last };
     } finally { BF.mobs.update = up; W.reset(); BF.state.paused = false; }
   });
   console.log(JSON.stringify(ff));
-  check(ff.bad === 0, "fast-forward ticks are 0.05 s too");
+  check(ff.bad === 0, "fast-forward ticks are " + TK + " s too");
   check(ff.n1 >= 1 && ff.n1 <= 1000 && ff.a1 < 1, "a 1000x frame runs at most 1000 ticks and drops the rest (" + ff.n1 + " ran)");
-  check(ff.n2 >= 1 && ff.n2 <= 20, "the next frame runs only its own ticks, at most 20 (" + ff.n2 + ")");
+  check(ff.n2 >= 1 && ff.n2 <= Math.round(1 / TK), "the next frame runs only its own ticks, at most " + Math.round(1 / TK) + " (" + ff.n2 + ")");
   check(ff.n3 === ff.want3 && ff.n4 === ff.want4 && Math.abs(ff.alpha - ff.wantAlpha) < 1e-6, "at 1x the accumulator carries the fraction of a tick (" + ff.n3 + " + " + ff.n4 + " ticks, alpha " + ff.alpha.toFixed(3) + ")");
 
   // ---- drawing between ticks: a walking mob is drawn between prev and cur, and at cur when alpha is 1

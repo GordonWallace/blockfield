@@ -20,7 +20,7 @@
 //   --cworkers: each group's interval in turn) or tick; either way the groups are planned onto workers at each meeting (js/cworkers.js
 //   plan), or with --pull (cluster order) each worker takes the next group when it is free; --shuffle k: the groups change workers at
 //   every meeting; --partial: partial copies (each worker's copy of a mob is current only while it runs it; the end hash gathers them);
-//   --meet t (benchmarks): the clusters meet every t ticks instead of 20 (every worker the same; hashes differ from the default's).
+//   --meet t (benchmarks): the clusters meet every t ticks instead of every 8 game seconds (every worker the same; hashes differ from the default's).
 //   --sizes: what worker 0 sends at a meeting, KB by part. --load works with --cworkers too (every worker restores the save): use a
 //   settled save to measure, since a fresh world's first minutes spawn wild animals per cluster.
 //   --json: one JSON line at the end ({seed, seconds, ticks, vss, mobss, msPerTick, real, villagers, mobs, chunks, hash, parts, workers,
@@ -189,7 +189,7 @@ async function main(argv) {
   }
   const villagers = BF.mobs.list.filter(m => m.type === 'villager' && !m.dead && !m.removed).length;
   const r = {
-    seed: BF.state.seed, seconds: h.seconds, ticks: h.ticks, real: +T.real.toFixed(2),
+    seed: BF.state.seed, seconds: h.seconds, ticks: h.ticks, tick: BF.warp.TICK, real: +T.real.toFixed(2),
     vss: Math.round(T.vs / T.real), mobss: Math.round(T.mobs / T.real), msPerTick: +(T.stepMs / Math.max(1, T.steps)).toFixed(3),
     speed: +(T.game / T.real).toFixed(2), villagers, mobs: BF.mobs.list.length, chunks: BF.world.chunks.size, hash: H.hash, parts: H.parts,
     workers, census: census(BF),

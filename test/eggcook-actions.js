@@ -8,7 +8,7 @@ module.exports = async (pg) => {
   await lib.newWorld(pg, 123, { gen: 4, villages: 9, gameMode: "survival" });
   const res = await lib.sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const R = { lines: [], info: {} }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
-    const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
+    const step = (h = BF_TK) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
     const I = BF.I, T = BF.trades, inv = T.inv, W = BF.world, EC = BF.eggCook, FU = BF.furnaceUse;
     const c = (m, n) => inv.count(m.inv, I[n]);
     BF.state.paused = true;

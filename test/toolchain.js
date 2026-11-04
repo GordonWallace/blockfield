@@ -220,9 +220,9 @@ function snapshot() {
         const key = Math.round(v.x) + ',' + Math.round(v.z);
         BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
         const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-        for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
+        for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(BF_TK); }
         BF.sky.setTime(0.02);
-        for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
+        for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(BF_TK); }
         const mem = BF.mobs.list.filter(m => m.type === 'villager' && m.village && m.village.key === key && !m.dead);
         const profs = {};
         for (const m of mem) profs[m.profession] = (profs[m.profession] || 0) + 1;
@@ -231,7 +231,7 @@ function snapshot() {
       if (!Object.keys(setup.profs).length || NEED.some(p => !setup.profs[p])) { console.log(`seed ${seed} village ${key} pop ${v.pop}: skipped ${JSON.stringify(setup.profs)}`); continue; }
       done++;
       await sim(pg, () => globalThis.__snap());
-      const h = 0.05, HOUR = Math.round(50 / h), total = Math.round(DAYS * 1200 / h), PER_CALL = HOUR * 4;
+      const h = BF_TK, HOUR = Math.round(50 / h), total = Math.round(DAYS * 1200 / h), PER_CALL = HOUR * 4;
       for (let s = 0; s < total; s += PER_CALL) {
         await sim(pg, ([n, h, v, HOUR]) => {
           const R = globalThis.__rec;

@@ -26,7 +26,7 @@ module.exports = async (pg) => {
       const o = BF[k];
       if (o && typeof o === "object" && typeof o.ai === "function" && o !== M) { const f = o.ai; hooks.push([o, f]); o.ai = function (m) { return m && m.type === "villager" ? false : f.apply(this, arguments); }; }
     }
-    const step = () => { BF.sky.setTime(0.3); M.update(0.05); BF.world.tickSim(); P.set(seller.position.x + 4, seller.position.y + 30, seller.position.z + 4); };
+    const step = () => { BF.sky.setTime(0.3); M.update(BF_TK); BF.world.tickSim(); P.set(seller.position.x + 4, seller.position.y + 30, seller.position.z + 4); };
     const walkOff = () => { const ai = seller.ai; ai.leaving = false; ai.mode = "walk"; ai.t = 5; ai.tx = seller.position.x + 10 * dx; ai.tz = seller.position.z + 10 * dz; ai.route = null; };
     const reset = () => { seller.position.copy(start); seller.vel.set(0, 0, 0); seller.ai.blockedT = 0; seller.ai.stuckT = 0; seller.ai.detour = null; };
     const place = dist => { buyer.position.set(seller.position.x - dist * dx, seller.position.y, seller.position.z - dist * dz); buyer.vel.set(0, 0, 0); };

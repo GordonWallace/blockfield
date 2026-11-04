@@ -112,9 +112,9 @@ function survey(key) {
         const key = Math.round(v.x) + ',' + Math.round(v.z);
         BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
         const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-        for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
+        for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(BF_TK); }
         BF.sky.setTime(0.02);
-        for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
+        for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(BF_TK); }
         BF.villageLife.log.length = 0;
         const farmers = BF.mobs.list.filter(m => m.type === 'villager' && m.village && m.village.key === key && !m.dead && m.profession === 'farmer');
         return { key, farmers: farmers.length };
@@ -123,7 +123,7 @@ function survey(key) {
       done++;
       const before = await lib.sim(pg, survey, key);
       const kinds = {};
-      const STEPS_PER_CALL = 4000, h = 0.05, total = Math.round(DAYS * 1200 / h);
+      const STEPS_PER_CALL = 4000, h = BF_TK, total = Math.round(DAYS * 1200 / h);
       for (let s = 0; s < total; s += STEPS_PER_CALL) {
         const k = await lib.sim(pg, ([n, h, v]) => {
           for (let i = 0; i < n; i++) {

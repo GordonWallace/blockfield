@@ -72,7 +72,7 @@ module.exports = async (pg, out) => {
     const seen = new Set(M.list.filter(m => m.hostile));
     // only monsters that spawned on the surface: one that spawned in a dark cave may walk out into the open at any time
     const born = new Map(), onTop = m => m.position.y >= BF.world.heightAt(m.position.x, m.position.z) + 0.5;
-    let firstAt = null, dt = 0.05, counts = {};
+    let firstAt = null, dt = BF_TK, counts = {};
     S.day = 9; S.time = 0.5;
     for (let i = 0; S.time < 0.62; i++) {
       S.time += dt / S.dayLength; M.update(dt);
@@ -94,7 +94,7 @@ module.exports = async (pg, out) => {
     M.spawning = false;
     for (const m of M.list.slice()) if (m.hostile) m.dead = true;
     S.day = 12; S.time = 0.44;
-    const dt = 0.05;
+    const dt = BF_TK;
     // each step a whole sim tick after the mobs (js/world.js tickSim): their requests apply, so a door a villager opens is open next step
     for (let i = 0; S.time < 0.565; i++) { S.time += dt / S.dayLength; M.update(dt); BF.world.tickSim(); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
     const vs = M.list.filter(m => m.type === "villager" && !m.dead && !m.removed && m.bed);

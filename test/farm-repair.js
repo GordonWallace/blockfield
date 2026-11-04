@@ -61,9 +61,9 @@ const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 4);
   const before = await lib.sim(pg, ({ v, f }) => {
     BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
     const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-    for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
+    for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(BF_TK); }
     BF.sky.setTime(0.02);
-    for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
+    for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(BF_TK); }
     const W = BF.world, B = BF.B, y = f.y, count = { air: 0, water: 0, farm: 0, dry: 0, dirt: 0, crops: 0, grass: 0 };
     for (let x = f.x0 + 1; x < f.x1; x++) for (let z = f.z0 + 1; z < f.z1; z++) {
       const id = W.getBlock(x, y, z);
@@ -90,7 +90,7 @@ const SEED = +(process.argv[2] || 2), DAYS = +(process.argv[3] || 4);
   ok('part of it has gone back to dirt', before.count.dirt > 0, before.count);
   ok('a farmer works the farm\'s composter', before.site && before.farmer === 'farmer', before);
 
-  const STEPS = 4000, h = 0.05, total = Math.round(DAYS * 1200 / h), kinds = {};
+  const STEPS = 4000, h = BF_TK, total = Math.round(DAYS * 1200 / h), kinds = {};
   for (let s = 0; s < total; s += STEPS) {
     const k = await lib.sim(pg, ([n, h, v]) => {
       for (let i = 0; i < n; i++) {

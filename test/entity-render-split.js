@@ -70,7 +70,7 @@ module.exports = async (pg, out) => {
         d.phase = i * 0.5;
         return d;
       });
-      for (let i = 0; i < 30; i++) BF.drops.update(0.05);
+      for (let i = 0; i < 30; i++) BF.drops.update(BF_TK);
       for (const d of made) d.age = 2;
       BF.drops.update(1e-6);
       return { n: made.length, D: 7 };
@@ -84,7 +84,7 @@ module.exports = async (pg, out) => {
         const vel = new THREE.Vector3((i - 4) * 1.5, 2 - (i % 3) * 2, -30);
         made.push(M.shootArrow(from, vel, { damage: 2, pickup: 0 }));
       }
-      for (let i = 0; i < 20; i++) M.update(0.05);
+      for (let i = 0; i < 20; i++) M.update(BF_TK);
       return { n: made.filter(a => a.stuck).length, D: 4.5 };
     } },
     { name: "boats", setup: ({ st }) => {
@@ -93,7 +93,7 @@ module.exports = async (pg, out) => {
       const v = BF.mobs.spawn("villager", made[1].pos.x, st.y, made[1].pos.z, "farmer", "plains"), pig = BF.mobs.spawn("pig", made[4].pos.x, st.y, made[4].pos.z);
       for (const [b, m] of [[made[1], v], [made[4], pig]]) { m.rider = {}; m.walkPhase = 0; m.walkAmt = 0; m.headYaw = 0; m.headPitch = 0; m.age = 1; b.mob = m; m.riding = b; }
       for (let i = 0; i < 60; i++) BF.boats.update(0.001);
-      for (let i = 0; i < 20; i++) BF.mobs.update(0.05);
+      for (let i = 0; i < 20; i++) BF.mobs.update(BF_TK);
       for (let i = 0; i < 60; i++) BF.boats.update(0.001);
       return { n: made.length, D: Math.max(7, (made.length * 2.2 + 2) / 2.2) };
     } },
@@ -120,7 +120,7 @@ module.exports = async (pg, out) => {
       H.leash(a, { x: st.x - 4, y: st.y, z: st.z - 4 });
       H.leash(b, v);
       H.leash(c, "player");
-      for (let i = 0; i < 20; i++) BF.mobs.update(0.05);
+      for (let i = 0; i < 20; i++) BF.mobs.update(BF_TK);
       for (const m of [a, b, c, v]) m.age = 1;
       BF.mobs.update(0.001);
       return { n: 3, D: 8 };

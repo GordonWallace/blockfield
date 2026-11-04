@@ -14,7 +14,7 @@ module.exports = async (pg, out) => {
   const r = await lib.sim(pg, () => {
     const M = BF.mobs, T = BF.trades, I = BF.I, r = {};
     M.spawning = false;
-    for (let i = 0; i < 200; i++) { BF.sky.setTime(0.2); M.update(0.05); }
+    for (let i = 0; i < 200; i++) { BF.sky.setTime(0.2); M.update(BF_TK); }
     const vs = M.list.filter(m => m.type === "villager" && !m.dead && !m.child);
     const open = m => { m.sleeping = false; const msg = M.interact(m); const o = BF.inventory.isOpen(); if (BF.proto) BF.proto.flush(); return { msg, open: o }; };
     // statuses of everyone (screen title text)

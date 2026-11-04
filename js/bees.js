@@ -510,7 +510,10 @@ function update(dt) {
       }
     } else for (const b of mb) if (b.follow && !b.gone) { b.follow = null; nextErrand(b); }
   }
-  for (let i = mb.length - 1; i >= 0; i--) { const b = mb[i]; if (b && !b.gone) stepBee(b, dt, lp, now); }
+  // A bee flies in steps of at most 0.05 s, whatever the tick (idea-049): its walls, flowers, hive doors and stings are looked for at
+  // each step, and at 0.2 s steps one step of flight went past them (test/bees-actions.js: no landings on walls, no flowers, no stings).
+  const n = Math.max(1, Math.ceil(dt / 0.05 - 1e-9)), h = dt / n;
+  for (let k = 0; k < n; k++) for (let i = mb.length - 1; i >= 0; i--) { const b = mb[i]; if (b && !b.gone) stepBee(b, h, lp, now); }
 }
 
 // ---------------------------------------------------------------- the world: chunks, blocks, crops

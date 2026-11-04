@@ -37,7 +37,7 @@ module.exports = async (pg) => {
   }
   const r = await lib.sim(pg, async () => {
     const M = BF.mobs, S = BF.sky;
-    const run = async n => { let ms = 0; for (let i = 0; i < n; i++) { S.advance(0.05); const t0 = performance.now(); M.update(0.05); ms += performance.now() - t0; if (i % 100 === 0) await new Promise(r => setTimeout(r, 0)); } return ms / n; };
+    const run = async n => { let ms = 0; for (let i = 0; i < n; i++) { S.advance(BF_TK); const t0 = performance.now(); M.update(BF_TK); ms += performance.now() - t0; if (i % 100 === 0) await new Promise(r => setTimeout(r, 0)); } return ms / n; };
     const count = () => { const c = { hostile: 0, wildAnimals: 0, all: 0 }; for (const m of M.list) if (!m.dead && !m.removed) { c.all++; if (m.hostile) c.hostile++; else if (M.isWild(m)) c.wildAnimals++; } return c; };
     S.setTime(0.6);
     // the scene with no wild mobs

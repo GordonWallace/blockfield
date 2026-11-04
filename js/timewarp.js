@@ -80,6 +80,7 @@ function noteDropped(n) {
   }
 }
 
+globalThis.BF_TK = TICK;   // (the tick length for tests and tools that step the simulation by hand: test/lib.js sets it in Node too)
 BF.warp = {
   SPEEDS,
   BUDGET_MS: 40,                       // max simulation time per frame; the speed degrades gracefully past this

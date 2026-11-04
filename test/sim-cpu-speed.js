@@ -45,7 +45,7 @@ async function run(b, slowMs) {
   const per = TICKS;
   for (let done = 0; done < TICKS; done += per) {
     await pg.evaluate(([v, n, slowMs]) => {
-      const h = 0.05;
+      const h = BF_TK;
       for (let i = 0; i < n; i++) {
         BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h);
         if (BF.dayTimeline) BF.dayTimeline.update();

@@ -57,7 +57,7 @@ const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/compa
   if (DAYS > 0) {
     const t0 = Date.now();
     for (let d = 0; d < DAYS * 6; d++) {   // a sixth of a game day per call: the game loop and the feed run in between
-      await lib.sim(game, n => { const h = 0.05; for (let i = 0; i < n; i++) { BF.simStep(h);   // (the game's own tick: js/boot.js)
+      await lib.sim(game, n => { const h = BF_TK; for (let i = 0; i < n; i++) { BF.simStep(h);   // (the game's own tick: js/boot.js)
         if (i % 50 === 0) BF.world.update(BF.player.position.x, BF.player.position.z, 4); } }, Math.round(200 / 0.05));
       await game.waitForTimeout(50);
     }
