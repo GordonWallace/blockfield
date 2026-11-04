@@ -556,6 +556,7 @@ function idsOf(c, si) {
   e.secs[si] = [s, ids];
   return ids;
 }
+world.sectionIds = idsOf;   // (the ids section si of chunk c holds, null when not kept: js/light.js seedEmitters)
 world.scanFlagged = function (c, flag, cb, thr, ya, yb) {
   thr = thr || 0;
   const lo = ya == null ? c.y0 : Math.max(c.y0, ya), hi = yb == null ? c.y1 - 1 : Math.min(c.y1 - 1, yb);
