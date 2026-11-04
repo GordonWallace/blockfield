@@ -20,6 +20,9 @@ function world(roundTrip) {
   const C = BF.ctick;
   C.on = true;
   const step = () => { BF.boot.stream(); C.interval(BF.warp.TICK); };
+  // intervals in 30 game seconds: a meeting every C.MEET ticks (20 when this was written, 160 since r15-89, which made 30 intervals
+  // four minutes of game time and the test near its timeout on CI)
+  const N = Math.max(2, Math.round(30 / (C.MEET * BF.warp.TICK)));
   step();
   // something of each kind in the last (far) group: a drop, a skeleton's arrow, a boat
   const gs = C.groups(), far = gs[gs.length - 1];
@@ -28,7 +31,7 @@ function world(roundTrip) {
   BF.drops.spawn(BF.I.cobblestone, 3, p.x + 2, p.y + 1, p.z);
   const b = BF.boats.spawn('oak', p.x - 3, p.y, p.z, 0);
   const sk = BF.mobs.spawn('skeleton', p.x + 6, p.y, p.z + 6);
-  for (let i = 0; i < 29; i++) step();
+  for (let i = 0; i < N - 1; i++) step();
   const res = { BF, far: far.key, made: { drop: BF.drops.list.length, boat: !!b, skeleton: !!sk } };
   if (roundTrip) {
     const before = BF.stateHash.full().hash;
@@ -41,7 +44,7 @@ function world(roundTrip) {
     res.names = names; res.parts = parts;
     res.same = before === BF.stateHash.full().hash;
   }
-  for (let i = 0; i < 30; i++) step();
+  for (let i = 0; i < N; i++) step();
   res.hash = BF.stateHash.full().hash;
   res.counts = { drops: BF.drops.list.length, boats: BF.boats.list.length, mobs: BF.mobs.list.length };
   return res;
