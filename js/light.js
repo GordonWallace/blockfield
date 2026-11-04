@@ -175,6 +175,10 @@ function seedEmitters(c) {
       for (let i = 0; i < 4096; i++) { lset(c, i & 15, by + (i >> 8), (i >> 4) & 15, EMIT[s]); pushAdd(ox + (i & 15), by + (i >> 8), oz + ((i >> 4) & 15)); }
       continue;
     }
+    // (a section with no glowing block, as nearly all are, skipped by the ids it holds: js/world.js sectionIds, worked out once per chunk
+    // version and read again by the chunk-load hooks right after, r15-95)
+    const ids = world().sectionIds ? world().sectionIds(c, si) : null;
+    if (ids) { let any = false; for (let j = 0; j < ids.length; j++) if (EMIT[ids[j]]) { any = true; break; } if (!any) continue; }
     let ls = null;
     for (let i = 0; i < 4096; i++) {
       const e = EMIT[s[i]];

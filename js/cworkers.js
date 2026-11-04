@@ -753,7 +753,7 @@ function gathered(fn, use) {
   const R = RW();
   R.refs();
   const list = [...mine].filter(m => !m.removed);
-  const all = xchange("gathered", JSON.stringify([list.map(m => m.id), R.encMany(list.map(whole))]));
+  const all = xchange("gathered", JSON.stringify([list.map(m => m.id), list.length ? R.encMany(list.map(whole)) : []]));
   const keep = [];
   const got = [];
   R.atLater(() => { for (let w = 0; w < all.length; w++) if (w !== CW.me) { const [ids, e] = JSON.parse(all[w]); got.push([ids, R.dec(e)]); } });
@@ -828,7 +828,12 @@ function fetch(ms, pred) {
   if (!pred && !need) return;
   const R = RW();
   R.refs();
-  const all = xchange(atMeeting ? "fetch" : "fetch.tick", JSON.stringify([out.map(m => m.id), R.encMany(out.map(whole))]));
+  // (none of them has a current copy on only one worker: every worker finds that alike, the holders being the same everywhere, so none
+  // exchanges. Exchanging for nothing held every worker at the slowest one's pace, r15-95)
+  if (!need) { if (BF.regions) BF.regions.tick(); return new Set(here); }
+  // (nothing of its own to send: an empty list encodes as one, without indexing every village record first, about 20-35 ms a call on
+  // test4's followers, r15-95)
+  const all = xchange(atMeeting ? "fetch" : "fetch.tick", JSON.stringify([out.map(m => m.id), out.length ? R.encMany(out.map(whole)) : []]));
   const got = [];
   R.atLater(() => { for (let w = 0; w < all.length; w++) if (w !== CW.me) { const [ids, e] = JSON.parse(all[w]); got.push([ids, R.decAll(e)]); } });
   const pairs = [], fresh = new Set();
@@ -851,15 +856,18 @@ function views(ms, fn) {
   const out = new Map();
   if (!CW.partial || !atMeeting) { for (const m of ms) if (m && !m.removed) { const v = fn(m); if (v != null) out.set(m.id, v); } return out; }
   const mineV = [], seen = new Set();
+  let held = 0;
   for (const m of ms) {
     if (!m || m.removed || seen.has(m)) continue;
     seen.add(m);
     const h = holder.get(m.id);
+    if (h !== undefined) held++;
     if (h !== undefined && h !== CW.me) continue;
     const v = fn(m);
     if (v == null) continue;
     if (h === undefined) out.set(m.id, v); else mineV.push([m.id, v]);
   }
+  if (!held) return out;   // (every copy of each is current: each worker read them all alike, so none exchanges, as in fetch)
   const all = xchange("views", JSON.stringify(mineV));
   for (let w = 0; w < all.length; w++) for (const [id, v] of w === CW.me ? mineV : JSON.parse(all[w])) out.set(id, v);
   return out;
