@@ -64,7 +64,7 @@ When the clusters are split over several workers, a worker keeps only its own cl
 
 A save while the clusters are split waits for the next meeting. There each worker writes down its own mobs' part of the save (where each one is and what it is doing, a villager's trades, a horse's place) and sends just that to the others, so no worker has to be sent every mob whole. The periodic check that the workers' copies of the world still agree (every five game minutes) works the same way: each worker hashes its own mobs. Both take a fraction of a second, where they used to pause the game for about a second with many villages.
 
-Chunks that load during an interval wait for the next meeting before they join the world. Every worker builds them as they come, while it waits for the first worker's ticks, so at the meeting each one only puts them in place; they used to be built there, holding up every worker for a few tenths of a second whenever you were moving.
+Chunks that load during an interval wait for the next meeting before they join the world. Every worker builds them as they come, while it waits for the first worker's ticks, so at the meeting each one only puts them in place; they used to be built there, and their sky light worked out there, holding up every worker for about a second at each meeting whenever you were moving. Chunks left behind also go at the meeting, a few hundred at once at a long view distance, and the game now sorts what it keeps track of by chunk once for all of them instead of looking through everything for each chunk.
 
 ## What it costs
 
