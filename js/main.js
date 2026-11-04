@@ -124,10 +124,12 @@ const frame = BF.tload.wrap(function frameBody(now) {   // (timed: the page thre
   if (BF.preparing) { last = now; return; }
   const raw = Math.max(0, (now - last) / 1000), dt = Math.min(0.05, raw);   // the player's step; the sim's accumulator takes up to 0.25 s (js/timewarp.js)
   last = now;
-  const p = BF.player.position;
+  // the detached view (r15-98): the page's own copy of the world (the simulation in a worker or on the world server) streams round the
+  // view, which loads nothing in the simulation; in the page the world is the simulation's, so it stays round the body
+  const p = BF.player.detached && BF.world.replica ? BF.player.viewPos() : BF.player.position;
   PF.frame();
   PF.mark();
-  BF.world.update(p.x, p.z, BF.warp.speed >= 10 ? 3 : BF.player.turbo ? 14 : 8);   // turbo flight streams terrain harder; fast-forward leaves the frame to the sim
+  BF.world.update(p.x, p.z, BF.warp.speed >= 10 ? 3 : BF.player.turbo || BF.player.detached ? 14 : 8, p.y);   // turbo flight streams terrain harder; fast-forward leaves the frame to the sim
   PF.lap(PF.C.stream);   // chunk streaming and remeshing, once a frame
   if (BF.lod) BF.lod.update();   // distant terrain rings on the planet (js/lod.js)
   const W = BF.warp, drawn0 = W.renderNow(), remote = host.worker;

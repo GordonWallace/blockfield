@@ -647,7 +647,7 @@ lod.update = function (budgetMs = 4) {
   lod.frames = (lod.frames || 0) + 1; if (ms > 25) lod.slowFrames = (lod.slowFrames || 0) + 1;
 };
 function update(budgetMs) {
-  const Pl = P(), pp = BF.player.position, gr = Pl.grid(pp.x, pp.z);
+  const Pl = P(), pp = (BF.player.viewPos ? BF.player.viewPos() : BF.player.position), gr = Pl.grid(pp.x, pp.z);   // (round the detached view, r15-98)
   if (gr.f < 0) return;
   const V = lod.view, now = performance.now();
   V.f = gr.f; V.u = gr.u; V.v = gr.v;
@@ -683,6 +683,7 @@ function update(budgetMs) {
   if (above < RIBBON_HIDE && !(ff && lod.ribbon)) ribbons(V, top);
   // cut each ring to its disc, minus the next finer ring's disc and the loaded chunks
   lod.eyeHole = Math.min(BF.world.viewDist * BF.CS, BF.world.covered || 0) * 0.95;
+  if (BF.player.detached && !BF.world.replica) lod.eyeHole = 0;   // (detached in the page: the chunks load round the body, not the view; the chunk mask alone keeps the rings off them, r15-98)
   markChunks(pp, V);
   let prev = null;
   const lastStand = lod.levels[STAND_LEVELS - 1];
@@ -749,7 +750,7 @@ function markChunks(pp, V) {
 }
 // (tests) whether the chunk mask marks chunk (cx, cz) as drawn
 lod.masked = (cx, cz) => {
-  const pp = BF.player.position, H = MASK_N / 2, i = cx - Math.floor(pp.x / BF.CS) + H, j = cz - Math.floor(pp.z / BF.CS) + H;
+  const pp = (BF.player.viewPos ? BF.player.viewPos() : BF.player.position), H = MASK_N / 2, i = cx - Math.floor(pp.x / BF.CS) + H, j = cz - Math.floor(pp.z / BF.CS) + H;
   return i >= 0 && j >= 0 && i < MASK_N && j < MASK_N && maskData[j * MASK_N + i] > 0;
 };
 // How far from ring L's centre it is certainly covered by the loaded chunks or the finer ring (blocks; 0 if unsure): measured only within
