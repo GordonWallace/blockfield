@@ -344,8 +344,10 @@ const simClock = { win: -1e9, last: -1e9 }, realClock = { win: -1e9, last: -1e9 
 const stepping = () => !(BF.warp && BF.warp.frozen) && !(BF.state && BF.state.paused);
 const clustered = () => !!(BF.ctick && BF.ctick.on);
 // Called from world.update every frame. Returns true when the kept set changed (here, or in a step since the last call).
+let warmN = 0;
 function update(px, pz) {
   focusX = px; focusZ = pz;
+  if (clustered() && ++warmN % 20 === 0 && BF.active && BF.active.warm) BF.active.warm(px, pz);   // (meetings find the layouts ready, js/active.js warm)
   let changed = stepChanged;
   stepChanged = false;
   // (a trip pinned or unpinned since the last step is taken at once: nothing has stepped since, so it is the same moment the next step would see;
