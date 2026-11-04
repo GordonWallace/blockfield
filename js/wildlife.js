@@ -81,6 +81,7 @@ function daylightBetween(t0, t1) {
   for (let t = t0; t <= t1; t += 0.004) { const f = ((t % 1) + 1) % 1; if (f < 0.5 && (!L || L(f) > 0.55)) return true; }
   return false;
 }
+const stowCmp = (x, y) => { const p = x.snap && x.snap.p || [], q = y.snap && y.snap.p || []; for (let i = 0; i < 3; i++) if (p[i] !== q[i]) return (p[i] || 0) - (q[i] || 0); return x.type < y.type ? -1 : x.type > y.type ? 1 : 0; };
 function stow(m) {
   if (!BF.mobSave || !m || !m.position) return;
   const e = BF.mobSave.packWild(m);
@@ -88,7 +89,9 @@ function stow(m) {
   if (m.def && m.def.burns && BF.mobs.skyOpen(m.position.x, m.position.y + m.height - 0.1, m.position.z)) e.open = 1;
   const k = ck(m.position.x, m.position.z);
   const a = stored.get(k);
-  if (a) a.push(e); else stored.set(k, [e]);
+  // (in one order by where it stood, not by when it was stored: cluster workers store a chunk's mobs in their own list order, one
+  // walking off the loaded land before its chunk unloads on one copy and with it on another, and the copies then differed by order)
+  if (a) { const i = a.findIndex(o => stowCmp(e, o) < 0); if (i < 0) a.push(e); else a.splice(i, 0, e); } else stored.set(k, [e]);
   log("stored", { type: m.type, chunk: k });
 }
 // Wild mobs of a loaded save (js/mobsave.js): each waits with its chunk, saved at game time t.
