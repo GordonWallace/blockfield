@@ -504,7 +504,9 @@ function serve(send, opts) {
     P.dead = !!m.dead;
     if (m.sel != null && BF.inventory && BF.inventory.selectedIndex !== m.sel) BF.inventory.select(m.sel);   // the hotbar slot (r15-44: the page's)
     if (m.ride && P.rideIn) P.rideIn(m.ride);   // the boat or horse the page steers (r15-44 part 2)
-    if (m.saturation != null) P.saturation = m.saturation;   // (r15-43: the page drains it; eating here raises it, flushSelf)
+    if (m.saturation != null) P.saturation = m.saturation;
+    // the detached view (r15-98): [x, z, yaw, y] for the debug screen's map only; nothing in the simulation reads it
+    P.detView = Array.isArray(m.det) && m.det.length >= 3 && m.det.every(Number.isFinite) ? m.det.slice(0, 4) : null;   // (r15-43: the page drains it; eating here raises it, flushSelf)
     S.rep = { x: keep ? rp.x : m.x, y: keep ? rp.y : m.y, z: keep ? rp.z : m.z, yaw: lookUnsent ? rp.yaw : P.yaw, pitch: lookUnsent ? rp.pitch : P.pitch, flying: flyUnsent ? rp.flying : !!P.flying, health: P.health, hunger: P.hunger, saturation: P.saturation, gameMode: P.gameMode };
   }
   // replica: the player's body is the client's, so what would change it here goes to the client instead (mobs, bees and lightning
@@ -932,7 +934,7 @@ function connect(send, mode) {
   C.frame = () => {
     const P = BF.player, W = BF.world;
     if (!P || !P.position || !W) return;
-    const p = P.position, v = C.lastView, d = W.viewDist;
+    const p = P.viewPos ? P.viewPos() : P.position, v = C.lastView, d = W.viewDist;   // (a detached view, r15-98: what is sent follows the view; the simulation still has the body)
     if (!v || v.dist !== d || Math.floor(v.x / 16) !== Math.floor(p.x / 16) || Math.floor(v.z / 16) !== Math.floor(p.z / 16) || Math.abs(v.y - p.y) > 16)
       C.view(p.x, p.y, p.z, d);
   };
