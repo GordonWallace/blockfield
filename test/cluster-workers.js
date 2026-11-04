@@ -28,9 +28,14 @@
 // --drop s: at second s the fixed set of extra villages shrinks by 3 (BF.active fixed): the farthest leave and unload while split, their
 // chunks' wild mobs stored (a chunk dropping fetched only the mobs some worker ran: one current everywhere was left out of the set, so no
 // copy unloaded it and its owner stored it a tick later, where it had walked off to).
+// --trips s (with --partial for the case it guards): in interval s a villager is put on a caravan trip from its village in its own
+// group's pass (so only the worker running it has the trip), and at the next meeting every copy force-ends the trips to or from
+// that village (js/villagesim.js forceTrips, as the held-chunks limit does): every copy must end the same one trip. Read from each copy
+// as it stood, only the worker running the merchant ended it and dropped its pin, and at the next meeting that worker skipped an exchange
+// the others made: they waited for it 120 s and the simulation stopped (Gordon's run 2026-11-04, reports/bug-118.md).
 // --restored: items on the ground before the tick starts, as from a save (with --plan: see restoredDrops). --load file: boot from a save
 // (tools/headless.js --save) instead of the seed.
-// Usage: node test/cluster-workers.js [--workers 2] [--seed 3] [--extra 3] [--seconds 30] [--shuffle k | --plan] [--order tick|cluster] [--pull] [--partial] [--bees] [--restored] [--leave s [--rejoin s]] [--cycle p] [--cold-beds] [--drop s] [--load save.json]
+// Usage: node test/cluster-workers.js [--workers 2] [--seed 3] [--extra 3] [--seconds 30] [--shuffle k | --plan] [--order tick|cluster] [--pull] [--partial] [--bees] [--restored] [--leave s [--rejoin s]] [--cycle p] [--cold-beds] [--drop s] [--trips s] [--load save.json]
 //                                    [--profile converted|a,b,c]
 const path = require('path'), crypto = require('crypto');
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
@@ -41,7 +46,7 @@ else main().catch(e => { console.error(e); process.exit(1); });
 
 // ---------------------------------------------------------------- a worker: one world
 function child() {
-  const { me, n, seed, extra, order, shuffle, fixed, profile, shared, pull, partial, bees, save, restored, coldBeds } = workerData;
+  const { me, n, seed, extra, order, shuffle, fixed, profile, shared, pull, partial, bees, save, restored, coldBeds, trips } = workerData;
   for (const k of ['log', 'info', 'debug']) console[k] = () => {};
   const { load } = require('../tools/headless.js');
   const { BF } = load();
@@ -63,6 +68,7 @@ function child() {
     BF.cworkers.setup({ n, me, link, claims: shared.claims, pull, partial });
   }
   const homeEdits = bees ? beeEdits(BF) : null;
+  const tripEdit = trips ? tripTest(BF) : null;
   const md5 = t => crypto.createHash('md5').update(t).digest('hex').slice(0, 16);
   const objs = () => {
     const o = {};
@@ -91,6 +97,7 @@ function child() {
       if (msg.do === 'interval') {
         BF.boot.stream();
         if (homeEdits) homeEdits(msg.s);
+        if (tripEdit && msg.s === trips) tripEdit.arm();
         if (msg.leave && shared) BF.cworkers.leave();   // (--leave: back to one at this interval's meeting)
         if (msg.rejoin && shared && coldBeds && me > 0) for (const rec of BF.mobs.villages.values()) delete rec.bedCache;   // (--cold-beds: the copies' bed caches differ at the split)
         if (msg.rejoin && shared) BF.cworkers.setup({ n, me, link, claims: shared.claims, pull, partial });   // (--rejoin: split again, the cluster tick still on, as js/rplay.js startSplit)
@@ -99,7 +106,7 @@ function child() {
         const s = C.stats();
         const [parts, os] = all(() => [BF.stateHash.parts(), objs()]);
         parentPort.postMessage({ parts, objs: os, beesOut: beesOut(), tick: BF.rand.tick, mobs: BF.mobs.list.length, groups: s.groups.length,
-          errors: errors.splice(0), owners: shared ? [...BF.cworkers.owners] : null, text: shared ? BF.cworkers.text() : null });
+          errors: errors.splice(0), forced: tripEdit ? tripEdit.take() : null, owners: shared ? [...BF.cworkers.owners] : null, text: shared ? BF.cworkers.text() : null });
       } else if (msg.do === 'text') parentPort.postMessage(all(() => ({ texts: msg.keys.map(textOf), parts: msg.parts.map(p => BF.stateHash.text(p)) })));
       else if (msg.do === 'stats') parentPort.postMessage({ stats: shared ? BF.cworkers.stats() : null, sizes: shared ? BF.cworkers.sizes : null });
       else if (msg.do === 'stop') process.exit(0);
@@ -109,6 +116,32 @@ function child() {
     }
   });
   parentPort.postMessage({ booted: true });
+}
+
+// --trips: the villager with the lowest id goes on a trip from its village in its group's pass; at the meeting that ends the interval
+// the village's trips are force-ended (a meeting hook, between ticks, on every copy alike). take() -> how many this copy ended so far.
+function tripTest(BF) {
+  const C = BF.ctick;
+  let target = null, home = null, set = false, forced = 0, armedAt = null;
+  const prev = BF.mobs.update;
+  BF.mobs.update = function () {
+    if (target && !set && C.cur && C.cur.key === BF.clusters.groupOf(target.cl)) {
+      set = true;
+      BF.merchant._state(target).trip = { id: 'test-trip', home, dest: '0,0', day0: 0, out: [], back: [], soldN: 0, soldE: 0, boughtN: 0 };
+    }
+    return prev.apply(this, arguments);
+  };
+  const fh = BF.merchant.forceHome;
+  BF.merchant.forceHome = (m, why) => { const ok = fh(m, why); if (ok && m === target) forced++; return ok; };
+  C.onMeet(() => { if (home && armedAt != null && BF.rand.tick > armedAt) { BF.villageSim._forceTrips(home, 'a test'); home = null; } }, 'test-trips', 'end');   // (the first meeting after the interval it was set in: alike on every copy)
+  return {
+    arm() {
+      const vs = BF.mobs.list.filter(m => m.type === 'villager' && !m.removed && !m.dead && m.village && m.cl !== undefined).sort((a, b) => +a.id.slice(1) - +b.id.slice(1));
+      if (!vs.length) throw new Error('--trips: no villager to send');
+      target = vs[0]; home = target.village.key; armedAt = BF.rand.tick;
+    },
+    take: () => forced,   // (so far)
+  };
 }
 
 // --restored: items lying on the ground before the cluster tick starts, as a save restores them (js/drops.js restore: no pass has worked
@@ -170,14 +203,14 @@ async function main() {
   const n = +arg('workers', 2), seed = +arg('seed', 3), extra = +arg('extra', 3), seconds = +arg('seconds', 30);
   const leaveAt = +arg('leave', 0), dropAt = +arg('drop', 0), rejoinAt = +arg('rejoin', 0), cycle = +arg('cycle', 0);
   const away = s => cycle > 0 && Math.floor(s / cycle) % 2 === 1;   // (--cycle p: back to one for p seconds every 2p, as the automatic split's trials)
-  const partial = process.argv.includes('--partial'), bees = process.argv.includes('--bees'), save = arg('load', null), restored = process.argv.includes('--restored'), coldBeds = process.argv.includes('--cold-beds');
+  const partial = process.argv.includes('--partial'), bees = process.argv.includes('--bees'), save = arg('load', null), restored = process.argv.includes('--restored'), coldBeds = process.argv.includes('--cold-beds'), trips = +arg('trips', 0);
   const order = arg('order', 'tick'), pull = order === 'cluster' && process.argv.includes('--pull') && arg('shuffle') == null;
   const profile = arg('profile', 'converted'), plan = process.argv.includes('--plan'), fixed = !plan && !pull && arg('shuffle') == null;
   const shuffle = plan || pull ? 0 : +arg('shuffle', 1);
   const { load } = require('../tools/headless.js');
   const shared = load().BF.cworkers.makeShared(n);
   const spawn = data => {
-    const w = new Worker(__filename, { workerData: Object.assign({ seed, extra, order, shuffle, fixed, profile, pull, partial, bees, save, restored, coldBeds }, data) });
+    const w = new Worker(__filename, { workerData: Object.assign({ seed, extra, order, shuffle, fixed, profile, pull, partial, bees, save, restored, coldBeds, trips }, data) });
     const waiting = [];
     w.on('message', m => { const f = waiting.shift(); if (f) f(m); });
     w.on('error', e => { console.error(e); process.exit(1); });
@@ -198,6 +231,11 @@ async function main() {
     const r = out[0];
     for (let w = 1; w < out.length; w++) for (const e of out[w].errors) { errs++; if (errs <= 20) console.log(`  worker ${w - 1} ERROR ${e}`); }
     for (const e of r.errors) { if (errs++ <= 20) console.log(`  reference ERROR ${e}`); }
+    if (trips && s === trips + 1) {   // (--trips: by the end of the next interval every copy ended the one trip, the reference too)
+      const got = out.map(o => o.forced);
+      if (got.every(f => f === 1)) console.log(`ok   second ${s}: the trip was ended on every copy (${got.join('/')})`);
+      else { console.log(`FAIL second ${s}: the trip was ended on ${got.slice(1).filter(f => f === 1).length} of ${n} workers (reference, workers: ${got.join('/')})`); fails++; }
+    }
     const diffs = [];
     for (let w = 1; w < out.length; w++) {
       const o = out[w];
