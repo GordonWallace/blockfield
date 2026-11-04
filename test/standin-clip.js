@@ -70,13 +70,17 @@ module.exports = async (pg, out) => {
     });
     const standIns = (on) => pg.evaluate((on) => { for (const L of BF.lod.levels) if (L.si) L.si.material.visible = on; }, on);
     const shot = async (name) => { await frames(4); const b = await pg.screenshot({ path: `${out}-${name}.png`, timeout: 180000 }); return b.toString("base64"); };
+    // (the world frozen for the three frames, and the drawing given time to reach the newest tick: the mobs, which moved between the
+    // frames, are the same in all three. On CI's world server their moving made 3000-4000 of the masked frame's pixels differ)
+    await pg.evaluate(() => BF.warp.freeze());
+    await pg.waitForTimeout(1500); await frames(10);
     await standIns(false);
     const none = await shot("none");
     await standIns(true);
     const masked = await shot("masked");
     await pg.evaluate(() => { BF.lod.maskOff = true; });
     const unmasked = await shot("unmasked");
-    await pg.evaluate(() => { BF.lod.maskOff = false; });
+    await pg.evaluate(() => { BF.lod.maskOff = false; BF.warp.set(0); });
     const d = await pg.evaluate(async ([a, b, c]) => {
       const px = async (s) => {
         const img = new Image(); img.src = "data:image/png;base64," + s; await img.decode();
