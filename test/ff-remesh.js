@@ -1,7 +1,7 @@
 // @ci integration suite=world timeout=600 hosts=worker,server
 // Batched chunk remeshing during fast-forward (spec r15-02): with the player above the boot world's village (59 villagers) at 1000x for
 // 20 real seconds, chunks outside the player's 3x3 are remeshed at most every 5 s (2 s at 100x, 400 ms at 10x). Checks:
-//  - no far chunk is remeshed twice within the 5 s wait, and far remeshes average under 2 a frame (per-chunk timing, not frame
+//  - no far chunk is remeshed twice within the 5 s wait, and far remeshes average under 3 a frame (per-chunk timing, not frame
 //    bursts: chunks meshed together at load come due together, so a slow runner's few frames can each catch several: frames are
 //    counted at 5 a second at least);
 //  - a block the player breaks at 1000x is meshed the same frame;
@@ -58,8 +58,10 @@ module.exports = async (pg) => {
   // (frames counted at 5 a second at least over the 20 s: a slow headless page's frame catches the remeshes due over several. Far
   // remeshes go to the mesher workers (r15-03); with the simulation off the page it isn't held to the page's frame rate at 1000x and its
   // village dirties two to three times as many far chunks in the 20 s)
+  // (under 3 since 0.2 s ticks, idea-049: the same 20 real seconds simulate about twice the game time, so the village dirties more far
+  // chunks; the 5 s wait per chunk, checked above, is what bounds them)
   const perFrame = Math.max(ff.frames, 100);
-  ok("far remeshes average under 2 a frame (" + (ff.far / perFrame).toFixed(2) + ")", ff.far < 2 * perFrame, ff);
+  ok("far remeshes average under 3 a frame (" + (ff.far / perFrame).toFixed(2) + ")", ff.far < 3 * perFrame, ff);
 
   // the player breaks a block at 1000x: its chunk is meshed by the next world.update
   const brk = await pg.evaluate(async () => {

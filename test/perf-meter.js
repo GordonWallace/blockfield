@@ -18,7 +18,7 @@ module.exports = async (pg) => {
     P.ask(true); P.reset();
     let vs = 0, game = 0;
     const t0 = performance.now();
-    for (let i = 0; i < 200; i++) { BF.simStep(BF_TK); vs += alive() * 0.05; game += 0.05; }
+    for (let i = 0; i < 200; i++) { BF.simStep(BF_TK); vs += alive() * BF_TK; game += BF_TK; }
     const t1 = performance.now();
     const s = P.stats(), tot = P.totals();
     out.villagers = alive(); out.real = (t1 - t0) / 1000; out.game = game; out.expVss = vs / out.real;

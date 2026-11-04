@@ -44,11 +44,11 @@ module.exports = async (pg, out) => {
     const pv = gs.map(() => 0);
     const step = () => {
       BF.sky.setTime(0.1); zb.position.set(X0 + 15.5, Y0, Z0 + 15.5); zb.vel.set(0, 0, 0); zb.fire = 0;
-      M.update(BF_TK); BF.world.tickSim(); P.set(X0 + 15, Y0 + 12, Z0 + 15); T += 0.05;
+      M.update(BF_TK); BF.world.tickSim(); P.set(X0 + 15, Y0 + 12, Z0 + 15); T += BF_TK;
       gs.forEach((g, i) => {
         if (g.vel.y > 7 && pv[i] <= 0.5) jumps++;
         pv[i] = g.vel.y;
-        if (near(g)) { nearT += 0.05; if (T > 30) lateNear += 0.05; }
+        if (near(g)) { nearT += BF_TK; if (T > 30) lateNear += BF_TK; }
         if (g.position.x < X0 + 1 || g.position.x > X0 + N - 1 || g.position.z < Z0 + 1 || g.position.z > Z0 + N - 1) g.position.set(X0 + 4.5, Y0, Z0 + 4.5);   // the floor is all the world they have
       });
     };
@@ -56,7 +56,7 @@ module.exports = async (pg, out) => {
     // patrol round the hut: every target a golem picks must be open ground it fits
     let bad = 0, picks = 0;
     for (const g of gs) { g.patrol = [X0 + 15.5, Z0 + 15.5]; g.ai.giveUp = zb; g.ai.giveUpT = 999; }
-    for (let k = 0; k < 400; k++) {
+    for (let k = 0; k < Math.round(20 / BF_TK); k++) {
       step();
       for (const g of gs) if (g.ai.mode === "walk") {
         picks++;
