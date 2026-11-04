@@ -26,6 +26,7 @@ module.exports = async (pg) => {
       const o = BF[k];
       if (o && typeof o === "object" && typeof o.ai === "function" && o !== M) { const f = o.ai; hooks.push([o, f]); o.ai = function (m) { return m && m.type === "villager" ? false : f.apply(this, arguments); }; }
     }
+    const G = n => Math.round(n * 0.05 / BF_TK);   // a step count written for 20 ticks a game second, in this build's ticks
     const step = () => { BF.sky.setTime(0.3); M.update(BF_TK); BF.world.tickSim(); P.set(seller.position.x + 4, seller.position.y + 30, seller.position.z + 4); };
     const walkOff = () => { const ai = seller.ai; ai.leaving = false; ai.mode = "walk"; ai.t = 5; ai.tx = seller.position.x + 10 * dx; ai.tz = seller.position.z + 10 * dz; ai.route = null; };
     const reset = () => { seller.position.copy(start); seller.vel.set(0, 0, 0); seller.ai.blockedT = 0; seller.ai.stuckT = 0; seller.ai.detour = null; };
@@ -37,7 +38,7 @@ module.exports = async (pg) => {
       seller = s; buyer = b; start = s.position.clone();
       for (const [ex, ez] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         dx = ex; dz = ez; reset();
-        for (let i = 0; i < 120; i++) { walkOff(); place(6); step(); }   // (as far as any phase goes: 1 s under way, then up to 4 s more)
+        for (let i = 0; i < G(120); i++) { walkOff(); place(6); step(); }   // (as far as any phase goes: 1 s under way, then up to 4 s more)
         if (Math.hypot(seller.position.x - start.x, seller.position.z - start.z) > 4.5) break search;
       }
       reset();
@@ -48,9 +49,9 @@ module.exports = async (pg) => {
     let heldFrames = 0;   // steps the seller spent stopped for this buyer
     const moved = (n, call, dist) => {   // how far the seller walks in n steps while the buyer at `dist` calls it (or not)
       reset(); heldFrames = 0;
-      for (let i = 0; i < 20; i++) { walkOff(); step(); }   // under way
+      for (let i = 0; i < G(20); i++) { walkOff(); step(); }   // under way
       const x0 = seller.position.x, z0 = seller.position.z;
-      for (let i = 0; i < n; i++) {
+      for (let i = 0; i < G(n); i++) {
         walkOff();
         place(dist);
         if (call) M.waitFor(seller, buyer, dist);
@@ -65,7 +66,7 @@ module.exports = async (pg) => {
     res.long = moved(200, true, 6);         // 10 s of calls: stops for 8, then walks on
     res.far = moved(40, true, 15); res.farHeld = heldFrames;
     // each buying from the other: only one of them stops
-    for (let i = 0; i < 20; i++) { M.waitFor(seller, buyer, 5); M.waitFor(buyer, seller, 5); step(); }
+    for (let i = 0; i < G(20); i++) { M.waitFor(seller, buyer, 5); M.waitFor(buyer, seller, 5); step(); }
     res.mutual = [seller.holdT > 0 && seller.holdFor === buyer, buyer.holdT > 0 && buyer.holdFor === seller];   // (either may also be held by another villager really buying from it)
     res.log = (BF.glog ? BF.glog.recent(400) : []).filter(e => e.k === "move" && !old.has(e) && /to come and trade/.test(e.x)).map(e => e.l + " " + e.x);
     for (const [o, f] of hooks) o.ai = f;

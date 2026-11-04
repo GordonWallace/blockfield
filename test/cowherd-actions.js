@@ -10,6 +10,7 @@ module.exports = async (pg, out) => {
   const res = await lib.sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const step = (h = BF_TK) => { const W = BF.warp; W.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
+    const G = n => Math.round(n * 0.05 / BF_TK);   // a step count written for 20 ticks a game second, in this build's ticks
     const run = (sec, h = BF_TK) => { for (let t = 0; t < sec; t += h) step(h); };
     const day = () => BF.sky.day + BF.sky.time;
     const C = BF.cowherd, I = BF.I, T = BF.trades;
@@ -197,7 +198,7 @@ module.exports = async (pg, out) => {
     let milkSold = 0;   // bottles of milk it sold meanwhile (the village's baker buys milk for its cakes, js/baker.js)
     const oTrade = BF.vlog.trade;
     BF.vlog.trade = function (buyer, seller, o, times) { if (seller === herder && o && o.sell && o.sell.id === I.milk_bottle) milkSold += o.sell.n * (times || 1); return oTrade.apply(this, arguments); };
-    for (let i = 0; i < 8000; i++) { step(); if (i % 10 === 0 && herder.cwk && herder.cwk.task) tasks[herder.cwk.task.kind] = (tasks[herder.cwk.task.kind] || 0) + 1; }
+    for (let i = 0; i < G(8000); i++) { step(); if (i % 10 === 0 && herder.cwk && herder.cwk.task) tasks[herder.cwk.task.kind] = (tasks[herder.cwk.task.kind] || 0) + 1; }
     BF.vlog.trade = oTrade;
     R.tasks = tasks;
     const twice = [...milked.values()].filter(a => a.length !== new Set(a).size).length;
@@ -211,7 +212,7 @@ module.exports = async (pg, out) => {
     const calf = calfS && calfS.mob;
     ok("a calf is smaller and gives no milk", !!(calf && calf.calf && calf.scale < 0.9 && !C.milkable(calf)), calf && calf.scale);
     R.herderInv = herder.inv.filter(Boolean).map(s => BF.items[s.id].name + ":" + s.count).join(",");
-    for (let i = 0; i < 1200 && (herder.position.x > P.fx0 && herder.position.x < P.fx1 && herder.position.z > P.fz0 && herder.position.z < P.fz1); i++) step();
+    for (let i = 0; i < G(1200) && (herder.position.x > P.fx0 && herder.position.x < P.fx1 && herder.position.z > P.fz0 && herder.position.z < P.fz1); i++) step();
 
     // ---- breeding needs wheat and two willing adults
     const spot = (dx, dz) => { const x = Math.floor(P.out[0] + dx), z = Math.floor(P.out[1] + dz), y = BF.world.heightAt(x, z) + 1; return [x + 0.5, y, z + 0.5]; };
@@ -243,7 +244,7 @@ module.exports = async (pg, out) => {
     for (const [m, ddx] of [[wa, 0], [wb, 1]]) { const [x, y, z] = spot(flat[0] + ddx, flat[1]); m.position.set(x, y, z); if (m.vel) m.vel.set(0, 0, 0); }
     if (Math.hypot(wa.position.x - wb.position.x, wa.position.z - wb.position.z) > 4) { const [x, y, z] = spot(flat[0], flat[1]); wa.position.set(x, y, z); const s2 = spot(flat[0] + 1, flat[1]); wb.position.set(s2[0], s2[1], s2[2]); }   // they wandered apart while one was fed: back side by side (mates look within 10 blocks)
     C.feed(wb, "test");
-    for (let i = 0; i < 600 && !wildBorn; i++) step();
+    for (let i = 0; i < G(600) && !wildBorn; i++) step();
     ok("two fed adults breed: a calf", wildBorn === 1, { wildBorn, d: +Math.hypot(wa.position.x - wb.position.x, wa.position.z - wb.position.z).toFixed(2), dy: +(wa.position.y - wb.position.y).toFixed(2),
       willing: [C.willing(wa, day()), C.willing(wb, day())], mate: [wa.mate === wb, wb.mate === wa], dead: [!!wa.dead, !!wb.dead], pasture: [!!wa.pasture, !!wb.pasture], led: [!!wa.ledBy, !!wb.ledBy], cows: BF.mobs.list.filter(m => m.type === "cow" && !m.dead).length });
     ok("a calf cannot breed or be fed to breed, and grows up after a few days", (() => {
@@ -266,7 +267,7 @@ module.exports = async (pg, out) => {
     while (P.cows.length < P.limit) P.cows.push({ fed: day(), cd: day() + 5, growAt: null, milkDay: Math.floor(day()), x: P.x0 + 1 + P.cows.length % 5, z: P.z0 + 1.5, mob: null });
     run(3);
     const beef0 = c("raw_beef"), lea0 = c("leather"), atLimit = P.cows.length;
-    for (let i = 0; i < 1500; i++) step();
+    for (let i = 0; i < G(1500); i++) step();
     ok("at the limit, no cow is culled", P.cows.length === atLimit && c("raw_beef") === beef0, [atLimit, P.cows.length]);
     for (let i = 0; i < 3; i++) P.cows.push({ fed: day(), cd: day() + 5, growAt: null, milkDay: Math.floor(day()), x: P.x0 + 1.5 + i, z: P.z0 + 2.5, mob: null });
     run(3);
@@ -298,7 +299,7 @@ module.exports = async (pg, out) => {
     for (let i = 0; i < P.limit + 2; i++) P.cows.push({ fed: null, cd: day() + 5, growAt: day() + 2, milkDay: null, x: P.x0 + 1.5 + (i % 6), z: P.z0 + 3, mob: null });
     run(3);
     const k1 = P.culls;
-    for (let i = 0; i < 2400; i++) step();
+    for (let i = 0; i < G(2400); i++) step();
     ok("over the limit with only 2 adults: no cull", P.cows.length === P.limit + 4 && P.cows.filter(s => s.growAt == null).length === 2 && P.culls === k1, [P.cows.length, P.culls - k1]);
     const vl = (BF.vlog.entries ? BF.vlog.entries(rec.key) : []).map(e => e[2]);
     ok("the village log has milking and culling lines", vl.some(t => /\(Cowherd\) milked a cow/.test(t)) && vl.some(t => /\(Cowherd\) culled a cow/.test(t)) && vl.some(t => /calf was born/.test(t)), vl.filter(t => /Cowherd|calf/.test(t)).slice(-4));
@@ -316,12 +317,12 @@ module.exports = async (pg, out) => {
     let leads = 0;
     // working hours only, and the next morning comes: a failed fetch is tried again at a time of day (js/cowherd.js pickTask stockAt, a
     // tenth of a day later or the next morning), so a clock put back on the same day never reached it and one failed lead failed the test
-    for (let i = 0; i < 30000 && P.cows.length < 2; i++) { step(); if (S.task && S.task.kind === "fetch" && S.stage !== "walk" && i % 20 === 0) leads++; if (BF.sky.time > 0.45) { BF.sky.day += 1; BF.sky.setTime(0.06); } }
+    for (let i = 0; i < G(30000) && P.cows.length < 2; i++) { step(); if (S.task && S.task.kind === "fetch" && S.stage !== "walk" && i % 20 === 0) leads++; if (BF.sky.time > 0.45) { BF.sky.day += 1; BF.sky.setTime(0.06); } }
     ok("the cowherd led wild cows into the empty pasture until it held 2", P.cows.length >= 2, { cows: P.cows.length, wild: wild.map(m => !!m.pasture), log: C.log.filter(e => /lead|stock|fetch|noWild/.test(e.kind)).slice(-6) });
     ok("it led them (it walked with a cow behind it)", leads > 0, leads);
     ok("they are inside the field", wild.filter(m => m.pasture === P).every(m => m.position.x > P.fx0 && m.position.x < P.fx1 && m.position.z > P.fz0 && m.position.z < P.fz1));
     const gateOpen = () => { const g = BF.blocks[BF.world.getBlock(P.gate[0], P.y + 1, P.gate[1])]; return !!(g && g.gate && g.gate.open); };
-    for (let i = 0; i < 2400 && gateOpen(); i++) step();
+    for (let i = 0; i < G(2400) && gateOpen(); i++) step();
     ok("the gate is shut again", !gateOpen());
     ok("the village log has the fetch", (BF.vlog.entries(rec.key) || []).some(e => /brought a wild cow into the pasture/.test(e[2])));
     // none in range: it looks again the next day
@@ -330,7 +331,7 @@ module.exports = async (pg, out) => {
     for (const m of BF.mobs.list.slice()) if (m.type === "cow" && !m.dead) BF.mobs.hurt(m, 999, "test");
     run(1);
     S.stockAt = 0;
-    for (let i = 0; i < 600; i++) step();
+    for (let i = 0; i < G(600); i++) step();
     ok("no wild cow in range: it tries again tomorrow", S.stockAt > day() && S.stockAt - day() < 1.05 && C.log.some(e => e.kind === "noWild"), { stockAt: S.stockAt, day: day() });
 
     // ---- the player: wheat feeds a cow, cows follow a player holding wheat
@@ -421,7 +422,7 @@ module.exports = async (pg, out) => {
       T.inv.add(herder.inv, I.coal, 2);
       herder.cwc = null;
       let loadedAt = -1, sawRawIn = false;
-      for (let i = 0; i < 8000 && c("steak") < 8; i++) {
+      for (let i = 0; i < G(8000) && c("steak") < 8; i++) {
         step();
         if (BF.sky.time > 0.4) BF.sky.setTime(0.1);
         const st = BF.inventory.furnaceState(fpos.x, fpos.y, fpos.z);

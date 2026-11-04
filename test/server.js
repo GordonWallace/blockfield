@@ -111,7 +111,8 @@ function headless(n) {
     await pg.waitForTimeout(1500);
     const real = (Date.now() - t0) / 1000;
     const h1 = await query(pg, 'hash'), h1b = await query(pg, 'hash');
-    check(h1.ok && h1.hash === h1b.hash && h1.tick > 20000, `paused after a game day (${h1.tick} ticks in ${real.toFixed(0)} s real, ${(h1.tick * 0.05 / real).toFixed(0)}x), the world stands still`);
+    const tk = await pg.evaluate(() => BF.client.world.tickLen || BF.warp.TICK);   // the simulation's tick length (its hello says)
+    check(h1.ok && h1.hash === h1b.hash && h1.tick * tk > 1000, `paused after a game day (${h1.tick} ticks of ${tk} s in ${real.toFixed(0)} s real, ${(h1.tick * tk / real).toFixed(0)}x), the world stands still`);
     const seen = await pg.evaluate(() => { const E = [...BF.client.world.entities.values()]; return { villagers: E.filter(e => e.kind === 'mob' && e.type === 'villager').length, villages: BF.client.world.villages.size }; });
     check(seen.villagers > 0 && seen.villages > 0, `villagers in the client's mirror (${seen.villagers} villagers, ${seen.villages} villages)`);
     const st0 = await state(debug);

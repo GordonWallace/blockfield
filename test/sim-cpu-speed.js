@@ -4,7 +4,7 @@
 // The simulation decides the same on a fast and a slow computer (spec r15-16). Usage: NODE_PATH=$(npm root -g) node test/sim-cpu-speed.js [ticks=2000] [seed=123]
 // (SLOW_MS=0 runs the slow page at full speed too: a plain same-seed-twice check)
 // Two fresh pages boot the same world with the frame loop halted, the same seeded Math.random and a fake performance.now that moves 1 us
-// a read. Each then loads the nearest village and runs the same `ticks` 0.05 s steps (the main loop's systems, world.update every 20).
+// a read. Each then loads the nearest village and runs the same `ticks` steps of one tick (the main loop's systems, world.update every game second).
 // The "slow" page also moves its clock 2 ms every step, as a busy computer would. Anything in the simulation that reads the wall clock
 // (a cooldown in real seconds, a work budget in ms) then decides differently there, and the checksums differ. The checksum covers every
 // mob (type, position to 1/1024, health, dead), the block edits, the clock, the village sim's kept set and the village stats, plus every part
@@ -52,7 +52,7 @@ async function run(b, slowMs) {
         BF.drops.update(h); BF.boats.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h);
         BF.world.tickSim();
         if (slowMs) __clock.add(slowMs);   // a slow computer: real time passes while the step runs
-        if (i % 20 === 19) BF.world.update(v.x, v.z, 60);
+        if (i % Math.round(1 / h) === Math.round(1 / h) - 1) BF.world.update(v.x, v.z, 60);
       }
     }, [v, Math.min(per, TICKS - done), slowMs]);
   }
@@ -67,7 +67,7 @@ async function run(b, slowMs) {
     const out = {};
     for (const k in parts) out[k] = fnv(parts[k]);
     if (BF.stateHash) for (const [k, h] of Object.entries(BF.stateHash.parts())) out['stateHash ' + k] = h;   // r15-24's whole-world hash, part by part
-    return { parts: out, mobs: BF.mobs.list.length, villagers: BF.mobs.list.filter(m => m.type === 'villager').length, edits: BF.world.edits.size, t: BF.simNow() };
+    return { parts: out, mobs: BF.mobs.list.length, villagers: BF.mobs.list.filter(m => m.type === 'villager').length, edits: BF.world.edits.size, t: BF.simNow(), tick: BF_TK };
   });
   await pg.close();
   return r;
@@ -81,7 +81,7 @@ async function run(b, slowMs) {
   console.log('fast', JSON.stringify(fast));
   const slow = await run(b, +(process.env.SLOW_MS || 2));
   console.log('slow', JSON.stringify(slow));
-  ok('the run simulated villagers', fast.villagers > 0 && Math.abs(fast.t - TICKS * 0.05) < 1e-6, { villagers: fast.villagers, t: fast.t });
+  ok('the run simulated villagers', fast.villagers > 0 && Math.abs(fast.t - TICKS * fast.tick) < 1e-6, { villagers: fast.villagers, t: fast.t });
   for (const k in fast.parts) ok('same ' + k + ' on a fast and a slow computer after ' + TICKS + ' ticks', fast.parts[k] === slow.parts[k], [fast.parts[k], slow.parts[k]]);
   await b.close();
   console.log(fails ? 'FAILED: ' + fails : 'PASSED');

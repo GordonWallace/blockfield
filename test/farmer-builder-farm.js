@@ -89,14 +89,15 @@ const check = (ok, msg, extra) => { console.log((ok ? 'ok   ' : 'FAIL ') + msg +
     return out;
   }, setup);
   const h = BF_TK, total = Math.round(DAYS * 1200 / h), kinds = {}, seq = [];
-  for (let s = 0; s < total; s += 4000) {
+  const BATCH = Math.round(200 / h);   // 200 game s a batch: the village-life log keeps its last 300 lines, so read it often enough
+  for (let s = 0; s < total; s += BATCH) {
     const k = await pg.evaluate(([n, h, v]) => {
-      for (let i = 0; i < n; i++) { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); if (i % 50 === 0) BF.world.update(v.x, v.z, 4); }
+      for (let i = 0; i < n; i++) { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); if (i % Math.round(2.5 / h) === 0) BF.world.update(v.x, v.z, 4); }
       const out = { seq: [] };
       for (const e of BF.villageLife.log.splice(0)) {
         if (e.kind === 'project' || e.kind === 'bedDone' || e.kind === 'bedDropped') out.seq.push(e.who + '|' + e.kind + ':' + e.plan); const kk = e.kind + (e.plan ? ':' + e.plan : '') + (e.built ? ':built' : '') + (e.why ? ':' + e.task + ':' + e.why : ''); out[kk] = (out[kk] || 0) + 1; }
       return out;
-    }, [Math.min(4000, total - s), h, setup.v]);
+    }, [Math.min(BATCH, total - s), h, setup.v]);
     if (process.env.DBG) console.log('probe', s, JSON.stringify(await soil()), await pg.evaluate(S => { const R = BF.mobs.list.find(m => m.village && m.village.key === S.key).village; return BF.builder.builtOf(R).length + ' ' + BF.builder.builtOf(R).map(e => e.id + e.type).join(','); }, setup));
     for (const kk in k) if (kk === 'seq') seq.push(...k.seq); else kinds[kk] = (kinds[kk] || 0) + k[kk];
   }
