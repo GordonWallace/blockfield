@@ -973,7 +973,7 @@ function renderBudget(b) {
   bar.className = on && leave != null && b.used >= leave ? "hot" : on && join != null && b.used >= join ? "mid" : "";
   for (const [id, v] of [["b-budget-join", join], ["b-budget-leave", leave]]) { $(id).hidden = !on || v == null; if (on && v != null) $(id).style.left = Math.min(99, v * 100) + "%"; }
   const set = b.peak != null ? b.peak * b.villages : null;
-  $("c-budget-more").textContent = [on ? (b.peak != null ? `busiest hour of the last day: ${pc(b.peak)} a village, about ${pc(set)} for these ${b.villages}` : "busiest hour: not measured yet (a whole day first)") : null,
+  $("c-budget-more").textContent = [on ? (b.peak != null ? `busiest hour of the last day${b.peakHour != null ? " (game hour " + b.peakHour + ")" : ""}: ${pc(b.peak)} a village, about ${pc(set)} for these ${b.villages}` : "busiest hour: not measured yet (a whole day first)") : null,
     `${b.fps} fps`, on ? `memory ${b.memMB} MB` : null, on ? (b.reach > 0 ? `within ${b.reach} blocks` : "no distance limit") : null].filter(Boolean).join(" \u00B7 ");
   if (b.auto != null && b.auto !== vAuto) $("c-vauto-st").textContent = "";
   vAuto = b.auto !== false;

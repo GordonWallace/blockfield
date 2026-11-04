@@ -70,5 +70,29 @@ A.reset();
 ok("reset forgets the day", A.peak() == null);
 A.load(s);
 ok("state() and load() carry the hours", A.peak() != null && Math.abs(A.peak() - 0.15) < 0.01, A.peak());
+// Gordon, 2026-11-03: "2069% expected in the day's busiest hour" with 24 villages at 69%. A slice with a lot of work and little game time
+// (a world loading, the set's newcomers loading their chunks) used to set the hour's share by its own ratio
+const before = A.peak();
+for (let f = 0; f < 4; f++) { clock += 0.005; realMs += 250; A.frame(1000, 0.25); }   // one second: 4 s of work, 20 ms of game time
+run(60, false);
+ok("a stalled second (much work, little game time) adds only its real cost to the hour", Math.abs(A.peak() - before) < 0.02, { before, after: A.peak() });
+// a set that just changed: its newcomers load (5 times the work for 20 s) while the count is new; left out of the hours
+const n1 = base.size + A.extras().length;
+base.set("200,200", { v: null, keys: [] });
+for (let i = 0; i < 20; i++) for (let f = 0; f < 4; f++) {
+  clock += 0.25; realMs += 250;
+  const g = sky.day + sky.time + 0.25 / DAY; sky.day = Math.floor(g); sky.time = g - sky.day;
+  A.frame(each(sky.time) * (n1 + 1) * 250 * 5, 0.25);
+}
+run(60, false);
+ok("the loading just after the set changes isn't counted in the busiest hour", Math.abs(A.peak() - before) < 0.02, { before, after: A.peak() });
+base.delete("200,200");
+// and a busiest hour far beyond the share now (a day measured with a bad hour in it) is capped at 4 times the share per village now
+const bad = JSON.parse(JSON.stringify(A.state()));
+for (const [, b] of bad.hours) { b.sim *= 50; break; }
+A.load(bad);
+const e = A.expect(0.69, 24);
+ok("one bad hour can't make a join wait on many times the real load: capped at 4 times the share now", e.raw > 4 * 0.69 / 24 && Math.abs(e.p - 4 * 0.69 / 24) < 1e-9 && e.want <= 4 * 0.69 + 1e-9, e);
+ok("the card names the busiest hour when it decides", A.expect(0.2, 4).hour >= 0 && A.expect(0.2, 4).hour < 24, A.expect(0.2, 4));
 if (fails) { console.log(`FAIL ${fails} check(s)`); process.exit(1); }
 console.log("PASS budget-peak");

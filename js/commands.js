@@ -474,8 +474,13 @@ def("time", {
       if (a.length !== 2) usage("time");
       const n = norm(a[1]);
       const t = own(TIME_NAMES, n) != null ? TIME_NAMES[n] : parseTicks(a[1]);
-      S.setTime((t % 24000) / 24000);
-      return `Set the time to ${t % 24000}`;
+      // The clock only moves forward, like sleeping: a time of day already past today is tomorrow's, so the day counter moves on and
+      // the game log reads in order (setting the current time exactly changes nothing).
+      const target = t % 24000, now = (S.time || 0) * 24000, from = (S.day || 0) + (S.time || 0);
+      if (target < now) S.day = (S.day || 0) + 1;
+      S.setTime(target / 24000);
+      if (BF.glog) BF.glog.log("INFO", "command", `/time set ${a[1]}: day ${from.toFixed(3)} -> day ${((S.day || 0) + target / 24000).toFixed(3)}`);
+      return `Set the time to ${target}`;
     }
     if (sub === "add") {
       if (a.length !== 2) usage("time");

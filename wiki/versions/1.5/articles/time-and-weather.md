@@ -67,4 +67,4 @@ Before 1.5 a tick was 0.05 seconds, 20 a second. Everything in the world is reck
 
 ## Commands
 
-`/time set` jumps the clock, `/time add` moves it on and `/weather` switches the weather; see [[page:commands]].
+`/time set` jumps the clock forward (to tomorrow if that time of day has already passed), `/time add` moves it on and `/weather` switches the weather; see [[page:commands]].
