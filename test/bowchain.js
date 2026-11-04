@@ -83,6 +83,9 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
       for (const n of WATCH) {
         let t = 0;
         for (const m of ms) t += BF.trades.inv.count(m.inv, I[n]);
+        // (and the materials of a craft in progress: the fletcher takes them when it starts, and its arrows count once finished; a craft started
+        // before the measured run would otherwise make arrows from feathers the start never counted)
+        for (const m of ms) if (m.flt && m.flt.craft && Array.isArray(m.flt.craft.mats)) for (const e of m.flt.craft.mats) if (e.id === I[n]) t += e.n;
         for (const c of BF.inventory.chests.values()) if (Math.hypot(c.pos.x - cx, c.pos.z - cz) < 80) for (const s of c.slots) if (s && s.id === I[n]) t += s.count;
         out[n] = t;
       }
@@ -95,9 +98,10 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
       const key = globalThis.__rec.key = Math.round(v.x) + ',' + Math.round(v.z);
       BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
       const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-      for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(BF_TK); }
+      const K = Math.max(1, Math.round(BF_TK / 0.05));   // (a step every K loads: the same game time as 0.05 s ticks, so nobody trades or crafts before the count starts)
+      for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % (4 * K) === 0) step(BF_TK); }
       BF.sky.setTime(0.02);
-      for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(BF_TK); }
+      for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); if (i % K === 0) step(BF_TK); }
       const profs = {};
       for (const m of BF.mobs.list) if (m.type === 'villager' && m.village && m.village.key === key && !m.dead) profs[m.profession] = (profs[m.profession] || 0) + 1;
       return { key, pop: v.pop, profs };
@@ -143,7 +147,7 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
     }, FLOCK);
     if (setup.gravelPlaced < GRAVEL) setup = { err: 'room for only ' + setup.gravelPlaced + ' of ' + GRAVEL + ' surface gravel by village ' + setup.key };
     else if (setup.flock < FLOCK) setup = { err: 'the poultry keeper\'s coop by village ' + setup.key + ' took in only ' + setup.flock + ' of ' + FLOCK + ' chickens' };
-    else await sim(pg, () => { const R = globalThis.__rec; R.lines.length = 0; R.restock.length = 0; R.buys = {}; R.gravel = 0; R.start = globalThis.__total(); R.startBy = globalThis.__featherBy(); });
+    else await sim(pg, () => { const R = globalThis.__rec; R.lines.length = 0; R.restock.length = 0; R.buys = {}; R.gravel = 0; R.start = globalThis.__total(); R.startBy = globalThis.__featherBy(); R.startCraft = BF.mobs.list.filter(m => m.flt && m.flt.craft).map(m => m.id + ':' + BF.items[m.flt.craft.id].name); });
   }
   if (setup.err) { console.log('FAIL ' + setup.err); await pg.done(); await b.close(); process.exitCode = 1; return; }
   console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: ${JSON.stringify(setup.profs)}, surface gravel ${setup.gravelPlaced}, coop ${setup.flock} chickens`);
@@ -184,6 +188,7 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
   const bought = n => Object.entries(R.buys).filter(([k]) => k.startsWith(n + ' ')).reduce((t, [, v]) => t + v, 0);
   const ok = (name, cond, extra) => console.log((cond ? 'PASS ' : 'FAIL ') + name + (extra !== undefined ? '  ' + JSON.stringify(extra) : ''));
   console.log('start', JSON.stringify(R.start), 'end', JSON.stringify(R.end));
+  console.log('crafts in progress at the start', JSON.stringify(R.startCraft || []));
   console.log('feathers at the start', JSON.stringify(R.startBy), 'at the end', JSON.stringify(R.endBy));
   console.log('made', JSON.stringify({ arrows, bows, spun, culledFeathers }), 'coops', JSON.stringify(R.poultry));
   console.log('fletcher', JSON.stringify(R.fletcher));
