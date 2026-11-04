@@ -524,11 +524,13 @@ function handover() {
   const byDest = Array.from({ length: CW.n }, () => []);
   for (const m of mineOut) byDest[CW.owners.get(groupOf(m)) || 0].push(m);
   const out = byDest.map(ms => (ms.length ? JSON.stringify([ms.map(m => m.id), R.encMany(ms.map(whole))]) : ""));
+  const tEnc = now() - t0;
   const cout = Array.from({ length: CW.n }, () => null);
   if (carried) { for (const [name, h] of carries) for (const [d, data] of h.give(ownerOf)) (cout[d] || (cout[d] = {}))[name] = data; noteOwners(); }
   T.moved += moves.length;
   const all = xchange("handover", JSON.stringify([out, cout]));
   T.exchange += now() - t0;
+  const t1 = now();
   const got = [], cin = [];
   R.atLater(() => { for (let w = 0; w < all.length; w++) if (w !== CW.me) {
     const [o, c] = JSON.parse(all[w]), part = o[CW.me];
@@ -540,8 +542,13 @@ function handover() {
   refillAll(pairs, fresh);
   for (const c of cin) for (const name in c) { const h = carries.get(name); if (h) h.take(c[name]); }   // (after the mobs: a bee follows one)
   if (BF.regions) BF.regions.tick();
-  if (!moves.length) return;
-  const per = (now() - t0) / moves.length;   // (ms a mob handed over, for the plan: the first worker's goes to all at the next swap)
+  // ms a mob handed over, for the plan (the first worker's goes to all at the next swap): what this worker spent encoding the mobs it
+  // sent and decoding and refilling the ones it got, over those mobs. Not the exchange: that is mostly waiting for the busiest worker,
+  // and over the few mobs a meeting moves (those crossing the player's reach) it came to 10-27 ms a mob against about 0.5, so the
+  // plan never moved a group (laptop 2026-11-04: at 100x the first worker idled at 40% while the others ran 85-95%)
+  const n = mineOut.length + pairs.length;
+  if (!n) return;
+  const per = (tEnc + (now() - t1)) / n;
   handOwn = handOwn === null ? per : handOwn + SMOOTH * (per - handOwn);
 }
 // a mob's own fields as a plain object (the codec writes the mob itself as a reference); refill: a stale copy made the sent one
