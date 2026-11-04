@@ -663,6 +663,7 @@ function holdChunk(cx, cz) {
   const RJ = BF.rworkers && BF.rworkers.journal ? BF.rworkers : null;
   if (RJ) RJ.rec(["cb", cx, cz]);   // (the followers build it now too)
   const c = buildChunk(cx, cz), e = world.edits.get(key);
+  if (BF.skyLight && BF.skyLight.prepare) BF.skyLight.prepare(c);   // (its own sky light now too: installing it only seeds its borders)
   heldEdits.set(c, e ? [...e] : null);
   heldChunks.set(key, c);
 }
