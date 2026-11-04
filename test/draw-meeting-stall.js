@@ -1,7 +1,7 @@
 // @ci integration suite=world timeout=300
 // The page's drawing clock through cluster workers' meetings (r15-95, js/protocol.js world.draw / place, js/mobview.js settle). Gordon,
 // 2026-11-04: at 1x the mobs visibly stop at every meeting. Plain node: a client end of the protocol gets the entities of mobs walking
-// at a steady 1 block a second, one tick every 50 ms, except that every 160 ticks (a meeting) no tick comes for STALL ms and the ticks
+// at a steady 1 block a second, one tick per tick length (50 ms at 0.05 s ticks), except that every 8 game seconds (a meeting) no tick comes for STALL ms and the ticks
 // then go on from there (the time is lost: no catch-up), and the page draws 60 frames a second, as js/main.js does. Checks:
 //  - a mob walking straight is never drawn standing still for more than 2 frames in a row (before: about 400 ms at each meeting);
 //  - it is never drawn moving faster than 1.6 times its speed, or backwards;
@@ -14,6 +14,7 @@ for (const k of ['log', 'info', 'debug', 'warn']) console[k] = () => {};
 const { BF } = load();
 const out = s => process.stdout.write(s + '\n');
 const STALL = +(process.argv[2] || 500);
+const TK = BF.warp && BF.warp.TICK > 0 ? BF.warp.TICK : 0.05;   // the simulation's tick length (s)
 let fails = 0;
 const check = (ok, what) => { out((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) fails++; };
 const P = BF.proto;
@@ -33,9 +34,9 @@ performance.now = () => fake;
 function runFake(speed, seconds, turnBack) {
   const C = P.connect(() => {}), M = C.world;
   const send = m => C.receive(P.encode(m));
-  send({ t: 'hello', version: P.VERSION });
+  send({ t: 'hello', version: P.VERSION, tickLen: TK });
   let tick = 0, x = 0, dir = 1, simAt = 0;
-  const tickMs = 50 / speed;
+  const tickMs = TK * 1000 / speed, PER_S = Math.round(1 / TK), MEET = Math.round(8 / TK);   // (this build's tick length, idea-049)
   send({ t: 'clock', tick, day: 0, time: 0.3, speed, frozen: false, achieved: speed });
   send({ t: 'entities', tick, add: [{ n: 1, kind: 'mob', s: { type: 'villager', x, y: 64, z: 0, yaw: 0, headYaw: 0, headPitch: 0, walkPhase: 0, walkAmt: 1, age: 0, deathT: 0, fuse: 0, swingT: 0, doorT: 0 } }], set: [], gone: [] });
   const r1 = M.entities.get(1), o = { x: 0, z: 0 }, xs = [];
@@ -44,14 +45,14 @@ function runFake(speed, seconds, turnBack) {
   for (let now = 0; now < seconds * 1000; now += FR) {
     while (simAt <= now) {
       fake = simAt;
-      tick++; x += 0.05 * dir;
+      tick++; x += TK * dir;
       send({ t: 'entities', tick, add: [], set: [{ n: 1, s: { x, walkPhase: tick * 0.3, age: tick } }], gone: [] });
-      if (tick % 20 === 0) send({ t: 'clock', tick, day: 0, time: 0.3, speed, frozen: false, achieved: speed * 0.92 });
+      if (tick % PER_S === 0) send({ t: 'clock', tick, day: 0, time: 0.3, speed, frozen: false, achieved: speed * 0.92 });
       simAt += tickMs;
-      if (tick % 160 === 0) { simAt += STALL * (speed > 2 ? 0.1 : 1); meetings++; if (turnBack && meetings === turnBack) dir = -1; }
+      if (tick % MEET === 0) { simAt += STALL * (speed > 2 ? 0.1 : 1); meetings++; if (turnBack && meetings === turnBack) dir = -1; }
     }
     fake = now;
-    M.draw(FR / 50 * speed, FR / 1000);
+    M.draw(FR / (TK * 1000) * speed, FR / 1000);
     drawn(M, r1, o);
     xs.push([now, o.x]);
     const behind = (M.tick - M.rt) * tickMs;
