@@ -478,6 +478,8 @@ function follower(post) {
       case "open": CWk().open = true; views.clear(); break;   // (the leader's meeting tick follows: then this one may run ahead)
       case "p": host.receive(o[1]);   /* (queries too: answering F3 or the debug screen works out things lazily that the world keeps, a poultry keeper's task state with a roll of its own) */ if (o[2]) setPlayer(o[2]); break;
       case "c": BF.world.replay.create(o[1], o[2]); break;
+      case "cb": BF.world.replay.hold(o[1], o[2]); break;   // (a chunk the leader holds for the meeting: built now, while this one waits for the leader's ticks, js/world.js holdChunk)
+      case "cbx": BF.world.replay.heldDone(); break;
       case "ug": BF.world.replay.drops(o[1]); break;
       case "d": BF.world.replay.extendDown(o[1], o[2], o[3]); break;
       case "v": RW.clock = o[3]; BF.villageSim.update(o[1], o[2]); break;

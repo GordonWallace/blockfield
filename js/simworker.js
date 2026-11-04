@@ -44,7 +44,11 @@ function boot(o) {
   // environment or the page's ?workers=. A browser's worker has none (r15-77)
   const spawn = self.BF_REGION_SPAWN || null;
   const nw = BF.rplay.setup({ workers: o.workers || self.BF_WORKERS, split: o.split || self.BF_SPLIT, kind: o.kind, verify: o.verify, cores: self.BF_CORES || (self.navigator && navigator.hardwareConcurrency), spawn, three: o.three });
-  BF.on("worldRestored", (data, meta) => { if (loadingWorld) BF.rplay.begin({ op: "load", data, meta, rivers: riverSt }); });   // (a saved world: right as it is restored)
+  BF.on("worldRestored", (data, meta) => {   // (a saved world: right as it is restored)
+    if (!loadingWorld) return;
+    startSpeed();
+    BF.rplay.begin({ op: "load", data, meta, rivers: riverSt });
+  });
   BF.glog.log("INFO", "worker", "Simulation worker loaded: " + BF.SIM_FILES.length + " files in " + Math.round(performance.now() - t0) + " ms" + (nw > 1 ? "; " + nw + " region workers per world" : ""));
   for (const p of early.splice(0)) sim.receive(p);
   post({ ready: true });
@@ -63,11 +67,20 @@ function rivers(seed, st) {
   return (BF.worker.replayed = !!BF.worldgen.adoptRivers(st));
 }
 // js/save.js load() asks for the rivers first (the page's loading screen, BF.prepareWorld); here they come with the world message
-let riverSt = null, pageRivers = null;
+let riverSt = null, pageRivers = null, wantSpeed = null;
+// The world starts at the page's speed (js/simhost.js sends it): restoring it reset the speed to 1x, and the page's own speed message
+// comes only after the op is answered, so a page frozen for the load saw its world run some ticks at 1x first (a planet-saves CI flake:
+// the mobs had moved off their saved spots). Called straight after newWorld / restore, before the loop runs a tick.
+function startSpeed() {
+  const W = BF.warp, sp = wantSpeed, i = sp ? W.SPEEDS.indexOf(sp) : -1;
+  wantSpeed = null;
+  if (sp === 0) W.freeze(); else if (i > 0) W.set(i);
+}
 function worldOp(op, a) {
   // the world server (r15-41, server/simthread.js): the world held paused since its page closed, picked again: it goes on as it is
   if (op === "load" && BF.worker.held && BF.save.current && BF.save.current.id === a.id) return BF.worker.held(a);
   BF.worker.held = null;
+  wantSpeed = op === "demo" ? null : a.speed;
   const t0 = performance.now();
   riverSt = (a.rivers && pageRivers && pageRivers.seed === a.rivers ? pageRivers : null) || (BF.worker.rivers ? BF.worker.rivers() : null);   // (the world server's cache, server/simthread.js)
   pageRivers = null;
@@ -81,6 +94,7 @@ function worldOp(op, a) {
     const o = a.opts || {};
     const replayed = rivers(a.seed, riverSt);
     BF.newWorld(a.seed, o);
+    startSpeed();
     if (op === "demo") { BF.rplay.end(); S.current = null; started("Title screen world seed " + BF.state.seed + " started"); return { seed: BF.state.seed, rivers: replayed }; }
     BF.rplay.begin({ op: "create", seed: a.seed, opts: o, rivers: riverSt });   // (region workers: the followers make the same world)
     S.current = a.meta;

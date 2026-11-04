@@ -3562,8 +3562,12 @@ BF.mobs = {
     BF.world.onChunkUnload((cx, cz) => {
       const k = cx + "," + cz, inChunk = m => cellOf(m) === k;
       const cur = dropping && dropping.ks.has(k) ? dropping.cur : partial() ? BF.cworkers.fetch(list, m => !m.removed && inChunk(m)) : null;
-      for (let i = list.length - 1; i >= 0; i--) {
-        const m = list[i];
+      // (a batch of chunks: the mobs sorted by chunk once, js/world.js chunkBucket; each still in the list and in this chunk, last first)
+      const b = BF.world.chunkBucket("mobs", add => { for (const m of list) { const c = cellOf(m), i = c.indexOf(","); add(+c.slice(0, i), +c.slice(i + 1), m); } });
+      const some = b ? b.get(k) || [] : list;
+      for (let i = some.length - 1; i >= 0; i--) {
+        const m = some[i];
+        if (b && m.removed) continue;
         if (cur ? cur.has(m) && inChunk(m) : inChunk(m)) { if (BF.wildlife && isWild(m)) BF.wildlife.stow(m); removeMob(m); }   // a wild mob is stored with its chunk (js/wildlife.js)
       }
       for (let i = arrows.length - 1; i >= 0; i--) {
