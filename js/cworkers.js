@@ -523,32 +523,36 @@ function handover() {
   // (each to its new owner only: the others keep their stale copies, as for any mob they don't run)
   const byDest = Array.from({ length: CW.n }, () => []);
   for (const m of mineOut) byDest[CW.owners.get(groupOf(m)) || 0].push(m);
+  const tE = now();
   const out = byDest.map(ms => (ms.length ? JSON.stringify([ms.map(m => m.id), R.encMany(ms.map(whole))]) : ""));
-  const tEnc = now() - t0;
+  let tMob = now() - tE;   // (encoding this worker's mobs, then decoding and refilling the ones it got: for handMs below)
   const cout = Array.from({ length: CW.n }, () => null);
   if (carried) { for (const [name, h] of carries) for (const [d, data] of h.give(ownerOf)) (cout[d] || (cout[d] = {}))[name] = data; noteOwners(); }
   T.moved += moves.length;
   const all = xchange("handover", JSON.stringify([out, cout]));
   T.exchange += now() - t0;
-  const t1 = now();
   const got = [], cin = [];
   R.atLater(() => { for (let w = 0; w < all.length; w++) if (w !== CW.me) {
     const [o, c] = JSON.parse(all[w]), part = o[CW.me];
-    if (part) { const [ids, e] = JSON.parse(part); got.push([w, ids, R.decAll(e)]); }
+    if (part) { const td = now(); const [ids, e] = JSON.parse(part); got.push([w, ids, R.decAll(e)]); tMob += now() - td; }
     if (c && c[CW.me]) cin.push(c[CW.me]);
   } });
   const pairs = [], fresh = new Set();
   for (const [w, ids, [os, made]] of got) { for (const x of made) fresh.add(x); ids.forEach((id, i) => { const m = BF.ids.live(id); if (m) pairs.push([m, os[i]]); else err("worker " + w + " handed over mob " + id + ", which this worker doesn't have"); }); }
+  const tr = now();
   refillAll(pairs, fresh);
+  tMob += now() - tr;
   for (const c of cin) for (const name in c) { const h = carries.get(name); if (h) h.take(c[name]); }   // (after the mobs: a bee follows one)
   if (BF.regions) BF.regions.tick();
   // ms a mob handed over, for the plan (the first worker's goes to all at the next swap): what this worker spent encoding the mobs it
-  // sent and decoding and refilling the ones it got, over those mobs. Not the exchange: that is mostly waiting for the busiest worker,
-  // and over the few mobs a meeting moves (those crossing the player's reach) it came to 10-27 ms a mob against about 0.5, so the
-  // plan never moved a group (laptop 2026-11-04: at 100x the first worker idled at 40% while the others ran 85-95%)
+  // sent and decoding and refilling the ones it got, over those mobs, and only from a handover of HAND_MIN mobs or more. Not the
+  // exchange (mostly waiting for the busiest worker), nor what every handover costs once (the codec's refs, the regions, the carried
+  // tables): over the few mobs a meeting moves with far in-view villages on followers (those crossing the player's reach) they came to
+  // 5-27 ms a mob against about 0.5, so the plan never moved a group (laptop 2026-11-04: at 100x the first worker idled at 40% while the
+  // others ran 85-95%)
   const n = mineOut.length + pairs.length;
-  if (!n) return;
-  const per = (tEnc + (now() - t1)) / n;
+  if (n < HAND_MIN) return;
+  const per = tMob / n;
   handOwn = handOwn === null ? per : handOwn + SMOOTH * (per - handOwn);
 }
 // a mob's own fields as a plain object (the codec writes the mob itself as a reference); refill: a stale copy made the sent one
@@ -615,6 +619,7 @@ const kids = (v, fn) => { if (Array.isArray(v)) { for (let i = 0; i < v.length; 
 // and keeps whichever costs less. With full copies a move costs nothing, so the plain plan wins unless the other is as good. Each
 // worker's load starts from its measured time outside the groups (base), so the first worker's extra work is counted as it is.
 const SMOOTH = 0.3, HORIZON = 4;
+const HAND_MIN = 20;   // (handover() measures handMs only on a handover of this many mobs or more on this worker)
 let est = new Map(), smooth = new Map(), handMs = 0.5, handOwn = null, base = [];   // (base: each worker's smoothed time outside groups)
 function plan(groups) {
   const prev = CW.owners;
