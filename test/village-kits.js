@@ -177,7 +177,7 @@ module.exports = async (pg) => {
       ok("farmer without a hoe or bucket wants one", !!BF.villageLife.toolNeed(fm));
       ok("toolsmith is a seller", !!BF.villageLife.findToolSeller(fm, BF.villageLife.toolNeed(fm)));
       const t0 = BF.sky.time;
-      for (let k = 0; k < 240 && BF.villageLife.toolNeed(fm); k++) run(0.5);
+      for (let k = 0; k < 720 && BF.villageLife.toolNeed(fm); k++) run(0.5);   // up to 6 game minutes: a toolsmith out walking can take a buyer two tries (60 s each, js/villagelife.js shopAI) to catch
       const hoe = fm.inv.find(s => s && /_hoe$/.test(BF.items[s.id].name));
       ok("farmer bought a bucket too", T.inv.count(fm.inv, I.bucket) + T.inv.count(fm.inv, I.water_bucket) > 0, names(fm.inv));
       ok("farmer bought a hoe", !!hoe, hoe ? BF.items[hoe.id].name : { prof: fm.profession, need: !!BF.villageLife.toolNeed(fm), inv: names(fm.inv), shop: fm.fshop && { stage: fm.fshop.stage, cd: fm.fshop.cd, checkT: fm.fshop.checkT, avoid: fm.fshop.avoid }, now: BF.sky.day + BF.sky.time, mode: fm.ai && fm.ai.mode, st: fm.st || null, ts: { prof: ts.profession, d: ts.position.distanceTo(fm.position), sleeping: ts.sleeping, hoes: T.inv.count(ts.inv, I.iron_hoe), offers: (ts.trades || []).map(o => BF.items[o.sell.id].name) }, log: BF.villageLife.log.slice(-5) });

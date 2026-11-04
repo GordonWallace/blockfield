@@ -79,8 +79,8 @@ module.exports = async (pg) => {
     for (let i = 0; i < 300; i++) { BF.world.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
     P.invulnerable = true;
     BF.sky.setTime(0.05);
-    for (let t = 0; t < 8; t += 0.05) step();
-    for (let k = 0; k < 120 && !((BF.mobs.villages.get(V.x + "," + V.z) || { members: [] }).members.some(m => m.profession === "shepherd")); k++) { BF.world.update(V.x, V.z, 8); for (let t = 0; t < 0.5; t += 0.05) step(); }
+    for (let t = 0; t < 8; t += BF_TK) step();
+    for (let k = 0; k < 120 && !((BF.mobs.villages.get(V.x + "," + V.z) || { members: [] }).members.some(m => m.profession === "shepherd")); k++) { BF.world.update(V.x, V.z, 8); for (let t = 0; t < 0.5; t += BF_TK) step(); }
     const rec = BF.mobs.villages.get(V.x + "," + V.z);
     const shep = rec && rec.members.find(m => m.type === "villager" && m.profession === "shepherd");
     const farmer = rec && rec.members.find(m => m.type === "villager" && m.profession === "farmer" && m.jobsite);

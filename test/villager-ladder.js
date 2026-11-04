@@ -43,7 +43,7 @@ module.exports = async (pg, out) => {
     };
     const run = secs => {
       let top = -1e9, low = 1e9, hpLost = 0, hp = m.hp;
-      for (let t = 0; t < secs; t += 0.05) {
+      for (let t = 0; t < secs; t += BF_TK) {
         (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
         top = Math.max(top, m.position.y); low = Math.min(low, m.position.y);
         if (m.__st === "done" || m.__st === "stuck") break;
@@ -78,7 +78,7 @@ module.exports = async (pg, out) => {
     const m = BF.mobs.list.find(o => o.__test);
     m.position.set(bx + 2.5, gy + 0.01, bz + 0.5); m.vel.set(0, 0, 0);
     const go = goal => { const [x, y, z] = N.feetCell(m); const path = N.findPath(x, y, z, goal, 3000); m.ai.route = path; m.ai.ri = 0; m.ai.stuckT = 0; return path; };
-    const run = secs => { let hp = m.hp; for (let t = 0; t < secs; t += 0.05) { (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver()); if (m.__st === "done" || m.__st === "stuck") break; } return { st: m.__st, pos: N.feetCell(m), hpLost: hp - m.hp }; };
+    const run = secs => { let hp = m.hp; for (let t = 0; t < secs; t += BF_TK) { (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver()); if (m.__st === "done" || m.__st === "stuck") break; } return { st: m.__st, pos: N.feetCell(m), hpLost: hp - m.hp }; };
     const res = { top: gy + 6 };
     const up = go({ x: bx, z: bz, at: (x, y, z) => x === bx && z === bz && y === gy + 6 });
     res.upLen = up && up.length;
@@ -89,7 +89,7 @@ module.exports = async (pg, out) => {
   // mid-climb: look at the villager on the ladder from a few blocks away
   const climber = await lib.sim(pg, () => {
     const P = globalThis.__pillar, m = BF.mobs.list.find(o => o.__test);
-    for (let t = 0; t < 3.2 && m.position.y < P.gy + 2.5; t += 0.05) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
+    for (let t = 0; t < 3.2 && m.position.y < P.gy + 2.5; t += BF_TK) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
     return [m.position.x, m.position.y, m.position.z];
   });
   await pg.evaluate(([P, m]) => {

@@ -16,7 +16,7 @@ module.exports = async (pg) => {
   const helpers = () => lib.sim(pg, () => {
     const step = (h = BF_TK) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.boats) BF.boats.update(h); BF.world.tickSim(); };
     globalThis.IDT = {
-      run: sec => { for (let t = 0; t < sec; t += 0.05) step(); },
+      run: sec => { for (let t = 0; t < sec; t += BF_TK) step(); },
       load: async (x, z) => {
         BF.player.teleport(x + 0.5, BF.worldgen.heightAt(Math.floor(x), Math.floor(z)) + 2, z + 0.5);
         for (let i = 0; i < 400 && !BF.world.isLoaded(x, z); i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); }

@@ -73,7 +73,7 @@ module.exports = async (pg, out) => {
     BF.mobs.spawning = false;
     for (let i = 0; i < 400 && !BF.world.isLoaded(gx, gz); i++) { BF.world.update(gx, gz, 8); await new Promise(r => setTimeout(r, 10)); }
     BF.drops.spawn(BF.I.cobblestone, 7, gx + 0.5, gy + 2, gz + 0.5, { pickupDelay: 999 });
-    for (let t = 0; t < 20; t += 0.05) BF.drops.update(BF_TK);
+    for (let t = 0; t < 20; t += BF_TK) BF.drops.update(BF_TK);
     await BF.save.saveNow();
     BF.drops.clear();
   });
