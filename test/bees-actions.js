@@ -244,8 +244,11 @@ module.exports = async (pg) => {
     BF.inventory.clear(); BF.inventory.setSlot(0, { id: B.poppy, count: 1 }); BF.inventory.select(0);
     BF.player.teleport(hb2.x + 1.5, hb2.y + 0.1, hb2.z + 1.5);
     let fol = 0;   // stand near a bee of that hive that is out (they may all be off at flowers): within 8 blocks it comes over
-    for (let i = 0; i < 1200 && !(fol = BE.list.filter(b => b.follow && b.follow.who === "player").length); i++) {
-      if (i % 100 === 0) { const b = BE.out(hb2)[0]; if (b) BF.player.position.set(b.x + 2, Math.max(b.y - 1.3, W.heightAt(b.x + 2, b.z) + 1), b.z); }
+    // Each second the next bee out that is free to follow (not on its way in, not angry), 2 blocks from it: the first one out could be
+    // heading home, and with only two or three out the rest were often 9-12 blocks off, past FOLLOW_R (a CI flake, #746)
+    const freeOut = () => BE.out(hb2).filter(b => !b.gone && b.mode !== "home" && !(b.angry > BF.simNow()));
+    for (let i = 0, k = 0; i < 1200 && !(fol = BE.list.filter(b => b.follow && b.follow.who === "player").length); i++) {
+      if (i % 20 === 0) { const bs = freeOut(), b = bs[k++ % Math.max(1, bs.length)]; if (b) BF.player.position.set(b.x + 2, Math.max(b.y - 1.3, W.heightAt(Math.floor(b.x + 2), Math.floor(b.z)) + 1), b.z); }
       step();
     }
     for (let i = 0; i < 40; i++) step();
@@ -283,7 +286,8 @@ module.exports = async (pg) => {
     }
     BE.housekeeping();
     const homes = BE.loadedHomes(), have = homes.reduce((n, h) => n + h.bees, 0), allowed = homes.reduce((n, h) => n + h.allow, 0);
-    const byDist = homes.slice().sort((a, b) => a.dist - b.dist), firstShut = byDist.findIndex(h => h.allow < h.bees);
+    const pd = h => BF.planet.distance(h, BF.player.position);   // (as housekeeping measures it: a home doesn't keep its distance, js/bees.js)
+    const byDist = homes.slice().sort((a, b) => pd(a) - pd(b)), firstShut = byDist.findIndex(h => h.allow < h.bees);
     const nearestFirst = firstShut >= 0 && byDist.slice(firstShut + 1).every(h => h.allow === 0);
     ok("with more than 600 bees to share, the allowances add up to exactly 600, nearest homes first", have > BE.CAP && allowed === BE.CAP && nearestFirst,
       { have, allowed, homes: homes.length, extra: extra.length, shut: byDist.filter(h => h.allow === 0).length });
