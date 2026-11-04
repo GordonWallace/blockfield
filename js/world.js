@@ -784,9 +784,25 @@ function drops(ops) {
   for (const [, k] of ops) { const c = world.chunks.get(k); if (c) cells.push([c.cx, c.cz]); }
   const ends = [];
   for (const fn of dropL) { const e = fn(cells); if (e) ends.push(e); }
+  buckets = new Map();
   try { for (const [op, k] of ops) (op === "u" ? unload : purge)(k); }
-  finally { for (const e of ends) e(); }
+  finally { buckets = null; for (const e of ends) e(); }
 }
+// world.chunkBucket(name, build) -> chunk key -> [items], or null outside a drops batch: an unload hook that looks through a whole
+// collection for the items in its chunk (the mobs, the block entities, farmland, job sites...) sorts the collection by chunk once a batch
+// instead (build(add): add(cx, cz, item) for each item, in the collection's order), and takes its chunk's part, checking each item is
+// still there. With the player moving at view 32 a meeting drops about 370 chunks at once, and every worker ran each such hook over
+// everything for each of them: about 800 ms a meeting on Gordon's laptop (2026-11-04, r15-95), every worker waiting for the slowest.
+let buckets = null;
+world.chunkBucket = (name, build) => {
+  if (!buckets) return null;
+  let b = buckets.get(name);
+  if (!b) {
+    buckets.set(name, (b = new Map()));
+    build((cx, cz, item) => { const k = cx + "," + cz; let a = b.get(k); if (!a) b.set(k, (a = [])); a.push(item); });
+  }
+  return b;
+};
 // fn(cells) before streaming drops those chunks ([cx, cz] each; their unload hooks run next, one a chunk); it may return a function, called after
 const dropL = [];
 world.onChunkDrops = fn => dropL.push(fn);

@@ -237,6 +237,11 @@ function scanChunk(cx, cz, c) {
 }
 function unloadChunk(cx, cz) {
   const CS = BF.CS;
+  const b = BF.world.chunkBucket && BF.world.chunkBucket("regions.bes", add => { for (const key of bes.keys()) { const i = key.indexOf(","), x = +key.slice(0, i), z = +key.slice(key.lastIndexOf(",") + 1); add(Math.floor(x / CS), Math.floor(z / CS), key); } });
+  if (b) {   // (a batch of chunks: js/world.js chunkBucket)
+    for (const key of b.get(cx + "," + cz) || []) { const k = bes.get(key); if (k === undefined) continue; bes.delete(key); const s = beBy.get(k); if (s && s.delete(key) && !s.size) beBy.delete(k); }
+    return;
+  }
   for (const [key, k] of bes) {
     const i = key.indexOf(","), x = +key.slice(0, i), z = +key.slice(key.lastIndexOf(",") + 1);
     if (Math.floor(x / CS) === cx && Math.floor(z / CS) === cz) { bes.delete(key); const s = beBy.get(k); if (s && s.delete(key) && !s.size) beBy.delete(k); }
