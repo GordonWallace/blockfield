@@ -5,8 +5,11 @@
 // villages. Two child processes boot the same world (tools/headless.js: seed 3 at the village nearest the spawn, 3 more villages
 // simulated), place the same herds, and run with the cluster tick on, one in the tick order and one in the cluster order (js/ctick.js);
 // after each interval the state hash's parts must match. The herds must move, and every horse record and herd must belong to exactly
-// one cluster group at every meeting. A third child runs the same world with the cluster tick off: its herds must end where the cluster
-// tick's do (a herd moved by more than one group, or by none, drifts at another speed).
+// one cluster group at every meeting. A third child runs the same world with the cluster tick off: its herds must be where the cluster
+// tick's are after 3200 ticks (a herd moved by more than one group, or by none, drifts at another speed). It steps up to a meeting first,
+// as C.interval does, so both are at the same tick. Only so far: the horses themselves aren't the same in the two (the tick orders
+// differ), and a herd whose horses fell more than 18 blocks behind is moved back to them, in one world and not the other (the herd by
+// the village nearest the spawn, at 6400 ticks, once meetings were every 160 ticks: then the run was twice as long as at 80).
 // Usage: node test/cluster-animals.js [--seed 3] [--seconds 40]
 const { fork } = require('child_process');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
@@ -56,11 +59,11 @@ function child() {
   process.on('message', msg => {
     if (msg.do === 'interval') {
       BF.boot.stream();
-      if (off) for (let t = 0; t < C.MEET; t++) BF.simStep(BF.warp.TICK); else C.interval(BF.warp.TICK);
-      process.send({ parts: BF.stateHash.parts(), herds: H.herds.size, recs: H.records.size, owners: owners(), errors: errors.splice(0) });
+      if (off) { while (BF.rand.tick % C.MEET !== 0) BF.simStep(BF.warp.TICK); for (let t = 0; t < C.MEET; t++) BF.simStep(BF.warp.TICK); } else C.interval(BF.warp.TICK);
+      process.send({ centres: centres(), parts: BF.stateHash.parts(), herds: H.herds.size, recs: H.records.size, owners: owners(), errors: errors.splice(0) });
     } else if (msg.do === 'end') process.send({ herds0, herds1: herdText(), centres: centres() }, () => process.exit(0));
   });
-  process.send({ ready: true, herds: H.herds.size, recs: H.records.size });
+  process.send({ ready: true, meet: C.MEET, herds: H.herds.size, recs: H.records.size });
 }
 
 async function parent() {
@@ -74,7 +77,8 @@ async function parent() {
   const ready = await Promise.all(kids.map((k, i) => waits[i]()));
   console.log(`booted 2 worlds in ${((Date.now() - t0) / 1000).toFixed(0)} s: ${ready[0].herds} herds, ${ready[0].recs} horse records`);
   check(ready[0].herds >= 3, `herds placed (${ready[0].herds})`);
-  let first = 0, owned = true;
+  let first = 0, owned = true, at = null;
+  const cmpAt = Math.min(seconds, Math.ceil(3200 / ready[0].meet));   // (the interval the herds are compared after)
   for (let n = 1; n <= seconds; n++) {
     const r = await Promise.all(kids.map((k, i) => ask(i, { do: 'interval' })));
     for (const x of r) for (const e of x.errors) console.log(`  game log ERROR: ${e}`);
@@ -82,13 +86,14 @@ async function parent() {
       if (owned) console.log(`  second ${n}: ${x.owners['horses.records']} of ${x.recs} records and ${x.owners['horses.herds']} of ${x.herds} herds in a group`);
       owned = false;
     }
+    if (n === cmpAt) at = [r[1].centres, r[2].centres];
     const parts = Object.keys(r[0].parts).filter(k => r[0].parts[k] !== r[1].parts[k]);
     if (parts.length && !first) { first = n; console.log(`second ${n}: the cluster order differs in ${parts.join(', ')}`); }
   }
   const end = await Promise.all(kids.map((k, i) => ask(i, { do: 'end' })));
   check(end[0].herds0 !== end[0].herds1, 'the herds moved');
-  const a = end[0].centres, b = end[2].centres, far = a.length === b.length ? Math.max(0, ...a.map((c, i) => Math.hypot(c[0] - b[i][0], c[1] - b[i][1]))) : Infinity;
-  check(far < 0.5, `the herds ended where they do with the cluster tick off (at most ${far.toFixed(2)} blocks apart)`);
+  const [a, b] = at, far = a.length === b.length ? Math.max(0, ...a.map((c, i) => Math.hypot(c[0] - b[i][0], c[1] - b[i][1]))) : Infinity;
+  check(far < 0.5, `after ${cmpAt * ready[0].meet} ticks the herds are where they are with the cluster tick off (at most ${far.toFixed(2)} blocks apart)`);
   check(owned, 'every horse record and herd belonged to exactly one cluster group');
   check(!first, `the tick and cluster orders give the same world for ${seconds} s` + (first ? ` (differ from second ${first})` : ''));
   console.log(`${((Date.now() - t0) / 1000).toFixed(0)} s`);
