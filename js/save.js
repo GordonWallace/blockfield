@@ -19,6 +19,9 @@
 const BF = (globalThis.BF = globalThis.BF || {});
 
 const DB_NAME = "blockfield", DB_VER = 1, AUTOSAVE_S = 30, VERSION = 3;
+// while the cluster workers are split (js/cworkers.js active): a save waits for a meeting and adds about 180-260 ms to it on Gordon's
+// laptop (test4, 8 workers, r15-95), so every other meeting-sized stretch goes without (pausing, quitting and closing still save at once)
+const AUTOSAVE_SPLIT_S = 60;
 let dbp = null;
 
 function db() {
@@ -453,7 +456,7 @@ const save = {
   update(dt) {
     if (!save.current) return;
     acc += dt;
-    if (acc >= AUTOSAVE_S) { acc = 0; save.saveNow(); }
+    if (acc >= (BF.cworkers && BF.cworkers.active ? AUTOSAVE_SPLIT_S : AUTOSAVE_S)) { acc = 0; save.saveNow(); }
   },
 };
 let acc = 0;
