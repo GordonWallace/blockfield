@@ -804,6 +804,20 @@ def("autovillages", {
     return (v === "on" ? "Automatic village loading and unloading is on" : "Automatic village loading and unloading is paused: only /loadvillages, /unloadvillages and the nearest villages' distance rule change which villages run") + (changed ? "" : " (it already was)");
   },
 });
+// /detach (r15-98): the view leaves the body and flies on its own; the game keeps the player where they were (js/player.js detach).
+// /detach again (or /attach) brings it back. Also the debug screen's Mobs map button.
+def("detach", {
+  aliases: ["attach", "spectate"], usage: "/detach [on|off]", desc: "Detaches the view from the player to fly around while the game keeps you where you were; again to come back", cheat: false, page: true,
+  complete: (a, i) => (i === 0 ? ["on", "off"] : null),
+  run(a, raw) {
+    if (!BF.page || !BF.player || !BF.player.detach) fail("The view can only be detached in the game window");
+    const v = norm(a[0] || ""), alias = /^\s*attach\b/i.test(raw);
+    if (a.length > 1 || (v && v !== "on" && v !== "off")) usage("detach");
+    const P = BF.player, r = alias || v === "off" ? P.attach("command") : v === "on" ? P.detach("command") : P.toggleDetach("command");
+    if (!r.ok) fail(r.msg);
+    return r.msg;
+  },
+});
 def("say", {
   usage: "/say <message>", desc: "Broadcasts a message", cheat: false,
   run(a, raw) {
@@ -820,7 +834,7 @@ def("say", {
 // With the simulation in a worker (r15-38) it runs there (this file is loaded for it) and the answer comes back later: the page echoes
 // the command now and prints the answer when it comes; the result is then {ok: true, pending: true, done} (done: a promise of {ok, msg}).
 function execute(text) {
-  if (!BF.req || !BF.req.player) return run(text);
+  if (!BF.req || !BF.req.player || pageOnly(text)) return run(text);
   const req = BF.req.player("command", null, { text: String(text) });
   if (!req.delivered && req.then) {
     print("/" + String(text).replace(/^\//, "").trim(), "dim");
@@ -833,6 +847,13 @@ function execute(text) {
   return { ok: !!r.ok, msg: r.msg || "" };
 }
 if (BF.req) BF.req.on("command", req => run(req.data.text));
+// A command marked page (the detached view, r15-98) runs in the game page at once, wherever the simulation is: it changes only what the
+// page draws, so it is no request and never reaches the simulation (or a recording of its requests).
+function pageOnly(text) {
+  if (!BF.page) return false;
+  const name = (split(String(text).replace(/^\//, ""))[0] || "").toLowerCase(), cmd = CMDS[name] || CMDS[ALIASES[name]];
+  return !!(cmd && cmd.page);
+}
 function split(s) { return s.trim().split(/\s+/).filter(Boolean); }
 function run(text) {
   const body = String(text).replace(/^\//, "");

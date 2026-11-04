@@ -226,7 +226,7 @@ function initBees() {
   scene.add(beeMesh);
   // floating origin (js/view.js): instance positions are stored relative to the mesh, which sits on a coarse grid near the player
   if (BF.view) BF.view.onBegin(() => {
-    const p = BF.player && BF.player.position;
+    const p = BF.player && (BF.player.viewPos ? BF.player.viewPos() : BF.player.position);   // (the detached view's, r15-98)
     if (!p) return;
     const rx = Math.floor(p.x / 256) * 256, rz = Math.floor(p.z / 256) * 256;
     if (rx !== beeMesh.position.x || rz !== beeMesh.position.z) beeMesh.position.set(rx, 0, rz);

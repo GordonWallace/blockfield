@@ -46,6 +46,13 @@ For testing, `/loadvillages <count>` (see [[page:commands]]) or the **Load** but
 
 `/autovillages off` or the card's **Pause** button stops the game from adding or stopping extra villages by itself, so the villages you loaded or unloaded by hand stay as they are, however busy the simulation gets. The rules for the nearest villages, the distance limit, and loading or unloading by hand still work. The pause menu's button then ends with "automatic paused". `/autovillages on` or **Resume** turns it back on, and the rules above start measuring afresh. Pausing lasts until you resume or start the game again.
 
+### Watching from afar: the detached view
+To see how distant villages behave while you are not there, `/detach` (see [[page:commands]]) or the **Detach view** button above the debug screen's Mobs map lets your view leave your body. You fly with the usual keys and mouse (W, A, S, D, Space up, Shift down, Ctrl or R faster, and faster still high up), through blocks, while the game carries on as if you had never moved: your body stays where it was, in the air if it was flying, and which villages run, how the work is split between the simulation's workers, where mobs spawn and which chunks are loaded all go by your body. Flying over land that isn't loaded loads nothing. You still get hungry and can be hurt where your body is; dying, or loading a world or a save, brings the view back. Your body does nothing while the view is away: no mining, placing or dropping.
+
+What you see follows the view: the mobs and villagers there, if the game has them loaded, and the distant terrain. When the game runs on a worker or the world server (the usual way), the page also draws the nearby terrain round the view from its own copy of the world, without the simulation loading it. When it runs in the page itself (`?sim=page`), the page's world is the simulation's, so only land already loaded round your body is drawn up close; elsewhere you see the distant terrain only.
+
+The debug screen's Mobs map shows your body as the green arrow and the view as a blue one, each pointing the way it faces, with a dashed line between them, so you can steer by the map; **Centre** follows the view while it is detached. The line under the map says how far away the view is. `/detach` again, or the button (now **Attach view**), puts the view back at your body. Detaching and coming back are INFO lines in the game log; a detach that can't be done (on the title screen, or while dead) is an ERROR line.
+
 ## The countdown before a village stops
 When a village would stop, because you moved away, because other villages pushed it out of the nearest four, or because the simulation went over its budget, it does not stop at once. It counts down.
 

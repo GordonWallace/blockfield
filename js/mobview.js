@@ -785,7 +785,7 @@ BF.mobView = {
     M = BF.client && BF.client.world;
     if (!scene || !M) return;
     frameNo++;
-    const pp = BF.player && BF.player.position, far = (BF.world.viewDist + 1) * BF.CS;   // nothing to draw beyond the meshed terrain
+    const pp = BF.player && (BF.player.viewPos ? BF.player.viewPos() : BF.player.position), far = (BF.world.viewDist + 1) * BF.CS;   // nothing to draw beyond the meshed terrain
     for (const m of M.entities.values()) {
       if (m.kind !== "mob") continue;
       let v = views.get(m.n);

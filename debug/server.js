@@ -337,7 +337,7 @@ function serveDebug(req, res) {
       const op = o && o.op, speed = o && +o.speed, n = o && +o.n;
       const villages = (op === "villages" || op === "unload") && Number.isInteger(n) && n >= 1 && n <= 50;   // force-load the n nearest villages (r15-90: the Simulation budget card) / force-unload the n farthest (r15-93)
       const auto = op === "auto" && o && typeof o.on === "boolean";   // automatic village loading on or paused (r15-93)
-      if (op !== "faster" && op !== "slower" && !villages && !auto && !(op === "set" && Number.isFinite(speed) && speed >= 0)) { res.writeHead(400, cors()).end("no step"); return; }
+      if (op !== "faster" && op !== "slower" && op !== "detach" && !villages && !auto && !(op === "set" && Number.isFinite(speed) && speed >= 0)) { res.writeHead(400, cors()).end("no step"); return; }
       const w = { id: ++warpId, t: Date.now(), op };
       if (op === "set") w.speed = speed;
       if (villages) w.n = n;

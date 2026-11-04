@@ -421,7 +421,7 @@
       <div class="panel" id="hpanel"></div>
       <div class="panel" id="mpanel">
         <div class="ph"><h2>Mobs map</h2><span class="sub" id="m-count"></span><div class="grow"></div>
-          <div class="seg"><button id="m-zout" title="Zoom out (or the mouse wheel)">−</button><button id="m-zin" title="Zoom in (or the mouse wheel)">+</button><button id="m-center" title="Centre the map on you again">Centre</button></div><div class="seg"><button id="m-pop" title="Open the map across nearly the whole screen (Esc closes)">Pop out</button></div><div class="seg"><button id="m-regions" title="Shade the simulation regions (64 x 64 blocks) by how many mobs each holds, coloured by the worker that thinks them">Regions</button></div></div>
+          <div class="seg"><button id="m-zout" title="Zoom out (or the mouse wheel)">−</button><button id="m-zin" title="Zoom in (or the mouse wheel)">+</button><button id="m-center" title="Centre the map on you again">Centre</button></div><div class="seg"><button id="m-pop" title="Open the map across nearly the whole screen (Esc closes)">Pop out</button></div><div class="seg"><button id="m-detach" title="Detach the game's view from the player (the /detach command): fly around with the usual keys while the game keeps you where you were. The map shows you (green) and the view (blue). Click again to come back">Detach view</button></div><div class="seg"><button id="m-regions" title="Shade the simulation regions (64 x 64 blocks) by how many mobs each holds, coloured by the worker that thinks them">Regions</button></div></div>
         <div class="mapwrap"><canvas id="mmap"></canvas><div class="tip" id="mtip"></div></div>
         <div class="mleg" id="m-rlegend" hidden title="With Regions on: each region coloured by the worker its mobs think on, striped when they think on several (a village's mobs go with their village wherever they stand, the wild ones with their region); each village is outlined in its worker's colour. The busy share is the worker's thread, as on the Threads card"></div>
         <div class="mleg"><div class="seg"><button id="m-all" title="Show every type">All</button><button id="m-none" title="Hide every type">None</button></div><span id="m-legend"></span></div>
@@ -1247,7 +1247,7 @@ function renderMobMap() {
   if (mCv.width !== w * r || mCv.height !== h * r) { mCv.width = w * r; mCv.height = h * r; }
   const g = mCv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0);
   if (!mview.sc) { mview.sc = mZoomFit(w, h); const [x0, z0, x1, z1] = mobBounds(); mview.x = (x0 + x1) / 2; mview.z = (z0 + z1) / 2; mview.follow = false; mview.fitted = true; }
-  if (mview.follow) { mview.x = mm.player[0]; mview.z = mm.player[1]; }
+  if (mview.follow) { const f = mm.view || mm.player; mview.x = f[0]; mview.z = f[1]; }   // (Centre follows the detached view while there is one, r15-98)
   clampZoom(w, h);
   const sc = mview.sc, X = x => w / 2 + (x - mview.x) * sc, Z = z => h / 2 + (z - mview.z) * sc, cs = mm.cs || 16;
   // unloaded land: dark and faintly hatched; loaded chunks: a soft tone, with a thin line where loaded land ends
@@ -1332,13 +1332,37 @@ function renderMobMap() {
   g.save(); g.translate(X(ppx), Z(ppz)); g.rotate(-yaw);
   g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 6); g.lineTo(0, 3); g.lineTo(-6, 6); g.closePath();
   g.fillStyle = "#a6dc72"; g.fill(); g.lineWidth = 1.5; g.strokeStyle = "#0b0f0d"; g.stroke(); g.restore();
+  // the detached view (r15-98): a blue arrow where the view is, pointing where it looks, a dashed line back to the player; on the map's
+  // edge when off it
+  if (mm.view) drawView(g, w, h, X, Z, ppx, ppz);
   // scale bar
   const blocks = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096].find(b => b * sc >= 60) || 4096;
   g.fillStyle = "rgba(238,243,234,0.7)"; g.fillRect(12, h - 14, blocks * sc, 2); g.fillText(blocks + " blocks", 12, h - 20);
   northMark(g, w, mm);
-  $("m-count").textContent = `${fmt(mm.mobs.length)} mobs · ${fmt(c.length / 2)} chunks loaded` + (mm.face != null ? ` · face ${mm.face}` : "");
+  $("m-count").textContent = `${fmt(mm.mobs.length)} mobs · ${fmt(c.length / 2)} chunks loaded` + (mm.face != null ? ` · face ${mm.face}` : "") +
+    (mm.detached ? " · view detached" + (mm.view ? " (" + fmt(Math.round(Math.hypot(mm.view[0] - ppx, mm.view[1] - ppz))) + " blocks away, y " + mm.view[3] + ")" : " (on the far side of the planet)") : "");
+  const db = $("m-detach"); db.classList.toggle("on", !!mm.detached); db.textContent = mm.detached ? "Attach view" : "Detach view";
   renderMobLegend();
 }
+function drawView(g, w, h, X, Z, ppx, ppz) {
+  const [vx, vz, vyaw] = mm.view, x = X(vx), z = Z(vz);
+  g.save(); g.setLineDash([4, 4]); g.strokeStyle = "rgba(108,196,255,0.6)"; g.lineWidth = 1.2;
+  g.beginPath(); g.moveTo(X(ppx), Z(ppz)); g.lineTo(x, z); g.stroke(); g.restore();
+  const m = 12, cx = Math.max(m, Math.min(w - m, x)), cz = Math.max(m, Math.min(h - m, z)), off = cx !== x || cz !== z;
+  g.save(); g.translate(cx, cz); g.rotate(-vyaw);
+  g.beginPath(); g.moveTo(0, -10); g.lineTo(7, 7); g.lineTo(0, 3); g.lineTo(-7, 7); g.closePath();
+  g.globalAlpha = off ? 0.6 : 1; g.fillStyle = "#6cc4ff"; g.fill(); g.lineWidth = 1.5; g.strokeStyle = "#0b0f0d"; g.stroke(); g.restore();
+  g.font = "10px IBM Plex Mono, monospace"; g.fillStyle = "#6cc4ff"; g.fillText("view", cx + 10, cz - 8);
+}
+// the detached view on or off (r15-98): POST /warp {op: "detach"}; the game page toggles it (js/debugfeed.js applyWarp)
+$("m-detach").addEventListener("click", () => {
+  const b = $("m-detach");
+  b.textContent = "asking…";
+  fetch("warp", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ op: "detach" }) })
+    .then(r => { if (!r.ok) b.textContent = "refused"; })
+    .catch(() => { b.textContent = "no debug server"; });
+  mview.follow = true;
+});
 let legSig = "";
 function renderMobLegend() {
   const n = {};

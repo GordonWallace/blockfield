@@ -999,8 +999,10 @@ function chunkD2(c, pcx, pcz) {
 let planTail = false;   // chunks were generated or meshed since the last plan
 let loadQ = 0;   // chunks still to generate or mesh for the view (queueLength without the mesher workers' jobs)
 
-// Called every frame with the player position. budgetMs bounds generation+meshing time.
-world.update = function (px, pz, budgetMs = 8) {
+// Called every frame with the player position. budgetMs bounds generation+meshing time. py: the height streamed for (the chunk ceiling,
+// vertical streaming), the player's by default (the page's copy streaming round a detached view passes the view's, r15-98).
+world.update = function (px, pz, budgetMs = 8, py) {
+  if (py == null && BF.player && BF.player.position) py = BF.player.position.y;
   const pcx = Math.floor(px / CS), pcz = Math.floor(pz / CS);
   const hold = heldNow();
   if (!hold) {
@@ -1015,12 +1017,12 @@ world.update = function (px, pz, budgetMs = 8) {
   if (BF.villageSim && !world.replica && BF.villageSim.update(px, pz)) lastCenter = null;   // simulated-village set changed: re-plan
   roundPlan = !!(BF.view && BF.view.roundAt(px, pz) > 0);   // near a cube corner: the round view wants the wedge filled
   // the chunk ceiling: above min(pxScale, chunkCeiling) over the ground no chunks load; back below 90% of it they do
-  if (BF.player && BF.player.position) {
+  if (py != null) {
     let g = BF.SEA;
     try { g = Math.max(BF.SEA, BF.worldgen.heightAt(Math.floor(px), Math.floor(pz))); } catch (_) {}
     let ceil = world.chunkCeiling;
     if (BF.renderer && BF.camera) ceil = Math.min(ceil, BF.renderer.getDrawingBufferSize(TV2).y / (2 * Math.tan(BF.camera.fov * Math.PI / 360)));
-    const above = BF.player.position.y - g;
+    const above = py - g;
     if (!world.high && above > ceil) world.high = true;
     else if (world.high && above < 0.9 * ceil) world.high = false;
   } else world.high = false;
@@ -1032,8 +1034,8 @@ world.update = function (px, pz, budgetMs = 8) {
   if (!MP.started || (BF.meshInline && !MP.inline)) poolStart();
 
   // vertical streaming: columns near the player load sections down to ~40 blocks below them (digging, caves, falling)
-  if (BF.player && BF.player.position) {
-    const want = Math.max(BF.SY0, (Math.floor(BF.player.position.y) - 40) >> 4);
+  if (py != null) {
+    const want = Math.max(BF.SY0, (Math.floor(py) - 40) >> 4);
     let budget = 3;
     for (let dz = -2; dz <= 2 && budget > 0; dz++) for (let dx = -2; dx <= 2 && budget > 0; dx++) {
       const c = world.chunkC(pcx + dx, pcz + dz);
