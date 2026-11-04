@@ -464,7 +464,14 @@ function sliceOf(s, n) {
   if (s < A) return { keys: ALONE[s], only: { kinds } };
   if (s === A) { const not = new Set(["mobs"].concat(...ALONE)); return { keys: BF.stateHash.PARTS.filter(k => !not.has(k)), only: { kinds } }; }
   const M = n - A - 1, i = s - A - 1;
-  return { keys: ["mobs"], only: { kinds: k => k === "hash", mobs: m => (typeof m.id === "number" ? m.id : 0) % M === i } };
+  return { keys: ["mobs"], only: { kinds: k => k === "hash", mobs: m => idSlot(m.id, M) === i } };
+}
+// (a mob's slice by its id, "e<number>" (js/ids.js): the same on every worker, and the mobs about evenly over the slices)
+function idSlot(id, M) {
+  const t = String(id);
+  let h = 0;
+  for (let i = 0; i < t.length; i++) h = (Math.imul(h, 31) + t.charCodeAt(i)) >>> 0;
+  return h % M;
 }
 // Every worker's hashes against the first worker's: a difference sets rworkers.mismatch and is an ERROR. Returns what each sent.
 function compare(h, what) {

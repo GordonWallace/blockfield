@@ -9,7 +9,8 @@
 //   - the hash from rows is the hash from whole mobs, and the same on every worker;
 //   - with two bred villagers in the world (a child and a grown one: js/breeding.js reads their place and profession);
 //   - while the rows' fn runs, every stale copy here is overwritten with junk (and put back after): a module reading a mob another
-//     worker runs without row() would read the junk, so the save or hash would come out different.
+//     worker runs without row() would read the junk, so the save or hash would come out different;
+//   - each slice of the copy check as play spreads it over the meetings (js/cworkers.js sliceOf), from only the rows it gathers.
 // Usage: node test/cluster-rows.js [--workers 3] [--extra 4] [--seconds 6] [--seeds 3,5]
 const crypto = require('crypto');
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
@@ -70,9 +71,19 @@ function child() {
         for (const [r, x, y, z, yaw, hp] of recs) Object.assign(r, { x, y, z, yaw, hp });
         const sWhole = strip(CW.gathered(save));
         const hRows = CW.gathered(poisoned(hash), 'hash'), hWhole = CW.gathered(hash);
+        // the copy check's slices (js/cworkers.js checkSlice: in play it's spread over 38 meetings): each from only its rows, as from
+        // whole mobs; and the mob slices together cover every mob once
+        const N = 38, slices = [];
+        let inSlices = 0, most = 0;
+        for (let sl = 0; sl < N; sl++) {
+          const { keys, only } = CW.sliceOf(sl, N), one = () => BF.stateHash.some(keys, only.mobs).hash;
+          slices.push([CW.gathered(poisoned(one), 'hash', only), CW.gathered(one)]);
+          if (only.mobs) { const k = BF.mobs.list.filter(m => !m.removed && only.mobs(m)).length; inSlices += k; most = Math.max(most, k); }
+        }
+        const live = BF.mobs.list.filter(m => !m.removed).length;
         let where = null;
         if (sRows !== sWhole) { let i = 0; while (sRows[i] === sWhole[i]) i++; where = sWhole.slice(Math.max(0, i - 120), i + 80) + '\n   rows: ' + sRows.slice(Math.max(0, i - 120), i + 80); }
-        parentPort.postMessage({ stale, save: sRows === sWhole, saveMd5: md5(sRows), where, hRows, hWhole, errors: errors.splice(0) });
+        parentPort.postMessage({ stale, save: sRows === sWhole, saveMd5: md5(sRows), where, hRows, hWhole, slices, inSlices, most, live, errors: errors.splice(0) });
       } else if (msg.do === 'stop') process.exit(0);
     } catch (e) { parentPort.postMessage({ error: String(e && e.stack || e) }); }
   });
@@ -111,6 +122,11 @@ async function main() {
       }
       check(c.every(x => x.hRows === x.hWhole), `seed ${seed} s ${s}: the hash from rows is the hash from whole mobs on every worker (${c.map(x => x.hRows).join(' ')})`);
       check(c.every(x => x.hRows === c[0].hRows), `seed ${seed} s ${s}: every worker's hash is the same`);
+      const badSl = c.map(x => x.slices.map((p, i) => (p[0] === p[1] ? -1 : i)).filter(i => i >= 0));
+      check(badSl.every(b => !b.length), `seed ${seed} s ${s}: every slice of the copy check from its rows is the same from whole mobs on every worker${badSl.some(b => b.length) ? ' (differ: ' + JSON.stringify(badSl) + ')' : ''}`);
+      check(c.every(x => JSON.stringify(x.slices) === JSON.stringify(c[0].slices)), `seed ${seed} s ${s}: every worker's slices are the same`);
+      check(c.every(x => x.inSlices === x.live), `seed ${seed} s ${s}: the mob slices cover every mob once (${c[0].inSlices} of ${c[0].live})`);
+      check(c.every(x => x.most <= 3 * x.live / 35 + 3), `seed ${seed} s ${s}: the mobs about evenly over the 35 mob slices (at most ${c[0].most} in one)`);
       for (const x of c) errs += x.errors.length;
     }
     check(errs === 0, `seed ${seed}: no ERROR in the workers' game log`);
