@@ -9,7 +9,11 @@ module.exports = async (pg) => {
   const check = (ok, what) => { console.log((ok ? "ok " : "FAIL ") + what); if (!ok) bad++; };
   await pg.evaluate(async () => {
     window.__errs = []; addEventListener("error", e => window.__errs.push(e.message));
-    delete document.getElementById("view").requestPointerLock;   // the real pointer lock: test/run.js turns it off for every other test
+    const cv = document.getElementById("view");
+    delete cv.requestPointerLock;   // the real pointer lock: test/run.js turns it off for every other test
+    // except BF.player.start's own request (no click behind it), refused the way a busy or unfocused browser refuses it: the click below
+    // must still take the mouse (one such refusal used to put the game in drag mode for good, a flake on a loaded machine, 2026-11-04)
+    cv.requestPointerLock = function () { delete cv.requestPointerLock; setTimeout(() => document.dispatchEvent(new Event("pointerlockerror")), 0); return Promise.reject(new DOMException("refused", "NotAllowedError")); };
     BF.newWorld(1337, { gen: 4 }); BF.world.viewDist = 4; BF.player.start(); BF.player.setGameMode("creative");
     await new Promise(r => setTimeout(r, 2000));
   });
@@ -22,6 +26,7 @@ module.exports = async (pg) => {
     const b = await st();
     return Math.abs(b.lon - a.lon) > 0.5 && Math.abs(b.lat - a.lat) > 0.5;
   };
+  check(!(await st()).locked, "the start's lock request, refused, left the mouse free");
   await pg.mouse.click(160, 100); await pg.waitForTimeout(500);
   check((await st()).locked, "a click on the game takes the mouse (pointer lock)");
   await pg.evaluate(() => { BF.player.setFlying(true); BF.player.position.y = 30000; }); await pg.waitForTimeout(800);

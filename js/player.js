@@ -23,6 +23,7 @@ let started = false;          // start screen dismissed
 let locked = false;           // pointer lock active
 let lockWorked = false;       // pointer lock succeeded at least once
 let dragMode = false;         // fallback look mode (no pointer lock)
+let lockAsked = null;         // the latest lock request: "gesture" (a click or key behind it) or "none"
 let menuOpen = null;          // null | "start" | "pause" | "death"
 let waitingForChunk = true;   // spawn: no physics until the ground is loaded
 let wasHigh = false;          // above the chunk ceiling last frame
@@ -722,6 +723,8 @@ function requestLock() {
   if (ev && ev.type === "keydown" && ev.key === "Escape") { lockOnEscUp = true; return; }
   const cv = canvas();
   if (!cv.requestPointerLock) { dragMode = true; return; }
+  const ua = navigator.userActivation;
+  lockAsked = !ua || ua.isActive ? "gesture" : "none";   // (a refusal of a request with no click or key behind it isn't a browser without the lock)
   try {
     const r = cv.requestPointerLock();
     if (r && r.catch) r.catch(() => onLockError());
@@ -731,6 +734,9 @@ function onLockError() {
   if (escRelock && !locked && !escRetryT) relockLater();
   escRelock = false;
   if (locked) return;
+  // asked without a user gesture (P.start for tests and embeds, a re-lock from a timer): refused, the next click asks again. Going
+  // to drag mode here kept every later click from taking the mouse (test/planet-drag.js on a busy machine, 2026-11-04)
+  if (lockAsked === "none") return;   // (the promise and the pointerlockerror event both report it)
   if (lockWorked) { if (menuOpen === "pause") pauseNote.textContent = "Click Resume again to capture the mouse."; return; }
   dragMode = true;
   if (menuOpen === "pause") { showScreen(null); BF.state.paused = false; }
