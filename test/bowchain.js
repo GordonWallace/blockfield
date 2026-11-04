@@ -75,6 +75,8 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
       return r;
     };
     // the village's holdings of the watched items: its villagers' packs and the chests within 80 blocks of its centre
+    // (who holds feathers, for a "from nothing" failure: villager id/profession -> count, chests by key)
+    globalThis.__featherBy = () => { const o = {}, [cx, cz] = R.key.split(',').map(Number); for (const m of BF.mobs.list) if (m.type === 'villager' && !m.dead && Array.isArray(m.inv)) { const n = BF.trades.inv.count(m.inv, BF.I.feather); if (n) o[m.id + ':' + m.profession + (m.village && m.village.key === R.key ? '' : '@' + (m.village ? m.village.key : 'none')) + ':' + Math.round(Math.hypot(m.position.x - cx, m.position.z - cz))] = n; } for (const [k, c] of BF.inventory.chests) { let n = 0; for (const s of c.slots) if (s && s.id === BF.I.feather) n += s.count; if (n) o['chest ' + k + ':' + Math.round(Math.hypot(c.pos.x - cx, c.pos.z - cz))] = n; } return o; };
     globalThis.__total = () => {
       const out = {}, I = BF.I, [cx, cz] = R.key.split(',').map(Number);
       const ms = BF.mobs.list.filter(m => m.type === 'villager' && m.village && m.village.key === R.key && !m.dead && Array.isArray(m.inv));
@@ -141,7 +143,7 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
     }, FLOCK);
     if (setup.gravelPlaced < GRAVEL) setup = { err: 'room for only ' + setup.gravelPlaced + ' of ' + GRAVEL + ' surface gravel by village ' + setup.key };
     else if (setup.flock < FLOCK) setup = { err: 'the poultry keeper\'s coop by village ' + setup.key + ' took in only ' + setup.flock + ' of ' + FLOCK + ' chickens' };
-    else await sim(pg, () => { const R = globalThis.__rec; R.lines.length = 0; R.restock.length = 0; R.buys = {}; R.gravel = 0; R.start = globalThis.__total(); });
+    else await sim(pg, () => { const R = globalThis.__rec; R.lines.length = 0; R.restock.length = 0; R.buys = {}; R.gravel = 0; R.start = globalThis.__total(); R.startBy = globalThis.__featherBy(); });
   }
   if (setup.err) { console.log('FAIL ' + setup.err); await pg.done(); await b.close(); process.exitCode = 1; return; }
   console.log(`seed ${SEED} village ${setup.key} pop ${setup.pop}: ${JSON.stringify(setup.profs)}, surface gravel ${setup.gravelPlaced}, coop ${setup.flock} chickens`);
@@ -159,7 +161,7 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
   }
   const R = await sim(pg, () => {
     const R = globalThis.__rec, I = BF.I;
-    R.end = globalThis.__total();
+    R.end = globalThis.__total(); R.endBy = globalThis.__featherBy();
     const f = BF.mobs.list.find(m => m.type === 'villager' && m.profession === 'fletcher' && m.village && m.village.key === R.key && !m.dead);
     R.fletcher = f ? { inv: f.inv.filter(Boolean).map(s => BF.items[s.id].name + ':' + s.count), offers: (f.trades || []).filter(o => o.sell.id === I.arrow || o.sell.id === I.bow).map(o => BF.items[o.sell.id].name + (BF.trades.blockReason(f, o) ? ' (' + BF.trades.blockReason(f, o) + ')' : ' in stock')) } : null;
     R.miners = BF.mobs.list.filter(m => m.type === 'villager' && m.profession === 'miner' && m.village && m.village.key === R.key && !m.dead).map(m => {
@@ -182,6 +184,7 @@ const FLOCK = 24;    // chickens in the poultry keeper's coop at the start, for 
   const bought = n => Object.entries(R.buys).filter(([k]) => k.startsWith(n + ' ')).reduce((t, [, v]) => t + v, 0);
   const ok = (name, cond, extra) => console.log((cond ? 'PASS ' : 'FAIL ') + name + (extra !== undefined ? '  ' + JSON.stringify(extra) : ''));
   console.log('start', JSON.stringify(R.start), 'end', JSON.stringify(R.end));
+  console.log('feathers at the start', JSON.stringify(R.startBy), 'at the end', JSON.stringify(R.endBy));
   console.log('made', JSON.stringify({ arrows, bows, spun, culledFeathers }), 'coops', JSON.stringify(R.poultry));
   console.log('fletcher', JSON.stringify(R.fletcher));
   console.log('fletcher bought', JSON.stringify(R.buys), 'short', JSON.stringify(R.flShort));

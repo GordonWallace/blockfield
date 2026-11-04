@@ -37,9 +37,10 @@ module.exports = async (pg, out) => {
   check(t1.bad === 0 && t1.n > 0, "every mob update at 1x is one " + TK + " s tick (" + t1.n + " ticks)");
   check(Math.abs(simS - t1.n * TK) < 1e-6, "the clock moved by exactly the ticks run");
   const lostS = (t1.dropped - t0.dropped) * TK;   // ticks the 40 ms frame budget couldn't fit (headless software rendering is slow)
-  check(Math.abs(simS + lostS - t1.counted) <= 0.1, "at 1x the sim clock keeps the frames' real time: " + simS.toFixed(3) + " s run + " + lostS.toFixed(2) + " s dropped for " + t1.counted.toFixed(3) + " s counted (" + realS.toFixed(3) + " s real, " + t1.slow + " of " + t1.frames + " frames over the 0.25 s cap)");
+  // (up to a tick of the counted time can wait in the accumulator for the next tick: 0.2 s since idea-049)
+  check(Math.abs(simS + lostS - t1.counted) <= 0.1 + TK, "at 1x the sim clock keeps the frames' real time: " + simS.toFixed(3) + " s run + " + lostS.toFixed(2) + " s dropped for " + t1.counted.toFixed(3) + " s counted (" + realS.toFixed(3) + " s real, " + t1.slow + " of " + t1.frames + " frames over the 0.25 s cap)");
   // (the first frame counts time from before the hooks went in: up to one frame's worth, which off the page includes the eval's round trip)
-  if (!t1.slow && !lostS) check(Math.abs(simS - realS) <= 0.1 + t1.first, "with no frame over the cap and none dropped, it keeps real time (" + simS.toFixed(3) + " s for " + realS.toFixed(3) + " s, first frame " + t1.first.toFixed(3) + " s)");
+  if (!t1.slow && !lostS) check(Math.abs(simS - realS) <= 0.1 + TK + t1.first, "with no frame over the cap and none dropped, it keeps real time (" + simS.toFixed(3) + " s for " + realS.toFixed(3) + " s, first frame " + t1.first.toFixed(3) + " s)");
 
   // ---- the same 10 game seconds of ticks (200 at 0.05 s) at 30 fps and at 120 fps (forced frame times, each run synchronous so no real frame interleaves).
   // The world as a whole can't be put back to the same start between two runs yet (villages, wildlife, horse herds and the job modules

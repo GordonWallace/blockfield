@@ -83,7 +83,7 @@ module.exports = async (pg, out) => {
   const fail = s => { console.log("FAIL " + s); bad++; };
   if (r.error) fail(r.error);
   else {
-    if (r.room.push >= 1) fail("the villager walked into the room's walls for " + r.room.push + " s in 60 s");
+    if (r.room.push >= 1) fail("the villager walked into the room's walls for " + r.room.push + " s in 60 s " + JSON.stringify(r.room.by));
     if (r.room.log.some(t => /^ERROR/.test(t))) fail("stuck ERROR for the villager in the room: " + r.room.log.join(" | "));
     if (r.pen.tall != null) fail("a golem's route went out of the pen (through the open gate)");
     if (r.pen.villager == null || !r.pen.viaGate) fail("a villager's route did not go out through the open gate");
