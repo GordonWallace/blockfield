@@ -52,7 +52,7 @@ module.exports = async (pg, out) => {
     const mine = () => (BF.glog ? BF.glog.recent(400) : []).filter(e => e.k === "move" && !old.has(e) && e.p && e.p[0] >= X0 - 2 && e.p[0] <= X0 + N && e.p[2] >= Z0 - 2 && e.p[2] <= Z0 + N).map(e => e.l + " " + e.x);
     let T = 0;
     try {
-      while (T < 60) { BF.sky.setTime(0.1); M.update(0.05); BF.world.tickSim(); P.set(X0 + 12, Y0 + 1, Z0 + 20); T += 0.05; }
+      while (T < 60) { BF.sky.setTime(0.1); M.update(BF_TK); BF.world.tickSim(); P.set(X0 + 12, Y0 + 1, Z0 + 20); T += 0.05; }
     } finally { W.moveBox = mb; }
     res.room = { push: +push.toFixed(2), by, who: m.profession, log: mine(), at: [m.position.x - X0, m.position.z - Z0].map(v => +v.toFixed(1)) };
     m.position.set(X0 + 12.5, Y0, Z0 + 20.5); m.vel.set(0, 0, 0);
@@ -83,7 +83,7 @@ module.exports = async (pg, out) => {
   const fail = s => { console.log("FAIL " + s); bad++; };
   if (r.error) fail(r.error);
   else {
-    if (r.room.push >= 1) fail("the villager walked into the room's walls for " + r.room.push + " s in 60 s");
+    if (r.room.push >= 1) fail("the villager walked into the room's walls for " + r.room.push + " s in 60 s " + JSON.stringify(r.room.by));
     if (r.room.log.some(t => /^ERROR/.test(t))) fail("stuck ERROR for the villager in the room: " + r.room.log.join(" | "));
     if (r.pen.tall != null) fail("a golem's route went out of the pen (through the open gate)");
     if (r.pen.villager == null || !r.pen.viaGate) fail("a villager's route did not go out through the open gate");

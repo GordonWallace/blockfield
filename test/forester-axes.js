@@ -88,7 +88,7 @@ module.exports = async (pg, out) => {
   const grow = async () => { const t = await growIn(); console.log("tree", JSON.stringify(t)); return t; };   // (where, for a failure)
   // runs the forester until it fells a tree (or `limit` seconds): seconds spent chopping (task cut, within reach) and the fell log entry
   const watch = (limit, opts) => sim(pg, ([limit, opts]) => {
-    const A = globalThis.__A, F = BF.forester, n0 = F.LOG.length, dt = 0.05, others = globalThis.__clearOthers(globalThis.__T);
+    const A = globalThis.__A, F = BF.forester, n0 = F.LOG.length, dt = BF_TK, others = globalThis.__clearOthers(globalThis.__T);
     A.fo = A.fo || null; const st = A.fo || (BF.forester._test.state(A));
     st.cutCd = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.thinkT = 0; st.sweep = null; if (!opts || !opts.keep) st.task = null;
     for (const d of BF.drops.list.slice()) BF.drops.remove(d);
@@ -153,13 +153,13 @@ module.exports = async (pg, out) => {
     for (const d of BF.drops.list.slice()) BF.drops.remove(d);
     // the sim clock and drops must move too: with them frozen, a forester waiting for items to land after a felling waits for good
     let chop = 0, pk = null, pc = 0, pd = 0;
-    for (let t = 0; t < 400 && chop < 7; t += 0.05) {
-      BF.sky.setTime(0.1); BF.warp.advance(0.05); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); BF.drops.update(0.05);
+    for (let t = 0; t < 400 && chop < 7; t += BF_TK) {
+      BF.sky.setTime(0.1); BF.warp.advance(BF_TK); (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver()); BF.drops.update(BF_TK);
       const k = A.fo.task;
-      if (k && k.kind === "cut" && k === pk && (A.fo.chop > pc + 1e-9 || k.done > pd)) chop += 0.05;
+      if (k && k.kind === "cut" && k === pk && (A.fo.chop > pc + 1e-9 || k.done > pd)) chop += BF_TK;
       pk = k; pc = A.fo.chop; pd = k ? k.done : 0;
     }
-    A.tradingWith = BF.player; BF.forester.ai(A, 0.05, {}); A.tradingWith = null;   // the player opens its trade screen: the task ends, progress kept
+    A.tradingWith = BF.player; BF.forester.ai(A, BF_TK, {}); A.tradingWith = null;   // the player opens its trade screen: the task ends, progress kept
     return { saved: A.fo.saved, chop, task: A.fo.task && { kind: A.fo.task.kind, done: A.fo.task.done }, log: BF.forester.LOG.slice(-6).map(e => JSON.stringify(e)) };
   });
   console.log("part", JSON.stringify(part));
@@ -184,7 +184,7 @@ module.exports = async (pg, out) => {
     for (const m of [A, S]) { const L = BF.food.life(m); L.sat = 5; L.lastAte = BF.food.dayNow(); L.starving = m.starving = false; m.fshop = { stage: null, deal: null, checkT: 1e9, avoid: {}, cd: 0 }; }
     const st = A.fo; st.task = null; st.saved = null; st.sweep = null; st.thinkT = 0; st.shopT = 0; st.cutCd = 999; st.plantCd = 999; st.gatherCd = 999; st.avoid = new Map();
     const res = { first: null, second: null };
-    const run = () => { let seen = false, t = 0; for (; t < 120; t += 0.05) { BF.sky.setTime(0.1); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); if (A.fo.task) seen = true; else if (seen) break; } return { seen, t: +t.toFixed(1) }; };
+    const run = () => { let seen = false, t = 0; for (; t < 120; t += BF_TK) { BF.sky.setTime(0.1); (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver()); if (A.fo.task) seen = true; else if (seen) break; } return { seen, t: +t.toFixed(1) }; };
     const seller = F._test.findAxeSeller(A, st);
     res.offer = seller && BF.items[seller.offer.sell.id].name;
     res.run1 = run();
@@ -203,7 +203,7 @@ module.exports = async (pg, out) => {
     if (BF.mobView) { BF.proto.flush(true); BF.mobView.render(0); const AV = BF.mobView.viewOf(A); res.drawn = AV && AV.heldMesh && AV.heldMesh.visible && BF.items[AV.heldId].name; }   // (the mirror first: r15-37)
     else res.drawn = A.held != null && BF.items[A.held].name;   // (off the page: the tool it holds; the page host checks the drawing)
     // nothing better on sale: no trip
-    st.shopT = 0; st.thinkT = 0; (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+    st.shopT = 0; st.thinkT = 0; (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
     res.thirdTask = A.fo.task && A.fo.task.kind;
     res.log = F.LOG.filter(e => e.kind === "buy").map(e => e.got + " for " + e.paid);
     return res;
@@ -243,7 +243,7 @@ module.exports = async (pg, out) => {
   const view = await sim(pg, () => {
     const A = globalThis.__A, st = A.fo; st.cutCd = 0; st.thinkT = 0; st.plantCd = 999; st.shopT = 999; st.gatherCd = 999; st.task = null; st.sweep = null;
     A.inv = BF.trades.inv.create(); BF.trades.inv.add(A.inv, BF.I.diamond_axe, 1);
-    for (let t = 0; t < 120; t += 0.05) { BF.sky.setTime(0.1); (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); const k = A.fo.task; if (k && k.kind === "cut" && A.fo.chop > 0) break; }
+    for (let t = 0; t < 120; t += BF_TK) { BF.sky.setTime(0.1); (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver()); const k = A.fo.task; if (k && k.kind === "cut" && A.fo.chop > 0) break; }
     const k = A.fo.task, fx = A.position.x, fz = A.position.z, tx = k ? k.x + 0.5 : fx + 1, tz = k ? k.z + 0.5 : fz;
     const dx = tx - fx, dz = tz - fz, L = Math.hypot(dx, dz) || 1, px = -dz / L, pz = dx / L;   // stand to the side of the chopping line
     const ex = fx + px * 3.2 + dx / L * 0.6, ez = fz + pz * 3.2 + dz / L * 0.6;

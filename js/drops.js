@@ -145,7 +145,9 @@ const drops = {
         } else if (dist < PICKUP_R) {
           const k = 10 / dist;
           d.vel.set(dx * k * 0.6, dy * k * 0.6, dz * k * 0.6);
-          d.pos.addScaledVector(d.vel, dt);
+          // (no further than to within 0.3 of the player: at long ticks a whole step of 6 b/s would overshoot the 0.6 reach and swing
+          // past forever; at 0.05 s ticks a step is 0.3, so this never shortens one)
+          d.pos.addScaledVector(d.vel, Math.min(dt, (dist - 0.3) / 6));
           d.pulled = true;
           BF.planet.reframe(d.pos, -1, null, d.vel);
           continue;

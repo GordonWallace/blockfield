@@ -986,7 +986,7 @@ function autoTick() {
   if (C) {
     // clusters (spec r15-39b, js/ctick.js): each cluster its own signs (by their anchor cell), the plans every half game second and the
     // texts at the ticks that start a half hour, on the clock each cluster runs on
-    if (BF.rand.tick % 10 === 1 && autoPlan.size) tryAutoPlans(C);
+    if (BF.warp.every(0.5, 1) && autoPlan.size) tryAutoPlans(C);
     const t = (S.day || 0) + (S.time || 0), d = BF.warp.TICK / (S.dayLength || 1200);
     if (Math.floor(t * 48) !== Math.floor((t - d) * 48)) runAuto(null, false, C);
     return;

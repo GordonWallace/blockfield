@@ -41,7 +41,7 @@ module.exports = async (pg) => {
     const sn = BF.simNow;
     BF.simNow = () => T;   // the bees' clock: this loop's time
     try { while (T < 240) {
-      step(0.05);
+      step(BF_TK);
       const out = BE.out(h);
       maxOut = Math.max(maxOut, out.length);
       if (T > 60 && Math.round(T * 20) % 10 === 0) { samples += out.length; under += out.filter(canopy).length; }

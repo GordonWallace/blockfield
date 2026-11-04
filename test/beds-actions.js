@@ -15,7 +15,7 @@ module.exports = async (pg, out) => {
     if (!BF.page) BF.state.paused = true;
     const key = m => (m.village ? m.village.key : "?") + "#" + (m.slot ? m.slot.idx : "?") + " " + m.profession;
     const seen = new Map();   // villager key -> [bed per night]
-    const run = async (t0, t1, secs, dt = 0.05) => {
+    const run = async (t0, t1, secs, dt = BF_TK) => {
       const n = Math.round(secs / dt);
       for (let i = 0; i < n; i++) {
         BF.sky.setTime(t0 + (t1 - t0) * i / n);

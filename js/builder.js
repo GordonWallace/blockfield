@@ -874,7 +874,7 @@ function placeCell(m, bs, e) {
     advance(e, c2 ? 2 : 1);
     e.placed = (e.placed || 0) + 1;
     bs.placed = (bs.placed || 0) + 1;
-    bs.placeT = rnd(RS(m), BLOCK_T[0], BLOCK_T[1]); bs.cands = null;
+    bs.placeT = rnd(RS(m), BLOCK_T[0], BLOCK_T[1]) + Math.max(-2 * BF.warp.TICK, Math.min(0, bs.placeT)); bs.cands = null;   // (the time the last one ran over, its request's wait included, up to two ticks: idea-049)
   });
   return "sent";
 }

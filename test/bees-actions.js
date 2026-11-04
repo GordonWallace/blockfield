@@ -15,7 +15,9 @@ module.exports = async (pg) => {
   if (await pg.evaluate(() => BF.simHost.worker)) await pg.evaluate(() => BF.player.start());   // (the page's player: the stings below)
   const res = await lib.sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const R = { lines: [], info: {} }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
-    const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
+    const G = n => Math.round(n * 0.05 / BF_TK);   // a loop of n 0.05 s steps, in the ticks of the same game time (idea-049)
+    globalThis.__G = G;
+    const step = (h = BF_TK) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
     const I = BF.I, B = BF.B, T = BF.trades, inv = T.inv, W = BF.world, BE = BF.bees, BK = BF.beekeeper;
     const c = (m, n) => inv.count(m.inv, I[n]);
     const settle = async (x, z) => {
@@ -90,12 +92,12 @@ module.exports = async (pg) => {
     // and 15-35 s inside between trips, are 3 or 4 out at once at most, so half of them out together is the scatter at chunk load)
     const peak0 = peakOf.get(h0) || 0;
     let out1 = peak0;
-    for (let i = 0; i < 1400; i++) { step(); out1 = Math.max(out1, BE.out(h0).length); }   // 70 s: they come out over about a minute, resting inside between trips
+    for (let i = 0; i < G(1400); i++) { step(); out1 = Math.max(out1, BE.out(h0).length); }   // 70 s: they come out over about a minute, resting inside between trips
     ok("by day a hive's bees come out", out1 >= h0.bees / 2 && BE.list.length > 0, { peakOut: out1, atLoad: peak0, bees: h0.bees, all: BE.list.length });
     let sides = 0; for (let i = 0; i < 400; i++) { const sp = BE.landingSpot(h0.x, h0.y + 2, h0.z, 6); if (sp && sp.ny === 0) sides++; }
     R.info.sideSpots = sides;
     let landed = 0, wall = 0, flowerL = 0, ceil = 0;
-    for (let i = 0; i < 1200; i++) { step(); for (const b of BE.list) if (b.mode === "land" && b.land) { landed++; if (b.land.ny === 0) wall++; if (b.land.flower) flowerL++; if (b.land.ny < 0) ceil++; } }
+    for (let i = 0; i < G(1200); i++) { step(); for (const b of BE.list) if (b.mode === "land" && b.land) { landed++; if (b.land.ny === 0) wall++; if (b.land.flower) flowerL++; if (b.land.ny < 0) ceil++; } }
     ok("bees land on flowers and other surfaces, never on ceilings", flowerL > 0 && landed > flowerL && ceil === 0, { landed, wall, flowerL, ceil });
     // walls: rest stops on a wall are rare by chance, so send one bee to a wall spot and see it land there, flat against the face
     // Each try takes the nearest bee not tried yet that is free to fly up: one under an overhang (the leaves of a tree) can only hop straight up into
@@ -113,27 +115,27 @@ module.exports = async (pg) => {
       if (!wb) break;
       tried.add(wb);
       wb.mode = "fly"; wb.tgt = ws; wb.land = null; wb.stuck = 0; wb.lastD = Infinity; wb.front = false; wb.restedOut = wb.restedBack = true;
-      for (let i = 0; i < 400 && !onWall && wb.tgt === ws; i++) { step(); onWall = wb.mode === "land" && wb.land === ws; }
+      for (let i = 0; i < G(400) && !onWall && wb.tgt === ws; i++) { step(); onWall = wb.mode === "land" && wb.land === ws; }
     }
     ok("bees land on walls", sides > 0 && onWall, { sides, spot: ws && [ws.x, ws.y, ws.z, ws.nx, ws.nz], bee: wb && [wb.mode, +wb.x.toFixed(2), +wb.y.toFixed(2), +wb.z.toFixed(2)], tries: tried.size });
     if (K.bkp) K.bkp.cd = 0;
     ok("honey rises after flower visits", h0.honey > 0, h0.honey);
     BF.sky.setTime(BE.DUSK - 0.002);
-    for (let i = 0; i < 200; i++) step();
+    for (let i = 0; i < G(200); i++) step();
     ok("at dusk the bees head home", BE.list.filter(b => b.home === h0).every(b => b.mode === "home" || b.follow), BE.list.filter(b => b.home === h0).map(b => b.mode));
-    for (let i = 0; i < 1600 && BE.out(h0).length; i++) step();
+    for (let i = 0; i < G(1600) && BE.out(h0).length; i++) step();
     ok("and are gone into their hive (counted, not tracked)", BE.out(h0).length === 0 && h0.bees >= 8, { out: BE.out(h0).length, bees: h0.bees });
     BF.sky.setTime(0.1);
-    for (let i = 0; i < 1400; i++) step();
+    for (let i = 0; i < G(1400); i++) step();
     ok("next morning they come out again (new bees from the count)", BE.out(h0).length > 0);
     if (BF.weather && BF.weather.set) { BF.weather.set("rain", 600); BF.weather.intensity = 1; }
-    for (let i = 0; i < 40; i++) step();
+    for (let i = 0; i < G(40); i++) step();
     const rainNow = BF.weather.raining && BF.weather.precipAt(h0.x, h0.z, h0.y) !== 0;
-    for (let i = 0; i < 1600 && BE.out(h0).length; i++) step();
+    for (let i = 0; i < G(1600) && BE.out(h0).length; i++) step();
     ok("rain sends them home", !rainNow || BE.out(h0).length === 0, { rainNow, out: BE.out(h0).length });
     if (BF.weather && BF.weather.set) BF.weather.set("clear", 1e6);
     BF.weather.intensity = 0;
-    for (let i = 0; i < 1400; i++) step();
+    for (let i = 0; i < G(1400); i++) step();
 
     // ---- no flowers, no honey; harvesting
     const W0 = { x: V.x + 400, z: V.z };   // a hive far from flowers? test by clearing the flowers around h1 instead
@@ -146,7 +148,7 @@ module.exports = async (pg) => {
     h1.honey = 0;
     if (K.bkp && K.bkp.stage) BK.forceStop(K);
     if (K.bkp) K.bkp.cd = 1e12;   // the beekeeper would replant them
-    for (let i = 0; i < 2400; i++) step();
+    for (let i = 0; i < G(2400); i++) step();
     if (K.bkp) K.bkp.cd = 0;
     ok("no flowers within reach, no honey", h1.honey === 0 && BE.flowersNear(h1, true).length === 0, { honey: h1.honey, fl: BE.flowersNear(h1, true).length });
     for (const [p, id] of saved) W.setBlock(p[0], p[1], p[2], id);
@@ -173,7 +175,7 @@ module.exports = async (pg) => {
     // (off the page the player's body is the page's: a hurt goes to it from BF.player.damage, js/protocol.js, with no playerDamaged here)
     const damage0 = BF.player.damage;
     if (!BF.page) BF.player.damage = function (n) { if (n > 0) hurt += n; return damage0.apply(this, arguments); };
-    for (let i = 0; i < 400; i++) { step(); if (BF.page) BF.player.update(0.05); BF.player.position.set(h1.x + 2.5, h1.y + 0.1, h1.z + 0.5); }
+    for (let i = 0; i < G(400); i++) { step(); if (BF.page) BF.player.update(0.05); BF.player.position.set(h1.x + 2.5, h1.y + 0.1, h1.z + 0.5); }
     ok("harvesting by day while bees are out angers them and they sting the player", angry > 0 && hurt > 0, { angry, hurt, stings, mode: BF.player.gameMode, modes: BE.list.filter(b => b.home === h1).map(b => b.mode + (b.stung ? "!" : "")).join(",") });
     BF.player.damage = damage0;
     BF.player.health = 20; BF.player.setGameMode("creative");
@@ -188,7 +190,7 @@ module.exports = async (pg) => {
     BF.sky.setTime(0.7); BE.housekeeping();
     ok("no boost at night", BE.cropFactor(h0.x + 5, h0.y, h0.z + 3) === 1);
     BF.sky.setTime(0.12);
-    for (let i = 0; i < 40; i++) step();
+    for (let i = 0; i < G(40); i++) step();
 
     // ---- colony growth: one a day with 6+ flowers, up to 30
     const planted = [];   // the beekeeper may have picked some by now: top them up to 6 on open grass near the hive, removed after
@@ -209,12 +211,12 @@ module.exports = async (pg) => {
     const gV = P.grid(V.x, V.z), far = { x: V.x + (gV.u < P.N / 2 ? 900 : -900), z: V.z };   // (900 blocks toward the middle of the village's face)
     BF.player.teleport(far.x + 0.5, BF.worldgen.heightAt(far.x, far.z) + 2, far.z + 0.5);
     const vl = BF.villageSim.LIMITS.villages; BF.villageSim.LIMITS.villages = 0; BF.villageSim.reset();   // the village sim would keep its chunks
-    for (let i = 0; i < 300 && W.isLoaded(h0.x, h0.z); i++) { W.update(far.x, far.z, 8); step(); await new Promise(r => setTimeout(r, 20)); }
+    for (let i = 0; i < G(300) && W.isLoaded(h0.x, h0.z); i++) { W.update(far.x, far.z, 8); step(); await new Promise(r => setTimeout(r, 20)); }
     BF.villageSim.LIMITS.villages = vl;
     ok("bees are dropped when their hive's chunk unloads", !W.isLoaded(h0.x, h0.z) && BE.out(h0).length === 0 && h0.bees === 30, { loaded: W.isLoaded(h0.x, h0.z), out: BE.out(h0).length, was: nOut, bees: h0.bees });
     BF.player.teleport(V.x + 0.5, BF.worldgen.heightAt(V.x, V.z) + 2, V.z + 0.5);
     await settle(V.x, V.z);
-    step(); step(); for (let i = 0; i < 30; i++) step();
+    step(); step(); for (let i = 0; i < G(30); i++) step();
     const hb = BE.homeAt(h0.x, h0.y, h0.z), back = BE.out(hb);
     ok("reloaded by day: its bees are scattered around it, most on flowers", back.length >= 20 && back.every(b => Math.hypot(b.x - hb.x, b.z - hb.z) <= BE.R + 2) && back.filter(b => b.land && b.land.flower).length > back.length / 3,
       { n: back.length, onFl: back.filter(b => b.land && b.land.flower).length });
@@ -225,7 +227,7 @@ module.exports = async (pg) => {
     BE.deserialize(snap);
     const hb2 = BE.homeAt(hb.x, hb.y, hb.z);
     ok("save and load keep bees and honey", hb2 && hb2.bees === 30 && hb2.honey === 3, hb2 && [hb2.bees, hb2.honey]);
-    for (let i = 0; i < 1400; i++) step();
+    for (let i = 0; i < G(1400); i++) step();
 
     // ---- leading bees with a flower into another hive
     let spot = null;   // 10-16 blocks from the hive, more than 8 from every other home
@@ -251,7 +253,7 @@ module.exports = async (pg) => {
       if (i % 20 === 0) { const bs = freeOut(), b = bs[k++ % Math.max(1, bs.length)]; if (b) BF.player.position.set(b.x + 2, Math.max(b.y - 1.3, W.heightAt(Math.floor(b.x + 2), Math.floor(b.z)) + 1), b.z); }
       step();
     }
-    for (let i = 0; i < 40; i++) step();
+    for (let i = 0; i < G(40); i++) step();
     fol = BE.list.filter(b => b.follow && b.follow.who === "player").length;
     ok("bees follow a player holding a flower", fol > 0, { fol, sel: BF.inventory.selected(), out: BE.out(hb2).length, near: BE.list.filter(b => Math.hypot(b.x - BF.player.position.x, b.z - BF.player.position.z) < 8).length });
     const total = () => BE.loadedHomes().reduce((n, o) => n + o.bees, 0);
@@ -261,7 +263,7 @@ module.exports = async (pg) => {
     const homes0 = BE.loadedHomes().map(o => [o, o.bees]), led = new Map(), by = new Set(); let booking = true;
     BE.onMoveIn((o, h, who) => { if (!booking) return; by.add(who === "player" ? "player" : who && who.profession || "?"); led.set(o, (led.get(o) || 0) + 1); if (h) led.set(h, (led.get(h) || 0) - 1); });
     const p0 = { x: BF.player.position.x, z: BF.player.position.z };
-    for (let i = 0; i < 600; i++) { const t = Math.min(1, i / 300), x = p0.x + (spot.x + 1.5 - p0.x) * t, z = p0.z + (spot.z + 0.5 - p0.z) * t; BF.player.position.set(x, Math.max(W.heightAt(Math.floor(x), Math.floor(z)) + 1, spot.y) + 0.1, z); step(); }
+    for (let i = 0; i < G(600); i++) { const t = Math.min(1, i / G(300)), x = p0.x + (spot.x + 1.5 - p0.x) * t, z = p0.z + (spot.z + 0.5 - p0.z) * t; BF.player.position.set(x, Math.max(W.heightAt(Math.floor(x), Math.floor(z)) + 1, spot.y) + 0.1, z); step(); }
     booking = false;
     const off = homes0.filter(([o, n]) => o.bees - n !== (led.get(o) || 0)).map(([o, n]) => [o.x, o.z, n, o.bees, led.get(o) || 0]);
     ok("led to another hive they move in, one from one count to the other", nh.bees > 0 && before[1] === 0 && nh.bees === led.get(nh) && total() === before[2] && off.length === 0

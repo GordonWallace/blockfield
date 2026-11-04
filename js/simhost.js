@@ -192,7 +192,7 @@ function run(w, via) {
     w.onerror = ev => { if (ev && ev.preventDefault) ev.preventDefault(); if (!settled) fail(ev && ev.message || "it could not load"); else crashed(ev && ev.message || "the " + what + " failed"); };
     const three = document.querySelector('script[src*="three"]');
     if (server) { H.hello = w.hello; if (!urlWorkers().workers) w.postMessage({ workers: { n: H.workersPref() } }); }   // the Cluster workers setting, before the boot (server/world.js)
-    w.postMessage({ boot: Object.assign({ three: three ? three.src : null, build: window.BF_BUILD || null }, bootWorkers()) });   // (build: the checkout's commit, for the game log's header)
+    w.postMessage({ boot: Object.assign({ three: three ? three.src : null, build: window.BF_BUILD || null, tick: BF.warp.TICK }, bootWorkers()) });   // (build: the checkout's commit, for the game log's header; tick: the page's tick length, ?tick=, idea-049)
   });
 }
 

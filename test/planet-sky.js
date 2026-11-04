@@ -69,7 +69,7 @@ module.exports = async (pg) => {
     const before = sample();
     let mx = 0, mz = 0, px = D[0], pz = D[1];
     for (let i = 0; i < 400; i++) {
-      S.update(0.05);
+      S.update(0.05);   // 400 frames of 0.05 s: 20 s
       let ddx = D[0] - px, ddz = D[1] - pz;
       const CS = S.cloudCellSize;
       if (ddx > CS / 2) ddx -= CS; if (ddx < -CS / 2) ddx += CS;

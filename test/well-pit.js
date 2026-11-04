@@ -16,7 +16,7 @@ module.exports = async (pg, out) => {
     if (vs.length < 5) return { error: "not enough villagers" };
     const old = new Set(BF.glog ? BF.glog.recent(400) : []);
     let T = 0;
-    const step = () => { BF.sky.setTime(0.2); BF.mobs.update(0.05); BF.world.tickSim(); T += 0.05; };
+    const step = () => { BF.sky.setTime(0.2); BF.mobs.update(BF_TK); BF.world.tickSim(); T += 0.05; };
     const m = vs[0];
     m.position.set(V.x + 0.5, V.y + 0.5, V.z + 0.5); m.vel.set(0, 0, 0); m.ai.mode = "idle"; m.ai.t = 0; m.ai.route = null;
     let outAt = null;

@@ -123,7 +123,7 @@ function update() {
   if (!hooked && typeof BF.on === "function") { hooked = true; BF.on("newWorld", reset); }
   // clusters (spec r15-39b, js/ctick.js): each cluster its own villages, every 2 game seconds on the tick counter
   const C = BF.ctick && BF.ctick.filter ? BF.ctick : null;
-  if (C) { if (BF.rand.tick % 40 !== 5) return; }
+  if (C) { if (!BF.warp.every(2, 5)) return; }
   else {
     const t = BF.simNow();   // every 2 game seconds, from the game step (js/villagelog.js init; spec r15-16)
     if (t - tickT < 2 && t >= tickT) return;

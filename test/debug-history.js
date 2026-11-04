@@ -77,7 +77,7 @@ const root = path.resolve(__dirname, '..'), out = process.argv[2] || '/tmp/debug
   await dbg.reload(); await dbg.waitForTimeout(2000);
   const day0 = await lib.sim(game, () => BF.sky.day + BF.sky.time);
   for (let i = 0; i < 24; i++) {   // a game day, a game hour at a time, the feed running in between
-    await lib.sim(game, n => { for (let i = 0; i < n; i++) { BF.simStep(0.05); if (i % 50 === 0) BF.world.update(BF.player.position.x, BF.player.position.z, 4); } }, 1000);
+    await lib.sim(game, n => { for (let i = 0; i < n; i++) { BF.simStep(BF_TK); if (i % 50 === 0) BF.world.update(BF.player.position.x, BF.player.position.z, 4); } }, 1000);
     await game.waitForTimeout(300);
   }
   const dayEnd = await lib.sim(game, () => BF.sky.day + BF.sky.time);

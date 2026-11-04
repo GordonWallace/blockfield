@@ -36,7 +36,7 @@
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
-let MEET = 160;        // ticks between meetings (js/clusters.js MEET; setMeet: benchmarks)
+let MEET = Math.max(1, Math.round(8 / BF.warp.TICK));        // ticks between meetings: eight game seconds, 160 at 0.05 s (idea-049) (js/clusters.js MEET; setMeet: benchmarks)
 // (BF_MEET=n in the environment, Node only: every copy of a world server's simulation, its region workers too, meets every n ticks.
 // A benchmark knob, 2026-10-29: what longer intervals save in play)
 { const e = globalThis.process && process.env ? +process.env.BF_MEET : 0; if (e > 0) { MEET = e | 0; if (BF.onLoad) BF.onLoad(() => { if (BF.clusters) BF.clusters.setMeet(MEET); }); } }

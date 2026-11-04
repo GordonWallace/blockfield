@@ -157,7 +157,7 @@ let tickT = 0;
 function update() {
   // clusters (spec r15-39b, js/ctick.js): each cluster its own villages, every game second on the tick counter
   const C = BF.ctick && BF.ctick.filter ? BF.ctick : null;
-  if (C) { if (BF.rand.tick % 20 !== 6) return; }
+  if (C) { if (!BF.warp.every(1, 6)) return; }
   else {
     const t = BF.simNow();   // every game second, from the game step (js/villagelog.js init; spec r15-16)
     if (t - tickT < 1 && t >= tickT) return;

@@ -13,12 +13,12 @@ module.exports = async (pg) => {
     const P = BF.perf, out = {};
     const alive = () => { let v = 0; for (const m of BF.mobs.list) if (!m.dead && !m.removed && m.type === "villager") v++; return v; };
     out.offOn = P.on; out.lapsBefore = P.laps;
-    for (let i = 0; i < 50; i++) BF.simStep(0.05);
+    for (let i = 0; i < 50; i++) BF.simStep(BF_TK);
     out.lapsOff = P.laps;
     P.ask(true); P.reset();
     let vs = 0, game = 0;
     const t0 = performance.now();
-    for (let i = 0; i < 200; i++) { BF.simStep(0.05); vs += alive() * 0.05; game += 0.05; }
+    for (let i = 0; i < 200; i++) { BF.simStep(BF_TK); vs += alive() * BF_TK; game += BF_TK; }
     const t1 = performance.now();
     const s = P.stats(), tot = P.totals();
     out.villagers = alive(); out.real = (t1 - t0) / 1000; out.game = game; out.expVss = vs / out.real;
@@ -28,7 +28,7 @@ module.exports = async (pg) => {
     out.text = P.text(s);
     P.ask(false);
     out.onAfter = P.on;
-    const l0 = P.laps; BF.simStep(0.05); out.lapsAfterOff = P.laps - l0;
+    const l0 = P.laps; BF.simStep(BF_TK); out.lapsAfterOff = P.laps - l0;
     return out;
   });
   console.log(`villagers ${r.villagers}, ${r.real.toFixed(2)} s real for ${r.game.toFixed(1)} game s: meter ${r.vss.toFixed(1)} V·s/s, expected ${r.expVss.toFixed(1)}; ` +
@@ -75,7 +75,7 @@ module.exports = async (pg) => {
     const P = BF.perf;
     P.ask(true); P.reset();
     const t0 = performance.now();
-    for (let i = 1; performance.now() - t0 < 6500; i++) { BF.simStep(0.05); if (i % 20 === 0) P.frame(); }
+    for (let i = 1; performance.now() - t0 < 6500; i++) { BF.simStep(BF_TK); if (i % 20 === 0) P.frame(); }
     const t = P.totals();
     P.ask(false);
     return { real: t.real, stepMs: t.stepMs / t.steps, split: Object.values(t.split).reduce((a, b) => a + b, 0) / t.steps };

@@ -42,7 +42,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   console.log(`node: ${node.villagers} villagers, ${node.mobs} mobs, ${node.chunks} chunks, ${node.vss} V·s/s, ${node.msPerTick} ms/tick, ${node.real} s real`);
   check(node.villagers > 0, `villagers were simulated (${node.villagers})`);
   check(node.vss > 0, `the villager-seconds meter counted work (${node.vss} V·s/s)`);
-  check(Math.abs(node.seconds - seconds) < 0.001 && node.ticks === Math.round(seconds / 0.05), `it ticked ${seconds} game seconds in 0.05 s ticks (${node.ticks})`);
+  check(Math.abs(node.seconds - seconds) < 0.001 && node.ticks === Math.round(seconds / (node.tick || 0.2)), `it ticked ${seconds} game seconds in ${node.tick || 0.2} s ticks (${node.ticks})`);
   // the game log went to the file, with the boot and the run in it
   const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '';
   check(/headless\s+Headless simulation booted/.test(log), 'the game log file has the headless boot line');

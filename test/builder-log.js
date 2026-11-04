@@ -35,7 +35,7 @@ const check = (ok, msg) => { console.log((ok ? 'ok   ' : 'FAIL ') + msg); if (!o
       const key = Math.round(v.x) + "," + Math.round(v.z);
       BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
       const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-      for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
+      for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(BF_TK); }
       return BF.mobs.list.some(m => m.type === "villager" && m.village && m.village.key === key && !m.dead && m.profession === "builder");
     }, c);
     if (ok) { vk = { ...c, key: Math.round(c.x) + "," + Math.round(c.z) }; break; }

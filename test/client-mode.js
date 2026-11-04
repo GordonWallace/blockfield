@@ -98,7 +98,7 @@ module.exports = async (pg, out) => {
     v.level = 2; v.xp = 15;
     v.trades = [1, 2, 3].flatMap(l => BF.trades.offers("toolsmith", l));
     window.__v = v;
-    for (let i = 0; i < 20; i++) { BF.sky.setTime(0.25); M.update(0.05); }
+    for (let i = 0; i < 20; i++) { BF.sky.setTime(0.25); M.update(BF_TK); }
     v.age = 1;
   }, { st });
   await place();

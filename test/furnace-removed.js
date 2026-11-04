@@ -19,7 +19,7 @@ module.exports = async (pg) => {
       remove();
       await tick();
       const left = inv.furnaceState(x, y, z);
-      for (let i = 0; i < 200; i++) inv.simTick(0.05);
+      for (let i = 0; i < 200; i++) inv.simTick(BF_TK);
       res[name] = { gone: !BF.isFurnace(W.getBlock(x, y, z)), drops: dropsHere(), record: !!left, invItems: inv.slots.filter(Boolean).length };
     };
     await way("setBlock", () => W.setBlock(x, y, z, 0));   // what a creeper explosion does to the cell (js/mobs.js explode)

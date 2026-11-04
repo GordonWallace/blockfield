@@ -24,7 +24,7 @@ const cows = (pg, c) => lib.sim(pg, async c => {
   if (globalThis.__upd) BF.mobs.update = globalThis.__upd;
   BF.mobs.spawning = false;
   for (const m of BF.mobs.list.slice()) if (m.type === 'cow' && P.distance(sp, m.position) < 80) BF.mobs.kill(m);
-  for (let i = 0; i < 10; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+  for (let i = 0; i < 10; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
   const cowA = BF.mobs.spawn('cow', c.a.x, yAt(c.a), c.a.z), cowB = BF.mobs.spawn('cow', c.b.x, yAt(c.b), c.b.z);
   globalThis.__upd = BF.mobs.update; BF.mobs.update = () => {};   // hold everything still so the game and the screen can be compared
   const pp = BF.player.position, F = P.face(pp.x, pp.z), q = P.inFrame(F, cowA.position.x, cowA.position.z, {});

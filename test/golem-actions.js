@@ -11,7 +11,7 @@ module.exports = async (pg, out) => {
     const M = BF.mobs, W = BF.world, r = {};
     BF.sky.setTime(0.75);
     M.spawning = false;   // no natural spawns muddling the fights
-    const step = (n, dt = 0.05) => { for (let i = 0; i < n; i++) { BF.sky.setTime(0.75); M.update(dt); } };
+    const step = (n, dt = BF_TK) => { for (let i = 0; i < n; i++) { BF.sky.setTime(0.75); M.update(dt); } };
     // clear other hostiles and park every golem but one far away
     for (const m of M.list.slice()) if (m.hostile) M.kill(m);
     const golems = M.list.filter(m => m.type === "iron_golem");

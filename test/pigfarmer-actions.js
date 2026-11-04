@@ -12,8 +12,8 @@ module.exports = async (pg, out) => {
   await lib.simBFT(pg);
   const res = await lib.sim(pg, async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
-    const step = (h = 0.05) => { const W = BF.warp; W.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
-    const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
+    const step = (h = BF_TK) => { const W = BF.warp; W.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
+    const run = (sec, h = BF_TK) => { for (let t = 0; t < sec; t += h) step(h); };
     const day = () => BF.sky.day + BF.sky.time;
     const PF = BF.pigFarmer, I = BF.I, T = BF.trades;
     const rosterOf = v => BF.mobs.roster({ key: Math.round(v.x) + "," + Math.round(v.z), houses: v.houses || [], nb: v.nb0 != null ? v.nb0 : v.buildings.length, pop: v.pop || 0, ground: v.ground });

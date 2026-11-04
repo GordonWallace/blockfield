@@ -9,8 +9,8 @@ module.exports = async (pg, out) => {
   await lib.newWorld(pg, 123, { gen: 4, villages: 9, gameMode: "survival" });
   const res = await lib.sim(pg, async () => {   // (where the simulation is: spec r15-43)
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
-    const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
-    const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
+    const step = (h = BF_TK) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.inventory.simTick(h); BF.world.tickSim(); };
+    const run = (sec, h = BF_TK) => { for (let t = 0; t < sec; t += h) step(h); };
     const K = BF.baker, I = BF.I, T = BF.trades, W = BF.world;
     BF.state.paused = true;
     ok("new worlds use village generator 6", BF.state.villages >= 6, BF.state.villages);

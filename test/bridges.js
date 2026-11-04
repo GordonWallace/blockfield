@@ -15,7 +15,7 @@ module.exports = async (pg) => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const M = BF.mobs, Bd = BF.builder, Br = BF.bridges, W = BF.world, B = BF.B, I = BF.I, T = BF.trades.inv;
     M.spawning = false;
-    for (let i = 0; i < 100; i++) { BF.sky.setTime(0.2); M.update(0.05); }
+    for (let i = 0; i < 100; i++) { BF.sky.setTime(0.2); M.update(BF_TK); }
     const bm = M.list.find(m => m.type === "villager" && m.profession === "builder" && !m.dead);
     if (!bm) { ok("setup: a builder", false); return R; }
     const rec = bm.village, key = rec.key;
@@ -92,7 +92,7 @@ module.exports = async (pg) => {
     T.add(bm.inv, I.coal, 4); T.add(bm.inv, I.cobblestone, 40);
     bm.bs = bm.bs || {}; Object.assign(bm.bs, { mode: "idle", cool: 0, t: 0, fail: {}, avoid: {}, entry: null });
     const built = Bd.builtOf(rec);
-    M.update(0.05);
+    M.update(BF_TK);
     // nobody but the builder on or beside the span: a mob there holds the plan back (js/builder.js occupiedBox) and one standing where a post
     // goes gets that log skipped. Wild animals and monsters (idea-037) go; the village's own (villagers, golems, pen and stable animals) are
     // sent back to the village centre. Done again through the build.
@@ -116,7 +116,7 @@ module.exports = async (pg) => {
     Bd.startBuild(bm, bm.bs, e, true);
     BF.player.teleport(x0 - 6, gref + 3, z0 + 0.5);
     bm.position.set(x0 - 12, gref + 2, z0 + 0.5); bm.vel.set(0, 0, 0);
-    for (let i = 0; i < 40; i++) { BF.sky.setTime(0.2); M.update(0.05); }
+    for (let i = 0; i < 40; i++) { BF.sky.setTime(0.2); M.update(BF_TK); }
     let steps = 0;
     for (; steps < 9000 && e.state !== "done"; steps++) {
       BF.sky.setTime(0.2 + Math.min(0.2, steps * 0.00002)); M.update(0.1);

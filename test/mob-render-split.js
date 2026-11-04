@@ -93,7 +93,7 @@ module.exports = async (pg, out) => {
         }
         return m;
       });
-      for (let i = 0; i < 40; i++) { BF.sky.setTime(0.25); M.update(0.05); }
+      for (let i = 0; i < 40; i++) { BF.sky.setTime(0.25); M.update(BF_TK); }
       for (let i = 0; i < made.length; i++) {
         const m = made[i], d = shot.mobs[i];
         m.age = 1;
@@ -148,7 +148,7 @@ module.exports = async (pg, out) => {
     BF.sky.setTime(0.25);
     const z = M.spawn("zombie", st.x + 0.5, st.y, st.z - 2.5);
     z.rider = {};
-    for (let i = 0; i < 10; i++) { BF.sky.setTime(0.25); M.update(0.05); }
+    for (let i = 0; i < 10; i++) { BF.sky.setTime(0.25); M.update(BF_TK); }
     return { onFire: !!z.onFire, hp: z.hp };
   }, { st: stage });
   await pg.waitForTimeout(300);

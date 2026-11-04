@@ -517,7 +517,7 @@ function forget(m) {
 function tick(dt) {
   hook();
   // clusters (spec r15-39b, js/ctick.js): every cluster once a game second on the tick counter (its villagers only: the region query)
-  if (BF.ctick && BF.ctick.filter) { if (BF.rand.tick % 20 !== 3) return; }
+  if (BF.ctick && BF.ctick.filter) { if (!BF.warp.every(1, 3)) return; }
   else { tickT -= dt; if (tickT > 0) return; tickT = 1; }
   if (!BF.mobs || !BF.world) return;
   const W = BF.world;

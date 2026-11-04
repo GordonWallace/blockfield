@@ -65,7 +65,7 @@ module.exports = async (pg) => {
     }
 
     // ---- in a running village: shears and hoe wear as they are used
-    const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
+    const step = (h = BF_TK) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
     BF.state.paused = true;
     BF.newWorld(123, { gen: 4, villages: 9, gameMode: "survival" });   // the harness planet seed: its rivers are worked out in this page already
     BF.mobs.spawning = false;
@@ -79,8 +79,8 @@ module.exports = async (pg) => {
     for (let i = 0; i < 300; i++) { BF.world.update(V.x, V.z, 8); await new Promise(r => setTimeout(r, 10)); if (BF.world.queueLength === 0) break; }
     P.invulnerable = true;
     BF.sky.setTime(0.05);
-    for (let t = 0; t < 8; t += 0.05) step();
-    for (let k = 0; k < 120 && !((BF.mobs.villages.get(V.x + "," + V.z) || { members: [] }).members.some(m => m.profession === "shepherd")); k++) { BF.world.update(V.x, V.z, 8); for (let t = 0; t < 0.5; t += 0.05) step(); }
+    for (let t = 0; t < 8; t += BF_TK) step();
+    for (let k = 0; k < 120 && !((BF.mobs.villages.get(V.x + "," + V.z) || { members: [] }).members.some(m => m.profession === "shepherd")); k++) { BF.world.update(V.x, V.z, 8); for (let t = 0; t < 0.5; t += BF_TK) step(); }
     const rec = BF.mobs.villages.get(V.x + "," + V.z);
     const shep = rec && rec.members.find(m => m.type === "villager" && m.profession === "shepherd");
     const farmer = rec && rec.members.find(m => m.type === "villager" && m.profession === "farmer" && m.jobsite);

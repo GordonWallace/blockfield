@@ -111,7 +111,7 @@ module.exports = async (pg) => {
     const end = BF.sky.day + BF.sky.time + days, wall = performance.now();
     let waits = null;   // the stuck villager's waits, read an hour after they ended (a 2-day run drops that day by the end)
     while (BF.sky.day + BF.sky.time < end) {
-      for (let i = 0; i < 400; i++) step(0.05);
+      for (let i = 0; i < 400; i++) step(BF_TK);
       if (!waits && BF.sky.day + BF.sky.time > to + 1 / 24) waits = JSON.parse(JSON.stringify(D.get(vk).s.filter(s => s[2] === "Waiting for gold")));
       await new Promise(r => setTimeout(r, 0)); if (performance.now() - wall > 1.5e6) break;
     }

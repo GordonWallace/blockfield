@@ -2,7 +2,7 @@
 // 0x (Left at 1x, or an alert from the debug screen: js/alerts.js) freezes the world: no simulation steps run at all, so mobs,
 // villagers, crops, furnaces, the sky and water all stand still, while the player still moves, looks around and can teleport.
 // Right from 0x always goes back to 1x, whatever speed the game ran at before.
-// Fixed tick (spec r15-10): the world simulation always runs in ticks of TICK = 0.05 s of game time, 20 a second at 1x, at every
+// Fixed tick (spec r15-10, length idea-049): the world simulation always runs in ticks of TICK = 0.2 s of game time, 5 a second at 1x, at every
 // speed and every frame rate, so the sim behaves the same at 1x and 1000x, at 30 fps and 144 fps. An accumulator collects
 // real seconds x speed each frame (a frame counts at most MAX_FRAME real seconds, so a hitch doesn't cause a burst of ticks) and
 // the game loop (main.js) runs the whole ticks it holds, within BUDGET_MS; the fraction left carries to the next frame, and whole
@@ -12,7 +12,7 @@
 // The player is not stepped: it keeps normal speed (one update per frame) so you can still move around and observe.
 // BF.simNow() is the simulation clock in seconds: it advances only by simulated ticks (not while paused), and every
 // cooldown / scan timer in the sim modules reads it instead of performance.now(), so they speed up with everything else.
-// API: BF.warp = { speed, frozen, TICK, plan(dt) -> {n, h}, advance(h), done(n, simSec, dt, achieved?), alpha, renderNow(), last, achieved, dropped, reset(), set(i),
+// API: BF.warp = { speed, frozen, TICK, ticksOf(sec), every(sec, phase), plan(dt) -> {n, h}, advance(h), done(n, simSec, dt, achieved?), alpha, renderNow(), last, achieved, dropped, reset(), set(i),
 // freeze(), cycle(), faster(), slower(), BUDGET_MS, MAX_FRAME, SPEEDS, clock }. advance(h) moves the clock only (tests step it by hand).
 // set(i) takes an index into SPEEDS (0 = 1x); speed reads 0 while frozen.
 (() => {
@@ -20,8 +20,21 @@
 const BF = (globalThis.BF = globalThis.BF || {});
 
 const SPEEDS = [1, 3, 5, 10, 100, 1000];
+// Tick length (idea-049): 0.2 s unless asked otherwise, by ?tick= in the address, BF_TICK in Node's environment or
+// globalThis.BF_TICK before this file loads (0.01 to 1 s; 0.05 s was the length before 1.5). Read once at load: the sim modules
+// size their tick counts from it, and everything that happens is per game second, so a longer tick does the same work in fewer,
+// longer steps (reports/idea-049.md). A page drawing a remote simulation follows the simulation's length (js/protocol.js hello).
+const DEFAULT_TICK = 0.2;
 const SLOW_1X = 0.8;   // at 1x the indicator shows only below this share of 1x (the measure wobbles a little: no flicker)
-const TICK = 0.05, MAX_STEPS = 1000, MAX_FRAME = 0.25;   // one tick is 0.05 s of game time; never more than 1000 ticks in a frame; a frame counts at most 0.25 real s
+const TICK = (() => {
+  const g = globalThis;
+  let v = g.BF_TICK;
+  if (v == null && g.process && g.process.env) v = g.process.env.BF_TICK;
+  if (v == null && g.location && g.location.search) try { v = new URLSearchParams(g.location.search).get("tick"); } catch (_) { /* none */ }
+  const t = +v;
+  return v != null && t >= 0.01 && t <= 1 ? t : DEFAULT_TICK;
+})();
+const MAX_STEPS = 1000, MAX_FRAME = 0.25;   // never more than 1000 ticks in a frame; a frame counts at most 0.25 real s
 let idx = 0, clock = 0, eff = 1, last = 1, shown = null, frozen = false;
 let acc = 0, acc0 = 0, planned = 0;   // game seconds collected but not yet ticked (and before the latest plan()); ticks that plan() asked for
 
@@ -67,6 +80,7 @@ function noteDropped(n) {
   }
 }
 
+globalThis.BF_TK = TICK;   // (the tick length for tests and tools that step the simulation by hand: test/lib.js sets it in Node too)
 BF.warp = {
   SPEEDS,
   BUDGET_MS: 40,                       // max simulation time per frame; the speed degrades gracefully past this
@@ -76,6 +90,10 @@ BF.warp = {
   get last() { return last; },         // achieved speed in the latest frame (game seconds simulated / real seconds)
   get dropped() { return droppedAll; },   // ticks dropped so far this session (the frame budget or MAX_STEPS couldn't fit them)
   TICK, MAX_FRAME,
+  // Schedules on the tick counter in game time (idea-049): ticksOf(sec) the ticks in sec game seconds (at least 1); every(sec, phase) is
+  // true on one tick in each sec game seconds, the phase'th (a phase spreads modules over the ticks; it wraps at short periods).
+  ticksOf: sec => Math.max(1, Math.round(sec / TICK)),
+  every(sec, phase) { const n = Math.max(1, Math.round(sec / TICK)); return BF.rand.tick % n === (phase || 0) % n; },
   // Ticks for a frame of real length dt (seconds, capped at MAX_FRAME): n ticks of TICK, the whole ticks in the accumulator.
   plan(dt) {
     acc0 = acc;

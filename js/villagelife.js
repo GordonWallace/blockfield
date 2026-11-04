@@ -221,7 +221,7 @@ const ACT = { harvest: 0.55, plant: 0.45, till: 0.9, border: 0.75, unborder: 0.8
 const actOf = k => (ACT[k] != null ? ACT[k] : BF.baker && BF.baker.FARM_KINDS[k] != null ? BF.baker.FARM_KINDS[k] : 0.6);   // + sugar cane and pumpkin tasks (js/baker.js)
 const TASK_MAX = 45;              // seconds before an unfinished task is given up
 const BREAK_P = 0.05;             // chance of a short break after a task (the rest of the day is farming)
-const SCAN_COLS = 500;            // columns of the village area scanned per tick
+const SCAN_COLS = Math.round(500 * BF.warp.TICK / 0.05);   // columns of the village area scanned per tick (500 a 0.05 s tick, idea-049)
 const RESCAN = 10;                // seconds between village farm scans
 const FARM_R = 12;                // a farmer tends farmland within 12 blocks, in every direction, of its composter, and the whole of any bed that reaches that box
 const BED_REACH = 16;             // ... so a bed it looks after (and builds) may stretch up to 16 blocks from the composter
@@ -404,13 +404,30 @@ function scanStep(R, D, budget) {
 const claims = new Map();   // cell key -> mob
 // Several region workers (spec r15-39, js/rworkers.js): a claim is made while its farmer thinks, so the other workers get it through a
 // channel; else a village whose thinking moves to another worker would find its farmers' cells unclaimed there and pick them twice.
-const claimSet = (k, m) => { claims.set(k, m); if (BF.rworkers) BF.rworkers.touch("farmclaim", k); };
+// Think order must not matter (spec r15-71): a farmer thinking reads the claims as they stood at the start of the tick (claimed() leaves
+// out the ones made this tick), and when two farmers pick the same cell on one tick the lower id keeps it; the other finds its claim gone
+// at its next tick and picks again (farmAI). Two farmers of a village picking on one tick came up every few game minutes at 0.2 s ticks
+// (test/think-order.js, idea-049).
+// (the tick a farmer made its claim is kept on it, m.farm.claimAt, not in a table here: with cluster workers a village that comes over
+// brings its farmers current, while a table here would hold what this worker last saw, test/cluster-rejoin.js)
+const idN = m => { const id = m.id, n = typeof id === "string" && id.charCodeAt(0) === 101 ? +id.slice(1) : NaN; return n === n ? n : 1e15; };   // (js/mobs.js idNum)
+const live = o => o && !o.dead && !o.removed && o.farm && o.farm.task;
+// (the same villager by id: with cluster workers a mob that came over from another worker is a new object here, and a claim its old object
+// made still names that one, test/cluster-rejoin.js)
+const same = (o, m) => o === m || (!!o && !!m && o.id != null && o.id === m.id);
+const claimSet = (k, m) => {
+  const o = claims.get(k), now = BF.rand.tick;
+  if (m.farm && !same(o, m)) { m.farm.pickAt = now; m.farm.pickDone = false; }   // (farmAI: two farmers that picked one cell on one tick)
+  if (same(o, m)) { if (o !== m) claims.set(k, m); return; }   // (its harvest's cell, now to plant: the claim keeps its tick)
+  if (o && live(o) && o.farm.task.k === k && o.farm.claimAt === now && idN(o) < idN(m)) return;   // (a lower id picked it this tick)
+  claims.set(k, m); if (m.farm) m.farm.claimAt = now; if (BF.rworkers) BF.rworkers.touch("farmclaim", k);
+};
 const claimDrop = k => { claims.delete(k); if (BF.rworkers) BF.rworkers.touch("farmclaim", k); };
 if (BF.rworkers) BF.rworkers.channel("farmclaim", {
   key: k => k, get: k => k, state: k => { const o = claims.get(k); return o ? o.id : null; },
   set: (k, id) => { const o = id == null ? null : BF.ids.get(id); if (o) claims.set(k, o); else claims.delete(k); },
 });
-function claimed(k, m) { const o = claims.get(k); return o && o !== m && !o.dead && !o.removed && o.farm && o.farm.task && o.farm.task.k === k; }
+function claimed(k, m) { const o = claims.get(k); return !!o && !same(o, m) && live(o) && o.farm.task.k === k && o.farm.claimAt !== BF.rand.tick; }
 function plantFor(m, x, y, z) {
   const c = ids(), votes = new Map();
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [2, 0], [-2, 0], [0, 2], [0, -2]]) {
@@ -1137,7 +1154,10 @@ function travel(m, fs, dt, out, tx, ty, tz, speed) {
   else if (st === "done") ai.route = null;
   return "going";
 }
-function newFarm() { return { task: null, stage: null, t: 0, actT: 0, breakT: 0, avoid: {}, stats: { day: -1, farm: 0, total: 0 }, last: null, counts: {} }; }
+// Time a farm step ran over its timer, or spent waiting for its block request's result, given to the next step (at most two ticks), so the
+// pace of the work doesn't depend on the tick length (idea-049).
+function takeCarry(fs) { const c = Math.min(2 * BF.warp.TICK, fs.carry || 0); fs.carry = 0; return c; }
+function newFarm() { return { task: null, stage: null, t: 0, actT: 0, breakT: 0, avoid: {}, stats: { day: -1, farm: 0, total: 0 }, last: null, counts: {}, claimAt: -1, pickAt: -1, pickDone: true }; }
 function endTask(m, fs, success) {
   const t = fs.task;
   if (t) {
@@ -1271,10 +1291,21 @@ function farmAI(m, dt, out) {
   const D = vdata(R), fs = m.farm || (m.farm = newFarm()), ai = m.ai;
   ensureKit(m); ensureCover(D, m);
   if (fs.breakT > 0) { fs.breakT -= dt; return false; }
+  // two farmers of the village picked this cell on the same tick: the lower id keeps it, the other picks again (the tick after; read off
+  // the farmers themselves, not the claims table, which on a cluster worker can still name another worker's copy)
+  if (fs.task && fs.task.k && fs.pickAt >= 0 && fs.pickAt < BF.rand.tick && !fs.pickDone) {
+    fs.pickDone = true;
+    const k = fs.task.k, me = idN(m);
+    if (m.village && m.village.members && m.village.members.some(o => o !== m && !same(o, m) && o.type === "villager" && live(o) && o.farm.task.k === k && o.farm.pickAt === fs.pickAt && idN(o) < me)) {
+      fs.task = null; fs.stage = null; fs.next = null; ai.route = null; fs.thinkT = 0;
+      if (BF.villageSim && BF.villageSim.done) BF.villageSim.done(m);
+    }
+  }
   if (!fs.task) {
-    if (fs.next) { fs.task = fs.next; fs.next = null; fs.stage = "act"; fs.actT = actOf(fs.task.kind); fs.t = 0; claimSet(fs.task.k, m); }
+    if (fs.next && claimed(fs.next.k, m)) fs.next = null;   // another farmer took the cell while it rested after the harvest
+    if (fs.next) { fs.task = fs.next; fs.next = null; fs.stage = "act"; fs.actT = actOf(fs.task.kind) - takeCarry(fs); fs.t = 0; claimSet(fs.task.k, m); }
     else {
-      fs.thinkT = (fs.thinkT || 0) - dt;
+      fs.thinkT = (fs.thinkT || 0) - dt - takeCarry(fs);
       if (fs.thinkT > 0) return fs.idleWork;      // brief pause between tasks still counts as work
       fs.thinkT = 0.4;
       if (!D.ready) { fs.idleWork = false; return false; }
@@ -1290,6 +1321,7 @@ function farmAI(m, dt, out) {
   const t = fs.task;
   if (fs.stage === "wait") {   // its block request is out: the result ends the task (one that never came, after a reset or a reload, gives it up)
     ai.mode = "idle"; ai.t = 2;
+    fs.carry = (fs.carry || 0) + dt;   // the wait for the result counts toward the next step (idea-049)
     if (!BF.blockReq.busy(m)) endTask(m, fs, false);
     return true;
   }
@@ -1318,6 +1350,7 @@ function farmAI(m, dt, out) {
   fs.actT -= dt;
   if (t.kind === "craft" && ai.swingT <= 0) ai.swingT = 0.35;
   if (fs.actT <= 0) {
+    fs.carry = -fs.actT;   // the time the action ran over goes to the next step (idea-049)
     let okDone = false;
     try { okDone = perform(m, fs, R, D); } catch (e) { console.error(e); }
     if (okDone && typeof okDone === "object") {   // a block request (spec r15-18): the result, before its next think, ends the task
@@ -1703,13 +1736,13 @@ function tick(dt) {
   // numbered by it too, the same in every cluster
   const C = BF.ctick, f = C && C.filter;
   let step;
-  if (f) { if (BF.rand.tick % 10 !== 0) return; step = 10 * BF.warp.TICK; }
+  if (f) { if (!BF.warp.every(0.5)) return; step = BF.warp.ticksOf(0.5) * BF.warp.TICK; }
   else { acc += dt; if (acc < 0.5) return; step = acc; }
   if (!BF.mobs || !BF.food) return;
   if (!f) acc = 0;
   const now = dayNow(), t = skyT(), day = BF.sky ? BF.sky.day || 0 : 0;
   if (!agesHooked && BF.on) { agesHooked = true; BF.on("newWorld", () => villageAges.clear()); }
-  if (f) pass = BF.rand.tick / 10; else pass++;
+  if (f) pass = BF.rand.tick / BF.warp.ticksOf(0.5); else pass++;
   const scanned = new Set();
   for (const m of BF.regions.ofType("villager")) {   // (the villagers only, r15-32)
     if (m.type !== "villager" || m.dead || m.removed || !Array.isArray(m.inv)) continue;

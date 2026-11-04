@@ -32,7 +32,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   });
   let last = -1;
   for (let i = 0; i < 60; i++) {
-    const c = await pg.evaluate(() => { window.__load(20); BF.simStep(0.05); return BF.world.chunks.size; });
+    const c = await pg.evaluate(() => { window.__load(20); BF.simStep(BF_TK); return BF.world.chunks.size; });
     if (c === last && i > 5) break;
     last = c; await pg.waitForTimeout(250);
   }
@@ -42,7 +42,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   const steps = Math.round(days * 1200 / 0.05), SLICE = 2000;
   const t0 = Date.now();
   for (let done = 0; done < steps; done += SLICE) {
-    await pg.evaluate(n => { for (let i = 0; i < n; i++) { BF.simStep(0.05); if (i % 50 === 0) window.__load(1); } }, Math.min(SLICE, steps - done));
+    await pg.evaluate(n => { for (let i = 0; i < n; i++) { BF.simStep(BF_TK); if (i % 50 === 0) window.__load(1); } }, Math.min(SLICE, steps - done));
   }
   const day = await pg.evaluate(() => ({ st: BF.regions.queryStats(), mobs: BF.mobs.list.length, villagers: BF.regions.ofType('villager').length }));
   console.log(`  ${steps} steps in ${((Date.now() - t0) / 1000).toFixed(0)} s; ${day.mobs} mobs, ${day.villagers} villagers; ${day.st.checked} queries checked`);
@@ -65,7 +65,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
       const x = Math.floor(v.position.x) + 2, z = Math.floor(v.position.z), y = W.heightAt(x, z) + 1;
       if (W.getBlock(x, y, z) === 0) { W.setBlock(x, y, z, BF.B.composter); BF.emit('blockPlaced', x, y, z, BF.B.composter); W.setBlock(x, y, z, 0); BF.emit('blockBroken', x, y, z, BF.B.composter); }
     }
-    for (let i = 0; i < 200; i++) BF.simStep(0.05);
+    for (let i = 0; i < 200; i++) BF.simStep(BF_TK);
     out.st = R.queryStats();
     R.verifyQueries = false;
     return out;

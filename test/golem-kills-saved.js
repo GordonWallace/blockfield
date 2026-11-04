@@ -12,7 +12,7 @@ module.exports = async (pg, out) => {
     BF.mobs.spawning = false;
     for (let round = 0; round < 10; round++) {   // the village replaces golems one at a time until its quota is used up
       for (const g of BF.mobs.list.filter(m => m.type === "iron_golem" && m.village)) BF.mobs.kill(g);
-      for (let i = 0; i < 200; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver());
+      for (let i = 0; i < 200; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
     }
   });
   await pg.evaluate(() => BF.save.saveNow());
@@ -24,7 +24,7 @@ module.exports = async (pg, out) => {
   await lib.simReady(pg);
   await lib.sim(pg, () => { BF.mobs.spawning = false; });
   await pg.waitForTimeout(9000);
-  await lib.sim(pg, () => { for (let i = 0; i < 400; i++) (BF.mobs.update(0.05), BF.req.apply(), BF.req.deliver()); });
+  await lib.sim(pg, () => { for (let i = 0; i < 400; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver()); });
   const afterReload = await golems();
   const ok = (name, cond, extra) => console.log((cond ? "PASS " : "FAIL ") + name + "  " + JSON.stringify(extra));
   ok("the village had golems to kill", before > 0, { before });

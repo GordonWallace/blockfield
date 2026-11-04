@@ -111,7 +111,7 @@ module.exports = async (pg) => {
   const b1 = perSec(one.stats, one.frames);
   console.log("TIME 1x ms per frame: " + JSON.stringify(one.times));
   console.log("BYTES 1x per second (60 fps): " + JSON.stringify(b1));
-  ok("1x: entities sent every tick", one.stats.out.entities && one.stats.out.entities.msgs >= 30 * 20 * 0.9, one.stats.out.entities);
+  ok("1x: entities sent every tick", one.stats.out.entities && one.stats.out.entities.msgs >= 30 / (+process.env.BF_TICK || 0.2) * 0.9, one.stats.out.entities);
 
   // ---- player requests through the protocol
   const req = await pg.evaluate(() => {
@@ -163,7 +163,7 @@ module.exports = async (pg) => {
   const b100 = perSec(ff.stats, ff.frames);
   console.log("TIME 100x ms per frame: " + JSON.stringify(ff.times));
   console.log("BYTES 100x per second (60 fps frames, " + (ff.ticks / ff.frames).toFixed(1) + " ticks a frame, achieved " + (ff.game / (ff.frames / 60)).toFixed(0) + "x): " + JSON.stringify(b100));
-  ok("100x: entities at most once a frame", ff.stats.out.entities && ff.stats.out.entities.msgs <= ff.stats.flushes && ff.stats.out.entities.msgs * 10 < ff.ticks,
+  ok("100x: entities at most once a frame", ff.stats.out.entities && ff.stats.out.entities.msgs <= ff.stats.flushes && ff.stats.out.entities.msgs * 4 < ff.ticks,   // (100x is 8 ticks a frame at 0.2 s ticks, 33 at 0.05)
     { msgs: ff.stats.out.entities && ff.stats.out.entities.msgs, flushes: ff.stats.flushes, ticks: ff.ticks });
   console.log("wall " + ff.wall.toFixed(0) + " s for " + Math.round(ff.game) + " game s");
   console.log(fails ? "FAILED " + fails : "ALL PASS");

@@ -1617,7 +1617,7 @@ function fluidTick() {
 }
 // Per cluster group (js/ctick.js): every FLUID_TICK on the tick counter, the group's own queued cells in canonical order with a budget of
 // its own. A cell that reads a cell of another group (2 blocks along each side: through a fence) is worked out at the next meeting.
-const FLUID_EVERY = Math.round(FLUID_TICK / 0.05);   // ticks (js/timewarp.js TICK)
+const FLUID_EVERY = Math.max(1, Math.round(FLUID_TICK / BF.warp.TICK));   // ticks (js/timewarp.js TICK)
 function fluidTickCluster(g) {
   if (BF.rand.tick % FLUID_EVERY !== 0 || !fluidQ.size) return;
   const own = [];
@@ -1656,8 +1656,8 @@ function growTick() {
   let dt, cells;
   if (g) {
     // per cluster group (js/ctick.js): once a second on the tick counter, the group's own cells
-    if (BF.rand.tick % 20 !== 0) return;
-    dt = 1;
+    if (!BF.warp.every(1)) return;
+    dt = BF.warp.ticksOf(1) * BF.warp.TICK;
     cells = [];
     for (const k of growing) { const i = k.indexOf(","), j = k.lastIndexOf(","); if (cellGroup(+k.slice(0, i), +k.slice(j + 1)) === g.key) cells.push(k); }
   } else {

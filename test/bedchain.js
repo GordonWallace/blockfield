@@ -76,9 +76,9 @@ async function openWorld(seed) {
         if (BF.player.setGameMode) BF.player.setGameMode('creative');   // (in the simulation too: the page's frames, which report it, have stopped)
         BF.player.spawn(v.x + 0.5, (v.y || BF.worldgen.heightAt(v.x, v.z)) + 3, v.z + 0.5);
         const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-        for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
+        for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(BF_TK); }
         BF.sky.setTime(0.02);
-        for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
+        for (let i = 0; i < 200; i++) { BF.world.update(v.x, v.z, 30); step(BF_TK); }
         const mem = BF.mobs.list.filter(m => m.type === "villager" && m.village && m.village.key === key && !m.dead);
         const profs = {};
         for (const m of mem) profs[m.profession] = (profs[m.profession] || 0) + 1;
@@ -103,7 +103,7 @@ async function openWorld(seed) {
       if (!eligible) { console.log(`seed ${seed} village ${setup.key} pop ${v.pop}: skipped (${JSON.stringify(p)})`); continue; }
       done++;
       if (process.env.DEBUG) console.log('   after spawn: FM', JSON.stringify(setup.fmInv), 'builders', JSON.stringify(setup.bInv));
-      const STEPS_PER_CALL = 4000, h = 0.05, total = Math.round(DAYS * 1200 / h);
+      const STEPS_PER_CALL = 4000, h = BF_TK, total = Math.round(DAYS * 1200 / h);
       for (let s = 0; s < total; s += STEPS_PER_CALL) {
         await sim(pg, ([n, h, v]) => {
           const R = globalThis.__rec;

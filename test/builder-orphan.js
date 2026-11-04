@@ -14,13 +14,13 @@ module.exports = async (pg) => {
   for (let k = 0, t0 = Date.now(); k < 30 && Date.now() - t0 < 150000; k++, await pg.waitForTimeout(500)) {
     if (await sim(() => {
       const M = BF.mobs;
-      M.spawning = false; for (let i = 0; i < 200; i++) { BF.sky.setTime(0.2); M.update(0.05); }
+      M.spawning = false; for (let i = 0; i < 200; i++) { BF.sky.setTime(0.2); M.update(BF_TK); }
       return M.list.some(m => m.type === "villager" && !m.dead && m.profession === "builder" && m.village && BF.builder.builtOf(m.village).some(e => e.state === "building"));
     })) break;
   }
   const r = await sim(() => {
     const M = BF.mobs, Bd = BF.builder, r = {};
-    M.spawning = false; for (let i = 0; i < 200; i++) { BF.sky.setTime(0.2); M.update(0.05); }
+    M.spawning = false; for (let i = 0; i < 200; i++) { BF.sky.setTime(0.2); M.update(BF_TK); }
     const vs = M.list.filter(m => m.type === "villager" && !m.dead && !m.child);
     let A = vs.find(m => m.profession === "builder");
     if (!A) return { err: "no builder" };

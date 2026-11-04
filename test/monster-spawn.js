@@ -55,9 +55,10 @@ module.exports = async (pg) => {
     // the 1 s between rebuilds of the count. The whole count is kept for the log.
     let over = [], most = [];
     const capsOf = new Map();
-    for (let i = 0; i < 3600; i++) {
-      S.update(0.05); M.update(0.05);
-      if (i % 20 === 0) for (const A of L.areas()) {   // a second's worth: count again, as the areas are rebuilt
+    const G = n => Math.round(n * 0.05 / BF_TK);   // a step count written for 20 ticks a game second (3 game minutes here), in this build's ticks
+    for (let i = 0; i < G(3600); i++) {
+      S.update(BF_TK); M.update(BF_TK);
+      if (i % G(20) === 0) for (const A of L.areas()) {   // a second's worth: count again, as the areas are rebuilt
         const name = A.kind + ":" + A.key, caps = capsOf.get(name) || [];
         caps.push(A.cap); if (caps.length > 10) caps.shift(); capsOf.set(name, caps);
         const cap = Math.max(...caps);
@@ -66,7 +67,7 @@ module.exports = async (pg) => {
         if (own > cap + 2) over.push([A.kind, own, h, cap]);
         if (!most.length || h - A.cap > most[2] - most[3]) most = [A.kind, own, h, A.cap];
       }
-      if (i % 200 === 0) await new Promise(r => setTimeout(r, 0));
+      if (i % G(200) === 0) await new Promise(r => setTimeout(r, 0));
     }
     const active = BF.villageSim.isActive(key);   // (still running at the end: the pin held)
     L.spawned = orig;

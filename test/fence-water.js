@@ -6,7 +6,7 @@ module.exports = async (pg, out) => {
   const res = await pg.evaluate(async () => {
     const R = { lines: [] }, ok = (name, cond, extra) => R.lines.push((cond ? "PASS " : "FAIL ") + name + (extra !== undefined ? "  " + JSON.stringify(extra) : ""));
     const W = BF.world, B = BF.B;
-    const step = (s) => { for (let t = 0; t < s; t += 0.05) { BF.warp.advance(0.05); BF.state.time += 0.05; BF.sky.update(0.05); BF.world.tickSim(); } };
+    const step = (s) => { for (let t = 0; t < s; t += BF_TK) { BF.warp.advance(BF_TK); BF.state.time += BF_TK; BF.sky.update(BF_TK); BF.world.tickSim(); } };
     const px = Math.floor(BF.player.position.x) + 6, pz = Math.floor(BF.player.position.z) + 6;
     for (let i = 0; i < 100; i++) W.update(px, pz, 8);
     // a flat stone test bed in the air, walled in 9 blocks out

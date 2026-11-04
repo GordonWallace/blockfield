@@ -19,9 +19,9 @@ module.exports = async (pg) => {
     let R = null, bl = null;
     for (const v of vs.slice(0, 6)) {
       BF.player.spawn(v.x + 0.5, v.y + 3, v.z + 0.5);
-      for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(0.05); }
+      for (let i = 0; i < 400; i++) { BF.world.update(v.x, v.z, 60); if (i % 4 === 0) step(BF_TK); }
       BF.sky.setTime(0.03);
-      for (let i = 0; i < 100; i++) { BF.world.update(v.x, v.z, 30); step(0.05); }
+      for (let i = 0; i < 100; i++) { BF.world.update(v.x, v.z, 30); step(BF_TK); }
       const key = Math.round(v.x) + "," + Math.round(v.z);
       R = BF.mobs.villages.get(key);
       bl = R && R.members.find(m => m.profession === "builder" && !m.dead);
@@ -84,7 +84,7 @@ module.exports = async (pg) => {
     for (let s = 0; s < 6 * 60 * 20 && entry.state !== "done"; s++) {
       if (BF.sky.time > 0.45) BF.sky.setTime(0.03);   // keep it working hours
       BF.world.update(entry.ox, entry.oz, 30);
-      step(0.05);
+      step(BF_TK);
     }
     ok(entry.state === "done", "the farm got finished", { state: entry.state, prog: entry.prog, n: entry.n, mode: bl.bs && bl.bs.mode, stage: bl.bs && bl.bs.stage });
     const bp = B.bpOf(entry), W = BF.world;
@@ -111,7 +111,7 @@ module.exports = async (pg) => {
       // a big village has other free jobsites too, and one can come free during the wait (a forester's band saw when it dies or quits): cleared as they appear
       const clear = () => { for (const j of BF.jobs.unclaimed(other, null, other)) if (!(j.id === BF.B.composter && Math.abs(j.x - entry.ox) < bp.w + 3 && Math.abs(j.z - entry.oz) < bp.d + 3)) W.setBlock(j.x, j.y, j.z, 0); };
       clear();
-      for (let s = 0; s < 20 * 150 && other.profession === "unemployed"; s++) { if (s % 20 === 0) clear(); BF.world.update(entry.ox, entry.oz, 30); step(0.05); if (BF.sky.time > 0.45) BF.sky.setTime(0.03); }
+      for (let s = 0; s < 20 * 150 && other.profession === "unemployed"; s++) { if (s % 20 === 0) clear(); BF.world.update(entry.ox, entry.oz, 30); step(BF_TK); if (BF.sky.time > 0.45) BF.sky.setTime(0.03); }
       ok(R.members.some(o => o.profession === "farmer" && o.jobsite && W.getBlock(o.jobsite.x, o.jobsite.y, o.jobsite.z) === BF.B.composter && Math.abs(o.jobsite.x - entry.ox) < bp.w + 3 && Math.abs(o.jobsite.z - entry.oz) < bp.d + 3), "a jobless villager took the new composter", { prof: other.profession, js: other.jobsite, dist: Math.round(fd(other)), seek: other.seek && { site: other.seek.site, t: other.seek.t && +other.seek.t.toFixed(1), avoid: Object.keys(other.seek.avoid || {}).length }, task: other.vtask ? other.vtask.what : null, free: BF.jobs.unclaimed(other, null, other).map(j => [j.x, j.y, j.z, j.prof]) });
     }
     // ---- 3. farmers' dirt
@@ -138,7 +138,7 @@ module.exports = async (pg) => {
     for (let s = 0; e2 && s < 3 * 60 * 20 && B.log.filter(x => x.kind === "dig").length === d0; s++) {
       if (BF.sky.time > 0.45) BF.sky.setTime(0.03);
       BF.world.update(e2.ox, e2.oz, 30);
-      step(0.05);
+      step(BF_TK);
     }
     ok(!!e2 && B.log.filter(x => x.kind === "dig").length > d0, "with no dirt for sale the builder digs its own", { planned: !!e2, mode: bl.bs.mode, stage: bl.bs.stage, dirt: T.count(bl.inv, I.dirt), e2: e2 && [e2.state, e2.prog, e2.n, e2.fill && e2.fill.length], log: B.log.slice(-6).map(x => x.kind + ":" + JSON.stringify(x).slice(0, 120)) });
     return out;

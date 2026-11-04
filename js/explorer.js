@@ -441,7 +441,7 @@ function nightEnd() { const d = BF.sky ? BF.sky.day || 0 : 0, t = skyT(); return
 const tentAt = c => BF.world.isLoaded(c.x, c.z) && BF.world.getBlock(c.x, c.y, c.z) === BF.tentId(c.f, 0, 1);
 // Every 2 game seconds on the tick counter, so every copy of the world looks on the same ticks: a timer of its own here started again at
 // 0 on a region worker booting a loaded world, and the worker took a tent down ticks before the leader did (test/workers-load.js, 2026-10-29).
-function tick() { if (camps.size && BF.rand.tick % 40 === 8) sweep(); }
+function tick() { if (camps.size && BF.warp.every(2, 8)) sweep(); }
 // The camps' look (tests call it directly).
 function sweep() {
   const C = BF.ctick && BF.ctick.filter ? BF.ctick : null;   // (clusters: each cluster its camps)

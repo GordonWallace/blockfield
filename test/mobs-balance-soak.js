@@ -103,7 +103,7 @@ const RUN = 3;   // days each group of villages runs
   }, [DAYS, RUN]);
   if (setup.err) { console.log('FAIL ' + setup.err); await b.close(); if (srv) await srv.stop(); process.exit(1); }
   console.log(`seed ${SEED}, player at ${setup.spot}, ${setup.groups.length} groups of 4 villages`);
-  const t0 = Date.now(), h = 0.05, DAY = Math.round(1200 / h), PER_CALL = Math.round(DAY / 8);
+  const t0 = Date.now(), h = BF_TK, DAY = Math.round(1200 / h), PER_CALL = Math.round(DAY / 8);
   const runs = [];
   for (let g = 0; g < setup.groups.length; g++) {
     const days = Math.min(RUN, DAYS - g * RUN), ks = setup.groups[g];

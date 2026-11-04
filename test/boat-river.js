@@ -51,7 +51,7 @@ module.exports = async (pg, out) => {
     const b = BF.boats.spawn("oak", spot.x + 0.5, wy + 0.739, spot.z + 0.5, yaw);
     P.mount(b);
     // autopilot: every 0.2 s look across headings within 100 degrees of the bow for the longest run of wet columns whose water doesn't rise
-    const h = 0.05, start = { x: b.pos.x, z: b.pos.z };
+    const h = BF_TK, start = { x: b.pos.x, z: b.pos.z };
     let path = 0, t = 0, want = yaw, inSolid = null, below = false, lastProgT = 0, lastPath = 0, minY = b.pos.y, maxV = 0;
     const steer = () => {
       const lv0 = level(b.pos.x, b.pos.z);

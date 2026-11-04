@@ -14,9 +14,9 @@ module.exports = async (pg) => {
   // helpers where the simulation is (spec r15-43; again after the reload, which may start a new thread there): a fixed-step run with
   // the village kept loaded, and the reference audit
   const helpers = () => lib.sim(pg, () => {
-    const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.boats) BF.boats.update(h); BF.world.tickSim(); };
+    const step = (h = BF_TK) => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); if (BF.boats) BF.boats.update(h); BF.world.tickSim(); };
     globalThis.IDT = {
-      run: sec => { for (let t = 0; t < sec; t += 0.05) step(); },
+      run: sec => { for (let t = 0; t < sec; t += BF_TK) step(); },
       load: async (x, z) => {
         BF.player.teleport(x + 0.5, BF.worldgen.heightAt(Math.floor(x), Math.floor(z)) + 2, z + 0.5);
         for (let i = 0; i < 400 && !BF.world.isLoaded(x, z); i++) { BF.world.update(x, z, 8); await new Promise(r => setTimeout(r, 10)); }

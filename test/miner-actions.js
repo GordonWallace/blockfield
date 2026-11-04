@@ -68,7 +68,7 @@ module.exports = async (pg, out) => {
     const pick0 = BF.miner.pickOf(M), w0 = pick0 ? pick0.wear || 0 : null;
     BF.miner.LOG.length = 0;
     const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-    for (let i = 0; i < 6000; i++) { step(0.05); if (i % 50 === 0) BF.world.update(BF.player.position.x, BF.player.position.z, 4); }
+    for (let i = 0; i < 6000; i++) { step(BF_TK); if (i % 50 === 0) BF.world.update(BF.player.position.x, BF.player.position.z, 4); }
     const pick = BF.miner.pickOf(M), kinds = {};
     for (const e of BF.miner.LOG) kinds[e.kind] = (kinds[e.kind] || 0) + 1;
     const sh = M.mi && M.mi.shaft;

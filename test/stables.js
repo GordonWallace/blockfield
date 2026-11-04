@@ -78,8 +78,8 @@ module.exports = async (pg) => {
   // ---------------------------------------------------------------- the soak village
   const ready = await lib.sim(pg, async () => {
     const ok = globalThis.__ok, I = BF.I, S = globalThis.__S;
-    const step = (h = 0.05) => { BF.warp.advance(h); BF.state.time += h; BF.sky.advance(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-    const run = (sec, h = 0.05) => { for (let t = 0; t < sec; t += h) step(h); };
+    const step = (h = BF_TK) => { BF.warp.advance(h); BF.state.time += h; BF.sky.advance(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
+    const run = (sec, h = BF_TK) => { for (let t = 0; t < sec; t += h) step(h); };
     globalThis.__step = step;
     BF.newWorld(1, { gen: 4, villages: 9, gameMode: "survival" });
     BF.mobs.spawning = false;                                // no wild spawns or herds: the test brings the wild horses
@@ -208,7 +208,7 @@ module.exports = async (pg) => {
     const ok = globalThis.__ok, hand = globalThis.__hand, R = globalThis.__R, step = globalThis.__step;
     const st = BF.stables.stableOf(R);
     BF.sky.setTime(0.06);
-    for (let i = 0; i < 20 * 180 && !BF.stables.LOG.some(e => e.kind === "nowild"); i++) step(0.05);   // it buys feed, looks, finds no horse
+    for (let i = 0; i < 20 * 180 && !BF.stables.LOG.some(e => e.kind === "nowild"); i++) step(BF_TK);   // it buys feed, looks, finds no horse
     const nowild = BF.stables.LOG.some(e => e.kind === "nowild");
     ok("with no wild horse in range it waits for the next day", nowild && hand.stb && hand.stb.waitWild > BF.sky.day + BF.sky.time);
     // a herd of 3 wild adults ~40 blocks from the rack, on the ground
@@ -242,7 +242,7 @@ module.exports = async (pg) => {
       const t0 = performance.now();
       let n = 0;
       while (BF.sky.time < 0.47 && BF.sky.time >= 0.03) {
-        step(0.05);
+        step(BF_TK);
         if (++n % 20 === 0) {
           const mine = BF.horses.horsesOf(owner);
           if (mine.length > L.maxPen) { L.maxPen = mine.length; L.maxPenAt = +(BF.sky.day + BF.sky.time).toFixed(3); }

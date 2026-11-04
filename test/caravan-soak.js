@@ -57,7 +57,7 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
     if (__C.FAR) {   // far pair: the player visits both villages (so the merchants know the other one's prices), then goes back to the one with a merchant
       const warm = V => {
         BF.player.spawn(V.x + 0.5, BF.worldgen.heightAt(Math.floor(V.x), Math.floor(V.z)) + 3, V.z + 0.5);
-        for (let i = 0; i < 400; i++) { BF.world.update(V.x, V.z, 60); if (i % 4 === 0) { BF.warp.advance(0.05); BF.sky.update(0.05); BF.mobs.update(0.05); BF.world.tickSim(); } }
+        for (let i = 0; i < 400; i++) { BF.world.update(V.x, V.z, 60); if (i % 4 === 0) { BF.warp.advance(BF_TK); BF.sky.update(BF_TK); BF.mobs.update(BF_TK); BF.world.tickSim(); } }
       };
       const keyOf = V => Math.round(V.x) + ',' + Math.round(V.z), has = [];
       const books = {};
@@ -89,9 +89,9 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
     globalThis.__mid = [mx, mz];
     BF.player.spawn(mx + 0.5, BF.worldgen.heightAt(Math.floor(mx), Math.floor(mz)) + 3, mz + 0.5);
     const step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); BF.drops.update(h); BF.world.tickSim(); };
-    for (let i = 0; i < 900; i++) { BF.world.update(mx, mz, 60); if (i % 4 === 0) step(0.05); }
+    for (let i = 0; i < 900; i++) { BF.world.update(mx, mz, 60); if (i % 4 === 0) step(BF_TK); }
     BF.sky.setTime(0.02);
-    for (let i = 0; i < 200; i++) { BF.world.update(mx, mz, 30); step(0.05); }
+    for (let i = 0; i < 200; i++) { BF.world.update(mx, mz, 30); step(BF_TK); }
     const keys = [A, B].map(v => Math.round(v.x) + ',' + Math.round(v.z));
     if (!__C.FAR) {   // near pair: a real price gap each way, as the far pair has one way. Merchants don't carry goods the buyers there can get as
       // cheaply from a seller of their own (bug-066), and natural gaps between two villages of the same professions rarely beat that within 30 days
@@ -171,7 +171,7 @@ const AWAY = +(process.env.AWAY || Math.ceil(DAYS * 2 / 3));
   console.log(`seed ${SEED} villages ${setup.keys.join(' and ')} ${setup.d} blocks apart; merchants: ${setup.merchants.join(', ') || 'none'}; gap items ${JSON.stringify(setup.gap)}; ${setup.sim}`);
   const t0 = Date.now();
   await lib.sim(pg, () => globalThis.__day());
-  const h = 0.05, DAY = Math.round(1200 / h), PER_CALL = Math.round(DAY / 6);
+  const h = BF_TK, DAY = Math.round(1200 / h), PER_CALL = Math.round(DAY / 6);
   let away = false;
   for (let s = 0, d = 0; s < DAYS * DAY; s += PER_CALL) {
     // from day AWAY on, the player leaves as soon as a merchant is on the road (or 3 days before the end, whatever happens)

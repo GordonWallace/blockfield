@@ -13,7 +13,7 @@ The performance meter measures how much simulation the game gets through. Its ma
 
 - **V·s/s**: villager-seconds of game time per real second. With no villagers loaded it is 0.
 - **mob-s/s**: the same for every loaded mob (villagers, golems, animals and monsters).
-- **ms/step**: real milliseconds per simulation step. A step is the game's unit of simulation: 0.05 game seconds or less at 1x, and 0.05 seconds at 100x and 1000x.
+- **ms/step**: real milliseconds per simulation step. A step is the game's unit of simulation, one tick: 0.2 game seconds (see [[page:time-and-weather]]).
 - **The split**: ms per step for each part:
   - *villagers*: villagers' own updates and the village systems (building, jobs, meals, breeding, chests, trading, restocking, day timelines);
   - *monsters*: monsters' updates and monster spawning;

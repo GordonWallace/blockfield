@@ -12,7 +12,7 @@ module.exports = async (pg, out) => {
   const check = (ok, what) => { console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails.push(what); };
   const trial = async (preHit) => {
     await pg.evaluate(() => { for (let i = 0; i < 60; i++) BF.player.update(0.05); BF.player.health = 20; });   // let any old hurt cooldown run out
-    await lib.sim(pg, () => { for (const m of BF.mobs.list.slice()) if (m.hostile) m.dead = true; BF.sky.setTime(0.75); BF.mobs.update(0.05); });
+    await lib.sim(pg, () => { for (const m of BF.mobs.list.slice()) if (m.hostile) m.dead = true; BF.sky.setTime(0.75); BF.mobs.update(BF_TK); });
     await pg.waitForTimeout(500);
     await pg.evaluate(() => { BF.player.health = 20; });
     await pg.waitForTimeout(300);   // (the page's health reaches the simulation)
@@ -24,13 +24,13 @@ module.exports = async (pg, out) => {
         if (preHit) {     // a zombie punch, as mobs.js deals it, then a second, weaker hit in the same half second
           const z = M.spawn("zombie", p.x - 0.9, p.y, p.z);
           z.ai.target = true; z.ai.los = true; z.ai.losT = 5; z.ai.attackCd = 0;
-          M.update(0.05);
+          M.update(BF_TK);
           r.punch = r.hits.length ? r.hits[0] : 0; z.dead = true;
           P.damage(1, p.clone ? p.clone() : { x: p.x - 1, y: p.y, z: p.z });
         }
         const c = M.spawn("creeper", p.x + 1.5, p.y, p.z);
         c.ai.target = true; c.ai.los = true; c.ai.losT = 5; c.ai.fuse = 1.49;
-        M.update(0.05);
+        M.update(BF_TK);
         r.exploded = !!c.exploded;
       } finally { P.damage = damage; }
       if (BF.proto && BF.proto.flush) BF.proto.flush();

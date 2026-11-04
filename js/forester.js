@@ -112,7 +112,9 @@ function hook() {
     const creative = !!(BF.inventory && BF.inventory.isCreative && BF.inventory.isCreative());
     fallAbove(x, y, z, !creative);
   });
-  BF.on("newWorld", () => { saps.clear(); notTree.clear(); growLast = sawT = sapLast = 0; });
+  // (claims too: a world loaded after another kept the trees and spots the last world's foresters had claimed, on the copy that played
+  // it only, so its region workers picked other spots, idea-049)
+  BF.on("newWorld", () => { saps.clear(); notTree.clear(); claims.clear(); growLast = sawT = sapLast = 0; });
 }
 
 // Tree shapes: [logs, leaves] as [dx, dy, dz] lists around the sapling cell (dy 0 = the sapling's own cell).
@@ -160,7 +162,7 @@ function growTree(x, y, z) {
 function growTick() {
   hook();
   if (BF.ctick && BF.ctick.filter) {   // clusters (spec r15-39b, js/ctick.js): every cluster its own foresters, every 5 game seconds on the tick counter
-    if (BF.rand.tick % 100 === 9 && BF.mobs) for (const m of BF.regions.ofType("villager")) if (m.profession === "forester" && !m.dead && !m.removed && Array.isArray(m.inv)) saw(m, state(m));
+    if (BF.warp.every(5, 9) && BF.mobs) for (const m of BF.regions.ofType("villager")) if (m.profession === "forester" && !m.dead && !m.removed && Array.isArray(m.inv)) saw(m, state(m));
     return;
   }
   const now = nowS();
@@ -179,7 +181,7 @@ function sapTick() {
   hook();
   const CC = W().clusterCells, g = CC && CC.cur();
   let dt;
-  if (g) { if (BF.rand.tick % 20 !== 0) return; dt = 1; }
+  if (g) { if (!BF.warp.every(1)) return; dt = BF.warp.ticksOf(1) * BF.warp.TICK; }
   else {
     const now = nowS();
     if (now - sapLast < 1) return;

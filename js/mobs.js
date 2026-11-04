@@ -1544,7 +1544,8 @@ let planBudget = 0;
 // module table, so that every copy of the world (spec r15-39: several workers, each thinking some regions) hands out the same grants: a
 // table here held only what this worker's own mobs asked, and still held them after their region moved to another worker. A tick number
 // ahead of the counter (a save loaded after the counter restarted) counts as lapsed.
-const PLANS = 2, KEEP = 20;
+const TS = BF.warp.TICK / 0.05;   // ticks of 0.05 s in one tick (idea-049): per-tick budgets below are per 0.05 s of game time
+const PLANS = Math.max(1, Math.round(2 * TS)), KEEP = Math.max(4, Math.round(20 / TS));
 let curMob = null, planTick = 0;   // (counts mob updates, not BF.rand.tick: tests step BF.mobs.update on its own; with clusters, the tick)
 // With clusters (spec r15-39b, js/ctick.js) the mob loop's parts run once per cluster: own(m) -> the mob is the running cluster's
 // (null: every mob is)
@@ -1857,13 +1858,18 @@ function pathOut(m) {
 }
 // Steers along ai.route. Returns "done", "stuck" or "going".
 // `ai` defaults to the villager's own route state (m.ai: route, ri, stuckT); detours pass their own.
-function followRoute(m, dt, out, speed, ai = m.ai) {
+function followRoute(m, dt, out, speed, ai = m.ai, again = false) {
   const r = ai.route;
   if (!r || ai.ri >= r.length) return "done";
   if (coarseStep && m === curMob) { const w = cellWalk(m, dt, speed, ai); if (w) return w; }   // (coarse mode: cell by cell)
   const c = r[ai.ri], dx = c[0] + 0.5 - m.position.x, dz = c[2] + 0.5 - m.position.z, d = Math.hypot(dx, dz);
   // reached: within 0.3 of its centre, and on a ladder only once the feet are in that cell
-  if (d < 0.3 && (m.onLadder ? Math.floor(m.position.y + 0.01) === c[1] : Math.abs(m.position.y - c[1]) < 1.1)) { ai.ri++; ai.stuckT = 0; return ai.ri >= r.length ? "done" : "going"; }
+  if (d < 0.3 && (m.onLadder ? Math.floor(m.position.y + 0.01) === c[1] : Math.abs(m.position.y - c[1]) < 1.1)) {
+    ai.ri++; ai.stuckT = 0;
+    if (ai.ri >= r.length) return "done";
+    if (!again) return followRoute(m, dt, out, speed, ai, true);   // on to the next cell this update, rather than a standing tick at each cell (idea-049)
+    return "going";
+  }
   ai.stuckT = (ai.stuckT || 0) + dt;
   if (ai.stuckT > 6) return "stuck";
   const s = Math.min(speed, d * 4 + 0.3);
@@ -2435,7 +2441,8 @@ function updateMob(m, dt) {
   if (m.dead) {
     m.deathT += dt;   // (js/mobview.js tips it over and flushes it red)
     m.tint = "red";
-    m.vel.x *= 0.8; m.vel.z *= 0.8; m.vel.y -= GRAVITY * dt;
+    const drag = Math.pow(0.8, dt / 0.05);   // 0.8 a 0.05 s tick, whatever the tick length (idea-049)
+    m.vel.x *= drag; m.vel.z *= drag; m.vel.y -= GRAVITY * dt;
     BF.world.moveBox(m.position, m.vel, m.halfWidth, Math.min(m.height, 0.5), dt, { stepUp: 0 });
     keepFrame(m);
     if (m.deathT > 1.0) {
@@ -2491,7 +2498,8 @@ function updateMob(m, dt) {
   } else {
   m.onLadder = m.type === "villager" && !m.inWater && onLadder(m);
   if (m.knockT <= 0) {
-    const k = Math.min(1, dt * (m.onGround ? 10 : m.inWater ? 4 : 2.5));
+    // the same pull toward the wanted velocity per game second at any tick length (idea-049): what a 0.05 s tick gives, compounded
+    const rate = m.onGround ? 10 : m.inWater ? 4 : 2.5, k = dt === 0.05 ? Math.min(1, dt * rate) : 1 - Math.pow(1 - Math.min(1, 0.05 * rate), dt / 0.05);
     m.vel.x += (_desired.x - m.vel.x) * k;
     m.vel.z += (_desired.z - m.vel.z) * k;
   }
@@ -2749,7 +2757,12 @@ function buildSepGridRef() {
   }
   chunkCells = REF_CHUNK.size;
 }
+// Separation pushes go into the velocity, which the next update eases back toward the wanted one: the push a mob ends up moving at is the
+// impulse over the easing (6 * dt / 0.5 at 0.05 s ticks). At longer ticks the impulse grows with dt while the easing can't pass 1, so
+// pressed mobs (pens) were shoved about twice as fast at 0.2 s: scale the impulse so the push speed stays what 0.05 s gives (idea-049).
+const sepScale = dt => dt === 0.05 ? 1 : 0.05 / 0.5 * (1 - Math.pow(0.5, dt / 0.05)) / dt;
 function separate(m, dt) {
+  const ss = sepScale(dt);
   const gx = Math.floor(m.position.x / 2), gz = Math.floor(m.position.z / 2);
   const plain = gridFast && inSquare(m.position.x, m.position.z, GRID_EDGE);
   for (let cz = gz - 1; cz <= gz + 1; cz++) for (let cx = gx - 1; cx <= gx + 1; cx++) {
@@ -2762,7 +2775,7 @@ function separate(m, dt) {
     if (Math.abs(dx) > min || Math.abs(dz) > min) continue;
     if (m.position.y > o.position.y + o.height || o.position.y > m.position.y + m.height) continue;
     const d = Math.hypot(dx, dz) || 0.01;
-    m.vel.x += (dx / d) * 6 * dt; m.vel.z += (dz / d) * 6 * dt;
+    m.vel.x += (dx / d) * 6 * dt * ss; m.vel.z += (dz / d) * 6 * dt * ss;
   }
   }
   if (playerLives()) {
@@ -2771,7 +2784,7 @@ function separate(m, dt) {
     const min = m.halfWidth + (p.halfWidth || 0.3);
     if (Math.abs(dx) < min && Math.abs(dz) < min && m.position.y < p.position.y + (p.height || 1.8) && p.position.y < m.position.y + m.height) {
       const d = Math.hypot(dx, dz) || 0.01;
-      m.vel.x += (dx / d) * 8 * dt; m.vel.z += (dz / d) * 8 * dt;
+      m.vel.x += (dx / d) * 8 * dt * ss; m.vel.z += (dz / d) * 8 * dt * ss;
     }
   }
 }
@@ -3582,7 +3595,7 @@ BF.mobs = {
   },
   update(dt) {
     if (!ready) return;
-    dt = Math.min(dt, 0.05);
+    dt = Math.min(dt, BF.warp ? BF.warp.TICK : 0.05);   // (one tick at most: a longer tick, idea-049, moves mobs its whole length)
     logShare();
     const share = planShare();
     planBudget = share; // A* searches per frame outside the mob loop

@@ -628,7 +628,7 @@ function copyBrowser(btn) {
 function loading(text) { if (BF.loading) { if (text) BF.loading.show(text); else BF.loading.hide(); } }
 function loaded(what, t0) {
   loading(null);
-  if (BF.glog) BF.glog.log("INFO", "save", what + " world \"" + (BF.save && BF.save.current ? BF.save.current.name : "?") + "\": playing after " + ((performance.now() - t0) / 1000).toFixed(1) + " s of loading");
+  if (BF.glog) BF.glog.log("INFO", "save", what + " world \"" + (BF.save && BF.save.current ? BF.save.current.name : "?") + "\": playing after " + ((performance.now() - t0) / 1000).toFixed(1) + " s of loading; simulation ticks of " + ((BF.client && BF.client.world && BF.client.world.tickLen) || (BF.warp ? BF.warp.TICK : 0.05)) + " s");
 }
 function createWorld() {
   const f = createForm.elements;

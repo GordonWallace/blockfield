@@ -1,3 +1,5 @@
+// BF_TK: the simulation's tick length, for tests that step it by hand (js/timewarp.js sets it where the simulation is; 0.2 s unless BF_TICK says)
+if (globalThis.BF_TK == null) globalThis.BF_TK = +(process.env.BF_TICK || 0.2);
 // Shared test helpers. toVillage: moves the player into the village nearest to where they are (spawn, on a fresh planet) and waits
 // for it to load (where the simulation is: any host).
 exports.toVillage = async pg => {

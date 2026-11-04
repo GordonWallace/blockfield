@@ -54,7 +54,7 @@ const FWD_HOUR = 20;      // a follower's ERROR lines a game hour sent on to the
 const BUSY_MS = 2000;     // real ms of dropped ticks before a split is tried
 const LOAD_MS = 30000;    // real ms at 1x with the simulation's thread busy (js/active.js pressed: 65% of each second, or the Distant villages
                           // limit holding villages back) before a split is tried (Gordon, 2026-10-30: at 1x the workers never split)
-const VERIFY = 6000;      // split ticks between the copies' hash checks (5 game minutes)
+const VERIFY = Math.round(300 / BF.warp.TICK);      // split ticks between the copies' hash checks (5 game minutes; 6000 at 0.05 s, idea-049)
 const LAG = 10;           // ticks a follower may be behind for the split to start, or more if replaying them takes at most LAG_MS at the leader's
 const LAG_MS = 2000;      // ms a tick (soloMs): the first meeting waits while they catch up (game seconds at the speed set were far too many on a slow
                           // machine at 100x: 4000 ticks, minutes of replay before the first meeting)
@@ -70,13 +70,13 @@ const L = {
   busySince: null, loadSince: null, soloMs: null, plainMs: null, splitMs: null, loopT0: null, loopTicks: 0, shared: null, why: "", lastText: "",
 };
 const log = (l, x) => { if (BF.glog) BF.glog.log(l, "workers", x); };
-const TRIAL_CLUSTERS = 400;   // ticks of a clusters' split trial, measured after WARM_MEETS meetings
+const TRIAL_CLUSTERS = BF.warp.ticksOf(20);   // ticks of a clusters' split trial (20 game seconds; 400 at 0.05 s, idea-049), measured after WARM_MEETS meetings
 // The first meetings of a clusters' split hand over whole clusters, the mobs moved and their first views (Gordon's laptop, test4, 8
 // workers, 2026-10-31: 1.6 s at the first meeting, then about 150 and 75 ms more; steady within 10% after about 600 ticks). The trial
 // used to judge the split on an average seeded by that first loop (1629 ms for its one tick, still 28.8 ms a tick at the verdict against
 // a true 6 and 10.8 on one), so every split on test4 was refused. It now leaves those out and judges the busy ms a tick it summed after them.
 const WARM_MEETS = 2;
-const PLAIN_TICKS = 1200;     // plain ticks measured before the first clusters' split (auto)
+const PLAIN_TICKS = BF.warp.ticksOf(60);     // (60 game seconds, idea-049) plain ticks measured before the first clusters' split (auto)
 const clustered = () => !!(BF.cworkers && BF.cworkers.active);
 // The clusters split over n workers, at this point of the journal on every worker alike: the cluster tick on (every system, the tick
 // order), then this one joins as cluster worker me with partial copies. verify (ticks): the copies are compared every verify / 20 meetings.

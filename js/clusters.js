@@ -25,7 +25,7 @@
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
 
-let MEET = 160;      // ticks between meetings (eight game seconds. A meeting costs about the same however long the interval: Gordon chose 40
+let MEET = Math.max(1, Math.round(8 / BF.warp.TICK));      // ticks between meetings: 160 at 0.05 s, eight game seconds at any tick (idea-049) (eight game seconds. A meeting costs about the same however long the interval: Gordon chose 40
                      // on 2026-10-28, 80 on 2026-10-30, when 8 workers on test4 went from 0.83 to 1.05 of one thread, then 160 on 2026-11-02,
                      // 18% faster than 80 on the laptop at 100x (test4, 8 workers); setMeet: benchmarks)
 const REACH = 256;   // blocks from a village's centre that its cluster reaches at most: the village, its fields and pens (its chunks

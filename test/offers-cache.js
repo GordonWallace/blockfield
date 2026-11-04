@@ -41,10 +41,11 @@ const DAYS = +(process.argv[2] || 1), SEED = +(process.argv[3] || 3);
   }, where);
   // load the area and let the village come out, then turn the check on
   const setup = await sim(pg, ({ x, z }) => {
+    globalThis.G = n => Math.round(n * 0.05 / BF_TK);   // a step count written for 20 ticks a game second, in this build's ticks
     globalThis.__step = h => { BF.warp.advance(h); BF.state.time += h; BF.sky.update(h); BF.mobs.update(h); if (BF.dayTimeline) BF.dayTimeline.update(); BF.drops.update(h); BF.boats.update(h); if (BF.inventory.simTick) BF.inventory.simTick(h); BF.world.tickSim(); };
-    for (let i = 0; i < 400; i++) { BF.world.update(x, z, 60); if (i % 4 === 0) __step(0.05); }
-    for (let i = 0; i < 200; i++) { BF.world.update(x, z, 30); __step(0.05); }
-    for (let i = 0; i < 2400; i++) { if (i % 10 === 0) BF.world.update(x, z, 30); __step(0.05); }
+    for (let i = 0; i < 400; i++) { BF.world.update(x, z, 60); if (i % 4 === 0) __step(BF_TK); }
+    for (let i = 0; i < 200; i++) { BF.world.update(x, z, 30); __step(BF_TK); }
+    for (let i = 0; i < G(2400); i++) { if (i % G(10) === 0) BF.world.update(x, z, 30); __step(BF_TK); }
     BF.debug.checkOffers = true;
     BF.debug.offerStats = { calls: 0, mismatches: 0, msTable: 0, msScan: 0 };
     const R = BF.vlog.villageAt(x, z), vs = R ? R.members.filter(m => m.type === 'villager' && !m.dead) : [];
@@ -54,7 +55,7 @@ const DAYS = +(process.argv[2] || 1), SEED = +(process.argv[3] || 3);
   if (!setup.key || !setup.shoppers) fail('no village with a toolsmith or furnace user came out');
   // N game days, an hour (1000 steps of 0.05 s) per evaluate
   for (let hr = 0; hr < DAYS * 24 && setup.key; hr++) {
-    const s = await sim(pg, ({ x, z }) => { for (let i = 0; i < 1000; i++) { if (i % 20 === 0) BF.world.update(x, z, 3); __step(0.05); } return BF.debug.offerStats; }, where);
+    const s = await sim(pg, ({ x, z }) => { for (let i = 0; i < G(1000); i++) { if (i % G(20) === 0) BF.world.update(x, z, 3); __step(BF_TK); } return BF.debug.offerStats; }, where);
     if (hr % 6 === 5) console.log(`h${hr + 1}: ${s.calls} lookups, ${s.mismatches} differences, table ${s.msTable.toFixed(0)} ms, scan ${s.msScan.toFixed(0)} ms`);
   }
   const s = await sim(pg, () => BF.debug.offerStats);
