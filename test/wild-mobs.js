@@ -181,42 +181,43 @@ module.exports = async (pg) => {
   if (spot) {
     const br = await lib.sim(pg, async ([x, y, z]) => {
       const L = BF.mobs.list;
+      const G = n => Math.max(1, Math.round(n * 0.05 / BF_TK));   // a step count written for 0.05 s ticks, in this build's ticks (the same game time)
       // by day with no monsters about: a young one killed or chased off at night isn't a breeding failure
       const calm = () => { if (BF.sky.time > 0.4) BF.sky.setTime(0.1); for (const m of L.slice()) if (m.hostile && Math.hypot(m.position.x - x, m.position.z - z) < 48) m.dead = true; };
       for (const m of L.slice()) if (BF.mobs.isWild(m) && Math.hypot(m.position.x - x, m.position.z - z) < 40) m.dead = true;
       calm();
-      for (let i = 0; i < 30; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
+      for (let i = 0; i < G(30); i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
       BF.wildlife.tune.pairP = 1;
       const a = BF.mobs.spawn("cow", x + 0.5, y, z + 0.5), b = BF.mobs.spawn("cow", x + 2.5, y, z + 0.5);
       for (const m of [a, b]) { m.ai.t = 999; m.wildB = { next: 1e9 }; }
-      for (let i = 0; i < 40; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());   // landed on the grass before their daily roll
+      for (let i = 0; i < G(40); i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());   // landed on the grass before their daily roll
       for (const m of [a, b]) m.wildB = { next: 0 };
-      for (let i = 0; i < 1200; i++) { BF.sky.advance(BF_TK); (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver()); if (i % 200 === 0) { calm(); await new Promise(r => setTimeout(r, 0)); } }
+      for (let i = 0; i < G(1200); i++) { BF.sky.advance(BF_TK); (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver()); if (i % G(200) === 0) { calm(); await new Promise(r => setTimeout(r, 0)); } }
       const calves = L.filter(m => m.type === "cow" && !m.dead && m.cow && m.cow.growAt != null && Math.hypot(m.position.x - x, m.position.z - z) < 40).length;
       const pairs = (BF.wildlife.log || []).filter(e => e.kind === "wildPair" && e.type === "cow").length, cows = [a, b].map(m => [m.dead ? "dead" : "", m.cow && m.cow.fed, +m.position.x.toFixed(1), +m.position.y.toFixed(1), +m.position.z.toFixed(1)]);
       // a crowd: 9 cows together never pair up on their own
       for (const m of L.slice()) if (m.type === "cow") m.dead = true;
-      for (let i = 0; i < 30; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
+      for (let i = 0; i < G(30); i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
       const crowd = [];
       for (let i = 0; i < 9; i++) { const m = BF.mobs.spawn("cow", x + 0.5 + (i % 3), y, z + 0.5 + Math.floor(i / 3)); m.wildB = { next: 0 }; crowd.push(m); }
-      for (let i = 0; i < 100; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
+      for (let i = 0; i < G(100); i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
       const willing = crowd.filter(m => m.cow && m.cow.fed != null).length;
       for (const m of crowd) m.dead = true;
-      for (let i = 0; i < 30; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
+      for (let i = 0; i < G(30); i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
       // two wild horses breed on their own too, and their foal is wild
       calm();
       const h1 = BF.horses.spawn(x + 0.5, y, z + 0.5), h2 = BF.horses.spawn(x + 2.5, y, z + 0.5);
       for (const m of [h1, h2]) { m.ai.t = 999; m.wildB = { next: 1e9 }; }
-      for (let i = 0; i < 40; i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
+      for (let i = 0; i < G(40); i++) (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
       for (const m of [h1, h2]) m.wildB = { next: 0 };
       // one roll a game day, and calm() keeps it the same day: a horse caught mid-jump at its roll isn't on grass, so give it the next
       // day's roll, as the game would, until the pair is willing (the roll itself still has to pick the pair)
       const hRolls = [], ground = m => BF.world.getBlock(Math.floor(m.position.x), Math.floor(m.position.y + 0.01) - 1, Math.floor(m.position.z));
-      for (let i = 0; i < 1200; i++) {
+      for (let i = 0; i < G(1200); i++) {
         BF.sky.advance(BF_TK); (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver());
-        if (i % 200 === 0) {
+        if (i % G(200) === 0) {
           calm();
-          if (h1.horse.fed == null && i < 1000) { hRolls.push([h1, h2].map(ground)); for (const m of [h1, h2]) m.wildB = { next: 0 }; }
+          if (h1.horse.fed == null && i < G(1000)) { hRolls.push([h1, h2].map(ground)); for (const m of [h1, h2]) m.wildB = { next: 0 }; }
           await new Promise(r => setTimeout(r, 0));
         }
       }
@@ -227,7 +228,7 @@ module.exports = async (pg) => {
       // fed pigs
       const p1 = BF.mobs.spawn("pig", x + 0.5, y, z + 0.5), p2 = BF.mobs.spawn("pig", x + 2.5, y, z + 1.5);
       const fedOk = BF.pigFarmer.feed(p1, "player") && BF.pigFarmer.feed(p2, "player");
-      for (let i = 0; i < 1200; i++) { BF.sky.advance(BF_TK); (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver()); if (i % 200 === 0) await new Promise(r => setTimeout(r, 0)); }
+      for (let i = 0; i < G(1200); i++) { BF.sky.advance(BF_TK); (BF.mobs.update(BF_TK), BF.req.apply(), BF.req.deliver()); if (i % G(200) === 0) await new Promise(r => setTimeout(r, 0)); }
       const piglets = L.filter(m => m.type === "pig" && !m.dead && m.pig && m.pig.growAt != null).length;
       return { calves, pairs, cows, foals, horses, hPairs, hRolls, wildHorses, willing, fedOk, piglets, pigScale: L.filter(m => m.type === "pig" && m.piglet).map(m => +m.scale.toFixed(2)) };
     }, spot);
