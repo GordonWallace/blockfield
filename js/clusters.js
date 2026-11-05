@@ -7,7 +7,7 @@
 //                  to the nearest village's cluster within REACH blocks of its centre, else to the wild cluster of its CELL x CELL
 //                  regions block, "w:<face>:<a>:<b>";
 //   groups         base clusters merged for one meeting interval: every base with a region within the player's reach (the view, at most
-//                  TOUCH blocks, and a margin that grows with the player's speed) goes in one group, the player's, so everything the
+//                  TOUCH blocks with NEAR on, and a margin that grows with the player's speed) goes in one group, the player's, so everything the
 //                  player can touch runs together (further out in view, mobs run where the plan puts them and the page sees them as
 //                  they were at the last meeting); every other base in view is a group of its own. A group is what runs on one
 //                  worker; its key is its smallest base key. Merges are decided from the world's state only (the player's position,
@@ -43,9 +43,11 @@ const TOUCH = 96;    // ...but no further than this: the land the player can rea
                      // meeting). Gordon's laptop, 2026-11-03, 60 villages at view 32: 13 villages in the player's group, the first worker
                      // at 47% busy against 33-37% on the others. (Sending those mobs to the page every tick instead was measured
                      // 2026-11-04 and dropped: fast-forward 33-41% slower, no gain at 1x.)
-// NEAR: off (BF_NEAR=0 in the world server's environment, or BF.clusters.setNear(false) through a test's eval, which every copy runs;
-// it takes effect at the next meeting) puts everything in view in the player's group again, so every mob in view moves every tick
-let NEAR = !(globalThis.process && process.env && process.env.BF_NEAR === "0");
+// NEAR: OFF by default (laptop 2026-11-05: with the automatic budget at 1x it kept no more villages, 80 either way, while fast-forward
+// ran about 8% slower and far villages moved in steps), so everything in view is in the player's group and every mob in view moves
+// every tick. On: BF_NEAR=1 in the world server's environment, or BF.clusters.setNear(true) through a test's eval, which every copy
+// runs; it takes effect at the next meeting.
+let NEAR = !!(globalThis.process && process.env && process.env.BF_NEAR === "1");
 const MAX_RUN = 512; // a move further than this between meetings is a jump (a teleport), not a speed: it adds nothing
 
 let villages = [];               // [key, x, z] of the simulated villages at the last meeting, by key
