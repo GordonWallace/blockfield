@@ -379,6 +379,7 @@ function candidates(px, pz, base, t, ed, need = 1, anyCool = false) {
   const end = Math.min(lim(), SEARCH_MAX);
   let r = Math.min(end, Math.max(SEARCH_MIN, far + 600)), cand = [];
   for (;;) {
+    cand = [];   // (each wider search lists them all again: kept from the last, the nearer ones came twice, and force(40) loaded 20)
     let near = [];
     try { near = BF.worldgen.villagesNear(px, pz, r + 200) || []; } catch (e) { near = []; }
     warmR = r + 200;
