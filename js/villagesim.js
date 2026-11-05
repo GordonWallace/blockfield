@@ -356,10 +356,12 @@ function update(px, pz) {
   if (clustered() && ++warmN % 20 === 0 && BF.active && BF.active.warm) BF.active.warm(px, pz);   // (meetings find the layouts ready, js/active.js warm)
   let changed = stepChanged;
   stepChanged = false;
-  // (a trip pinned or unpinned since the last step is taken at once: nothing has stepped since, so it is the same moment the next step would see;
-  // with the cluster tick on, at the next meeting. Not while the cluster workers' followers may be ahead (js/cworkers.js open: paused
-  // mid-interval while fast-forwarding): at the next meeting then too)
-  if ((!stepping() || (pinDirty && !clustered())) && !(BF.cworkers && BF.cworkers.open) && check(px, pz, realClock, BF.rworkers.realNow() / 1000)) changed = true;
+  // (a trip pinned or unpinned since the last step is taken at once: nothing has stepped since, so it is the same moment the next step would see.
+  // With the cluster tick on, never here, paused or not: only at meetings (meet), where every worker decides alike. Here it went by this
+  // copy's own clock state: a follower whose clock was frozen (it doesn't run the clock; an alert froze it) took a forced load on its own
+  // a meeting early, and the others then lacked those villages' records (laptop 2026-11-05: "worker 6 changed village V, which this
+  // worker doesn't have", then "no object at bred to change", and the workers stopped))
+  if (!clustered() && (!stepping() || pinDirty) && check(px, pz, realClock, BF.rworkers.realNow() / 1000)) changed = true;
   return changed;
 }
 // Called every game step (world.tickSim); cheap (re-evaluates every 1.5 game seconds, the villager windows every 0.5). With the cluster
