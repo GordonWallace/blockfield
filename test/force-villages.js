@@ -101,6 +101,13 @@ const root = path.resolve(__dirname, '..');
     // nothing left to unload? the next steps need some extras: force 3 more (paused, they stay)
     await game.evaluate(() => BF.commands.execute('/loadvillages 3'));
     ok('paused, forced loads still work', await wait(() => BF.active.extras().length >= 3, null, 30000));
+    // more than the first search radius holds: it widens until it has enough, each village once (it listed the nearer ones again at each
+    // wider step: /loadvillages 40 loaded 20, laptop 2026-11-05)
+    const ex8 = await lib.sim(game, () => BF.active.extras().length);
+    await game.evaluate(() => BF.commands.execute('/loadvillages 8'));
+    const got8 = await wait(n => BF.active.extras().length >= n + 8, ex8, 30000);
+    const joins = await lib.sim(game, () => BF.glog.recent(5000).filter(e => e.k === 'budget' && /force-loaded, \d+ of 8\)/.test(e.x)).map(e => e.x.replace(/ joins the simulated set.*/, '')));
+    ok('/loadvillages 8 adds 8 villages, each once', got8 && joins.length === 8 && new Set(joins).size === 8, { joins, extras: await lib.sim(game, () => BF.active.extras().length), before: ex8 });
 
     // 4. afterwards the usual rules: the debug screen's Resume, and a budget forced low lets the extras go (farthest first, through the countdown)
     await dbg.click('#c-vauto-go');
