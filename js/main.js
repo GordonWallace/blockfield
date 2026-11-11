@@ -13,6 +13,7 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, 1, 0.05, 1000);
 scene.add(camera); // so modules can attach view-model meshes (held item) to the camera
 BF.renderer = renderer; BF.scene = scene; BF.camera = camera;
+if (BF.real && BF.real.on) BF.real.setup(renderer, scene, camera);   // the realistic look (js/real/core.js, 1.6)
 
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -157,6 +158,7 @@ const frame = BF.tload.wrap(function frameBody(now) {   // (timed: the page thre
   if (BF.save && !BF.state.paused && !remote) BF.save.update(dt);   // (the worker autosaves itself)
   BF.mobView.render(BF.state.paused || W.frozen ? 0 : dt * Math.max(1, Math.min(10, W.last)));   // the mobs' models from their simulation state (js/mobview.js)
   BF.entityView.render(BF.state.paused || W.frozen ? 0 : drawnDt, dt);   // drops, arrows, boats, bees, leads and effects at BF.warp.alpha (js/entityview.js)
+  if (BF.real && BF.real.on) BF.real.frame(dt);   // the realistic look: lights, air and its modules (js/real/core.js)
   BF.view.begin(scene, camera);   // floating origin and unfolded faces on the planet (js/view.js)
   if (BF.lod && BF.lod.cull) BF.lod.cull(camera);   // the distant rings' sectors in view (js/lod.js)
   const r0 = performance.now();
@@ -173,6 +175,7 @@ const frame = BF.tload.wrap(function frameBody(now) {   // (timed: the page thre
 
 // ---------- boot ----------
 BF.sky.init(scene);
+if (BF.real && BF.real.on) BF.real.start();
 BF.world.init(scene);
 BF.mobs.init(scene);
 BF.villageSim.init();
