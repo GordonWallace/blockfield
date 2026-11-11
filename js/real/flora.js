@@ -622,17 +622,18 @@ const real = BF.real;
     conifer: function (sp, detail) { var g = conifer(sp, detail); return { bark: g.b, foliage: g.f }; },
     broadleaf: function () { var g = alder(); return { bark: g.b, foliage: g.f }; },
     // a single-trunk broadleaf sized for a block world: o = { h, r, limbs, cards, cardLen, crown: [from, width, height], spread, up, droop, flat }
-    broadleafP: function (o) {
+    broadleafP: function (o, detail) {
+      var dl = detail | 0, lim = dl === 2 ? Math.max(3, Math.round(o.limbs * 0.4)) : dl === 1 ? Math.max(4, Math.round(o.limbs * 0.7)) : o.limbs;
       var B = new Geo(), F = new Geo(), H = o.h * rr(0.9, 1.1), r0 = o.r * rr(0.85, 1.15), n = 8, k, t, tr = [];
       var tp = path(new V3(0, -0.4, 0), new V3(rr(-0.06, 0.06), 1, rr(-0.06, 0.06)), H + 0.4, n, function () { return 0.015; }, 0.04);
       for (k = 0; k <= n; k++) tr.push(r0 * (1 - 0.8 * k / n) + 0.02);
       function flare(a, y) { return 1 + 0.5 * Math.exp(-Math.max(0, y) / 0.35); }
-      tube(B, tp, tr, 7, { flare: flare });
+      tube(B, tp, tr, dl === 2 ? 4 : dl === 1 ? 5 : 7, { flare: flare });
       var c0 = o.crown[0], cc = { x: 0, y: H * (c0 + (1 - c0) * 0.55), z: 0, rx: H * o.crown[1], ry: H * o.crown[2] }, P = new V3(), D = new V3(), az = rr(0, TAU), e;
-      var S = { maxD: 2, n: [0, 3, 2], seg: [0, 4, 3], kids: [0, 4], ratio: 0.62, spread: o.spread || 0.8, up: o.up == null ? 0.25 : o.up, jit: 0.07, bend: [0, 0.05, 0.02], t0: 0.3,
-        cards: o.cards, cardLen: o.cardLen, cells: [0, 1, 2, 3], flat: !!o.flat, droop: o.droop == null ? 0.25 : o.droop, col: [WHITE, [0.9, 0.9, 0.88], [0.7, 0.66, 0.6]] };
-      for (k = 0; k < o.limbs; k++) {
-        t = c0 + (0.97 - c0) * (k + R() * 0.6) / o.limbs; at(tp, t, P, D);
+      var S = { maxD: 2, n: [0, dl ? 2 : 3, dl === 2 ? 1 : 2], seg: [0, dl ? 3 : 4, 3], kids: [0, dl === 2 ? 2 : dl === 1 ? 3 : 4], ratio: 0.62, spread: o.spread || 0.8, up: o.up == null ? 0.25 : o.up, jit: 0.07, bend: [0, 0.05, 0.02], t0: 0.3,
+        cards: dl === 2 ? Math.max(2, Math.round(o.cards * 0.4)) : dl === 1 ? Math.max(3, Math.round(o.cards * 0.6)) : o.cards, cardLen: o.cardLen * (dl === 2 ? 1.7 : dl === 1 ? 1.25 : 1), cells: [0, 1, 2, 3], flat: !!o.flat, droop: o.droop == null ? 0.25 : o.droop, col: [WHITE, [0.9, 0.9, 0.88], [0.7, 0.66, 0.6]] };
+      for (k = 0; k < lim; k++) {
+        t = c0 + (0.97 - c0) * (k + R() * 0.6) / lim; at(tp, t, P, D);
         az += 2.4 + rr(-0.4, 0.4); e = 0.25 + 0.75 * t + rr(-0.1, 0.1);
         branch(B, F, S, P.clone(), new V3(Math.cos(az) * Math.cos(e), Math.sin(e), Math.sin(az) * Math.cos(e)), H * o.crown[1] * (1.15 - 0.55 * t) * rr(0.85, 1.15), Math.max(0.03, r0 * (1 - 0.8 * t) * 0.55), 1, cc);
       }
@@ -642,24 +643,25 @@ const real = BF.real;
     },
     // a conifer sized for a block world: whorls of whole boughs (one card each) on a straight trunk.
     // o = { h, r, clear, L (lowest boughs' length), dy (whorl spacing), per (boughs a whorl), e0, e1 (bough pitch at the base and the top), droop, width }
-    coniferP: function (o) {
+    coniferP: function (o, detail) {
+      var dl = detail | 0, dys = dl === 2 ? 2.6 : dl === 1 ? 1.6 : 1, pern = dl === 2 ? 4 : dl === 1 ? o.per - 1 : o.per, wide = dl === 2 ? 1.5 : dl === 1 ? 1.2 : 1;
       var B = new Geo(), F = new Geo(), H = o.h * rr(0.9, 1.1), r0 = o.r * rr(0.85, 1.15), n = 8, k, tr = [];
       var tp = path(new V3(0, -0.4, 0), new V3(rr(-0.03, 0.03), 1, rr(-0.03, 0.03)), H + 0.4, n, function () { return 0; }, 0.02);
       for (k = 0; k <= n; k++) tr.push(r0 * (1 - 0.9 * k / n) + 0.015);
-      tube(B, tp, tr, 6, { flare: function (a, y) { return 1 + 0.4 * Math.exp(-Math.max(0, y) / 0.3); } });
+      tube(B, tp, tr, dl === 2 ? 4 : 6, { flare: function (a, y) { return 1 + 0.4 * Math.exp(-Math.max(0, y) / 0.3); } });
       var cb = H * o.clear, cc = { x: 0, y: (cb + H) * 0.5, z: 0, rx: o.L * 0.9, ry: (H - cb) * 0.55 }, P = new V3(), D = new V3(), dir = new V3(), az = rr(0, TAU), y = cb, t, L, e, j, per;
       while (y < H - 0.3) {
         t = (y - cb) / (H - cb);
         L = o.L * Math.pow(1 - t, 0.85) * Math.min(1, 0.55 + t * 3) + 0.35;
-        per = Math.max(3, Math.round(o.per * (1 - 0.4 * t)));
+        per = Math.max(3, Math.round(pern * (1 - 0.4 * t)));
         at(tp, (y + 0.4) / (H + 0.4), P, D);
         for (j = 0; j < per; j++) {
           az += TAU / per + rr(-0.25, 0.25); e = o.e0 + (o.e1 - o.e0) * t + rr(-0.1, 0.1);
           dir.set(Math.cos(az) * Math.cos(e), Math.sin(e), Math.sin(az) * Math.cos(e));
-          card(F, P, dir, L * rr(0.85, 1.12), L * o.width * rr(0.9, 1.1), CELLS[(R() * 4) | 0], o.droop * rr(0.7, 1.3), 0.3, rr(-0.15, 0.15), cc, fcol(0.62 + 0.4 * t), 0.3);
+          card(F, P, dir, L * rr(0.85, 1.12), L * o.width * wide * rr(0.9, 1.1), CELLS[(R() * 4) | 0], o.droop * rr(0.7, 1.3), 0.3, rr(-0.15, 0.15), cc, fcol(0.62 + 0.4 * t), 0.3);
         }
         az += 0.6;
-        y += o.dy * rr(0.8, 1.2) * (1 - 0.3 * t);
+        y += o.dy * dys * rr(0.8, 1.2) * (1 - 0.3 * t);
       }
       at(tp, 1, P, D); P.y -= 0.5;
       for (j = 0; j < 4; j++) { az += 1.6; dir.set(Math.cos(az) * 0.35, 1, Math.sin(az) * 0.35).normalize(); card(F, P, dir, 0.9, 0.5, CELLS[(R() * 4) | 0], 0, 0.3, 0, cc, fcol(1.05), 0.35); }
@@ -681,15 +683,15 @@ const memo = fn => { let v; return () => v || (v = fn()); };
   const firTex = memo(kit.atlases.fir), alderTex = memo(kit.atlases.alder), mapleTex = memo(kit.atlases.maple);
   real.assets.species.push({
     id: "spruce", kind: "tree", log: "spruce_log", weight: 1, variants: 3, height: [10, 14], modelHeight: 12,
-    build: (rand, detail) => kit.withRand(rand, () => kit.coniferP({ h: 12, r: 0.24, clear: 0.12, L: 3.0, dy: 0.62, per: 6, e0: -0.35, e1: 0.25, droop: 0.3, width: 0.62 })),
+    build: (rand, detail) => kit.withRand(rand, () => kit.coniferP({ h: 12, r: 0.24, clear: 0.12, L: 3.0, dy: 0.62, per: 6, e0: -0.35, e1: 0.25, droop: 0.3, width: 0.62 }, detail)),
     barkMaterial: memo(() => kit.barkMat("fir", 0.05)), foliageMaterial: memo(() => kit.foliageMat(firTex(), 0.22)),
   }, {
     id: "oak", kind: "tree", log: "oak_log", weight: 1, variants: 3, height: [7, 9], modelHeight: 8,
-    build: (rand, detail) => kit.withRand(rand, () => kit.broadleafP({ h: 8, r: 0.3, limbs: 10, cards: 8, cardLen: 0.85, crown: [0.38, 0.42, 0.36], spread: 0.85, up: 0.12, droop: 0.2, flat: true })),
+    build: (rand, detail) => kit.withRand(rand, () => kit.broadleafP({ h: 8, r: 0.3, limbs: 10, cards: 8, cardLen: 0.85, crown: [0.38, 0.42, 0.36], spread: 0.85, up: 0.12, droop: 0.2, flat: true }, detail)),
     barkMaterial: memo(() => kit.barkMat("maple", 0.03)), foliageMaterial: memo(() => kit.foliageMat(mapleTex(), 0.5)),
   }, {
     id: "birch", kind: "tree", log: "birch_log", weight: 1, variants: 3, height: [8, 10], modelHeight: 9,
-    build: (rand, detail) => kit.withRand(rand, () => kit.broadleafP({ h: 9, r: 0.2, limbs: 10, cards: 8, cardLen: 0.66, crown: [0.42, 0.26, 0.34], spread: 0.6, up: 0.35, droop: 0.35 })),
+    build: (rand, detail) => kit.withRand(rand, () => kit.broadleafP({ h: 9, r: 0.2, limbs: 10, cards: 8, cardLen: 0.66, crown: [0.42, 0.26, 0.34], spread: 0.6, up: 0.35, droop: 0.35 }, detail)),
     barkMaterial: memo(() => kit.barkMat("alder", 0.012)), foliageMaterial: memo(() => kit.foliageMat(alderTex(), 0.42)),
   });
 })();
@@ -725,7 +727,7 @@ function parts(entry, variant) {
   if (!m) models.set(entry, (m = []));
   if (m[variant]) return m[variant];
   const rand = kit.rng(((entry.id || "").split("").reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7) ^ (variant * 2654435761)) >>> 0);
-  const detail = real.quality.level >= 2 ? 1 : 2;
+  const detail = 2 - Math.max(0, Math.min(2, real.quality.level));
   const g = entry.build(rand, detail);
   const out = [];
   if (g && g.isBufferGeometry) out.push({ geo: g, mat: entry.material() });
@@ -775,7 +777,7 @@ real.flora.place = function (key, ox, oz, F) {
         const s = tree ? (want / mh) * (0.92 + 0.16 * ((seed * 13.7) % 1)) * (kind === 4 ? 1.5 : 1) : 0.85 + 0.3 * ((seed * 13.7) % 1);
         P3.set(F[i], F[i + 1], F[i + 2]); Q.setFromAxisAngle(YA, seed * 6.2831853); S3.set(s, s, s);
         im.setMatrixAt(j, M4.compose(P3, Q, S3));
-        const sky = Math.min(1, extra % 2), l = (0.35 + 0.65 * sky) * (0.9 + 0.2 * ((seed * 5.3) % 1));
+        const sky = (extra % 16) / 15, l = (0.35 + 0.65 * sky) * (0.9 + 0.2 * ((seed * 5.3) % 1));
         im.setColorAt(j, COL.setRGB(l, l, l));
       });
       im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true;
@@ -788,6 +790,7 @@ real.flora.place = function (key, ox, oz, F) {
   batches.set(key, { objs, cx: ox + 8, cz: oz + 8, y: ysum / n });
 };
 real.flora.batches = batches;
+real.flora.resolve = resolve;
 
 // Batches out of view or too far away are hidden (cheap: a sphere a chunk). The performance thread's scheduler replaces this.
 const fr = new T.Frustum(), pm = new T.Matrix4(), cm = new T.Matrix4(), inv = new T.Matrix4(), ONE = new T.Vector3(1, 1, 1), sph = new T.Sphere(), tr = [0, 0, 0];
