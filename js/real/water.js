@@ -38,20 +38,23 @@ let RW = null;
 const WB = 80, CPB = 2, N = WB * CPB, NN = N * N, CELL = 1 / CPB, V = N + 1, VV = V * V;
 const SNAP = 8, MOVE = 12;      // the window moves in steps of SNAP blocks once the player is MOVE from its centre
 const YUP = 20, YDN = 28, YH = YUP + YDN;   // the blocks read above and below the player's feet
+const RIM = 10;                 // blocks over which the surface eases to the blocks' level at the rim
 const EDGE = 5;                 // blocks of cross-fade to block water at the window's rim
 const G = 9.81, NONE = -1e9, WET = 0.004, DEEP = 6;
 const FILL = 1.2, EASE = 0.3, SEEP = 0.5;   // per second: towards the rest level from below / from above, and off dry columns
+const WARM = 60;
 const SRC_H = 0.889;            // a source block's surface in its cell (as the mesher draws it)
 
 // ---------- fields ----------
 // per column (WB x WB): surface (rest level, NONE dry), bed, known (its chunk was loaded when read), soft (natural ground, may be smoothed)
 const cSurf = new Float32Array(WB * WB).fill(NONE), cBed = new Float32Array(WB * WB), cKnown = new Uint8Array(WB * WB), cSoft = new Uint8Array(WB * WB);
+const cBlk = new Float32Array(WB * WB);   // the surface as the blocks give it (cSurf differs on a river, rule 3)
 const cVer = new Uint32Array(WB * WB), cTopY = new Int16Array(WB * WB), cBedY = new Int16Array(WB * WB);
 // per cell (N x N)
 const bed = new Float32Array(NN), tgt = new Float32Array(NN).fill(NONE), deep = new Float32Array(NN), fresh = new Uint8Array(NN).fill(1);
 const d = new Float32Array(NN), fL = new Float32Array(NN), fR = new Float32Array(NN), fU = new Float32Array(NN), fD = new Float32Array(NN);
 const vx = new Float32Array(NN), vz = new Float32Array(NN), foam = new Float32Array(NN), foam2 = new Float32Array(NN);
-const CELLF = [bed, tgt, deep, d, fL, fR, fU, fD, vx, vz, foam], COLF = [cSurf, cBed, cKnown, cSoft, cVer, cTopY, cBedY];
+const CELLF = [bed, tgt, deep, d, fL, fR, fU, fD, vx, vz, foam], COLF = [cSurf, cBed, cKnown, cSoft, cVer, cTopY, cBedY, cBlk];
 const tmpF = new Float32Array(NN), tmpC = new Float64Array(WB * WB);
 
 let ox = 0, oz = 0, baseY = 0, placed = false, enabled = true, active = false, seedKey = "";
@@ -80,14 +83,14 @@ function scanColumn(i, j) {
   stats.scans++;
   if (!c) { cSurf[q] = NONE; cBed[q] = baseY + YH; cKnown[q] = 0; cSoft[q] = 0; cTopY[q] = cBedY[q] = 0; cVer[q] = 0; return pK !== 0; }
   cVer[q] = c.colVer[((z - c.cz * 16) << 4) | (x - c.cx * 16)] + 1;
-  let surf = NONE, bedH = NONE, soft = 0, topY = 0, bedY = 0, cover = -1, air = false;
+  let surf = NONE, blk = 0, bedH = NONE, soft = 0, topY = 0, bedY = 0, cover = -1, air = false;
   const get = W.getBlock;
   for (let y = baseY + YH - 1; y >= baseY; y--) {
     const id = get(x, y, z), f = FL[id];
     if (surf === NONE) {
       if (f) {
         if (cover >= 0 && !air) { bedH = cover + 1; break; }          // water sealed right under ground: not this column's surface
-        surf = y + (f === 8 ? SRC_H : (8 - f) / 9); topY = y;
+        surf = blk = y + (f === 8 ? SRC_H : (8 - f) / 9); topY = y;
         if (f === 8 && BF.rivers && y >= BF.SEA) {
           // a river's own surface instead of the blocks' step (rule 3): within the top block, never above the blocks' level
           let hit = false;
@@ -107,8 +110,10 @@ function scanColumn(i, j) {
   if (surf !== NONE && bedH === NONE) { bedH = baseY; bedY = baseY; }      // water deeper than the window reads
   if (surf === NONE) bedH = cover >= 0 ? cover + 1 : bedH === NONE ? baseY : bedH;
   if (surf !== NONE && surf - bedH < 0.12) surf = bedH + 0.12;
-  cSurf[q] = surf; cBed[q] = bedH; cKnown[q] = 1; cSoft[q] = soft;
+  if (surf === NONE || blk < surf) blk = surf;
+  cSurf[q] = surf; cBed[q] = bedH; cKnown[q] = 1; cSoft[q] = soft; cBlk[q] = blk;
   cTopY[q] = surf === NONE ? 0 : topY + 1 - baseY; cBedY[q] = surf === NONE ? 0 : Math.max(0, bedY - baseY);
+  if (!pK) for (let b = 0; b < CPB; b++) for (let a = 0; a < CPB; a++) fresh[i * CPB + a + (j * CPB + b) * N] = 1;   // just loaded: starts at rest
   return surf !== pS || bedH !== pB || !pK;
 }
 
@@ -170,6 +175,7 @@ function place(px, py, pz, force) {
   for (let j = 0; j < WB; j++) for (let i = 0; i < WB; i++) if (yMove || whole || !cKnown[i + j * WB]) scanColumn(i, j);
   buildCells(0, 0, WB - 1, WB - 1);
   mesh.position.set(ox, baseY, oz); mesh.updateMatrix();
+  if (whole) for (let q = 0; q < WARM; q++) simStep(0.03);   // a fresh window: rivers already running, not starting from rest
 }
 // Moves what the window holds by (-dx, -dz) blocks; the columns and cells that come in are marked unknown / fresh.
 function shift(dx, dz) {
@@ -299,8 +305,8 @@ const U = {
   uRwTime: { value: 0 }, uRwNoise: { value: noiseTex }, uRwOn: { value: 0 }, uRwOrg: { value: new THREE.Vector3() }, uRwOwn: { value: null },
   uSunDir: RU.uSunDir, uSunCol: RU.uSunCol, uSkyCol: RU.uSkyCol, uFogCol: RU.uFogCol, uFogNear: RU.uFogNear, uFogFar: RU.uFogFar, uDay: RU.uDay,
 };
-const GLSL_COMMON = `
-uniform float uRwTime, uFogNear, uFogFar, uDay; uniform sampler2D uRwNoise; uniform vec3 uSunDir, uSunCol, uSkyCol, uFogCol;
+const GLSL_DAY = "uniform float uDay;\n", GLSL_COMMON = `
+uniform float uRwTime, uFogNear, uFogFar; uniform sampler2D uRwNoise; uniform vec3 uSunDir, uSunCol, uSkyCol, uFogCol;
 vec3 rwSky(vec3 r) { float y = clamp(r.y, 0.0, 1.0); return mix(uFogCol * 0.9, uSkyCol * vec3(0.55, 0.75, 1.1), pow(y, 0.55)); }
 // Nn: surface normal; Vd: towards the eye; lit: how much sky reaches the water (0 in a cave)
 vec3 rwShade(vec3 Nn, vec3 Vd, float depth, float foamAmt, float foamNoise, float lit, out float alpha) {
@@ -325,7 +331,7 @@ const mat = new THREE.ShaderMaterial({
   vertexShader: `attribute float aDepth; attribute vec2 aVel; attribute float aFoam;
 varying vec3 vW; varying vec3 vL; varying vec3 vN; varying float vDepth; varying vec2 vVel; varying float vFoam;
 void main() { vN = normal; vL = position; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vDepth = aDepth; vVel = aVel; vFoam = aFoam; gl_Position = projectionMatrix * viewMatrix * w; }`,
-  fragmentShader: GLSL_COMMON + `
+  fragmentShader: GLSL_DAY + GLSL_COMMON + `
 varying vec3 vW; varying vec3 vL; varying vec3 vN; varying float vDepth; varying vec2 vVel; varying float vFoam;
 void main() {
   if (vDepth <= 0.0) discard;
@@ -336,14 +342,18 @@ void main() {
   vec2 dr = vec2(uRwTime * 0.012, uRwTime * 0.007);
   vec4 a0 = texture2D(uRwNoise, uv - vVel * p0 * 0.42 + dr), a1 = texture2D(uRwNoise, uv + 0.37 - vVel * p1 * 0.42 + dr);
   vec4 b0 = texture2D(uRwNoise, uv2 - vVel * p0 * 1.66 - dr * 1.7), b1 = texture2D(uRwNoise, uv2 + 0.61 - vVel * p1 * 1.66 - dr * 1.7);
-  vec4 a = mix(a0, a1, w), b = mix(b0, b1, w);
+  // moving water: two phases of each layer carried by the flow, swapped as they stretch; still water: the layers as they are
+  // (the same picture the chunks' block water draws, so the two meet without a seam)
+  float mv = smoothstep(0.03, 0.3, sp);
+  vec4 a = mix(texture2D(uRwNoise, uv + dr), mix(a0, a1, w), mv), b = mix(texture2D(uRwNoise, uv2 - dr * 1.7), mix(b0, b1, w), mv);
   vec2 n = (a.xy - 0.5) * 2.0 + (b.xy - 0.5) * 1.2;
   float st = 0.07 + 0.42 * clamp(sp, 0.0, 2.2);
   vec4 c0 = texture2D(uRwNoise, xz * 3.0 - vVel * p0 * 5.8), c1 = texture2D(uRwNoise, xz * 3.0 + 0.23 - vVel * p1 * 5.8);
-  vec2 n3 = mix(c0, c1, w).xy - 0.5;
+  vec4 c = mix(texture2D(uRwNoise, xz * 3.0), mix(c0, c1, w), mv);
+  vec2 n3 = c.xy - 0.5;
   vec3 Nn = normalize(normalize(vN) * vec3(1.5, 1.0, 1.5) + vec3((n.x + n3.x * 1.4) * st, 0.0, (n.y + n3.y * 1.4) * st));
   vec3 Vd = normalize(-vW);                        // render space: the eye is the origin
-  float fn = b.z * 0.45 + a.z * 0.3 + mix(c0, c1, w).z * 0.25, alpha;
+  float fn = b.z * 0.45 + a.z * 0.3 + c.z * 0.25, alpha;
   vec3 col = rwShade(Nn, Vd, vDepth, vFoam, fn, 1.0, alpha);
   alpha *= smoothstep(0.0, 0.03, vDepth);
   // cross-fade to the chunks' block water at the window's rim (rule 5)
@@ -394,8 +404,17 @@ function updateMesh(dt) {
         n++; sy += bed[k] + dk; sd += dk + deep[k]; sx += vx[k]; sz += vz[k]; sf += foam[k];
       }
     }
-    if (n) { const r = 1 / n; wPos[q * 3 + 1] = sy * r - baseY; wDepth[q] = sd * r; wVel[q * 2] = sx * r; wVel[q * 2 + 1] = sz * r; wFoam[q] = sf * r; }
-    else { wPos[q * 3 + 1] = lo - 0.05 - baseY; wDepth[q] = -0.4; wVel[q * 2] = wVel[q * 2 + 1] = 0; wFoam[q] = 0; }
+    if (n) {
+      const r = 1 / n;
+      let y = sy * r;
+      // at the rim the surface eases to the level the blocks draw, so it meets the chunks' water (a river's blocks sit up to a block higher)
+      const e = Math.min(i, j, N - i, N - j) * CELL;
+      if (e < RIM) {
+        const c = cBlk[Math.min(WB - 1, i >> 1) + Math.min(WB - 1, j >> 1) * WB];
+        if (c !== NONE && c > y) { const t = e <= 1 ? 1 : 1 - (e - 1) / (RIM - 1); y += (c - y) * t * t * (3 - 2 * t); }
+      }
+      wPos[q * 3 + 1] = y - baseY; wDepth[q] = sd * r; wVel[q * 2] = sx * r; wVel[q * 2 + 1] = sz * r; wFoam[q] = sf * r;
+    } else { wPos[q * 3 + 1] = lo - 0.05 - baseY; wDepth[q] = -0.4; wVel[q * 2] = wVel[q * 2 + 1] = 0; wFoam[q] = 0; }
   }
   // a dry corner next to wet ones sits at their level, so the surface meets a bank or a cube wall level instead of diving
   for (let j = 0; j < V; j++) for (let i = 0; i < V; i++) {
@@ -449,8 +468,8 @@ function material(base) {
     if (inner) inner(sh, r);
     for (const k of Object.keys(U)) sh.uniforms[k] = U[k];
     sh.vertexShader = "varying vec3 vRwPos;\n" + sh.vertexShader.replace("#include <project_vertex>", "#include <project_vertex>\nvRwPos = (modelMatrix * vec4(transformed, 1.0)).xyz;");
-    sh.fragmentShader = "varying vec3 vRwPos;\nuniform float uRwOn; uniform vec3 uRwOrg; uniform sampler2D uRwOwn;\n" + GLSL_COMMON + "\n" +
-      sh.fragmentShader.replace("#include <color_fragment>", `#include <color_fragment>
+    sh.fragmentShader = "varying vec3 vRwPos;\nuniform float uRwOn; uniform vec3 uRwOrg; uniform sampler2D uRwOwn;\n" + GLSL_DAY + GLSL_COMMON + "\n" +
+      sh.fragmentShader.replace("uniform float uDay;", "").replace("#include <color_fragment>", `#include <color_fragment>
 float rwLit = diffuseColor.r;   // (set below)
 {
   // the game's own light, as a factor: open sky by day 1, a cave pool nearly 0, torchlight in between
@@ -476,7 +495,8 @@ if (uRwOn > 0.5) {
   vec2 n = (texture2D(uRwNoise, P.xz * 0.25 + dr).xy - 0.5) * 2.0 + (texture2D(uRwNoise, P.xz * 0.875 - dr * 1.7).xy - 0.5) * 1.2;
   vec3 Ng = normalize(cross(dFdx(vRwPos), dFdy(vRwPos)));
   float flat_ = smoothstep(0.5, 0.9, abs(Ng.y));
-  vec3 Nn = normalize(vec3(n.x * 0.07, 1.0, n.y * 0.07));
+  vec2 n3 = texture2D(uRwNoise, P.xz * 3.0).xy - 0.5;
+  vec3 Nn = normalize(vec3((n.x + n3.x * 1.4) * 0.07, 1.0, (n.y + n3.y * 1.4) * 0.07));
   float alpha;
   vec3 col = rwShade(Nn, Vd, 1.6, 0.0, 0.0, rwLit, alpha);
   // falling water and the sides of a body of water: its own colour, a little sky
