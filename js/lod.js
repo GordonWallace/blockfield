@@ -137,6 +137,32 @@ void main() {
   gl_FragColor = vec4(col, 1.0);
 #include <fog_fragment>
 }`;
+// The realistic look (1.6, docs/REALISTIC_CONTRACT.md; js/real/lod.js is this file's other half there): the same rings and stand-ins, lit
+// by the frame's sun and sky like the terrain of the loaded chunks and put through the renderer's tone mapping, so the land doesn't
+// change brightness where the chunks end. The ground's normal comes from the surface's own slope on screen (the rings carry none); the
+// stand-ins' from their faces' block shades. With the look off none of this is used and the shaders are 1.5's, byte for byte.
+const REAL = !!(BF.real && BF.real.on && BF.real.U);
+const REAL_PARS = `
+uniform vec3 uSunCol;
+uniform vec3 uSunDir;
+uniform vec3 uSkyCol;
+uniform vec3 uGroundCol;
+#include <common>
+#include <fog_pars_fragment>`;
+const REAL_OUT = `
+  gl_FragColor = vec4(pow(alb, vec3(2.2)) * light, 1.0);
+#include <tonemapping_fragment>
+#include <encodings_fragment>
+#include <fog_fragment>
+}`;
+const realUniforms = () => { const U = BF.real.U; return { uSunCol: U.uSunCol, uSunDir: U.uSunDir, uSkyCol: U.uSkyCol, uGroundCol: U.uGroundCol }; };
+const VERT_USED = !REAL ? VERT : VERT.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;").replace("  vDist = length(mvPosition.xyz);", "  vDist = length(mvPosition.xyz);\n  vV = mvPosition.xyz;");
+const FRAG_USED = !REAL ? FRAG : FRAG.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;").replace("#include <fog_pars_fragment>", REAL_PARS)
+  .replace(/  vec3 col = mix\(vColor, vCanopy\.rgb, a\) \* max\(0\.1, uDay\);[\s\S]*$/, `  vec3 alb = mix(vColor, vCanopy.rgb, a);
+  vec3 upV = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz), sunV = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz);
+  vec3 n = normalize(cross(dFdx(vV), dFdy(vV)));
+  n = normalize(mix(n, upV, 0.5 * a));   // (a canopy is rough: its light follows the slope less)
+  vec3 light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, upV)) + uSunCol * max(dot(n, sunV), 0.0);` + REAL_OUT);
 let shared = null;
 function material(morph) {
   const Pl = P();
@@ -149,7 +175,7 @@ function material(morph) {
   }
   const sphM = new THREE.Matrix4();
   const m = new THREE.ShaderMaterial({
-    vertexShader: VERT, fragmentShader: FRAG, fog: true,
+    vertexShader: VERT_USED, fragmentShader: FRAG_USED, fog: true,
     defines: Object.assign({ FACE_N: Pl.N.toFixed(1) }, morph ? { MORPH: 1 } : {}),
     uniforms: Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), shared, {
       sphM: { value: sphM }, uK: BF.world.roundK, uDay: BF.world.dayUniform,
@@ -159,6 +185,7 @@ function material(morph) {
       stand: { value: 0 }, edge: { value: new THREE.Vector2(1e30, 2e30) }, pxScale,
     }),
   });
+  if (REAL) { Object.assign(m.uniforms, realUniforms()); m.extensions.derivatives = true; }
   m.userData.sphM = sphM;   // js/view.js sets it each frame (the round placement in the mesh's own frame)
   return m;
 }
@@ -297,10 +324,15 @@ void main() {
   gl_FragColor = vec4(col * max(0.1, uDay), 1.0);
 #include <fog_fragment>
 }`;
+// (the realistic look: a stand-in's faces carry their block shade, 1 on top, 0.8 and 0.65 on the sides, 0.72 on a point's trunk: read
+// back as how much sky and sun the face gets)
+const STAND_FRAG_USED = !REAL ? STAND_FRAG : STAND_FRAG.replace("#include <fog_pars_fragment>", REAL_PARS)
+  .replace(/  gl_FragColor = vec4\(col \* max\(0\.1, uDay\), 1\.0\);[\s\S]*$/, `  vec3 alb = col;
+  vec3 light = mix(uGroundCol, uSkyCol, 0.8) + uSunCol * 0.4;` + REAL_OUT);
 function standMaterial(boxes) {
   const sphM = new THREE.Matrix4();
   const m = new THREE.ShaderMaterial({
-    vertexShader: STAND_VERT, fragmentShader: STAND_FRAG, fog: true,
+    vertexShader: STAND_VERT, fragmentShader: STAND_FRAG_USED, fog: true,
     defines: Object.assign({ FACE_N: P().N.toFixed(1), MASK_N: MASK_N.toFixed(1), CHUNK: BF.CS.toFixed(1) }, boxes ? { BOXES: 1 } : {}),
     uniforms: Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), {
       sphM: { value: sphM }, uK: BF.world.roundK, uDay: BF.world.dayUniform, pxScale, frame: { value: new THREE.Matrix3() },
@@ -309,6 +341,7 @@ function standMaterial(boxes) {
       toHole2: { value: new THREE.Matrix3() }, seam2: { value: 0 }, chunkMask, maskO,
     }),
   });
+  if (REAL) Object.assign(m.uniforms, realUniforms());
   m.userData.sphM = sphM;
   return m;
 }
