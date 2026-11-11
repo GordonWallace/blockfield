@@ -21,6 +21,7 @@
 const BF = (globalThis.BF = globalThis.BF || {});
 
 const PX = 1 / 16;
+const REAL = !!(BF.real && BF.real.on);   // the realistic look (1.6): models lit by the scene's lights (js/real/mobs.js)
 const rnd = (a, b) => a + Math.random() * (b - a);   // visual (fire)
 function hash(a, b, c, d) {
   let h = (a * 374761393 + b * 668265263 + c * 2147483647 + d * 1274126177) | 0;
@@ -62,7 +63,8 @@ function buildGeometry(boxes, seed) {
         let hex = typeof bx.paint === "function" ? bx.paint(name, u, v, nu, nv) : bx.paint;
         if (hex == null) hex = 0xff00ff;
         tmpC.setHex(hex);
-        const j = (1 + (hash(u, v, fi + bi * 7, seed) - 0.5) * 0.14) * shade;
+        if (REAL) tmpC.convertSRGBToLinear();   // (the lit material works in linear light)
+        const j = (1 + (hash(u, v, fi + bi * 7, seed) - 0.5) * 0.14) * (REAL ? 1 : shade);   // (lit: the lights shade the faces)
         const r = tmpC.r * j, g = tmpC.g * j, bl = tmpC.b * j;
         const p00 = p(u * cu, v * cv), p10 = p((u + 1) * cu, v * cv), p11 = p((u + 1) * cu, (v + 1) * cv), p01 = p(u * cu, (v + 1) * cv);
         pos.push(...p00, ...p10, ...p11, ...p00, ...p11, ...p01);
@@ -73,6 +75,7 @@ function buildGeometry(boxes, seed) {
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  if (REAL) g.computeVertexNormals();
   g.computeBoundingSphere();
   return g;
 }
@@ -495,6 +498,7 @@ function buildMeshes(v, m) {
     mesh.rotation.order = "YXZ";
     mesh.userData.part = p;
     if (p.spiderLeg) { mesh.rotation.z = -0.6 * p.spiderLeg; mesh.rotation.y = p.spread; }
+    if (REAL) BF.real.mobs.part(mesh);
     v.model.add(mesh);
     v.meshes[p.name] = mesh;
   }
@@ -502,8 +506,9 @@ function buildMeshes(v, m) {
 function createView(m) {
   const root = new THREE.Group(), model = new THREE.Group();
   root.add(model);
-  const v = { root, model, meshes: {}, mat: baseMat.clone(), look: undefined, lids: null, badge: null, badgeLv: 0, heldMesh: null, heldId: null, fire: null, seen: 0 };
+  const v = { root, model, meshes: {}, mat: REAL ? BF.real.mobs.material() : baseMat.clone(), look: undefined, lids: null, badge: null, badgeLv: 0, heldMesh: null, heldId: null, fire: null, seen: 0 };
   buildMeshes(v, m);
+  if (REAL) BF.real.mobs.view(v, m);
   scene.add(root);
   return v;
 }
@@ -712,7 +717,7 @@ function draw(v, m, dt) {
   if (m.type === "villager") eyelids(v, !!m.sleeping && !m.dead);
   if (!m.dead) animate(v, m, S);   // (a dying mob keeps the pose it died in)
   // colour: light, hurt and death flash, creeper fuse
-  const light = lightAt(pos.x, pos.y + 0.5, pos.z), col = v.mat.color;
+  const light = REAL ? BF.real.mobs.light(v, m, pos.x, pos.y + 0.5, pos.z) : lightAt(pos.x, pos.y + 0.5, pos.z), col = v.mat.color;
   if (m.tint === "red") col.setRGB(light * 1.5, light * 0.35, light * 0.35);
   else if (fuse > 0 && !m.sleeping) {
     const f = fuse / 1.5;

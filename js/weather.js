@@ -129,10 +129,11 @@ function makeParticles() {
       uTime: { value: 0 }, uIntensity: { value: 0 }, uLight: { value: 1 },
       uHeight: { value: hmTex }, uOrigin: { value: new THREE.Vector2() }, uHide: { value: 0 }, uMinY: { value: 0 },
       uCam: { value: new THREE.Vector3() },
+      uReal: { value: 0 }, uWind: { value: new THREE.Vector2() },   // the realistic look (1.6): finer streaks, slanted by the wind (0: the 1.5 drawing)
     },
     vertexShader: `
       attribute vec4 seed; attribute vec2 corner;
-      uniform float uTime, uIntensity, uHide, uMinY; uniform sampler2D uHeight; uniform vec2 uOrigin; uniform vec3 uCam;
+      uniform float uTime, uIntensity, uHide, uMinY, uReal; uniform sampler2D uHeight; uniform vec2 uOrigin, uWind; uniform vec3 uCam;
       varying vec2 vUv; varying float vA; varying float vSnow;
       const float R = ${R.toFixed(1)}, BAND = ${BAND.toFixed(1)}, LO = ${BAND_LO.toFixed(1)}, HM = ${HM.toFixed(1)};
       void main() {
@@ -154,7 +155,7 @@ function makeParticles() {
         x += snow * sin(uTime * 0.7 + ph) * 0.45;
         z += snow * cos(uTime * 0.6 + ph * 1.3) * 0.45;
         float dist = length(vec2(x, z) - cam.xz);
-        float len = mix(1.0, 0.0, snow), wid = mix(0.03, 0.06, snow);
+        float len = mix(1.0 + 0.8 * uReal, 0.0, snow), wid = mix(0.03 - 0.012 * uReal, 0.06 - 0.02 * uReal, snow);
         if (kind < 0.5 || y < top || seed.w > uIntensity || dist > R || uHide > 0.5) {
           gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vA = 0.0; vUv = vec2(0.0); vSnow = 0.0; return;
         }
@@ -166,6 +167,7 @@ function makeParticles() {
           // cylindrical billboard: vertical streak facing the camera around the y axis
           vec2 side = normalize(vec2(-(z - cam.z), x - cam.x) + 1e-4);
           vec3 p = vec3(x + side.x * corner.x * wid, y + corner.y * len, z + side.y * corner.x * wid);
+          p.xz += uWind * (corner.y * len * 0.07 * uReal);
           mv = modelViewMatrix * vec4(p, 1.0);
         }
         gl_Position = projectionMatrix * mv;
@@ -174,7 +176,7 @@ function makeParticles() {
         vA = (1.0 - smoothstep(R * 0.6, R, dist)) * mix(smoothstep(1.2, 3.5, dist), smoothstep(1.5, 5.0, dist), snow) * smoothstep(0.0, 4.0, yy) * (1.0 - smoothstep(BAND - 6.0, BAND, yy));
       }`,
     fragmentShader: `
-      uniform float uLight;
+      uniform float uLight, uReal;
       varying vec2 vUv; varying float vA; varying float vSnow;
       void main() {
         if (vA <= 0.0) discard;
@@ -188,7 +190,7 @@ function makeParticles() {
           col = vec3(1.0);
         } else {
           a = 0.55 * (1.0 - abs(vUv.x) * 0.6) * smoothstep(0.0, 0.35, vUv.y);
-          col = vec3(0.62, 0.70, 0.86);
+          col = mix(vec3(0.62, 0.70, 0.86), vec3(0.80, 0.85, 0.92), uReal); a *= 1.0 - 0.3 * uReal;
         }
         gl_FragColor = vec4(col * uLight, a * vA);
       }`,
@@ -401,6 +403,7 @@ const weather = {
       u.uMinY.value = BF.MIN_Y;
       u.uLight.value = Math.min(1.3, 0.22 + 0.85 * (BF.sky ? BF.sky.light : 1));
       u.uHide.value = BF.player && BF.player.headInWater ? 1 : 0;
+      if (BF.real && BF.real.on) { u.uReal.value = 1; u.uWind.value.set(BF.atmos.wind.x, BF.atmos.wind.z); BF.atmos.rainMap = { tex: hmTex, ox: hmOX, oz: hmOZ, size: HM }; }   // (js/real/atmos.js: splashes on the same column tops)
     }
     weather.drawMs = weather.drawMs * 0.95 + (performance.now() - t0) * 0.05;
   },
