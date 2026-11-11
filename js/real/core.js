@@ -20,7 +20,7 @@ function wanted() {
 
 const real = (BF.real = BF.real || {});
 real.on = wanted();
-real.quality = { level: 2, shadows: false };
+real.quality = { level: 2, shadows: false, auto: true };
 real.modules = [];
 real.module = m => { real.modules.push(m); return m; };
 real.assets = { species: [], cover: [], ground: [], rocks: [] };
@@ -102,7 +102,7 @@ real.frame = function (dt) {
   U.uTime.value = clock; U.uWet.value = atmos.wetness;
   U.uWind.value.set(atmos.wind.x, atmos.wind.z, atmos.wind.strength);
   if (BF.world && BF.world.dayUniform) U.uDay.value = BF.world.dayUniform.value;
-  const p = BF.player && BF.player.pos;
+  const p = BF.player && BF.player.position;
   if (p) U.uEye.value.set(((p.x % 4096) + 4096) % 4096, p.y, ((p.z % 4096) + 4096) % 4096);
   for (const m of real.modules) {
     if (m.dead || !m.frame) continue;
@@ -110,7 +110,7 @@ real.frame = function (dt) {
   }
   // quality: drop a level after two seconds of slow frames (never raised again in a session)
   if (dt > 1 / 28) slow += dt; else slow = Math.max(0, slow - dt * 0.5);
-  if (slow > 2 && real.quality.level > 0) { real.quality.level--; slow = 0; }
+  if (real.quality.auto && slow > 2 && real.quality.level > 0) { real.quality.level--; slow = 0; }
 };
 
 // Sky and block light of the cell at an atlas position, as lit() expects it: out.x sky 0..1, out.y block 0..1.
@@ -119,14 +119,15 @@ real.cellLight = function (x, y, z, out) {
   const w = BF.world;
   let s = 1, b = 0;
   try {
-    if (BF.skylight && BF.skylight.get) s = BF.skylight.get(Math.floor(x), Math.floor(y), Math.floor(z)) / 15;
+    const SL = BF.skyLight;
+    if (SL && SL.get) { const l = SL.get(Math.floor(x), Math.floor(y), Math.floor(z)); s = SL.bright ? SL.bright(l) : SL.BRIGHT ? SL.BRIGHT[l] : l / 15; }
     if (w && w.getBlockLight) b = w.getBlockLight(Math.floor(x), Math.floor(y), Math.floor(z)) / 15;
   } catch (_) { /* not loaded: open sky */ }
   return out.set(s, b);
 };
 
 // ---------- the lit-material patch ----------
-// Makes a three.js lit material (Standard, Lambert, Phong) agree with Blockfield's light: sun and sky light are scaled by how much
+// Makes a three.js lit material (Standard or Phong: r128's Lambert lights per vertex and has no hook) agree with Blockfield's light: sun and sky light are scaled by how much
 // open sky reaches the surface, block light (torches) is added as a warm term the sun doesn't touch. opts: light "vertex" | "cell" |
 // "open", round (a chunk mesh bent to the planet: js/world.js adds uK and sphM itself), wind (foliage sway).
 real.lit = function (mat, opts) {

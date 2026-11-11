@@ -75,7 +75,7 @@ After `update`, core.js copies it into the lights, `scene.fog` (the `THREE.Fog` 
 reaches the cell) and `bl` (block light level / 15; above 1.5 marks an emissive part). 1.5 multiplies an unlit colour by
 `max(skyl' * uDay, bl')`. In the realistic look, lit materials go through one helper so everything agrees:
 
-    BF.real.lit(material, opts) -> material      // patches onBeforeCompile; works on MeshStandard / MeshLambert / MeshPhong
+    BF.real.lit(material, opts) -> material      // patches onBeforeCompile; works on MeshStandard and MeshPhong (not Lambert: r128 lights it per vertex)
       opts.light: "vertex"   geometry has skyl and bl attributes (chunk passes)
                   "cell"     one value for the whole object: material.userData.cell = { value: Vector2(sky, block) },
                              set it from BF.real.cellLight(x, y, z, out) at the object's atlas position (mobs, props, trees)
@@ -88,57 +88,68 @@ reaches the cell) and `bl` (block light level / 15; above 1.5 marks an emissive 
 
 ## 4. What the mesher gives you (foundation)
 
-`BF.mesher.build(J, TB)` returns `{ S, L }` as in 1.5 and, when the job has `J.real`, also:
+`BF.mesher.build(J, TB)` returns `{ S, L }` as in 1.5 and, when the job has `J.real` (js/real/mesh.js does the work, in the
+page and in the mesher workers), also:
 
-- `T`: the natural terrain pass: `{ pos, nrm, col, sky, bl, mat, sphere, ind }`. A smooth surface (surface nets) over the
-  natural solid blocks: grass, dirt, podzol, mud, sand, red sand, gravel, clay, stone and its natural variants, deepslate,
-  sandstone, terracotta in badlands, snow, ice, ores. Those blocks are left out of `S`. Digging and placing these materials
-  reshapes the smooth surface. Collision stays on the block grid. `mat` is a per-vertex ground material index
-  (section 6); `col` is the biome tint.
-- `F`: the flora list, plain data, one record of 8 floats per plant:
-  `[x, y, z, kind, species, height, seed, extra]` with x, y, z chunk-local (y the ground surface), `kind` 0 tree, 1 sapling
-  or bush, 2 ground plant (a "cross" block: grass, fern, flower, crop stays a cube-world crop: crops are **not** flora),
-  3 rock (reserved), `species` an index into `BF.real.assets.species`, `height` in blocks (a tree's log column), `seed` a
-  stable hash of the atlas cell (0 .. 1), `extra` the sky light at the base (0 .. 1) plus 2 x the block light (0 .. 1).
-  A tree is a column of one species' logs that stands on natural ground and has that species' leaves attached; its logs and
-  leaves are left out of `S`. Logs without leaves (village posts, anything the player builds) stay cubes. Breaking a log of a
-  tree is unchanged game logic; the mesh simply rebuilds.
+- `T`: the natural terrain pass: `{ pos, nrm, col, sky, bl, mat, sphere, ind }`. A smooth surface (surface nets, eased once)
+  over the natural ground blocks listed in `BF.real.assets.ground` (grass, dirt, sand, gravel, stone and its variants, snow,
+  ores under their rock, ...). Those blocks are left out of `S`; every other block stays a cube, and a cube's face against
+  natural ground is drawn (the ground may slope away from it). Digging and placing ground materials reshapes the surface.
+  A flat floor comes out exactly on the block tops, and collision stays on the block grid. `col` is the ground's colour
+  (times the biome grass tint where the entry says so), `mat` four weights for the detail layers (section 5).
+- `F`: the flora list, plain data, a `Float32Array` with one record of 8 floats per plant:
+  `[x, y, z, kind, block, height, seed, extra]`: x, y, z chunk-local (y the base, on the ground); `kind` 0 tree, 2 ground
+  plant, 4 big tree (a 2 x 2 trunk, x and z at its centre), 1 and 3 reserved (bushes, rocks); `block` the block id of the
+  tree's log or of the plant; `height` the log column's height in blocks; `seed` a stable hash of the atlas cell (0 .. 1);
+  `extra` the sky light level at the base (0 .. 15) plus 16 x the block light level (0 .. 15).
+  A tree is a column of a registered species' logs standing on natural ground with that species' leaves at its top (a
+  `leafless` species, such as a cactus, needs no leaves). Its logs, any logs joined to them, and all leaves of registered
+  species leave `S`. Logs without leaves (village posts, what the player builds) stay cubes. A ground plant is a block
+  with a registered `cover` entry; every other plant (crops included) stays as 1.5 draws it. Game logic is untouched:
+  breaking a log simply rebuilds the mesh. Known gaps: leaf blocks a player places by hand are hidden too, and the
+  selection box still outlines hidden leaf blocks.
 
-`js/world.js` turns `T` into a mesh with the terrain material and hands `F` to the flora placer:
+`js/world.js` draws `T` with `BF.real.terrainMaterial()` and hands `F` to the flora placer:
 
-    BF.real.flora.place(key, ox, oz, F)   // key: the chunk's key; ox, oz: its corner in atlas coordinates
+    BF.real.flora.place(key, ox, oz, F)   // key: the chunk's key; ox, oz: its corner in atlas coordinates; F may be null
     BF.real.flora.remove(key)
+    BF.real.flora.resolve(block, biome, logs, seed) -> registry entry or null   // the one rule for which model a record gets
 
-The foundation ships a simple placer (one InstancedMesh per species per chunk, full detail). The performance thread
-**replaces these two functions** with its scheduler (region batching, level of detail, impostors, culling, time-slicing) and
-owns everything beyond loaded chunks (distant rings, far trees). It must not change what a record means.
+The foundation ships a simple placer (an InstancedMesh per model part per chunk, hidden beyond about 176 blocks). The
+performance thread **replaces `place` and `remove`** with its scheduler (region batching, level of detail, impostors,
+culling, time-slicing), keeps `resolve`, and owns everything beyond loaded chunks (distant rings, far trees). It must not
+change what a record means.
 
-## 5. Flora toolkit and the species registry
+## 5. Flora toolkit and the registries
 
-`js/real/flora.js` (foundation) exports the Cascade Creek toolkit as `BF.real.kit`:
-`{ Geo, toGeo, tube, path, at, card, branch, conifer, spray, needles, cells, cellUV, atlasTex, barkTex, barkMat,
-foliageMat, depthMat, rng }`. Same signatures as `mod_flora.js` in the project files (`/mnt/project-files/cascade-creek/`),
-with materials already passed through `BF.real.lit`. 1 unit = 1 block, origin at the trunk base, y up.
-
-The biome assets thread fills the registry (`js/real/assets-*.js`); the foundation ships spruce, oak and birch as examples:
+`js/real/flora.js` (foundation) exports the Cascade Creek toolkit as `BF.real.kit`: `{ Geo, toGeo, tube, path, at, card,
+branch, spray, needles, cells, cellUV, atlasTex, barkTex, barkMat, foliageMat, depthMat, atlases, rng, withRand, conifer,
+broadleaf, shrubTree, broadleafP, coniferP }`. The builders draw from the generator set by `kit.withRand(rand, fn)`.
+Materials from `barkMat` and `foliageMat` are already lit (`light: "open"`; the placer puts the sky light in the instance
+colour). 1 unit = 1 block, origin at the trunk base, y up. Other threads may keep their own toolkits.
 
     BF.real.assets.species.push({
       id: "sitka_spruce", kind: "tree",
-      log: "spruce_log",                    // the block whose trees this draws (any wood species name of blocks.js)
-      biomes: ["Taiga", "Old Growth Taiga"],// optional: only there; several entries for one log are chosen by seed
-      weight: 1,
-      variants: 4,                          // how many different models to build (chosen by seed)
-      build(rand, detail) -> { bark: BufferGeometry, foliage: BufferGeometry },   // detail 0 full, 1 medium, 2 low
-      barkMaterial(), foliageMaterial(),    // shared per species, made with the kit (so they are lit and fogged alike)
-      height: [6, 14],                      // model height in blocks at scale 1; the placer scales to the log column
-      impostor(detail)                      // optional: canvas for a far billboard (performance thread's impostors)
+      log: "spruce_log",                    // the block whose trees this draws
+      leaves: "spruce_leaves",              // optional: default is the log's name with _leaves
+      leafless: false,                      // true: any column of `log` on natural ground is a plant (cactus, mushroom stem)
+      biomes: ["Taiga", "Old Growth Taiga"],// optional: only in these biomes (names of js/worldgen.js)
+      logs: [4, 9],                         // optional: only for log columns this tall
+      weight: 1, variants: 3,               // chosen by seed among the entries that fit; models built per variant
+      build(rand, detail) -> { bark: BufferGeometry, foliage: BufferGeometry },   // detail 0 full, 1 medium, 2 low; foliage may be empty, never null
+      barkMaterial(), foliageMaterial(),    // shared per species
+      modelHeight: 12,                      // the model's height in blocks at scale 1 (or height: [min, max]); the placer scales it to the log column + 2.5
     })
-    BF.real.assets.cover.push({ id, block: "fern" | "short_grass" | ..., biomes, build(rand, detail), material() })
-    BF.real.assets.ground[index] = { id, blocks: ["grass_block", ...], color, texture() -> CanvasTexture (tiling, 4 blocks),
-                                     normal() -> CanvasTexture }       // the terrain pass's `mat` index
-    BF.real.assets.rocks.push({ id, biomes, build(rand, detail), material() })
+    BF.real.assets.cover.push({ id, block: "fern", biomes, weight, variants, build(rand, detail) -> BufferGeometry, material() })
+    BF.real.assets.rocks.push({ id, biomes, build(rand, detail) -> BufferGeometry, material() })
+    BF.real.assets.ground.push({ id, blocks: ["grass", ...], color: "#hex" | [r, g, b] (sRGB), layer: 0 | 1 | 2 | 3, tint: bool })
 
-Everything is generated in code (canvas textures, built geometry): no binary files, no downloads.
+Ground: `layer` picks the shared detail texture's channel (0 soil and turf, 1 rock, 2 sand and gravel, 3 snow and ice),
+`tint` multiplies the colour by the biome's grass tint. A later entry for the same block wins; js/real/terrain.js holds the
+defaults. Everything is generated in code (canvas textures, built geometry): no binary files, no downloads.
+
+Albedo: the game's sun runs up to about 3 with ACES tone mapping, so keep albedos low (the ground and the kit's foliage
+multiply their colours by about 0.4 to 0.5 in linear space).
 
 ## 6. Water
 
@@ -156,7 +167,7 @@ foundation thread for the attribute you need). Water physics is 1.5's fluid simu
 
 | Thread | New files | May edit in existing files |
 |---|---|---|
-| Foundation | `js/real/core.js`, `terrain.js`, `flora.js`, this document | `index.html`, `js/main.js`, `js/world.js`, `js/mesher.js` (solid part), `js/meshworker.js`, `js/view.js` |
+| Foundation | `js/real/core.js`, `mesh.js`, `terrain.js`, `flora.js`, this document | `index.html`, `js/main.js`, `js/world.js`, `js/mesher.js` (solid part), `js/meshworker.js`, `js/view.js` |
 | Water | `js/real/water.js` | the liquid part of `js/mesher.js`, `js/planetrivers.js` (drawing only) |
 | Performance | `js/real/lod.js` | `js/lod.js`, `js/lodworker.js`, `js/grid.js`, `js/globe.js` |
 | Biome assets | `js/real/assets-biomes.js` (stub on the branch), more `js/real/assets-*.js` on request | `js/textures*.js` only if a block texture must change |

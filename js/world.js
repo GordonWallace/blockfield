@@ -122,6 +122,7 @@ const dayUniform = { value: 1 };
 world.init = function (sceneRef) {
   scene = sceneRef;
   const tex = BF.textures.build();
+  if (BF.real && BF.real.on) tex.texture.encoding = THREE.sRGBEncoding;   // (the realistic look's renderer encodes its output, js/real/core.js)
   solidMat = new THREE.MeshBasicMaterial({ map: tex.texture, vertexColors: true, alphaTest: 0.5, side: THREE.FrontSide });
   liquidMat = new THREE.MeshBasicMaterial({ map: tex.texture, vertexColors: true, transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide });
   // Precompute per-block per-face atlas rects.
@@ -171,6 +172,7 @@ world.init = function (sceneRef) {
 }`);
     };
   }
+  if (BF.real && BF.real.on) solidMat.toneMapped = liquidMat.toneMapped = false;   // (blocks keep their own colours under the realistic look's tone mapping)
   world.solidMat = solidMat; world.liquidMat = liquidMat;
   TBL = null;   // the mesher's tables (face rects) are built again
 };
@@ -203,7 +205,8 @@ function planetMaterial(base, face) {
     sh.vertexShader = "attribute vec3 sphere;\nuniform float uK;\nuniform mat4 sphM;\n" + sh.vertexShader.replace("#include <begin_vertex>",
       "vec3 transformed = vec3(position);\nif (uK > 0.0) transformed = mix(transformed, (sphM * vec4(sphere, 1.0)).xyz, uK);");
   };
-  m.customProgramCacheKey = () => "bf-planet-" + (base === liquidMat ? "l" : "s");
+  const ck = base === liquidMat ? "l" : base === solidMat ? "s" : base.userData.realWater ? "w" : "r:" + (base.customProgramCacheKey ? base.customProgramCacheKey() : base.uuid);
+  m.customProgramCacheKey = () => "bf-planet-" + ck;
   return m;
 }
 // Unit directions at the 17 x 17 block corners of the chunk at atlas (ox, oz), and its anchor (centre, sea level) on the sphere.
@@ -757,6 +760,7 @@ function unload(key) {
   const c = world.chunks.get(key);
   if (!c) return;
   disposeMeshes(c);
+  if (BF.real && BF.real.on) BF.real.flora.remove(key);
   world.chunks.delete(key); CGEN++; forgetChunk(c);   // (caches must not keep its arrays alive, r15-35)
   world._dirty.delete(key);
   MP.queue.delete(c);
@@ -794,6 +798,7 @@ world.contextRestored = function () {
 };
 function dropFar(key) {
   staleFar.delete(key);
+  if (BF.real && BF.real.on) BF.real.flora.remove(key);
   for (const m of world.farMeshes.get(key) || []) { scene.remove(m); m.geometry.dispose(); if (m.material.userData.planet) m.material.dispose(); }
   world.farMeshes.delete(key);
 }
@@ -1140,6 +1145,7 @@ function meshTables() {
     faceUV: world._faceUV, faceTint: world._faceTint, dirtUV: world._dirtUV, overlayUV: world._overlayUV, tiles, tile0: draw ? BF.textures.uv("\u0000") : null,
     blocks: BF.blocks, DIRS: BF.DIRS, STONE: BF.B.stone, BEDROCK: BF.B.bedrock, PATH: BF.B.dirt_path, FARM: BF.B.farmland, FARM_DRY: BF.B.farmland_dry,
     MINY: BF.MIN_Y, HTOP: BF.H,
+    real: draw && BF.real && BF.real.on && BF.real.meshTables ? BF.real.meshTables() : null,   // the realistic look (1.6, js/real/terrain.js)
   };
   // blocks whose model is not one of the mesher's own (signs read their group from the world): their boxes are worked out here
   FOREIGN = new Uint8Array(BF.MAX_BLOCK + 1);
@@ -1220,7 +1226,7 @@ function meshJob(c, copy) {
   return {
     ox, oz, lo: c.lo, hi: c.hi, y0: c.y0, y1: c.y1,
     secs: copy ? c.secs.map(cp) : c.secs, light: copy && c.light ? c.light.map(cp) : c.light, sky: copy && c.sky ? c.sky.map(cp) : c.sky,
-    Y0, Y1, rb, rl, rs, tint, ext,
+    Y0, Y1, rb, rl, rs, tint, ext, real: !!T.real,
     sph: Object.assign(sphereFrame(ox, oz), { R: BF.planet.R, sea: BF.SEA }),
   };
 }
@@ -1236,11 +1242,13 @@ function jobBuffers(J) {
 function applyMesh(c, R, anchor) {
   const ox = c.cx * CS, oz = c.cz * CS;
   disposeMeshes(c);
-  const make = (T, mat, order) => {
+  const REAL = BF.real && BF.real.on ? BF.real : null;
+  const make = (T, mat, order, ground) => {
     if (!T) return;
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(T.pos, 3));
-    g.setAttribute("uv", new THREE.BufferAttribute(T.uv, 2));
+    if (ground) { g.setAttribute("normal", new THREE.BufferAttribute(T.nrm, 3)); g.setAttribute("mat", new THREE.BufferAttribute(T.mat, 4)); }
+    else g.setAttribute("uv", new THREE.BufferAttribute(T.uv, 2));
     g.setAttribute("color", new THREE.BufferAttribute(T.col, 3));
     g.setAttribute("skyl", new THREE.BufferAttribute(T.sky, 1));
     g.setAttribute("bl", new THREE.BufferAttribute(T.bl, 1));
@@ -1249,6 +1257,7 @@ function applyMesh(c, R, anchor) {
     g.computeBoundingSphere();
     for (const a of [...Object.values(g.attributes), g.index]) a.onUpload(markUploaded);   // (see purge)
     const m = new THREE.Mesh(g, planetMaterial(mat, BF.planet.face(ox, oz)));
+    if (ground) m.receiveShadow = true;
     m.renderOrder = order;
     m.matrixAutoUpdate = false;
     m.position.set(ox, 0, oz); m.updateMatrix();
@@ -1258,7 +1267,11 @@ function applyMesh(c, R, anchor) {
     c.meshes.push(m);
   };
   make(R.S, solidMat, 0);
-  make(R.L, liquidMat, 1);
+  make(R.L, REAL && REAL.water && REAL.water.material ? REAL.water.material(liquidMat) : liquidMat, 1);   // (js/real/water.js keeps one clone)
+  if (REAL) {   // the realistic look (1.6): the smooth ground and the trees and plants (js/real/terrain.js, flora.js)
+    if (R.T) make(R.T, REAL.terrainMaterial(), 0, true);
+    REAL.flora.place(c.key, ox, oz, R.F || null);
+  }
   c.mesh = true;
 }
 

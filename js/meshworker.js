@@ -1,6 +1,6 @@
 // A mesher worker (spec r15-03): builds chunk meshes' vertex arrays off the main thread with js/mesher.js, from the jobs and tables
 // js/world.js sends (the tables first, and again when they change). It answers each job in order with the arrays, transferred.
-importScripts("mesher.js" + self.location.search);   // (stamped like the worker: see BF.workerUrl in js/grid.js)
+importScripts("real/mesh.js" + self.location.search, "mesher.js" + self.location.search);   // (stamped like the worker: see BF.workerUrl in js/grid.js)
 let tables = null;
 onmessage = (e) => {
   const m = e.data;
