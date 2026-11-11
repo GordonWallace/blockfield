@@ -154,7 +154,7 @@ function biome(name, cells, plants, wood) {
       if (mats) return mats;
       return K.withRand(K.mulberry(name.length * 7919 + name.charCodeAt(0) * 31 + name.charCodeAt(name.length - 1)), () => {
         const tex = K.atlas(4, (g, i, S) => { if (i === WOOD_CELL) C.wood(wood || { base: "#5a4a3c", cols: ["#3a2e26", "#7a6a58", "#4a3c30"] })(g, S); else if (cells[i]) cells[i](g, S); });
-        return (mats = { foliage: K.foliageMat(tex, 0.45), depth: K.depthMat(tex) });
+        return (mats = { foliage: K.foliageMat(tex, 0.45, undefined, "cover"), depth: K.depthMat(tex) });
       });
     },
     plants: plants.map(p => ({ id: p[0], name: p[1], latin: p[2], block: p[3], density: (p[5] && p[5].density) || 0.5, scatter: p[5] && p[5].scatter,

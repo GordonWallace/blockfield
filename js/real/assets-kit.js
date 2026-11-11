@@ -36,7 +36,11 @@ function withRand(rand, fn) {
 function canvas(w, h) { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; }
 const hsl = (h, s, l, a) => "hsla(" + (h | 0) + "," + (s | 0) + "%," + (l | 0) + "%," + (a == null ? 1 : a) + ")";
 
-const K = { texScale: 1, low: false };   // low: the lightest build (the registry's detail 2), set around a build by the caller       // 0.5 halves every texture's resolution (set before the first material is asked for)
+// texScale: 0.5 halves every texture's resolution (set before the first material is asked for).
+// lod: how far a build is thinned, set around a build by the caller: 0 as the builder's detail argument says (the viewer's close-ups),
+// 1 near (the registry's detail 0), 2 middle (about a third of the triangles), 3 far (about a tenth: trunk, main limbs and a few big cards).
+// albedo: what the materials' colours are multiplied by (the game's sun runs to about 2.4 under ACES tone mapping).
+const K = { texScale: 1, lod: 0, albedo: { bark: 0.62, foliage: 0.46, cover: 0.42, rock: 0.6 } };
 
 // =====================================================================
 //  BARK (colour + height map, tiling). paint(P) draws in a 512 x 1024 space whatever the real resolution.
@@ -426,7 +430,7 @@ const heads = {
 //  MATERIALS
 // =====================================================================
 const U = BF.real.U;
-const lit = (m, key) => (BF.real.lit ? BF.real.lit(m, { light: "cell", key: "akit-" + key }) : m);
+const lit = (m, key, alb) => { m.color.multiplyScalar(K.albedo[alb || key] || 1); return BF.real.lit ? BF.real.lit(m, { light: "cell", key: "akit-" + key }) : m; };
 const WIND_GLSL = [
   "#ifdef USE_INSTANCING",
   "  float wPh = instanceMatrix[3][0] * 0.31 + instanceMatrix[3][2] * 0.17;",
@@ -450,7 +454,7 @@ const TRANS_GLSL = [
 ].join("\n");
 // alpha-tested, double-sided foliage: sways by the aWind attribute (x = amount, y = phase) with the shared time and wind, glows when
 // back-lit by the sun (trans), keeps its bent normals on back faces, and is lit like everything else (BF.real.lit, cell light)
-function foliageMat(tex, trans, rough) {
+function foliageMat(tex, trans, rough, alb) {
   const m = new T.MeshStandardMaterial({ map: tex, alphaTest: 0.4, side: T.DoubleSide, roughness: rough == null ? 0.78 : rough, metalness: 0, vertexColors: true });
   m.onBeforeCompile = function (sh) {
     let vs = sh.vertexShader, fs = sh.fragmentShader;
@@ -463,7 +467,7 @@ function foliageMat(tex, trans, rough) {
     }
     sh.vertexShader = vs; sh.fragmentShader = fs;
   };
-  return lit(m, "foliage");
+  return lit(m, "foliage", alb);
 }
 function depthMat(tex) { return new T.MeshDepthMaterial({ depthPacking: T.RGBADepthPacking, map: tex, alphaTest: 0.4, side: T.DoubleSide }); }
 
@@ -530,7 +534,7 @@ function card(F, P, dir, len, wid, cell, droop, vee, roll, cc, col, bw, rows) {
     const cr = Math.cos(roll), sr = Math.sin(roll), tx = sx * cr + nx * sr, ty = ny * sr, tz = sz * cr + nz * sr;
     nx = nx * cr - sx * sr; ny = ny * cr; nz = nz * cr - sz * sr; sx = tx; sy = ty; sz = tz;
   }
-  const nr = rows || 3, nc = vee ? 3 : 2, hw = wid * 0.5, cv = Math.cos(vee), sv = Math.sin(vee), base = F.nv, ph = R() * TAU;
+  const nr = K.lod >= 2 ? 2 : rows || 3, nc = vee && K.lod < 2 ? 3 : 2, hw = wid * 0.5, cv = Math.cos(vee), sv = Math.sin(vee), base = F.nv, ph = R() * TAU;
   for (let r = 0; r < nr; r++) {
     const t = r / (nr - 1);
     const cx = P.x + dir.x * len * t, cy = P.y + dir.y * len * t - droop * len * t * t, cz = P.z + dir.z * len * t;
@@ -556,13 +560,16 @@ const dirOf = (az, e) => new V3(Math.cos(az) * Math.cos(e), Math.sin(e), Math.si
 // S: { maxD, n[], seg[], kids[], ratio, spread, up, jit, bend[] (number or fn(t)), t0, cards, cardLen, cardW, cells[], flat, droop,
 //      col[] (wood tint per depth), moss, flatTop (y above which twigs level off: umbrella crowns), hang (cards hang straight down) }
 function branch(B, F, S, o, d, len, r, depth, cc) {
-  const n = S.n[depth], seg = S.seg[depth], rad = [], P = new V3(), D = new V3(), sd = new V3(), up = new V3(), dir = new V3();
+  const lod = K.lod, twig = depth >= S.maxD;
+  const n = lod >= 1 && (twig || lod >= 2) ? Math.min(S.n[depth], twig ? 1 : 2) || 1 : S.n[depth], seg = lod >= 1 && twig ? 3 : S.seg[depth];
+  const rad = [], P = new V3(), D = new V3(), sd = new V3(), up = new V3(), dir = new V3();
   const bd = S.bend[depth], bendFn = typeof bd === "function" ? t => bd(t) * (3 / n) : () => bd * (3 / n);
   const pts = path(o, d, len, n, S.flatTop == null ? bendFn : t => bendFn(t), S.jit);
   if (S.flatTop != null) for (const p of pts) if (p.y > S.flatTop) p.y = S.flatTop + (p.y - S.flatTop) * 0.25;
   for (let k = 0; k <= n; k++) rad.push(Math.max(0.005, r * (1 - 0.72 * k / n)));
   const c0 = S.col[Math.min(depth, S.col.length - 1)];
-  tube(B, pts, rad, seg, { col: S.moss && depth === 0 ? (kk, pp) => { const m = Math.max(0, 1 - pp.y); return [c0[0] * (1 - 0.25 * m), c0[1] * (1 + 0.2 * m), c0[2] * (1 - 0.4 * m)]; } : () => c0 });
+  // (thinned builds drop the wood nobody sees: twigs from the middle level, everything past the main limbs when far)
+  if (!(lod >= 2 && twig) && !(lod >= 3 && depth >= 2)) tube(B, pts, rad, seg, { col: S.moss && depth === 0 ? (kk, pp) => { const m = Math.max(0, 1 - pp.y); return [c0[0] * (1 - 0.25 * m), c0[1] * (1 + 0.2 * m), c0[2] * (1 - 0.4 * m)]; } : () => c0 });
   function perp(Dv, spread) {
     sd.set(-Dv.z, 0, Dv.x); if (sd.lengthSq() < 1e-4) sd.set(1, 0, 0); sd.normalize(); up.crossVectors(Dv, sd);
     _phi += 2.4 + rr(-0.4, 0.4);
@@ -602,9 +609,13 @@ function branch(B, F, S, o, d, len, r, depth, cc) {
 function broadleaf(sp, detail) {
   const B = new Geo(), F = new Geo(), H = sp.h, S = sp.S, P = new V3(), D = new V3();
   const cc = { x: 0, y: H * (sp.crown ? sp.crown.y : 0.68), z: 0, rx: H * (sp.crown ? sp.crown.rx : 0.35), ry: H * (sp.crown ? sp.crown.ry : 0.36) };
-  const SS = detail ? S : K.low
-    ? Object.assign({}, S, { seg: S.seg.map(() => 3), n: S.n.map(v => Math.min(v, 3)), kids: S.kids.map(k => Math.max(2, k - 1)), cards: Math.max(2, Math.round(S.cards * 0.4)), cardLen: S.cardLen * 2.0 })
-    : Object.assign({}, S, { seg: S.seg.map(s => Math.max(3, s - 2)), cards: Math.max(2, Math.round(S.cards * 0.6)), cardLen: S.cardLen * 1.45 });
+  const thin = (kd, cd, cl) => Object.assign({}, S, { seg: S.seg.map(() => 3), n: S.n.map(v => Math.min(v, 3)), kids: S.kids.map(kd), cards: Math.max(1, Math.round(S.cards * cd)), cardLen: S.cardLen * cl });
+  const SS = detail ? S
+    : K.lod >= 3 ? thin(k => Math.max(1, Math.ceil(k / 2)), 0.12, 3.3)
+    : K.lod === 2 ? thin(k => Math.max(2, k - 1), 0.25, 2.6)
+    : K.lod === 1 ? Object.assign({}, S, { seg: S.seg.map(v => Math.max(3, v - 2)), n: S.n.map(v => Math.min(v, 3)), kids: S.kids.map(k => (k >= 4 ? k - 1 : k)), cards: Math.max(2, Math.round(S.cards * 0.5)), cardLen: S.cardLen * 1.7 })
+    : Object.assign({}, S, { seg: S.seg.map(v => Math.max(3, v - 2)), cards: Math.max(2, Math.round(S.cards * 0.6)), cardLen: S.cardLen * 1.45 });
+  const far = K.lod >= 2;
   const stems = sp.stems || 1, ph = rr(0, TAU);
   let az = rr(0, TAU);
   for (let s = 0; s < stems; s++) {
@@ -617,8 +628,8 @@ function broadleaf(sp, detail) {
     const flare = (a, y) => 1 + fl * Math.exp(-Math.max(0, y) / fh) * (lob ? 0.4 + 0.6 * Math.pow(Math.abs(Math.cos(a * lob * 0.5 + ph)), 1.5) : 1);
     const bc = sp.base || [0.7, 0.95, 0.5];
     const tcol = (kk, pp) => { const m = Math.max(0, 1 - Math.max(0, pp.y) / 1.1) * 0.8, q = rr(0.94, 1.04); return [q * (1 - m * (1 - bc[0])), q * (1 - m * (1 - bc[1])), q * (1 - m * (1 - bc[2]))]; };
-    tube(B, tp.slice(0, 5), tr.slice(0, 5), detail ? 12 : 7, { flare, col: tcol });
-    tube(B, tp.slice(4), tr.slice(4), detail ? 8 : 5, { col: tcol, v0: TH * 0.45 / BH });
+    tube(B, tp.slice(0, 5), tr.slice(0, 5), detail ? 12 : far ? 5 : 7, { flare, col: tcol });
+    tube(B, tp.slice(4), tr.slice(4), detail ? 8 : far ? 4 : 5, { col: tcol, v0: TH * 0.45 / BH });
     const np = Math.max(1, Math.round(sp.np / (stems > 1 ? stems * 0.6 : 1)));
     for (let k = 0; k < np; k++) {
       const t = sp.t0 + (1 - sp.t0) * (k + R() * 0.5) / np, tc = np > 1 ? k / (np - 1) : 1;
@@ -649,8 +660,12 @@ function conifer(sp, detail) {
   const flare = (a, yy) => 1 + sp.flare * Math.exp(-Math.max(0, yy) / sp.flareH) * (0.4 + 0.6 * Math.pow(Math.abs(Math.cos(a * sp.lobes * 0.5 + ph)), 1.5));
   const bc = sp.base || [0.7, 1.25, 0.5];
   const tcol = (kk, pp) => { const m = Math.max(0, 1 - Math.max(0, pp.y) / 1.6) * 0.75, q = rr(0.92, 1.05); return [q * (1 - m * (1 - bc[0])), q * (1 - m * (1 - bc[1])), q * (1 - m * (1 - bc[2]))]; };
-  tube(B, tp.slice(0, 9), tr.slice(0, 9), detail ? 14 : 8, { flare, col: tcol });
-  tube(B, tp.slice(8), tr.slice(8), detail ? 8 : 5, { col: tcol, v0: 3.1 });
+  const lod = K.lod, thinT = lod >= 2 ? tp.filter((p, k) => k % 2 === 0 || k === nT) : null, thinR = lod >= 2 ? tr.filter((p, k) => k % 2 === 0 || k === nT) : null;
+  if (thinT) tube(B, thinT, thinR, lod >= 3 ? 4 : 5, { flare, col: tcol });
+  else {
+    tube(B, tp.slice(0, 9), tr.slice(0, 9), detail ? 14 : 8, { flare, col: tcol });
+    tube(B, tp.slice(8), tr.slice(8), detail ? 8 : 5, { col: tcol, v0: 3.1 });
+  }
   function trunkAt(yy, out) {
     let q = 1;
     for (; q < nT; q++) if (tp[q + 1].y >= yy) break;
@@ -667,7 +682,7 @@ function conifer(sp, detail) {
     tube(B, pts, [0.05, 0.035, 0.012], 4, { col: () => [0.6, 0.6, 0.6] });
   }
   let y = cb;
-  const dyl = sp.dy * (detail ? 1 : K.low ? 2.4 : 1.5), topGap = Math.min(0.7, H * 0.05);
+  const dyl = sp.dy * (detail ? 1 : lod >= 3 ? 3.4 : lod === 2 ? 2.3 : 1.5), topGap = Math.min(0.7, H * 0.05);
   while (y < H - topGap) {
     const tc = (y - cb) / (H - cb);
     if (R() < sp.gap && tc < 0.8) { y += dyl; az += 1.3; continue; }
@@ -677,8 +692,8 @@ function conifer(sp, detail) {
     const pts = path(O.clone(), dirOf(az, e), L, n, tt => sp.bend(tt, tc) * (5 / n), 0.035);
     const rad = [], lr = Math.min(rt * 0.6, 0.02 + 0.017 * L);
     for (let k = 0; k <= n; k++) rad.push(lr * (1 - 0.86 * k / n) + 0.007);
-    tube(B, pts, rad, detail ? 4 : 3, { col: () => limbC });
-    const cl = sp.card * (detail ? 1 : K.low ? 2.1 : 1.5), ns = Math.max(2, Math.round(L / (cl * (detail ? 0.5 : 0.42))));
+    if (lod < 3) tube(B, pts, rad, detail ? 4 : 3, { col: () => limbC });
+    const cl = sp.card * (detail ? 1 : lod >= 3 ? 3.0 : lod === 2 ? 2.1 : 1.5), ns = Math.max(2, Math.round(L / (cl * (detail ? 0.5 : 0.42))));
     let side = R() < 0.5 ? 1 : -1;
     for (let s = 0; s < ns; s++) {
       const t = Math.min(0.97, 0.2 + 0.8 * (s + R() * 0.6) / ns);
@@ -770,7 +785,7 @@ function shrub(o, detail) {
 // ---------------------------------------------------------------- columnar succulents (ribbed stems, no foliage)
 // sp: { h, r, ribs, arms, armAt [min, max] (fraction of h), armLen [min, max], depth (rib depth) }
 function succulent(sp, detail) {
-  const B = new Geo(), ribs = sp.ribs, seg = detail ? ribs * 2 : ribs, dep = sp.depth == null ? 0.12 : sp.depth;
+  const B = new Geo(), ribs = sp.ribs, seg = detail ? ribs * 2 : K.lod >= 3 ? Math.max(5, Math.ceil(ribs / 2)) : ribs, dep = sp.depth == null ? 0.12 : sp.depth;
   const rib = a => 1 - dep * (0.5 - 0.5 * Math.cos(a * ribs));        // grooves where the texture's rib edges fall (u integer)
   function column(pts, r) {
     const n = pts.length, rad = [], out = pts.slice();

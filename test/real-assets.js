@@ -1,7 +1,7 @@
 // @ci integration suite=world timeout=240
 // The realistic look's species registry (docs/REALISTIC_CONTRACT.md section 5, js/real/assets-*.js) builds without throwing.
 // Loads debug/real-assets.html with the look on and, for every tree species, ground cover plant and rock in BF.real.assets, builds the
-// model at detail 0 and 2 from two seeds and checks it: geometry with finite positions and valid indices, a lighter build at detail 2,
+// model at every detail level from two seeds and checks it: geometry with finite positions and valid indices, a lighter build at detail 2,
 // the same model again from the same seed, and materials that compile (each is drawn once). Also checks that every tree entry names
 // a block that exists, every biome of the table has trees or rocks registered, and every ground entry names real blocks.
 // Standalone: NODE_PATH=$(npm root -g) node test/real-assets.js [out.png]
@@ -44,7 +44,7 @@ const root = path.resolve(__dirname, '..');
       const log = renderer.info.programs.filter(pr => pr.diagnostics && !pr.diagnostics.runnable);
       if (log.length) bad(id + ': a shader did not compile');
     };
-    let count = 0, t3 = 0, t3low = 0;
+    let count = 0, t3 = 0, t3mid = 0, t3low = 0;
     for (const sp of A.species) {
       const id = 'tree ' + sp.id;
       if (BF.B[sp.log] == null) bad(id + ': no block named ' + sp.log);
@@ -55,8 +55,12 @@ const root = path.resolve(__dirname, '..');
         check(id + ' (seed 12)', other.bark);
         if (!same(hi.bark, again.bark)) bad(id + ': the same seed built a different model');
         const h = tris(hi.bark) + tris(hi.foliage), l = tris(lo.bark) + tris(lo.foliage);
-        if (l > h) bad(id + ': detail 2 (' + l + ' triangles) is heavier than detail 0 (' + h + ')');
-        if (h > 20000) bad(id + ': ' + h + ' triangles at full detail (budget 20000)');
+        const mid = sp.build(K.mulberry(11), 1), m = tris(mid.bark) + tris(mid.foliage);
+        if (l > m || m > h) bad(id + ': the detail levels do not get lighter (' + h + ', ' + m + ', ' + l + ' triangles)');
+        if (h > 9000) bad(id + ': ' + h + ' triangles at detail 0 (budget 9000)');
+        if (m > 2600) bad(id + ': ' + m + ' triangles at detail 1 (budget 2600)');
+        if (l > 1000) bad(id + ': ' + l + ' triangles at detail 2 (budget 1000)');
+        t3mid += m;
         hi.bark.computeBoundingBox();
         const top = hi.bark.boundingBox.max.y;
         if (top < sp.height[0] * 0.6 || top > sp.height[1] * 1.3) bad(id + ': stands ' + top.toFixed(1) + ' blocks tall, outside its height range ' + sp.height);
@@ -81,15 +85,16 @@ const root = path.resolve(__dirname, '..');
       catch (e) { bad(id + ': build threw ' + (e.stack || e.message)); }
     }
     for (const g of A.ground) for (const n of g.blocks) if (BF.B[n] == null) bad('ground ' + g.id + ': no block named ' + n);
+    for (const g of A.ground) if (!(Array.isArray(g.color) && g.color.length === 3 && g.color.every(v => v >= 0 && v <= 1))) bad('ground ' + g.id + ': the colour is not [r, g, b] in 0 .. 1');
     for (const name in A.biomes) {
       const has = l => l.some(e => e.biomes && e.biomes.includes(name));
       if (!has(A.species) && !has(A.rocks)) bad('biome ' + name + ': nothing registered');
     }
-    return { out, count, species: A.species.length, cover: A.cover.length, rocks: A.rocks.length, ground: A.ground.length, t3: Math.round(t3 / A.species.length), t3low: Math.round(t3low / A.species.length) };
+    return { out, count, species: A.species.length, cover: A.cover.length, rocks: A.rocks.length, ground: A.ground.length, t3: Math.round(t3 / A.species.length), t3mid: Math.round(t3mid / A.species.length), t3low: Math.round(t3low / A.species.length) };
   });
   for (const m of res.out) fail(m);
   console.log(res.species + ' tree entries, ' + res.cover + ' cover plants, ' + res.rocks + ' rocks, ' + res.ground + ' ground entries; ' + res.count + ' built and drawn');
-  console.log('mean tree: ' + res.t3 + ' triangles at detail 0, ' + res.t3low + ' at detail 2');
+  console.log('mean tree: ' + res.t3 + ' triangles at detail 0, ' + res.t3mid + ' at detail 1, ' + res.t3low + ' at detail 2');
   if (res.species < 15 || res.cover < 50 || res.rocks < 10) fail('the registry is missing entries');
   if (process.argv[2]) await pg.screenshot({ path: process.argv[2] });
   await b.close();

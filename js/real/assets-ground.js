@@ -1,7 +1,7 @@
 // Blockfield 1.6, the realistic look: js/real/assets-ground.js. Owner: the Biome assets thread (docs/REALISTIC_CONTRACT.md section 7).
 // Drawing only. Nothing here may run unless BF.real.on.
 // The colours of natural ground (BF.real.assets.ground): what each natural block looks like as smooth terrain. An entry is
-// { id, blocks: [names], color: "#hex" (sRGB), layer: 0 soil and turf | 1 rock | 2 sand and gravel | 3 snow and ice, tint: the biome's
+// { id, blocks: [names], color: [r, g, b] (sRGB, 0 .. 1; written here as "#hex"), layer: 0 soil and turf | 1 rock | 2 sand and gravel | 3 snow and ice, tint: the biome's
 // grass colour multiplies it }. A later entry for a block wins, so these override the foundation's defaults (js/real/terrain.js); the
 // shared detail texture adds the grain. Colours are of the dry material in open shade, measured against soil and rock references
 // rather than the block textures, so turf is not lawn green and stone is not flat grey.
@@ -10,7 +10,9 @@
 const BF = (globalThis.BF = globalThis.BF || {});
 if (!BF.real || !BF.real.on) return;
 const G = BF.real.assets.ground;
-const add = (id, layer, color, blocks, tint) => G.push({ id, blocks, color, layer, tint: !!tint });
+// (the terrain tables read a colour as [r, g, b] in sRGB, 0 .. 1)
+const rgb = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
+const add = (id, layer, color, blocks, tint) => G.push({ id, blocks, color: rgb(color), layer, tint: !!tint });
 // soil and turf
 add("turf", 0, "#a9b08a", ["grass"], true);          // near-neutral, so the biome's grass colour decides the hue
 add("loam", 0, "#5e4a38", ["dirt"]);

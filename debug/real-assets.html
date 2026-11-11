@@ -36,10 +36,11 @@ renderer.outputEncoding = THREE.sRGBEncoding; renderer.toneMapping = THREE.ACESF
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0x9db8d4); scene.fog = new THREE.Fog(0x9db8d4, 80, 400);
 const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
 const sunDir = new THREE.Vector3(0.5, 0.75, 0.35).normalize();
-const sun = new THREE.DirectionalLight(0xfff2dc, 1.9), hemi = new THREE.HemisphereLight(0x9cc0ff, 0x554a38, 0.55);
+// the game's midday light (js/real/core.js): a sun of 2.4 and a sky light of about 0.97 under ACES tone mapping
+const sun = new THREE.DirectionalLight(new THREE.Color(1, 0.95, 0.86), 2.4), hemi = new THREE.HemisphereLight(new THREE.Color(0.5, 0.66, 1), new THREE.Color(0.32, 0.28, 0.2), 0.97);
 sun.castShadow = true; sun.shadow.mapSize.set(4096, 4096); sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.05;
 scene.add(sun, sun.target, hemi);
-U.uSunDir.value.copy(sunDir); U.uSunCol.value.set(1, 0.95, 0.86).multiplyScalar(1.9); U.uDay.value = 1; U.uWind.value.set(1, 0.3, 0.3);
+U.uSunDir.value.copy(sunDir); U.uSunCol.value.set(1, 0.95, 0.86).multiplyScalar(2.4); U.uDay.value = 1; U.uWind.value.set(1, 0.3, 0.3);
 
 const bar = document.getElementById("bar");
 const names = Object.keys(A.biomes || {});

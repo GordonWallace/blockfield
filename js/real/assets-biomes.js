@@ -58,9 +58,9 @@ function tree(id, log, biome, o) {
     logs: o.logs, leafless: !!o.leafless, height: sp.h,
     build(rand, detail) {
       const r = rng(rand), h = sp.h[0] + (sp.h[1] - sp.h[0]) * r();
-      K.low = detail >= 2;
+      K.lod = 1 + Math.min(2, Math.max(0, detail | 0));
       let g;
-      try { g = sp.build(r, h, detail ? 0 : 1, o.brown ? { brown: true } : undefined); } finally { K.low = false; }
+      try { g = sp.build(r, h, 0, o.brown ? { brown: true } : undefined); } finally { K.lod = 0; }
       return { bark: g.b, foliage: g.f || EMPTY };
     },
     barkMaterial: () => sp.mats().bark,

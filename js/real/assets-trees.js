@@ -285,7 +285,7 @@ def("red_mangrove", {
     const B = new K.Geo(), F = new K.Geo(), root = o.root == null ? Math.max(1.2, H * 0.3) : Math.max(0.6, o.root), r0 = H * 0.022 + 0.05;
     const cc = { x: 0, y: root + (H - root) * 0.6, z: 0, rx: H * 0.45, ry: (H - root) * 0.5 }, hub = new V3(rr(-0.15, 0.15), root, rr(-0.15, 0.15));
     const rc = [0.92, 0.72, 0.6];                                              // prop roots run redder than the trunk
-    const nr = d ? 9 : 5;
+    const nr = d ? 9 : K.lod >= 3 ? 3 : 5;
     let az = rr(0, TAU);
     for (let k = 0; k < nr; k++) {                                              // prop roots: out and over in an arc, then straight down
       az += TAU / nr + rr(-0.3, 0.3);
@@ -304,6 +304,7 @@ def("red_mangrove", {
     }
     const S = { maxD: 3, n: [5, 4, 3, 1], seg: [d ? 7 : 5, 5, 3, 3], kids: [4, 4, 3], ratio: 0.6, spread: 0.85, up: 0.12, jit: 0.1, bend: [0.02, -0.02, 0, 0], t0: 0.35,
       cards: d ? 5 : 3, cardLen: H * (d ? 0.075 : 0.11), cells: [0, 1, 2, 3], flat: false, droop: 0.15, col: WOOD };
+    if (K.lod >= 3) { S.kids = [2, 2, 2]; S.cards = 1; S.cardLen *= 2.7; } else if (K.lod === 2) { S.kids = [3, 3, 2]; S.cards = 2; S.cardLen *= 1.7; }
     // the trunk proper starts where the roots meet, then breaks early into a low, wide crown
     const ns = 3;
     for (let k = 0; k < ns; k++) {
@@ -513,7 +514,7 @@ def("giant_fly_agaric", {
     for (let x = 0; x < W; x += 6) { P.h.strokeStyle = R() < 0.5 ? "#505050" : "#c8c8c8"; P.h.lineWidth = 2; P.h.beginPath(); P.h.moveTo(x, H / 2); P.h.lineTo(x, H); P.h.stroke(); }
   }), bump: 0.02, rough: 0.6,
   build(H, d, o) {
-    const B = new K.Geo(), seg = d ? 20 : 10, tint = o.brown ? [0.75, 0.62, 0.45] : WHITE, R0 = H * 0.42, sr = H * 0.06;
+    const B = new K.Geo(), seg = d ? 20 : K.lod >= 3 ? 6 : 10, tint = o.brown ? [0.75, 0.62, 0.45] : WHITE, R0 = H * 0.42, sr = H * 0.06;
     // v runs 0..0.5 over the cap (top half of the tile) and 0.5..1 down gills and stem; tube() spaces v by length / 2, so set uvs after
     const ring = (pts, rad, v0, v1) => {
       const b0 = B.nv; K.tube(B, pts, rad, seg, { urep: 4, col: () => tint });
