@@ -48,8 +48,8 @@ const config = {
   budgetMs: 2,            // batch building per frame
   keepMs: 4000,           // a batch no longer wanted is kept this long (walking back and forth across a band's edge)
   frames: 8, cellW: 128, cellH: 256,   // impostor atlas: directions per species, pixels per frame
-  crown: 2,               // a tree stands this many blocks taller than its log column
-  bigWidth: 1.5,          // a 2 x 2 trunk's tree is this much wider than its height alone makes it
+  crown: 2.5,             // a tree stands this many blocks taller than its log column
+  big: 1.5,               // a 2 x 2 trunk's tree is this much larger
   enabled: true,
 };
 const QUALITY = [0.55, 0.8, 1];   // config.scale by BF.real.quality.level
@@ -122,10 +122,9 @@ function partMaterial(def, name) {
 
 // The model of a flora record: its registry entry and variant (null when the registry has nothing for it).
 function modelFor(kind, block, biome, logs, seed) {
-  const def = resolve(kind, block, biome, logs, seed);
+  const def = resolve(kind, block, biome, logs, (seed * 7.13) % 1);   // (the seed as the foundation's placer hands it to its rule)
   if (!def) return null;
-  const nv = Math.max(1, def.variants | 0);
-  return modelOf(kind, def, Math.min(nv - 1, Math.floor(((seed * 7.31) % 1) * nv)));
+  return modelOf(kind, def, Math.floor(seed * 9973) % Math.max(1, def.variants | 0));   // (the variant as the foundation's placer picks it)
 }
 function modelOf(kind, def, variant) {
   let di = defIds.get(def);
@@ -134,7 +133,7 @@ function modelOf(kind, def, variant) {
   let M = models.get(key);
   if (M) return M;
   const K = config.kinds[kind] || config.kinds[TREE];
-  M = { id: modelById.length, key, kind, def, variant, K, jit: { value: K.jitter }, lods: [null, null, null], modelH: 0, row: -1, imp: null,
+  M = { id: modelById.length, key, kind, def, variant, K, jit: { value: K.jitter }, lods: [null, null, null], modelH: def.modelHeight || (def.height ? (def.height[0] + def.height[1]) / 2 : 0), row: -1, imp: null,
     cull: true, seed: (di * 7919 + variant * 104729 + 17) | 0, failed: false };
   if (K.impostor) {
     // one atlas row per registry entry (variants share it: past the last mesh level they can't be told apart)
@@ -155,7 +154,8 @@ function levelOf(M, i) {
   let out;
   try { out = M.def.build(mulberry(M.seed), i); } catch (e) { console.error("BF.real.lod: build failed for " + (M.def.id || M.key), e); M.failed = true; return null; }
   st.geo++; builtThisFrame = true;
-  const named = out && out.isBufferGeometry ? [["one", out]] : Object.keys(out || {}).filter(k => out[k] && out[k].isBufferGeometry).map(k => [k, out[k]]);
+  const named = out && out.isBufferGeometry ? [["one", out]] : Object.keys(out || {}).filter(k => out[k] && out[k].isBufferGeometry).map(k => [k, out[k]])
+    .filter(([, g]) => g.attributes.position && (g.index ? g.index.count : g.attributes.position.count) > 0);   // (a leafless tree's foliage is empty)
   if (!named.length) { M.failed = true; return null; }
   const range = { value: new THREE.Vector2(0, 1e9) };
   let tris = 0, top = 0;
@@ -165,15 +165,17 @@ function levelOf(M, i) {
     tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
     if (!g.boundingBox) g.computeBoundingBox();
     top = Math.max(top, g.boundingBox.max.y);
-    return { geometry: g, src, material: levelMaterial(src, range, M.jit), depthMaterial: (out.depth && out.depth[name]) || null };
+    return { geometry: g, src, foliage: name === "foliage", material: levelMaterial(src, range, M.jit), depthMaterial: (out.depth && out.depth[name]) || null };
   });
-  if (!M.modelH) M.modelH = top || 1;
+  if (!M.modelH) M.modelH = top || 1;   // (an entry that doesn't declare its model's height: measured)
   return (M.lods[i] = { parts, range, tris });
 }
-// A plant's scale from its record: a tree is as tall as its log column plus its crown; the rest keep the model's size, varied a little.
+// A plant's scale from its record, as the foundation's simple placer sizes it: a tree's model reaches a little past its log column
+// (the crown the leaf blocks made), a big tree (2 x 2 trunk) is half as large again; the rest keep the model's size. All vary a little.
 function scaleOf(M, height, seed) {
-  if (M.kind === TREE || M.kind === BIG) return (height + config.crown) / (M.modelH || 1);
-  return 0.8 + 0.4 * ((seed * 13.7) % 1);
+  const v = (seed * 13.7) % 1;
+  if (M.kind === TREE || M.kind === BIG) return (height + config.crown) / (M.modelH || 1) * (0.92 + 0.16 * v) * (M.kind === BIG ? config.big : 1);
+  return 0.85 + 0.3 * v;
 }
 
 // The distance bands of a model at the current settings: [from, to) of mesh levels 0 to 2, then the impostor's (or null).
@@ -456,13 +458,13 @@ function buildMeshBatch(r, M, lod) {
   for (const id of ids) n += r.count.get(id) || 0;
   const b = { ver: r.ver, meshes: [], n, tris: L ? L.tris * n : 0, last: 0 };
   if (!n || !L) return b;
-  const mats = new Float32Array(n * 16), cols = new Float32Array(n * 3), wide = M.kind === BIG ? config.bigWidth : 1;
+  const mats = new Float32Array(n * 16), cols = new Float32Array(n * 3);
   let o = 0, q = 0;
   for (const k of r.chunks) for (const id of ids) {
     const a = chunks.get(k).by.get(id);
     if (!a) continue;
     for (let i = 0; i < a.length; i += STRIDE) {
-      const s = scaleOf(M, a[i + 3], a[i + 4]), rot = a[i + 4] * 6.2831853 * 3, c = Math.cos(rot) * s * wide, sn = Math.sin(rot) * s * wide;
+      const s = scaleOf(M, a[i + 3], a[i + 4]), rot = a[i + 4] * 6.2831853, c = Math.cos(rot) * s, sn = Math.sin(rot) * s;
       mats[o] = c; mats[o + 2] = -sn; mats[o + 5] = s; mats[o + 8] = sn; mats[o + 10] = c;
       mats[o + 12] = a[i] - r.ox; mats[o + 13] = a[i + 1] - r.oy; mats[o + 14] = a[i + 2] - r.oz; mats[o + 15] = 1;
       tintOf(a, i, cols, q);
@@ -474,7 +476,7 @@ function buildMeshBatch(r, M, lod) {
     const m = new THREE.InstancedMesh(p.geometry, p.material, n);
     m.instanceMatrix = new THREE.InstancedBufferAttribute(mats, 16);
     m.instanceColor = new THREE.InstancedBufferAttribute(cols, 3);
-    m.castShadow = shadows; m.receiveShadow = true;
+    m.castShadow = shadows; m.receiveShadow = !p.foliage;
     if (p.depthMaterial) m.customDepthMaterial = p.depthMaterial;
     addToScene(m, r);
     b.meshes.push(m);
@@ -491,12 +493,10 @@ function buildImpostorBatch(r) {
   for (const k of r.chunks) for (const [id, a] of chunks.get(k).by) {
     const M = modelById[id], I = M.imp;
     if (M.row < 0 || !I) continue;
-    // (the card is sized by the row's model; the tree's own scale needs its own height, known once any of its levels is built)
-    const mh = M.modelH || (I.y0 + I.h / 1.04);
     for (let i = 0; i < a.length; i += STRIDE) {
-      const s = (a[i + 3] + config.crown) / mh;
-      A[o] = a[i] - r.ox; A[o + 1] = a[i + 1] - r.oy; A[o + 2] = a[i + 2] - r.oz; A[o + 3] = a[i + 4] * 6.2831853 * 3;
-      B[o] = I.r * s * (M.kind === BIG ? config.bigWidth : 1); B[o + 1] = I.h * s; B[o + 2] = I.y0 * s; B[o + 3] = M.row;
+      const s = scaleOf(M, a[i + 3], a[i + 4]);
+      A[o] = a[i] - r.ox; A[o + 1] = a[i + 1] - r.oy; A[o + 2] = a[i + 2] - r.oz; A[o + 3] = a[i + 4] * 6.2831853;
+      B[o] = I.r * s; B[o + 1] = I.h * s; B[o + 2] = I.y0 * s; B[o + 3] = M.row;
       tintOf(a, i, C, q);
       o += 4; q += 3;
     }
@@ -516,7 +516,7 @@ function buildImpostorBatch(r) {
 
 // ---------------------------------------------------------------- per frame
 const frustum = new THREE.Frustum(), pm = new THREE.Matrix4(), inv = new THREE.Matrix4(), bbox = new THREE.Box3();
-const jobs = [], rc = { min: 0, max: 0, mid: 0 }, asked = new Set();
+const jobs = [], rc = { min: 0, max: 0, mid: 0 }, asked = new Set(), tr3 = [0, 0, 0];
 // Nearest and farthest distance from the camera to a region's box.
 function reach(r, cx, cy, cz, out) {
   const S = config.region;
@@ -562,6 +562,11 @@ function update(camera) {
       continue;
     }
     reach(r, cp.x, cp.y, cp.z, rc);
+    if (r.face !== camFace && r.face >= 0 && BF.view && BF.view.toRender) {
+      // across a face edge the atlas is cut, so the distance is asked of the view (render space: the camera is the origin)
+      const q = BF.view.toRender(r.ox + S / 2, (r.y0 + r.y1) / 2, r.oz + S / 2, tr3);
+      if (q) { const d = Math.hypot(q[0], q[1], q[2]), h = S * 0.71 + (r.y1 - r.y0) / 2; rc.min = Math.max(0, d - h); rc.max = d + h; rc.mid = d; }
+    }
     bbox.min.set(r.ox - 16, r.y0 - 4, r.oz - 16); bbox.max.set(r.ox + S + 16, r.y1 + 64, r.oz + S + 16);
     const inView = !flat || r.face !== camFace || frustum.intersectsBox(bbox);
     for (const b of r.built.values()) b.want = false;
