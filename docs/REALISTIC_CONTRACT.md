@@ -197,6 +197,7 @@ foundation thread for the attribute you need). Water physics is 1.5's fluid simu
 | Biome assets | `js/real/assets-biomes.js` (stub on the branch), more `js/real/assets-*.js` on request | `js/textures*.js` only if a block texture must change |
 | Felled trees and items | `js/real/fell.js` | the stump rule in `js/real/mesh.js`, the drop lines of `js/entityview.js`, `js/drops.js`, `fallAbove` in `js/forester.js` |
 | Atmosphere and creatures | `js/real/atmos.js`, `js/real/mobs.js` | `js/sky.js`, `js/weather.js`, `js/mobs.js`, `js/mobview.js`, `js/entityview.js`, `js/audio.js` |
+| Farm animals | `js/real/creatures.js` (smooth pig, cow, sheep, chicken and horse; `BF.real.creatures`, off until the looks are approved: `?creatures=a` or `b`) | the `typeParts` line of `js/mobview.js` |
 | Digging | `js/real/dig.js` (the wear drawn on smooth ground while it is mined, `BF.real.dig`) | `js/cracks.js`, the break particles' line in `js/player.js` |
 
 `index.html` already loads every file above (empty stubs are on the branch), so nobody else needs to touch it. If you need

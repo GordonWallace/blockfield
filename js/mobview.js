@@ -477,7 +477,8 @@ function typeParts(name, variant) {
   let parts = partCache.get(key);
   if (!parts) {
     let seed = 0; for (const ch of name) seed = (seed * 31 + ch.charCodeAt(0)) | 0;
-    parts = MODELS[name](variant).map((p, i) => Object.assign({}, p, { geo: buildGeometry(p.boxes, seed + i) }));
+    parts = (REAL && BF.real.creatures && BF.real.creatures.parts(name, variant))   // the realistic look's smooth animals (js/real/creatures.js)
+      || MODELS[name](variant).map((p, i) => Object.assign({}, p, { geo: buildGeometry(p.boxes, seed + i) }));
     partCache.set(key, parts);
   }
   return parts;
