@@ -86,12 +86,12 @@ const SHAPE = () => {
   const { c, x, y, z, lx, lz } = spot;
   const T = W.meshArrays(c).T, p = T.pos;
   // the shaft's walls: no vertex leans into the open column beside the eye (from a block above its floor up to its mouth)
-  let lean = 0, walls = 0, pad = 0;
+  let lean = 0, walls = 0, pad = 0; const pads = new Set();   // (a place can hold two vertices: the ground's top and its side, js/real/mesh.js)
   for (let i = 0; i < p.length; i += 3) {
     const vx = p[i] - lx, vy = p[i + 1], vz = p[i + 2] - lz;
     if (vy > y - 1.1 && vy < y + 1.1 && vx > -0.3 && vx < 1.3 && vz > -0.3 && vz < 1.3) { walls++; lean = Math.max(lean, Math.min(vx, 1 - vx, vz, 1 - vz)); }
     // the block's 4 lower corners: the ground meets them exactly
-    if (Math.abs(vy - (y + 1)) < 1e-4 && (Math.abs(vx - 4) < 1e-4 || Math.abs(vx - 5) < 1e-4) && (Math.abs(vz) < 1e-4 || Math.abs(vz - 1) < 1e-4)) pad++;
+    if (Math.abs(vy - (y + 1)) < 1e-4 && (Math.abs(vx - 4) < 1e-4 || Math.abs(vx - 5) < 1e-4) && (Math.abs(vz) < 1e-4 || Math.abs(vz - 1) < 1e-4)) { const k = Math.round(vx) + ',' + Math.round(vz); if (!pads.has(k)) { pads.add(k); pad++; } }
   }
   return { rim, open, ex, made, spot: [x, y, z], walls, lean, pad };
 };

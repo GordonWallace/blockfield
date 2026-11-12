@@ -103,6 +103,12 @@ page and in the mesher workers), also:
   behind the surface; (3) with the look on a job's ring band (`Y0`..`Y1`) covers the 8 neighbours' loaded bands too, and
   an edit within 3 blocks of a chunk border re-meshes the neighbour, so both sides of a border build the same vertices. `col` is the ground's colour
   (times the biome grass tint where the entry says so), `mat` four weights for the detail layers (section 5).
+  Turf (a `tint` entry: the grass block) is green on top only. A vertex is listed once per kind of face that uses it: a face that
+  looks up shows the ground whose top it is (so the floor of a dug hole is the soil dug down to), every other face shows a cut
+  through the ground, where turf shows the soil under it (the entry's `under` block, dirt by default) unless the foot of that
+  side is turf too (the steps of a grassy slope). The `mat` weights add up to 1 + the share of turf at the vertex; the terrain
+  material draws that share as short grass and `js/real/turf.js` stands blades on it near the player (`BF.real.turf`, by
+  quality level; it reads the ground meshes world.js shows and needs no hook).
 - `F`: the flora list, plain data, a `Float32Array` with one record of 8 floats per plant:
   `[x, y, z, kind, block, height, seed, extra]`: x, y, z chunk-local (y the base, on the ground); `kind` 0 tree, 2 ground
   plant, 4 big tree (a 2 x 2 trunk, x and z at its centre), 1 and 3 reserved (bushes, rocks); `block` the block id of the
@@ -160,7 +166,7 @@ colour). 1 unit = 1 block, origin at the trunk base, y up. Other threads may kee
     })
     BF.real.assets.cover.push({ id, block: "fern", biomes, weight, variants, build(rand, detail) -> BufferGeometry, material() })
     BF.real.assets.rocks.push({ id, biomes, build(rand, detail) -> BufferGeometry, material() })
-    BF.real.assets.ground.push({ id, blocks: ["grass", ...], color: "#hex" | [r, g, b] (sRGB), layer: 0 | 1 | 2 | 3, tint: bool })
+    BF.real.assets.ground.push({ id, blocks: ["grass", ...], color: "#hex" | [r, g, b] (sRGB), layer: 0 | 1 | 2 | 3, tint: bool , under: "dirt" })
 
 Ground: `layer` picks the shared detail texture's channel (0 soil and turf, 1 rock, 2 sand and gravel, 3 snow and ice),
 `tint` multiplies the colour by the biome's grass tint. A later entry for the same block wins; js/real/terrain.js holds the
@@ -192,6 +198,7 @@ foundation thread for the attribute you need). Water physics is 1.5's fluid simu
 | Felled trees and items | `js/real/fell.js` | the stump rule in `js/real/mesh.js`, the drop lines of `js/entityview.js`, `js/drops.js`, `fallAbove` in `js/forester.js` |
 | Atmosphere and creatures | `js/real/atmos.js`, `js/real/mobs.js` | `js/sky.js`, `js/weather.js`, `js/mobs.js`, `js/mobview.js`, `js/entityview.js`, `js/audio.js` |
 | Digging | `js/real/dig.js` (the wear drawn on smooth ground while it is mined, `BF.real.dig`) | `js/cracks.js`, the break particles' line in `js/player.js` |
+| Grass ground | `js/real/turf.js` (blades of short grass on turf near the player, `BF.real.turf`) | the ground's colour rule in `js/real/mesh.js`, the turf drawing in `js/real/terrain.js` |
 
 `index.html` already loads every file above (empty stubs are on the branch), so nobody else needs to touch it. If you need
 another new file, name it `js/real/<yours>-*.js` and ask the foundation thread for the script tag.
