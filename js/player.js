@@ -1185,7 +1185,9 @@ function setViewModel(sel) {
     vmMesh.rotation.set(0, -0.5, 0.15);
     vmMesh.position.set(0, 0.06, 0);
   }
-  vmMesh.renderOrder = 10;
+  // drawn after everything else, water included: in the transparent pass (an opaque hand or held block is drawn before any water,
+  // which then paints over it, as it has no depth)
+  vmMesh.renderOrder = 10; vmMesh.material.transparent = true;
   vm.add(vmMesh);
 }
 function updateViewModel(dt) {
