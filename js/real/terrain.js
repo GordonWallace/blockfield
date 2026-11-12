@@ -16,6 +16,7 @@ const add = (blocks, color, layer, tint) => G.push({ id: blocks[0], blocks, colo
 add(["grass"], [0.56, 0.58, 0.54], 0, true);
 add(["dirt", "rooted_dirt", "farmland_soil"], "#6e4e36", 0);
 add(["coarse_dirt"], "#6b523c", 2);
+add(["dirt_path"], "#8a6a3e", 2);   // a village's trodden paths: part of the ground, a worn band through the turf
 add(["podzol"], "#5a4126", 0);
 add(["mycelium"], "#6f6470", 0);
 add(["mud"], "#3c3632", 0);
@@ -67,7 +68,13 @@ real.meshTables = function () {
     if (!s.leafless && leaves != null) { TREE[leaves] = 2; SPEC[leaves] = log; }
   }
   for (const c of real.assets.cover) if (B[c.block] != null) COVER[B[c.block]] = 1;
-  return { NAT, TREE, SPEC, COVER, GCOL, GLAY, GTINT };
+  // Blocks that are ground in one biome and a building material everywhere else (terracotta is the badlands' rock and the savanna
+  // villages' roofs; sandstone is the desert villages' walls): NATB is the table without them, used outside their home biome, so
+  // what is built of them stays cubes. An entry can ask for the same with built: true.
+  const NATB = NAT.slice();
+  for (const b of BF.blocks) if (b && NATB[b.id] && /terracotta|sandstone/.test(b.name)) NATB[b.id] = 0;
+  list.forEach(g => { if (g.built) for (const name of g.blocks) if (B[name] != null) NATB[B[name]] = 0; });
+  return { NAT, NATB, TREE, SPEC, COVER, GCOL, GLAY, GTINT };
 };
 
 // ---------- the detail texture ----------
