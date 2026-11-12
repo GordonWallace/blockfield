@@ -77,6 +77,7 @@ const stats = { scans: 0, wet: 0, stray: 0, zones: 0, stepMs: 0, meshMs: 0 };
 let zoneDirty = true;
 
 // The heights at which each column of a chunk has edits (blocks that differ from the generated world: js/world.js edits), or null.
+const editGround = new Int16Array(256);
 const editCache = new Map();   // chunk key -> { ver, n, lo, hi }
 function editSpans(c) {
   const e = BF.world.edits && BF.world.edits.get(c.key);
@@ -85,10 +86,19 @@ function editSpans(c) {
   if (m && m.ver === c.ver && m.n === e.size) return m;
   if (!m) { if (editCache.size > 64) editCache.clear(); editCache.set(c.key, (m = { ver: 0, n: 0, lo: new Int16Array(256), hi: new Int16Array(256) })); }
   m.ver = c.ver; m.n = e.size; m.lo.fill(32767); m.hi.fill(-32768);
-  for (const i of e.keys()) { const col = i & 255, y = (i >> 8) + BF.MIN_Y; if (y < m.lo[col]) m.lo[col] = y; if (y > m.hi[col]) m.hi[col] = y; }
+  // only edits that change the ground's shape: something solid above the generated ground (built) or something not solid at or under
+  // it (dug). Grass spreading, a path trodden, soil tilled swap one ground block for another and are not changes to a river.
+  const G = BF.worldgen, gh = editGround.fill(-32768);
+  for (const [i, id] of e) {
+    const col = i & 255, y = (i >> 8) + BF.MIN_Y;
+    if (gh[col] === -32768) { let h = 32767; try { h = G.heightAt(c.cx * 16 + (col & 15), c.cz * 16 + (col >> 4)); } catch (_) { /* counts as built */ } gh[col] = h; }
+    if (isBed[id] ? y <= gh[col] : y > gh[col]) continue;
+    if (y < m.lo[col]) m.lo[col] = y; if (y > m.hi[col]) m.hi[col] = y;
+  }
   return m;
 }
-// Was this column changed where a river runs, at the height of its water? (a dam, a dug bank, a trench: not a torch or a felled tree)
+// Was this column changed where a river runs, at the height of its water? (a dam, a dug bank, a trench: not a torch, a felled tree
+// or grass that has spread)
 function riverEdit(c, x, z) {
   const m = editSpans(c);
   if (!m || !BF.rivers) return 0;
