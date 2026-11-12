@@ -157,6 +157,7 @@ function finish(tile, anchor, m, own) {
   g.setAttribute("canopy", attr(m.can, 4, true));
   // (the realistic look lights the far ground by its slope and draws its water itself, js/lod.js: without these a tile is black)
   if (m.wat) g.setAttribute("wat", attr(m.wat, 1, true));
+  if (m.gnd) g.setAttribute("gnd", attr(m.gnd, 2, true));
   if (m.nrm) g.setAttribute("nrm", attr(m.nrm, 3, true));
   g.setIndex(own || idx);
   g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), T * tile.c + 4000);

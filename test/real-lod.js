@@ -153,6 +153,7 @@ module.exports = async (pg, out) => {
     const T = THREE, G = BF.gridJob, n = 5, NV = n * n;
     const raw = G.alloc({ nx: n, ny: n, real: true }), plain = G.alloc({ nx: n, ny: n });
     for (let o = 0; o < NV; o++) { raw.ok[o] = 1; raw.y[o] = 70 + (o % n) * 4; raw.dir[3 * o + 1] = 1; raw.col[3 * o] = 200; raw.wat[o] = o < n ? 255 : 0; }
+    raw.wat[2 * n + 1] = 1; raw.wat[2 * n + 3] = 2;   // (land's kinds: turf, snow)
     const p = { n, c: 4, gu0: 0, gv0: 0, cu: 8, cv: 8, anchor: [0, 0, 0], ext: 2, disc: 2, real: true };
     const m = G.mesh(p, raw), m15 = G.mesh(Object.assign({}, p, { real: false }), raw);
     const errs = [], ce = console.error;
@@ -161,7 +162,7 @@ module.exports = async (pg, out) => {
       const g = new T.BufferGeometry(), at = (a, k, nm) => new T.BufferAttribute(a, k, !!nm);
       g.setAttribute("position", at(m.pos, 3)); g.setAttribute("sphere", at(m.sph, 3)); g.setAttribute("col", at(m.col, 3, true));
       g.setAttribute("mflat", at(m.mpos, 3)); g.setAttribute("msph", at(m.msph, 3)); g.setAttribute("mcol", at(m.mcol, 3, true));
-      g.setAttribute("canopy", at(m.can, 4, true)); g.setAttribute("wat", at(m.wat, 1, true)); g.setAttribute("nrm", at(m.nrm, 3, true));
+      g.setAttribute("canopy", at(m.can, 4, true)); g.setAttribute("wat", at(m.wat, 1, true)); g.setAttribute("gnd", at(m.gnd, 2, true)); g.setAttribute("nrm", at(m.nrm, 3, true));
       g.setIndex([0, 1, 5, 1, 6, 5]);
       const sc = new T.Scene(), o = new T.Mesh(g, BF.lod.material(true)); o.frustumCulled = false; sc.add(o);
       const rt = new T.WebGLRenderTarget(8, 8), R = BF.renderer, prev = R.getRenderTarget();
@@ -169,12 +170,28 @@ module.exports = async (pg, out) => {
     } catch (e) { errs.push(String(e)); }
     console.error = ce;
     const mid = 3 * (2 * n + 2);
+    // the samples round the player, as the rings ask for them: every one water (140 and up) or a kind of land (0 bare, 1 turf, 2 snow)
+    const V = BF.planet.grid(BF.player.position.x, BF.player.position.z), job = { f: V.f, u0: Math.floor(V.u) - 256, v0: Math.floor(V.v) - 256, cell: 32, nx: 16, ny: 16, real: true }, sm = G.alloc(job);
+    G.rows(job, sm, 0, 16);
+    const kinds = [0, 0, 0, 0, 0];
+    for (const w of sm.wat) kinds[w < 3 ? w : w >= 140 ? 3 : 4]++;
+    const mat = BF.lod.material(true), SM = [BF.lod.standMaterial(true)];
     return { wat: !!raw.wat && !plain.wat, mesh: m.wat && Array.from(m.wat.subarray(0, 2)).concat(m.wat[NV - 1]), nrm: m.nrm && Array.from(m.nrm.subarray(mid, mid + 3)),
-      shade: [m.col[mid], m15.col[mid]], old: !m15.wat && !m15.nrm, errs };
+      shade: [m.col[mid], m15.col[mid]], old: !m15.wat && !m15.nrm && !m15.gnd, errs, kinds,
+      gnd: m.gnd && [Array.from(m.gnd.subarray(2 * (2 * n + 1), 2 * (2 * n + 1) + 2)), Array.from(m.gnd.subarray(2 * (2 * n + 3), 2 * (2 * n + 3) + 2)), m.gnd[0], m.wat[2 * n + 1], m.wat[2 * n + 3]],
+      turf: /texture2D\(uTurf/.test(mat.fragmentShader) && !!mat.uniforms.uTurf.value && !!mat.uniforms.uDet.value, snow: /uSnowCol, snow\)/.test(mat.fragmentShader),
+      house: SM.length > 0 && SM.some(x => x.defines.BOXES && /rlHouse\(alb\)/.test(x.fragmentShader)) };
   });
   check(land.wat && land.old, "only the look's ring samples and meshes carry water and slope", [land.wat, land.old]);
   check(land.mesh && land.mesh[0] === 255 && land.mesh[2] === 0 && land.nrm && land.nrm[0] < -60 && land.nrm[1] > 60 && land.nrm[2] === 0 && land.shade[0] === 200, "a ring's mesh says where water is, its ground's slope, and keeps its colours unshaded", [land.mesh, land.nrm, land.shade]);
   check(!land.errs.length, "the rings' ground and water material compiles", land.errs);
+  // where the chunks end the look must not: the far ground is drawn from the terrain's own turf texture, snow lies over the ground with
+  // an edge of its own, and a far house's faces show its blocks while they are a few pixels each
+  check(land.gnd && land.gnd[0][0] === 255 && land.gnd[0][1] === 0 && land.gnd[1][0] === 0 && land.gnd[1][1] === 255 && land.gnd[2] === 0 && land.gnd[3] === 0 && land.gnd[4] === 0,
+    "a ring's mesh says which ground is turf and which is under snow, apart from its water", land.gnd);
+  check(land.kinds[4] === 0 && land.kinds[1] > 0, "the samples round the player are water or a kind of land, turf among them", land.kinds);
+  check(land.turf && land.snow, "the far ground is drawn with the terrain's turf texture, and snow with its own edge", [land.turf, land.snow]);
+  check(land.house, "a far house's faces are drawn as blocks", land.house);
   // the atlas' smaller copies are made by hand (js/real/lod.js mipRow): a tree drawn small keeps the share of its picture that passes
   // the cards' alpha test, and its colour isn't darkened by the empty texels round it
   const mips = await pg.evaluate(() => {

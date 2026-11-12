@@ -331,6 +331,7 @@ varying float vShow;   // how much of the card is drawn (dithered): the level ca
 varying vec3 vRight;
 varying vec3 vFront;
 varying vec3 vUp;
+varying vec3 vCam;     // from the tree's foot to the eye
 vec4 rlCard(vec3 foot, vec3 up, vec3 xV, vec3 zV, vec3 corner, float row, float s, float yaw) {
   vec4 I = uRow[int(row + 0.5)];
   if (I.y <= 0.0) return vec4(0.0);
@@ -341,7 +342,7 @@ vec4 rlCard(vec3 foot, vec3 up, vec3 xV, vec3 zV, vec3 corner, float row, float 
   vec3 right = sl > 1e-3 ? side / sl : xV;
   vec3 front = cross(right, up);
   float cells = uGrid.x + 1.0, col = mod(floor(row + 0.5), uGrid.y), line = floor((row + 0.5) / uGrid.y);
-  vX = corner.x; vY = corner.y; vTop = corner.z; vRight = right; vFront = front; vUp = up;
+  vX = corner.x; vY = corner.y; vTop = corner.z; vRight = right; vFront = front; vUp = up; vCam = toCam;
   if (corner.z < 0.5) {
     if (el > 0.93) return vec4(0.0);
     vShow = 1.0 - smoothstep(0.8, 0.93, el);
@@ -380,6 +381,7 @@ varying float vShow;   // how much of the card is drawn (dithered): the level ca
 varying vec3 vRight;
 varying vec3 vFront;
 varying vec3 vUp;
+varying vec3 vCam;
 vec4 rlCardTexel() {
   vec4 c = texture2D(map, vUv);
   if (vMix > 0.0) c = mix(c, texture2D(map, vUv2), vMix);
@@ -391,6 +393,14 @@ vec3 rlCardNormal() {
   float x = clamp(vX, -1.0, 1.0) * 0.85;
   // (a crown is lit from above and dim underneath: the normal turns up with height on the card)
   return normalize(vRight * x + vFront * sqrt(1.0 - x * x) + vUp * (vLean * (2.0 * vY - 0.35)));
+}`;
+// rlCardGlow(sunV): the sun coming through the leaves towards the eye, as the models' foliage has it (js/real/assets-kit.js
+// TRANS_GLSL, trees' share 0.3), as a share of the sun's colour to add to the light: a tree seen against the sun is as light as a card
+// as it is as a model.
+const CARD_GLOW = `
+vec3 rlCardGlow(vec3 sunV) {
+  float tB = clamp(dot(-normalize(vCam), sunV), 0.0, 1.0);
+  return vec3(0.45, 0.43, 0.19) * (0.3 * tB * tB);
 }`;
 const CARD_DEFINES = () => ({ CARD_SQUARE: (config.cellW / config.cellH).toFixed(4) });
 // the two cards of a tree: corners as rlCard takes them
@@ -433,7 +443,7 @@ varying vec3 vTint;
 varying float vFade;
 #include <common>
 #include <fog_pars_fragment>
-` + CARD_FRAG + `
+` + CARD_FRAG + CARD_GLOW + `
 void main() {
   if (${DITHER} >= vFade) discard;
   vec4 c = rlCardTexel();
@@ -441,7 +451,7 @@ void main() {
   vec3 n = rlCardNormal();
   vec3 sunV = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz);
   // (a crown lets the sun through: its far side isn't black)
-  vec3 light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, normalize(vUp))) + uSunCol * (max(dot(n, sunV), 0.0) + 0.3 * max(-dot(n, sunV), 0.0));
+  vec3 light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, normalize(vUp))) + uSunCol * (max(dot(n, sunV), 0.0) + 0.3 * max(-dot(n, sunV), 0.0) + rlCardGlow(sunV));
   gl_FragColor = vec4(pow(c.rgb, vec3(2.2)) * vTint * light, 1.0);
   #include <tonemapping_fragment>
   #include <encodings_fragment>
@@ -931,7 +941,7 @@ function stats() {
 }
 
 real.lod = { config, models, place, remove, clear, update, stats, bake, impostor: imp, bandsOf,
-  cards: { uniforms: cardU, VERT: CARD_VERT, FRAG: CARD_FRAG, defines: CARD_DEFINES, quads: CARD_QUADS, rowOf: cardFor, MAXROW } };
+  cards: { uniforms: cardU, VERT: CARD_VERT, FRAG: CARD_FRAG + CARD_GLOW, defines: CARD_DEFINES, quads: CARD_QUADS, rowOf: cardFor, MAXROW } };
 // Take over the flora placer (contract section 4): now, and again at init in case the foundation's placer was installed after this file.
 function takeOver() { real.flora = real.flora || {}; real.flora.place = place; real.flora.remove = remove; }
 takeOver();

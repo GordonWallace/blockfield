@@ -159,20 +159,34 @@ const realUniforms = () => { const U = BF.real.U; return { uSunCol: U.uSunCol, u
 // (fog by the distance from the eye, not by the depth along its line of sight: far land at the side of the view is as hazy as it is
 // straight ahead, and doesn't fade as the eye turns to it)
 const REAL_FOG = ["#include <fog_vertex>", "#include <fog_vertex>\n#ifdef USE_FOG\n  fogDepth = length(mvPosition.xyz);\n#endif"];
-const VERT_USED = !REAL ? VERT : VERT.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;\nattribute float wat;\nattribute vec3 nrm;\nvarying float vWat;\nvarying vec3 vN;")
-  .replace("  vDist = length(mvPosition.xyz);", "  vDist = length(mvPosition.xyz);\n  vV = mvPosition.xyz;\n  vWat = wat;\n  vN = (modelViewMatrix * vec4(nrm, 0.0)).xyz;").replace(REAL_FOG[0], REAL_FOG[1]);
+const VERT_USED = !REAL ? VERT : VERT.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;\nattribute float wat;\nattribute vec3 nrm;\nattribute vec2 gnd;\nvarying float vWat;\nvarying vec3 vN;\nvarying vec2 vGnd;")
+  .replace("  vDist = length(mvPosition.xyz);", "  vDist = length(mvPosition.xyz);\n  vV = mvPosition.xyz;\n  vWat = wat;\n  vGnd = gnd;\n  vN = (modelViewMatrix * vec4(nrm, 0.0)).xyz;").replace(REAL_FOG[0], REAL_FOG[1]);
 // The ground is the loaded chunks' terrain seen from afar (js/real/terrain.js: half its colour's light, its detail texture's average;
 // darker when wet); water is theirs too (js/real/water.js, rwShade on a flat surface: its own dark colour, the sky by the angle it is
 // seen at, the floor through the shallows). `wat` is 0 on land and 0.55 (the shore) to 1 (16 blocks deep and more) on water, whose
 // vertex colour is its floor's (js/grid.js).
-const FRAG_USED = !REAL ? FRAG : FRAG.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;\nvarying float vWat;\nvarying vec3 vN;\nuniform vec3 uFogCol;\nuniform float uWet;\nuniform sampler2D chunkMask;\nuniform vec2 maskO;\nuniform mat4 projectionMatrix;").replace("#include <fog_pars_fragment>", REAL_PARS)
+const FRAG_USED = !REAL ? FRAG : FRAG.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;\nvarying float vWat;\nvarying vec3 vN;\nvarying vec2 vGnd;\nuniform sampler2D uTurf;\nuniform sampler2D uDet;\nuniform vec3 uSnowCol;\nuniform vec2 texO;\nuniform vec3 uFogCol;\nuniform float uWet;\nuniform sampler2D chunkMask;\nuniform vec2 maskO;\nuniform mat4 projectionMatrix;").replace("#include <fog_pars_fragment>", REAL_PARS)
   .replace(/  vec3 col = mix\(vColor, vCanopy\.rgb, a\) \* max\(0\.1, uDay\);[\s\S]*$/, `  vec3 alb = mix(vColor, vCanopy.rgb, a);
   vec3 upV = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz), sunV = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz);
   vec3 n = normalize(vN);
   n = normalize(mix(n, upV, 0.5 * a));   // (a canopy is rough: its light follows the slope less)
   vec3 light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, upV)) + uSunCol * max(dot(n, sunV), 0.0);
-  vec3 ground = pow(vColor, vec3(2.2)) * 0.5;
-  ground = mix(ground, ground * 0.55, uWet);
+  // The ground as the terrain's material draws it (js/real/terrain.js), from the same textures: turf (gnd.x) is short grass, light
+  // and dry in patches, so the land keeps its look where the chunks end and loses the detail with distance, as theirs does. Snow
+  // (gnd.y) lies over the ground's own colour with an edge of its own: a cell's worth of blur would be a soft smear on a far peak.
+  vec2 tp = vG + texO;
+  vec3 gc = pow(vColor, vec3(2.2));
+  float sv = vGnd.y + (texture2D(uDet, tp * 0.0131).a - 0.5) * 0.5 * step(0.001, vGnd.y) * step(vGnd.y, 0.999), sw = max(fwidth(sv), 1e-4);
+  float snow = smoothstep(0.5 - sw, 0.5 + sw, sv);
+  gc = mix(gc, uSnowCol, snow);
+  float turf = vGnd.x * (1.0 - snow), steep = smoothstep(0.62, 0.42, dot(n, upV));
+  vec4 g1 = texture2D(uTurf, tp * 0.625), g2 = texture2D(uTurf, tp * 0.3125 + 0.37);
+  float d2 = texture2D(uDet, tp * 0.031).r, pch = texture2D(uDet, tp * 0.0625).r;
+  float dry = clamp(g1.g * 0.35 + g2.g * 0.65 + (pch - 0.5) * 1.1, 0.0, 1.0);
+  vec3 bare = mix(gc, vec3(0.19, 0.18, 0.17), steep * turf * 0.75) * 0.5;
+  vec3 blade = gc * mix(vec3(0.84, 1.0, 0.8), vec3(1.16, 1.08, 0.68), smoothstep(0.3, 0.95, dry)) * 0.5 * (0.2 + 0.6 * g1.r + 1.1 * g2.r) * (0.78 + 0.44 * d2);
+  vec3 ground = mix(bare, blade, turf * (1.0 - steep * 0.6));
+  ground = mix(ground, ground * 0.55, uWet * (1.0 - snow));
   vec3 lin = mix(ground, pow(vCanopy.rgb, vec3(2.2)), a) * light;
   {
     // the sheen the terrain's material has (three.js' GGX highlight for roughness 0.94 and 4% reflectance): faint, but it is what
@@ -181,7 +195,7 @@ const FRAG_USED = !REAL ? FRAG : FRAG.replace("varying float vDist;", "varying f
     float a2 = 0.7807, nl = max(dot(n, sunV), 0.0), nv = max(dot(n, Ve), 0.0), nh = max(dot(n, Hh), 0.0), lh = max(dot(sunV, Hh), 0.0);
     float gv = nl * sqrt(a2 + (1.0 - a2) * nv * nv), gl = nv * sqrt(a2 + (1.0 - a2) * nl * nl), dn = nh * nh * (a2 - 1.0) + 1.0;
     float Fr = 0.04 + 0.96 * exp2((-5.55473 * lh - 6.98316) * lh);
-    lin += uSunCol * (nl * Fr * (0.5 / max(gv + gl, 1e-6)) * a2 / (dn * dn)) * (1.0 - a);
+    lin += uSunCol * (0.35 * nl * Fr * (0.5 / max(gv + gl, 1e-6)) * a2 / (dn * dn)) * (1.0 - a);   // (0.35: js/real/core.js keeps that much of the sun's sheen)
   }
   gl_FragColor = vec4(lin, 1.0);
   float wa = smoothstep(0.0, 0.5, vWat);
@@ -217,6 +231,30 @@ const FRAG_USED = !REAL ? FRAG : FRAG.replace("varying float vDist;", "varying f
 #include <fog_fragment>
 }`);
 let shared = null;
+// The ground's textures under the realistic look: the terrain's turf (js/real/terrain.js makes it) and its detail noise, which that
+// file keeps to itself, so this is its detailTexture() again (the same lattices: r soil and turf's patches, a snow). They repeat every
+// 1.6 and 4 blocks; a ring's texO is its centre within 1,600 blocks, a whole number of every repeat the shader reads them at.
+const groundTex = { uTurf: { value: null }, uDet: { value: null }, uSnowCol: { value: new THREE.Vector3(0.9, 0.93, 0.95) } };
+function detailTexture() {
+  const S = 256, d = new Uint8Array(S * S * 4);
+  const lat = (seed, n) => { const a = new Float32Array(n * n); let s = seed >>> 0; for (let i = 0; i < a.length; i++) { s = (s * 1664525 + 1013904223) >>> 0; a[i] = s / 4294967296; } return a; };
+  const noise = (a, n, x, y) => {
+    const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+    const g = (i, j) => a[(((j % n) + n) % n) * n + (((i % n) + n) % n)];
+    return (g(xi, yi) * (1 - u) + g(xi + 1, yi) * u) * (1 - v) + (g(xi, yi + 1) * (1 - u) + g(xi + 1, yi + 1) * u) * v;
+  };
+  const L = [8, 16, 32, 64, 128].map((n, i) => [lat(977 + i * 131, n), n]);
+  const fbm = (x, y, from) => { let s = 0, w = 0, amp = 1; for (let o = from; o < L.length; o++) { s += noise(L[o][0], L[o][1], x * L[o][1], y * L[o][1]) * amp; w += amp; amp *= 0.55; } return s / w; };
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const u = x / S, v = y / S, o = (y * S + x) * 4;
+    d[o] = (0.7 * fbm(u, v, 1) + 0.3 * fbm(u + 0.37, v + 0.11, 2)) * 255;
+    d[o + 3] = (0.8 * fbm(u, v, 0) + 0.2 * fbm(u, v, 3)) * 255;
+  }
+  const t = new THREE.DataTexture(d, S, S, THREE.RGBAFormat);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
+  t.anisotropy = 4; t.needsUpdate = true;
+  return t;
+}
 function material(morph) {
   const Pl = P();
   if (!shared) {
@@ -238,7 +276,11 @@ function material(morph) {
       stand: { value: 0 }, edge: { value: new THREE.Vector2(1e30, 2e30) }, pxScale,
     }),
   });
-  if (REAL) { Object.assign(m.uniforms, realUniforms(), { chunkMask, maskO }); m.extensions.fragDepth = true; }
+  if (REAL) {
+    if (!groundTex.uTurf.value) { groundTex.uTurf.value = BF.real.turfTexture(); groundTex.uDet.value = detailTexture(); }
+    Object.assign(m.uniforms, realUniforms(), { chunkMask, maskO, texO: { value: new THREE.Vector2() } }, groundTex);
+    m.extensions.fragDepth = true; m.extensions.derivatives = true;
+  }
   m.userData.sphM = sphM;   // js/view.js sets it each frame (the round placement in the mesh's own frame)
   return m;
 }
@@ -401,7 +443,10 @@ uniform vec3 uRowCol[${C.MAXROW}];
 varying float vCard;   // 0: boxes or the plain point, 1: cards or a flat point, 2: a point showing the model
 varying vec3 vTint;
 varying vec3 vN;
-#ifndef BOXES
+#ifdef BOXES
+varying vec3 vL;       // a house: this point from its foot, in blocks
+varying vec3 vHs;      // and its face (0 not a house, 1 a wall across x, 2 a wall across z, 3 a roof's slope, 4 a top), the wall's width, the eaves' height
+#else
 varying vec4 vCell;
 varying vec2 vSpr;
 #endif` + C.VERT);
@@ -429,7 +474,9 @@ varying vec2 vSpr;
   // (a box face's normal from its block shade: 1 the top, 0.8 the x sides, 0.65 the z sides; the colour then goes without the shade)
   v = rep(v, "  vColor = (up ? top : low) * shade;\n  vMask = ((toHole * vec3(g.xy + l.xz, 1.0)).xy - maskO) / CHUNK;", `  vColor = up ? top : low;
   if (vCard < 0.5) vN = shade > 0.9 ? upV : shade > 0.7 ? xV * sign(position.x) : zV * sign(position.z);
+  vHs = vec3(0.0);
   if (card.w < -0.5) {
+    vHs = vec3(shade > 0.9 ? 4.0 : shade > 0.7 ? 1.0 : 2.0, shade > 0.7 ? a.y : a.x, c + 2.0);
     // a house as worldgen.js builds it: walls to the eaves, two blocks over the stand-in's; on them a gable roof, its ridge along
     // the longer side, rising half its span and overhanging the walls on the slopes' sides only, with the gable ends wall (the
     // slopes are steps: lit mostly from above); or, where the village builds flat roofs, a slab
@@ -441,9 +488,10 @@ varying vec2 vSpr;
       float span = alongX ? b.y : b.x, hR = 0.5 * span, narrow = 1.0 - position.y;
       l = alongX ? vec3(position.x * (b.x - 2.0), eaves + position.y * hR, position.z * b.y * narrow) : vec3(position.x * b.x * narrow, eaves + position.y * hR, position.z * (b.y - 2.0));
       if (alongX ? xFace : zFace) vColor = low;
-      if (alongX ? zFace : xFace) vN = normalize((alongX ? zV * sign(position.z) : xV * sign(position.x)) * 0.4 + upV);
+      if (alongX ? zFace : xFace) { vN = normalize((alongX ? zV * sign(position.z) : xV * sign(position.x)) * 0.4 + upV); vHs.x = 3.0; }
     }
   }
+  vL = l;
   vMask = ((toHole * vec3(g.xy + (vCard > 0.5 ? vec2(0.0) : l.xz), 1.0)).xy - maskO) / CHUNK;`);
   v = rep(v, "  gl_PointSize = size;\n  vec3 l = vec3(0.0, 0.5 * tall, 0.0);", `  gl_PointSize = size;
   vec3 l = vec3(0.0, 0.5 * tall, 0.0);
@@ -468,7 +516,31 @@ varying vec2 vSpr;
 varying float vCard;
 varying vec3 vTint;
 varying vec3 vN;
-#ifndef BOXES
+#ifdef BOXES
+varying vec3 vL;
+varying vec3 vHs;
+// A house's faces as the blocks they stand for, while those are a few pixels each (HOUSE_PX): every block a shade of its own
+// between joints, posts at the walls' corners, a window by each, and a roof in steps. Under that size the plain colour.
+float rlHash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+vec3 rlHouse(vec3 alb) {
+  if (vHs.x > 3.5) return alb;
+  vec2 q = vec2((vHs.x < 1.5 ? vL.z : vL.x) + 0.5 * vHs.y, vL.y);
+  if (vHs.x > 2.5) q = vec2(abs(dFdx(vL.x)) + abs(dFdy(vL.x)) > abs(dFdx(vL.z)) + abs(dFdy(vL.z)) ? vL.x : vL.z, (vL.y - vHs.z) * 2.0);
+  float fw = max(fwidth(q.x), fwidth(q.y)), show = clamp(2.0 - fw * HOUSE_PX, 0.0, 1.0);
+  if (show <= 0.0) return alb;
+  vec2 cell = floor(q), f = q - cell;
+  float k = 0.93 + 0.14 * rlHash(cell);
+  if (vHs.x > 2.5) k *= mix(0.74, 1.06, smoothstep(0.0, 0.5, f.y));   // (a step's riser in the shade of the next)
+  else {
+    float lw = clamp(fw * 1.5, 0.04, 0.5);
+    k *= 1.0 - 0.16 * max(1.0 - smoothstep(0.0, lw, min(f.y, 1.0 - f.y)), 0.6 * (1.0 - smoothstep(0.0, lw, min(f.x, 1.0 - f.x))));
+    if (q.y < vHs.z && (cell.x < 0.5 || cell.x > vHs.y - 1.5)) k *= 0.62;   // (the corner posts)
+    else if (vHs.y > 4.5 && cell.y > 1.5 && cell.y < 2.5 && (abs(cell.x - 1.0) < 0.5 || abs(cell.x - (vHs.y - 2.0)) < 0.5))
+      return mix(alb, vec3(0.45, 0.55, 0.6), show * 0.85);   // (a window)
+  }
+  return alb * mix(1.0, k, show);
+}
+#else
 varying vec4 vCell;
 varying vec2 vSpr;
 #endif` + C.FRAG);
@@ -481,9 +553,9 @@ varying vec2 vSpr;
     vec4 tc = rlCardTexel();
     if (tc.a < 0.4) discard;
     alb = tc.rgb * vTint; n = rlCardNormal(); upV = normalize(vUp);
-  }
+  } else if (vHs.x > 0.5) alb = rlHouse(alb);
   light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, upV)) + uSunCol * max(dot(n, sunV), 0.0);
-  if (vCard > 0.5) light += uSunCol * 0.3 * max(-dot(n, sunV), 0.0);   // (leaves let the sun through, as BF.real.lod's cards)
+  if (vCard > 0.5) light += uSunCol * (0.3 * max(-dot(n, sunV), 0.0) + rlCardGlow(sunV));   // (leaves let the sun through, as BF.real.lod's cards)
 #else
   if (vCard > 1.5) {
     vec2 q = vec2(gl_PointCoord.x - 0.5, 0.5 - gl_PointCoord.y) * vSpr + 0.5;
@@ -494,7 +566,8 @@ varying vec2 vSpr;
   }
   if (vCard > 0.5) {   // (lit as a crown seen from here: mostly from above, and the sun comes through it from behind)
     float sl = dot(normalize(upV * 0.8 + vec3(0.0, 0.0, 0.6)), sunV);
-    light = mix(uGroundCol, uSkyCol, 0.8) + uSunCol * (max(sl, 0.0) + 0.3 * max(-sl, 0.0));
+    float tb = clamp(-sunV.z, 0.0, 1.0);   // (and towards the eye, as rlCardGlow: a point has no direction of its own, the view's stands in)
+    light = mix(uGroundCol, uSkyCol, 0.8) + uSunCol * (max(sl, 0.0) + 0.3 * max(-sl, 0.0) + vec3(0.45, 0.43, 0.19) * (0.3 * tb * tb));
     if (vCard < 1.5 && length(gl_PointCoord - 0.5) > 0.5) discard;
   }
 #endif`);
@@ -504,7 +577,7 @@ function standMaterial(boxes) {
   const sphM = new THREE.Matrix4(), SH = REAL ? realStandShaders() : null;
   const m = new THREE.ShaderMaterial({
     vertexShader: SH ? SH.vert : STAND_VERT, fragmentShader: SH ? SH.frag : STAND_FRAG_USED, fog: true,
-    defines: Object.assign({ FACE_N: P().N.toFixed(1), MASK_N: MASK_N.toFixed(1), CHUNK: BF.CS.toFixed(1) }, boxes ? { BOXES: 1 } : {}, SH && SH.cards ? SH.cards.defines() : {}),
+    defines: Object.assign({ FACE_N: P().N.toFixed(1), MASK_N: MASK_N.toFixed(1), CHUNK: BF.CS.toFixed(1) }, boxes ? { BOXES: 1 } : {}, SH && SH.cards ? Object.assign({ HOUSE_PX: "4.0" }, SH.cards.defines()) : {}),
     uniforms: Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), {
       sphM: { value: sphM }, uK: BF.world.roundK, uDay: BF.world.dayUniform, pxScale, frame: { value: new THREE.Matrix3() },
       edge: { value: new THREE.Vector2(1e30, 2e30) }, hole: { value: new THREE.Vector3() }, hole2: { value: new THREE.Vector3() },
@@ -512,7 +585,7 @@ function standMaterial(boxes) {
       toHole2: { value: new THREE.Matrix3() }, seam2: { value: 0 }, chunkMask, maskO,
     }),
   });
-  if (REAL) Object.assign(m.uniforms, realUniforms(), SH.cards ? SH.cards.uniforms : {});
+  if (REAL) { Object.assign(m.uniforms, realUniforms(), SH.cards ? SH.cards.uniforms : {}); m.extensions.derivatives = true; }
   m.userData.sphM = sphM;
   return m;
 }
@@ -675,6 +748,7 @@ lod.reset = function (scene) {
   if (!lod.pal) lod.pal = palette();
   if (!fullIdx) { const d = BF.gridJob.discIndex(2 * EXT + 1, EXT, HALF); fullIdx = new THREE.BufferAttribute(d.idx, 1); fullCounts = d.counts; }   // made once here
   BF.gridJob.palette(lod.pal);
+  if (REAL) { const W = lod.pal.top[BF.B.snow]; groundTex.uSnowCol.value.set(Math.pow(W[0], 2.2), Math.pow(W[1], 2.2), Math.pow(W[2], 2.2)); }
   // (rivers: the page's river network, for the workers' copies: js/worldgen.js riverState)
   BF.sampler.reset({ gen: BF.state.gen, seed: BF.state.seed, villages: BF.state.villages, biomeScale: BF.state.biomeScale, rivers: BF.worldgen.riverState() });
   // Without workers (a page opened as a file rather than through run.sh, where browsers refuse them) there is no distant terrain: sampling
@@ -775,6 +849,7 @@ function finish(L, b, m) {
   g.setAttribute("mcol", attr(m.mcol, 3, true));
   g.setAttribute("canopy", attr(m.can, 4, true));
   if (m.wat) g.setAttribute("wat", attr(m.wat, 1, true));
+  if (m.gnd) g.setAttribute("gnd", attr(m.gnd, 2, true));
   if (m.nrm) g.setAttribute("nrm", attr(m.nrm, 3, true));
   if (m.idx) g.setIndex(attr(m.idx, 1));
   else g.setIndex(fullIdx);
@@ -789,6 +864,7 @@ function finish(L, b, m) {
   mesh.position.set(a.x, 0, a.z); mesh.updateMatrix();
   mesh.userData = { anchor: b.anchor, lod: L.lv };
   L.mat.uniforms.anchor.value.set(b.anchor[0], b.anchor[1], b.anchor[2]);
+  if (L.mat.uniforms.texO) L.mat.uniforms.texO.value.set(b.cu % 1600, b.cv % 1600);
   if (L.mesh) { L.mesh.parent && L.mesh.parent.remove(L.mesh); L.mesh.geometry.dispose(); }
   // the stand-ins: their own object, placed the same way (kept with their material, like the ring)
   const S = b.parts ? join(b.parts) : null;

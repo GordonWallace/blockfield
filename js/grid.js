@@ -124,10 +124,14 @@ BF.gridJob = {
         const k = 1 - 0.55 * smooth(2, 60, depth), F = PAL.top[top], s = 0.45 * (1 - smooth(1, 6, depth));
         r = (tmp[0] * k) * (1 - s) + F[0] * s; gg = (tmp[1] * k) * (1 - s) + F[1] * s; bb = (tmp[2] * k) * (1 - s) + F[2] * s;
       } else {
-        const T = PAL.top[ice ? B.ice : top];
+        // (the realistic look: what kind of ground this is, 1 turf, 2 snow; under snow the colour is the ground's it lies on, and
+        // js/lod.js lays the snow over it with a sharp edge)
+        const snow = out.wat && !ice && (top === B.snow || top === B.snow_grass), base = !snow ? top : top === B.snow ? B.stone : B.grass;
+        const T = PAL.top[ice ? B.ice : base];
         tmp[0] = T[0]; tmp[1] = T[1]; tmp[2] = T[2];
-        if (!ice) tint(tmp, 0, PAL.tint[top], t);
+        if (!ice) tint(tmp, 0, PAL.tint[base], t);
         r = tmp[0]; gg = tmp[1]; bb = tmp[2];
+        if (out.wat) out.wat[o] = snow ? 2 : !ice && PAL.tint[top] === 1 ? 1 : 0;
       }
       out.col[3 * o] = Math.min(255, r * 255); out.col[3 * o + 1] = Math.min(255, gg * 255); out.col[3 * o + 2] = Math.min(255, bb * 255);
       // canopy: where generate() grows trees (grassy ground above the shore; mangroves stand in shallow water)
@@ -158,7 +162,7 @@ BF.gridJob = {
     return b;
   },
   stand,
-  mesh, meshBuffers: (m) => [m.pos, m.sph, m.col, m.mpos, m.msph, m.mcol, m.can, m.wat, m.nrm, m.idx].filter(Boolean).map((a) => a.buffer),
+  mesh, meshBuffers: (m) => [m.pos, m.sph, m.col, m.mpos, m.msph, m.mcol, m.can, m.wat, m.gnd, m.nrm, m.idx].filter(Boolean).map((a) => a.buffer),
   topOf, CROWNS,
 };
 
@@ -361,7 +365,7 @@ function mesh(p, raw) {
   const mpos = p.noMorph ? null : new Float32Array(NV * 3), msph = p.noMorph ? null : new Float32Array(NV * 3), mcol = p.noMorph ? null : new Uint8Array(NV * 3);
   const C = (v) => Math.min(255, Math.round(v));
   // (p.real, the realistic look: no slope shade in the colours, the ring is lit by its slope each frame; and where its water is)
-  const wat = p.real && raw.wat ? raw.wat.slice(0, NV) : null, lit = p.real ? () => 1 : shade, nrm = p.real ? new Int8Array(NV * 3) : null;
+  const wat = p.real && raw.wat ? raw.wat.slice(0, NV) : null, gnd = wat ? new Uint8Array(NV * 2) : null, lit = p.real ? () => 1 : shade, nrm = p.real ? new Int8Array(NV * 3) : null;
   const yAt = (i, j, o) => { const q = Math.min(n - 1, Math.max(0, j)) * n + Math.min(n - 1, Math.max(0, i)); return raw.ok[q] ? raw.y[q] : raw.y[o]; };
   let full = true;
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
@@ -374,12 +378,13 @@ function mesh(p, raw) {
     for (let k = 0; k < 3; k++) col[o * 3 + k] = C(raw.col[o * 3 + k] * sh);
     for (let k = 0; k < 3; k++) can[o * 4 + k] = C(raw.can[o * 4 + k] * sh);
     can[o * 4 + 3] = raw.can[o * 4 + 3];
+    if (wat && wat[o] < 3) { if (wat[o]) gnd[o * 2 + wat[o] - 1] = 255; wat[o] = 0; }   // (land: its kind, 1 turf, 2 snow; js/lod.js)
     if (nrm) {   // (the ground's slope in the ring's flat frame: x = u, y = up, z = v)
       const dx = (yAt(i - 1, j, o) - yAt(i + 1, j, o)) / (2 * c), dz = (yAt(i, j - 1, o) - yAt(i, j + 1, o)) / (2 * c), l = 127 / Math.hypot(dx, 1, dz);
       nrm[o * 3] = Math.round(dx * l); nrm[o * 3 + 1] = Math.round(l); nrm[o * 3 + 2] = Math.round(dz * l);
     }
   }
-  if (p.noMorph) return { pos, sph, col, mpos, msph, mcol, can, wat, nrm, idx: null };   // (the globe's tiles)
+  if (p.noMorph) return { pos, sph, col, mpos, msph, mcol, can, wat, gnd, nrm, idx: null };   // (the globe's tiles)
   // a point on the coarser grid (even i and j) stays put and takes the coarser ring's shading; any other point goes to the middle of the
   // coarser triangle edge it lies on (that ring splits its cells along the same diagonal)
   for (let j = 0; j < n; j += 2) for (let i = 0; i < n; i += 2) {
@@ -418,7 +423,7 @@ function mesh(p, raw) {
   }
   const bounds = sectorBounds(n, p.ext, p.disc, raw.ok, pos, mpos, sph, msph);
   const out = { pos, sph, col, mpos, msph, mcol, can, idx, counts, bounds };
-  if (wat) out.wat = wat;
+  if (wat) { out.wat = wat; out.gnd = gnd; }
   if (nrm) out.nrm = nrm;
   return out;
 }
