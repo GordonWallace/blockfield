@@ -77,7 +77,7 @@ module.exports = async (pg, out) => {
     // get out with Shift: onto the bank or into the water, never inside a block
     P.dismount();
     const pp = P.position;
-    ok("Shift: out of the boat, not inside a block", !P.boat && !b.rider && !W.boxCollides(pp.x, pp.y, pp.z, 0.3, 1.8), { p: [pp.x, pp.y, pp.z] });
+    ok("Shift: out of the boat, not inside a block", !P.boat && !b.rider && !W.boxCollides(pp.x, pp.y, pp.z, 0.3, 1.95), { p: [pp.x, pp.y, pp.z] });
 
     // ---- ice: about 40 blocks a second ----
     const xi = x0 + 20;

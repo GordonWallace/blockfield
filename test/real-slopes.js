@@ -52,7 +52,7 @@ const root = path.resolve(__dirname, '..');
   check(r.y === at.gy + 2 && r.z < at.Z - 2, `walking at a one-block rise of ground climbs it without a jump (y ${r.y} of ${at.gy + 2}, z ${r.z.toFixed(2)})`);
   check(r.ys.length === 2, 'the body only ever stood on the two levels (no jump): ' + r.ys);
   check(r.pop > 0.05 && r.pop < 0.7, `the view glides up the slope instead of popping a block (largest change in a tick ${r.pop.toFixed(2)})`);
-  check(Math.abs(r.cam - (r.y + 1.62)) < 0.08, 'and settles at eye height');
+  check(Math.abs(r.cam - (r.y + 1.78)) < 0.08, 'and settles at eye height');
   await pg.keyboard.up('KeyW');
   await pg.evaluate(() => BF.player.setLook(Math.PI, 0));
   await pg.keyboard.down('KeyW');

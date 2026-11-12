@@ -45,7 +45,7 @@ module.exports = async (pg, out) => {
   const card = () => pg.evaluate(id => { const el = document.querySelector(".bfv-hover"), s = BF.villagerHover.shown(); return !!el && getComputedStyle(el).display !== "none" && !!s && s.sid === id; }, setup.id);
   // look from above (eyes 2.2 blocks over the point) straight down at it: the card, the player's aim and the simulation's ray
   const lookDown = async (x, y, z) => {
-    await pg.evaluate(([x, y, z]) => { BF.player.teleport(x, y + 2.2 - 1.62, z); BF.player.setLook(0, -Math.PI / 2 + 1e-4); }, [x, y, z]);
+    await pg.evaluate(([x, y, z]) => { BF.player.teleport(x, y + 2.2 - BF.player.eye, z); BF.player.setLook(0, -Math.PI / 2 + 1e-4); }, [x, y, z]);
     await frames(4);
     const eye = await pg.evaluate(() => { const e = BF.player.eyePos(), d = BF.player.lookDir(); return { e: [e.x, e.y, e.z], d: [d.x, d.y, d.z] }; });
     const aimed = await pg.evaluate(id => { const a = BF.player.aimedMob(); return !!a && a.id === id; }, setup.id);

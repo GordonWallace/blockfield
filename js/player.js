@@ -9,7 +9,7 @@ const GRAVITY = 32, JUMP_V = 8.4, WALK = 4.3, SPRINT = 5.6, SNEAK = 1.3;
 const TURBO_MULT = 10, TURBO_LOOKAHEAD = 3;   // boost (fly + hold W and R): 10x the normal flying speed
 const FLY = 10.9, FLY_SPRINT = 21.6, CFLY = 16, CFLY_SPRINT = 32, SWIM = 2.2, REACH = 5, MOB_REACH = 3.5;
 const BASE_FOV = 75, AIR_MAX = 10, ATTACK_CD = 0.4, EAT_TIME = 1.2, PLACE_REPEAT = 0.22;
-const HW = 0.3, HEIGHT = 1.8, EYE = 1.62, SNEAK_EYE = 1.47;
+const HW = 0.3, HEIGHT = 1.95, EYE = 1.78, SNEAK_EYE = 1.63;   // the player is a villager's size: its box (js/mobs.js TYPES.villager) and its eyes (js/mobview.js: the row 28-29 px up)
 // Bow (vanilla): full draw takes 1 s; power f = (t^2 + 2t) / 3 for t = draw seconds, capped at 1, and below 0.1 nothing is fired.
 // The arrow leaves at 60 f blocks/s (3 blocks a tick) and deals ceil(6 f); a full-draw arrow is critical 1 time in 5 (+1..3, so up to 9).
 const BOW_DRAW = 1, BOW_SPEED = 60, BOW_DAMAGE = 6, BOW_CRIT = 0.2, BOW_MIN = 0.1;

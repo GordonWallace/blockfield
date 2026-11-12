@@ -560,7 +560,7 @@ function tick(dt) {
 }
 
 // ---------------------------------------------------------------- riding (the player's vehicle interface, js/player.js)
-const SEAT_Y = 0.75, SIT_EYE = 1.45;   // seat above the horse's feet, eye above the seat: the camera rides higher than on foot
+const SEAT_Y = 0.75, SIT_EYE = 1.59;   // seat above the horse's feet, eye above the seat: the camera rides higher than on foot
 const ride = { buck: 0, charge: 0, jumpHeld: false };
 function canBoard(m) {
   const r = m.horse;
