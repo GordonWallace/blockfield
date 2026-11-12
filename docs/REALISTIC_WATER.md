@@ -43,7 +43,8 @@ changes no block and the game never reads it, so a world plays the same with the
    free water stands, and the free water cannot run back up it. So a dam fills a pool behind it until the pool goes over the
    dam or round it over the banks (at most 3 blocks above the rest level), the reach below it falls while the pool fills,
    and a bank cut below the water lets the river out over the ground, where it runs downhill and soaks away. Take the dam
-   out and the edit is gone, and rule 4 is back. The blocks do not change: farmland, buckets, swimming and boats still read
+   out and the pool runs off and the river is back at its level (the place stays free, because the world remembers the
+   edit; a free river with nothing in its way keeps its level by itself). The blocks do not change: farmland, buckets, swimming and boats still read
    the block water, so a boat on a pool floats at the old level (see Not done yet).
 
 Cube channels fill exactly: the surface mesh's vertices sit on block edges and block centres, so a one-block farm channel
