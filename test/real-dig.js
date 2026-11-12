@@ -39,7 +39,7 @@ const lay = async (pg, name, only) => {
 const state = pg => pg.evaluate(() => ({
   target: BF.player.target ? BF.blocks[BF.player.target.id].name : null,
   cube: BF.cracks.visible, dig: !!(BF.real.dig && BF.real.dig.visible), tris: BF.real.dig ? BF.real.dig.triangles : 0,
-  chips: BF.real.dig ? BF.real.dig.chips : 0, prog: BF.real.dig ? BF.real.dig.progress : -1, debris: BF.cracks.particles,
+  chips: BF.real.dig ? BF.real.dig.chips : 0, thrown: BF.real.dig ? BF.real.dig.thrown : 0, prog: BF.real.dig ? BF.real.dig.progress : -1, debris: BF.cracks.particles,
 }));
 const shot = async (pg, name) => { if (out) await pg.screenshot({ path: path.join(out, name + '.png') }); };
 
@@ -61,12 +61,12 @@ const shot = async (pg, name) => { if (out) await pg.screenshot({ path: path.joi
     check(s1.target === 'sand' && s1.dig && s1.tris > 0, `mining sand draws the wear on the smooth ground (${s1.tris} triangles of the terrain)`, s1);
     check(!s1.cube, 'and the cube-shaped crack overlay stays hidden', s1);
     check(s1.prog > 0.3 && s1.prog < 1, 'the hollow grows with the mining progress', s1);
-    check(s1.chips > 0 && s1.debris === 0, `hits throw chips of the ground (${s1.chips}), not cube debris`, s1);
+    check(s1.thrown > 0 && s1.debris === 0, `hits throw chips of the ground (${s1.thrown}), not cube debris`, s1);   // (counted as thrown: a chip lives under a second, so on a slow machine none may be in the air at this moment)
     await pg.waitForFunction(c => BF.world.getBlock(c[0], c[1], c[2]) !== BF.B.sand, cell, { timeout: 10000 }).catch(() => {});
     const s2 = await state(pg);
     await pg.evaluate(() => BF.player.setMouse(false, false));
     check(await pg.evaluate(c => BF.world.getBlock(c[0], c[1], c[2]) === 0, cell), 'the sand block breaks as before');
-    check(s2.chips >= 10, `breaking it throws a burst of chips (${s2.chips})`, s2);
+    check(s2.thrown - s1.thrown >= 18, `breaking it throws a burst of chips (${s2.thrown - s1.thrown} more)`, s2);
     await pg.waitForTimeout(400);
     const s3 = await state(pg);
     check(!s3.dig && !s3.cube, 'the effect is gone once the mouse is released', s3);

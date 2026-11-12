@@ -171,6 +171,7 @@ function gather(x, y, z) {
 // ---------- chips ----------
 // Small faceted pieces of the ground, lit as everything else in the look (real.lit, one sky / block light value a material).
 const live = [], pool = [], chipMats = new Map();
+let thrown = 0;   // chips thrown since the page loaded (tests: the live ones are gone within a second)
 let chipGeo = null;
 const cellL = new T.Vector2();
 function chipMaterial(gi, x, y, z) {
@@ -204,7 +205,7 @@ function chip(m, px, py, pz, vx, vy, vz, size, life) {
   p.rotation.set(Math.random() * 6.3, Math.random() * 6.3, Math.random() * 6.3);
   const u = p.userData;
   u.vx = vx; u.vy = vy; u.vz = vz; u.life = life; u.spin = (Math.random() - 0.5) * 14;
-  scene.add(p); live.push(p);
+  scene.add(p); live.push(p); thrown++;
 }
 function frame(dt) {
   if (pulse > 0) { pulse = Math.max(0, pulse - dt * 7); if (mat) mat.uniforms.uPulse.value = pulse; }
@@ -252,7 +253,7 @@ real.dig = {
     const n = normal || [0, 1, 0];
     const m = chipMaterial(cur.gi, cur.x + n[0], cur.y + n[1], cur.z + n[2]);
     // off the surface inside the block's footprint, thrown along the ground's normal
-    for (let i = 0, made = 0; i < 24 && made < 5; i++) {
+    for (let i = 0, made = 0; i < 240 && made < 5; i++) {
       // a random point of a random triangle of the patch
       const o = Math.floor(Math.random() * nTri) * 9;
       let u = Math.random(), v = Math.random(); if (u + v > 1) { u = 1 - u; v = 1 - v; }
@@ -281,6 +282,7 @@ real.dig = {
   get visible() { return shown; },
   get triangles() { return shown ? nTri : 0; },
   get chips() { return live.length; },
+  get thrown() { return thrown; },
   get progress() { return shown && mat ? mat.uniforms.uProg.value : -1; },
 };
 real.module({ name: "dig", init, frame });
