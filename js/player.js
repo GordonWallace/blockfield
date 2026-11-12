@@ -1635,7 +1635,7 @@ function updateBreaking(dt) {
     const r = act("player.break", cellKey(x, y, z), { id, harvest: !creative() && canHarvest(b), shears: !!(b.shearSelf && tool && tool.type === "shears"),
       wear: b.hardness > 0 ? (tool && tool.type === "sword" ? 2 : 1) : 0 });   // tools wear 1 use per block, swords 2 (Minecraft)
     if (!r.ok) { resetBreak(); return; }   // the block changed under the crosshair
-    spawnParticles(x, y, z, id);
+    if (!(BF.real && BF.real.on && BF.real.dig && BF.real.dig.burst(x, y, z, id))) spawnParticles(x, y, z, id);   // (the realistic look: smooth ground throws its own chips, js/real/dig.js)
     resetBreak();
     breakCd = t === 0 && !creative() ? 0.05 : 0.25;   // vanilla: 5 ticks after a break (also the creative repeat), 1 tick for instant breaks
     target = null; outline.visible = false;

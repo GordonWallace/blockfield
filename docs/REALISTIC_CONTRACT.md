@@ -172,6 +172,7 @@ foundation thread for the attribute you need). Water physics is 1.5's fluid simu
 | Performance | `js/real/lod.js` | `js/lod.js`, `js/lodworker.js`, `js/grid.js`, `js/globe.js` |
 | Biome assets | `js/real/assets-biomes.js` (stub on the branch), more `js/real/assets-*.js` on request | `js/textures*.js` only if a block texture must change |
 | Atmosphere and creatures | `js/real/atmos.js`, `js/real/mobs.js` | `js/sky.js`, `js/weather.js`, `js/mobs.js`, `js/mobview.js`, `js/entityview.js`, `js/audio.js` |
+| Digging | `js/real/dig.js` (the wear drawn on smooth ground while it is mined, `BF.real.dig`) | `js/cracks.js`, the break particles' line in `js/player.js` |
 
 `index.html` already loads every file above (empty stubs are on the branch), so nobody else needs to touch it. If you need
 another new file, name it `js/real/<yours>-*.js` and ask the foundation thread for the script tag.
