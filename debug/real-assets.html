@@ -1,0 +1,124 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Blockfield 1.6: realistic biome assets</title>
+<!-- A viewer for the realistic look's species registry (js/real/assets-*.js): debug/real-assets.html?look=real&biome=Savanna
+     Parameters: biome=<name> (default: a menu), view=trees|cover|rocks (default all), only=<species id>, detail=0|1|2, seed=<n>, cam=<azimuth>,<elevation>,<distance factor>.
+     Drag to orbit, wheel to zoom. Not part of the game. -->
+<style>
+  html, body { margin: 0; height: 100%; background: #9db8d4; font: 13px/1.5 ui-monospace, Menlo, monospace; color: #1c2420; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #bar { position: fixed; left: 12px; top: 10px; right: 12px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+  #bar a { color: #14301c; background: rgba(255,255,255,.6); padding: 1px 6px; border-radius: 3px; text-decoration: none; }
+  #bar a.on { background: #14301c; color: #fff; }
+  #info { position: fixed; left: 12px; bottom: 10px; font-size: 11px; line-height: 1.35; opacity: .9; background: rgba(255,255,255,.72); padding: 6px 10px; border-radius: 3px; white-space: pre; max-width: 90vw; }
+</style>
+<canvas id="view"></canvas>
+<div id="bar"></div>
+<div id="info"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+  // the viewer always shows the realistic look
+  if (new URLSearchParams(location.search).get("look") !== "real") { const u = new URL(location.href); u.searchParams.set("look", "real"); location.replace(u); }
+</script>
+<script src="../js/real/core.js"></script>
+<script src="../js/real/assets-kit.js"></script>
+<script src="../js/real/assets-trees.js"></script>
+<script src="../js/real/assets-cover.js"></script>
+<script src="../js/real/assets-ground.js"></script>
+<script src="../js/real/assets-biomes.js"></script>
+<script>
+(() => {
+"use strict";
+const q = new URLSearchParams(location.search), A = BF.real.assets, U = BF.real.U, K = BF.real.akit;
+const biome = q.get("biome"), only = q.get("only"), detail = +(q.get("detail") || 0), seed = +(q.get("seed") || 7);
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("view"), antialias: true });
+renderer.outputEncoding = THREE.sRGBEncoding; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x9db8d4); scene.fog = new THREE.Fog(0x9db8d4, 80, 400);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+const sunDir = new THREE.Vector3(0.5, 0.75, 0.35).normalize();
+// the game's midday light (js/real/core.js): a sun of 2.4 and a sky light of about 0.97 under ACES tone mapping
+const sun = new THREE.DirectionalLight(new THREE.Color(1, 0.95, 0.86), 2.4), hemi = new THREE.HemisphereLight(new THREE.Color(0.5, 0.66, 1), new THREE.Color(0.32, 0.28, 0.2), 0.97);
+sun.castShadow = true; sun.shadow.mapSize.set(4096, 4096); sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.05;
+scene.add(sun, sun.target, hemi);
+U.uSunDir.value.copy(sunDir); U.uSunCol.value.set(1, 0.95, 0.86).multiplyScalar(2.4); U.uDay.value = 1; U.uWind.value.set(1, 0.3, 0.3);
+
+const bar = document.getElementById("bar");
+const names = Object.keys(A.biomes || {});
+for (const n of names) { const a = document.createElement("a"); a.textContent = n; a.href = "?look=real&biome=" + encodeURIComponent(n); if (n === biome) a.className = "on"; bar.appendChild(a); }
+const view = q.get("view") || "all";
+const inBiome = e => (!biome ? true : e.biomes ? e.biomes.includes(biome) : biome === "*");
+const lines = [];
+const gcol = (A.groundFor && biome && A.groundFor(biome)) || "#2a371b";
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: new THREE.Color(gcol).multiplyScalar(0.45), roughness: 1 }));
+ground.receiveShadow = true; scene.add(ground);
+
+const rand = K.mulberry(seed);
+let x = 0, maxH = 2, tris = 0;
+const add = (geo, mat, px, pz, s, ry, depth) => {
+  if (!geo || !geo.attributes.position || !geo.attributes.position.count) return;
+  const m = new THREE.Mesh(geo, mat); m.position.set(px, 0, pz); m.scale.setScalar(s || 1); m.rotation.y = ry || 0; m.castShadow = m.receiveShadow = true;
+  if (depth) m.customDepthMaterial = depth;
+  scene.add(m); tris += (geo.index ? geo.index.count : geo.attributes.position.count) / 3;
+};
+const trees = view === "all" || view === "trees" ? A.species.filter(e => inBiome(e) && (!only || e.id === only)) : [];
+for (const sp of trees) {
+  const n = only ? 3 : 2, w = sp.height[1] * 0.75 + 2;
+  for (let v = 0; v < n; v++) {
+    const t0 = performance.now(), g = sp.build(K.mulberry(seed * 100 + v * 17 + 1), v === 2 ? 2 : detail);
+    const tr = ((g.bark.index ? g.bark.index.count : 0) + (g.foliage.index ? g.foliage.index.count : 0)) / 3;
+    if (v === 0) lines.push(sp.name + " (" + sp.latin + ") for " + sp.log + (sp.logs ? " logs " + sp.logs : "") + ": " + Math.round(tr) + " tris, " + Math.round(performance.now() - t0) + " ms");
+    x += w * 0.5; add(g.bark, sp.barkMaterial(), x, 0, 1, 0); add(g.foliage, sp.foliageMaterial(), x, 0, 1, 0, sp.depthMaterial && sp.depthMaterial()); x += w * 0.5;
+    maxH = Math.max(maxH, sp.height[1]);
+  }
+}
+let width = Math.max(x, 8);
+const cover = view === "all" || view === "cover" ? A.cover.filter(e => inBiome(e) && (!only || e.id === only)) : [];
+const rocks = view === "all" || view === "rocks" ? A.rocks.filter(e => inBiome(e) && (!only || e.id === only)) : [];
+if (view === "cover") {            // close up: one patch per plant, in a row
+  width = cover.length * 2.4; maxH = 1.6;
+  cover.forEach((c, i) => {
+    const vars = [0, 1, 2].map(v => c.build(K.mulberry(seed * 31 + i * 7 + v), detail));
+    for (let k = 0; k < 7; k++) add(vars[k % 3], c.material(), i * 2.4 + 0.5 + rand() * 1.4, 1 + rand() * 2.2, 0.85 + rand() * 0.3, rand() * 6.28, c.depthMaterial && c.depthMaterial());
+    lines.push(c.name + " (" + c.latin + ") for " + (c.block || "scatter") + ": " + Math.round(vars[0].index.count / 3) + " tris");
+  });
+} else if (view === "rocks") {
+  width = rocks.length * 5; maxH = 3;
+  rocks.forEach((r, i) => { for (let k = 0; k < 3; k++) add(r.build(K.mulberry(seed * 53 + i * 11 + k), detail), r.material(), i * 5 + 1 + k * 1.6, 1 + (k % 2) * 2.4, r.size[0] + (r.size[1] - r.size[0]) * (k / 2), rand() * 6.28); lines.push(r.name); });
+} else {
+  cover.forEach((c, i) => {
+    const vars = [0, 1, 2].map(v => c.build(K.mulberry(seed * 31 + i * 7 + v), detail));
+    const n = c.block ? Math.max(8, Math.round((c.density || 0.5) * 60)) : 4;
+    for (let k = 0; k < n; k++) add(vars[k % 3], c.material(), rand() * width, 2 + rand() * 12 - (rand() < 0.3 ? 14 : 0), 0.85 + rand() * 0.35, rand() * 6.28, c.depthMaterial && c.depthMaterial());
+    lines.push("cover: " + c.name + " for " + (c.block || "scatter"));
+  });
+  rocks.forEach((r, i) => {
+    for (let k = 0; k < 5; k++) add(r.build(K.mulberry(seed * 53 + i * 11 + k), detail), r.material(), rand() * width, 3 + rand() * 9, r.size[0] + (r.size[1] - r.size[0]) * rand() * 0.6, rand() * 6.28);
+    lines.push("rock: " + r.name);
+  });
+}
+document.getElementById("info").textContent = (biome ? biome + ": " + ((A.biomes[biome] || {}).place || "") + "\n" : "") + lines.join("\n") + "\n" + Math.round(tris) + " triangles in view";
+
+if (q.get("ui") === "0") { bar.style.display = "none"; document.getElementById("info").style.display = "none"; }
+const cam = (q.get("cam") || "0.5,0.22,1").split(",").map(Number);
+let az = cam[0], el = cam[1], dist = Math.max(width * 0.62, maxH * 1.3) * (cam[2] || 1) + 4, drag = null;
+const target = new THREE.Vector3(width / 2, q.get("ty") ? +q.get("ty") : maxH * 0.42, 2);
+addEventListener("pointerdown", e => { drag = [e.clientX, e.clientY]; });
+addEventListener("pointerup", () => { drag = null; });
+addEventListener("pointermove", e => { if (!drag) return; az -= (e.clientX - drag[0]) * 0.006; el = Math.max(-0.05, Math.min(1.5, el + (e.clientY - drag[1]) * 0.006)); drag = [e.clientX, e.clientY]; });
+addEventListener("wheel", e => { dist *= Math.exp(e.deltaY * 0.001); });
+const S = Math.max(width, maxH) * 0.75 + 12;
+Object.assign(sun.shadow.camera, { left: -S, right: S, top: S, bottom: -S, near: 1, far: 600 }); sun.shadow.camera.updateProjectionMatrix();
+let t0 = performance.now();
+function frame(now) {
+  const w = innerWidth, h = innerHeight;
+  if (renderer.domElement.width !== w * devicePixelRatio || renderer.domElement.height !== h * devicePixelRatio) { renderer.setPixelRatio(devicePixelRatio); renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+  U.uTime.value = ((now - t0) / 1000) % 3600;
+  camera.position.set(target.x + Math.sin(az) * Math.cos(el) * dist, target.y + Math.sin(el) * dist, target.z + Math.cos(az) * Math.cos(el) * dist); camera.lookAt(target);
+  sun.target.position.copy(target); sun.position.copy(target).addScaledVector(sunDir, 250);
+  renderer.render(scene, camera);
+  window.__frames = (window.__frames || 0) + 1;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
