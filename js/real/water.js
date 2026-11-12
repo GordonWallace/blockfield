@@ -12,10 +12,11 @@
 //  2. Each column of the window is read from the blocks: its top water block (the surface) and the ground under that run of water
 //     (the bed). A dry column gives only its ground, which is a bank. The window's cells (CPB a block) take their bed and their
 //     rest level from their column.
-//  3. A river's rest level is the river network's own continuous surface (BF.rivers.at, rs) instead of the blocks' whole-block
-//     steps, so the water runs downhill between the steps and the steps themselves are not drawn.
-//  4. The simulation moves water between cells (virtual pipes); every cell is also pulled back towards its rest level, and water
-//     that strays onto dry columns seeps away. So a dam, a dug trench or a dropped block bends the flow and makes waves and foam, but
+//  3. A river is simulated resting at the river network's own continuous surface (BF.rivers.at, rs) instead of the blocks'
+//     whole-block steps, so it runs downhill all the way. It is drawn close to the blocks' level (at most LOWER below it: boats,
+//     swimmers and the player's own waterline are at the blocks' level), so each block step shows as a low riffle.
+//  4. The simulation moves water between cells (virtual pipes), only ever into cells whose column has block water; every cell is
+//     also pulled back towards its rest level. So a dam, a dug trench or a dropped block bends the flow and makes waves and foam, but
 //     the water always settles to what the blocks say.
 //  5. Inside the window the chunks' own water faces are not drawn for the water this owns (between a column's bed and its surface);
 //     water under that (a cave lake under a river) and everything outside the window stays block water, drawn by the chunk meshes
@@ -37,30 +38,35 @@ let RW = null;
 
 const WB = 80, CPB = 2, N = WB * CPB, NN = N * N, CELL = 1 / CPB, V = N + 1, VV = V * V;
 const SNAP = 8, MOVE = 12;      // the window moves in steps of SNAP blocks once the player is MOVE from its centre
-const YUP = 20, YDN = 28, YH = YUP + YDN;   // the blocks read above and below the player's feet
+const YUP = 16, YDN = 44, YH = YUP + YDN;   // the blocks read above and below the player's feet
 const RIM = 10;                 // blocks over which the surface eases to the blocks' level at the rim
 const EDGE = 5;                 // blocks of cross-fade to block water at the window's rim
 const G = 9.81, NONE = -1e9, WET = 0.004, DEEP = 6;
 const FILL = 1.2, EASE = 0.3, SEEP = 0.5;   // per second: towards the rest level from below / from above, and off dry columns
 const WARM = 60;
+const LOWER = 0.25;              // how much of a river's slope below its blocks' level is drawn (rule 3)
+const HEAP = 0.6;               // water never stands more than this above its rest level (under a fall, behind a dam)
 const SRC_H = 0.889;            // a source block's surface in its cell (as the mesher draws it)
 
 // ---------- fields ----------
 // per column (WB x WB): surface (rest level, NONE dry), bed, known (its chunk was loaded when read), soft (natural ground, may be smoothed)
 const cSurf = new Float32Array(WB * WB).fill(NONE), cBed = new Float32Array(WB * WB), cKnown = new Uint8Array(WB * WB), cSoft = new Uint8Array(WB * WB);
+const cSink = new Uint8Array(WB * WB);   // no ground in the heights read (it is further down): water that gets here is gone, not held up
 const cBlk = new Float32Array(WB * WB);   // the surface as the blocks give it (cSurf differs on a river, rule 3)
 const cVer = new Uint32Array(WB * WB), cTopY = new Int16Array(WB * WB), cBedY = new Int16Array(WB * WB);
 // per cell (N x N)
+const sink = new Uint8Array(NN);
+const lift = new Float32Array(NN);   // drawn above the simulated surface by this much (rule 3)
 const bed = new Float32Array(NN), tgt = new Float32Array(NN).fill(NONE), deep = new Float32Array(NN), fresh = new Uint8Array(NN).fill(1);
 const d = new Float32Array(NN), fL = new Float32Array(NN), fR = new Float32Array(NN), fU = new Float32Array(NN), fD = new Float32Array(NN);
 const vx = new Float32Array(NN), vz = new Float32Array(NN), foam = new Float32Array(NN), foam2 = new Float32Array(NN);
-const CELLF = [bed, tgt, deep, d, fL, fR, fU, fD, vx, vz, foam], COLF = [cSurf, cBed, cKnown, cSoft, cVer, cTopY, cBedY, cBlk];
+const CELLF = [lift, sink, bed, tgt, deep, d, fL, fR, fU, fD, vx, vz, foam], COLF = [cSurf, cBed, cKnown, cSoft, cVer, cTopY, cBedY, cBlk, cSink];
 const tmpF = new Float32Array(NN), tmpC = new Float64Array(WB * WB);
 
 let ox = 0, oz = 0, baseY = 0, placed = false, enabled = true, active = false, seedKey = "";
 let isBed = null, isSoft = null;
 const RV = {};
-const stats = { scans: 0, wet: 0, stepMs: 0, meshMs: 0 };
+const stats = { scans: 0, wet: 0, stray: 0, stepMs: 0, meshMs: 0 };
 
 function tables() {
   const n = BF.blocks.length;
@@ -81,7 +87,7 @@ function scanColumn(i, j) {
   const c = W.chunkAt(x, z);
   const pS = cSurf[q], pB = cBed[q], pK = cKnown[q];
   stats.scans++;
-  if (!c) { cSurf[q] = NONE; cBed[q] = baseY + YH; cKnown[q] = 0; cSoft[q] = 0; cTopY[q] = cBedY[q] = 0; cVer[q] = 0; return pK !== 0; }
+  if (!c) { cSurf[q] = NONE; cBed[q] = baseY + YH; cKnown[q] = 0; cSoft[q] = 0; cSink[q] = 0; cTopY[q] = cBedY[q] = 0; cVer[q] = 0; return pK !== 0; }
   cVer[q] = c.colVer[((z - c.cz * 16) << 4) | (x - c.cx * 16)] + 1;
   let surf = NONE, blk = 0, bedH = NONE, soft = 0, topY = 0, bedY = 0, cover = -1, air = false;
   const get = W.getBlock;
@@ -108,13 +114,15 @@ function scanColumn(i, j) {
     }
   }
   if (surf !== NONE && bedH === NONE) { bedH = baseY; bedY = baseY; }      // water deeper than the window reads
+  const pSink = cSink[q];
+  cSink[q] = surf === NONE && cover < 0 && bedH === NONE ? 1 : 0;
   if (surf === NONE) bedH = cover >= 0 ? cover + 1 : bedH === NONE ? baseY : bedH;
   if (surf !== NONE && surf - bedH < 0.12) surf = bedH + 0.12;
   if (surf === NONE || blk < surf) blk = surf;
   cSurf[q] = surf; cBed[q] = bedH; cKnown[q] = 1; cSoft[q] = soft; cBlk[q] = blk;
   cTopY[q] = surf === NONE ? 0 : topY + 1 - baseY; cBedY[q] = surf === NONE ? 0 : Math.max(0, bedY - baseY);
   if (!pK) for (let b = 0; b < CPB; b++) for (let a = 0; a < CPB; a++) fresh[i * CPB + a + (j * CPB + b) * N] = 1;   // just loaded: starts at rest
-  return surf !== pS || bedH !== pB || !pK;
+  return surf !== pS || bedH !== pB || !pK || pSink !== cSink[q];
 }
 
 // Cells of columns [i0, i1] x [j0, j1] from their columns (and the columns around them, where the ground is smoothed).
@@ -142,7 +150,8 @@ function buildCells(i0, j0, i1, j1) {
       }
       let dp = 0;
       if (t !== NONE && t - h > DEEP) { dp = t - h - DEEP; h = t - DEEP; }   // deep water is simulated as DEEP deep (waves stay slow enough to step)
-      bed[k] = h; tgt[k] = t; deep[k] = dp;
+      bed[k] = h; tgt[k] = t; deep[k] = dp; sink[k] = cSink[q];
+      lift[k] = s !== NONE && cBlk[q] > s ? (cBlk[q] - s) * (1 - LOWER) : 0;
       if (fresh[k]) {
         fresh[k] = 0;
         d[k] = t !== NONE && t > h ? t - h : 0;
@@ -225,15 +234,16 @@ function simStep(dt) {
     const k = i + j * N, dk = d[k];
     if (dk <= 1e-5 && fL[k] === 0 && fR[k] === 0 && fU[k] === 0 && fD[k] === 0) continue;
     const h = bed[k] + dk, damp = 1 / (1 + dt * (0.06 + 0.11 / (dk + 0.08)));
-    let l = i > 0 ? fL[k] * damp + A * (h - bed[k - 1] - d[k - 1]) : 0, r = i < N - 1 ? fR[k] * damp + A * (h - bed[k + 1] - d[k + 1]) : 0;
-    let u = j > 0 ? fU[k] * damp + A * (h - bed[k - N] - d[k - N]) : 0, dn = j < N - 1 ? fD[k] * damp + A * (h - bed[k + N] - d[k + N]) : 0;
+    // water only moves into cells the blocks give water (rule 1): never out over a bank or a lip the block water itself doesn't cross
+    let l = i > 0 && tgt[k - 1] !== NONE ? fL[k] * damp + A * (h - bed[k - 1] - d[k - 1]) : 0, r = i < N - 1 && tgt[k + 1] !== NONE ? fR[k] * damp + A * (h - bed[k + 1] - d[k + 1]) : 0;
+    let u = j > 0 && tgt[k - N] !== NONE ? fU[k] * damp + A * (h - bed[k - N] - d[k - N]) : 0, dn = j < N - 1 && tgt[k + N] !== NONE ? fD[k] * damp + A * (h - bed[k + N] - d[k + N]) : 0;
     if (l < 0) l = 0; if (r < 0) r = 0; if (u < 0) u = 0; if (dn < 0) dn = 0;
     const sum = l + r + u + dn;
     if (sum > 0) { const K = dk * cc / (sum * dt); if (K < 1) { l *= K; r *= K; u *= K; dn *= K; } }
     fL[k] = l; fR[k] = r; fU[k] = u; fD[k] = dn;
   }
   const s = dt / cc, kf = Math.min(1, FILL * dt), ke = Math.min(1, EASE * dt), ks = Math.min(1, SEEP * dt);
-  let wet = 0;
+  let wet = 0, stray = 0;
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const k = i + j * N;
     const inL = i > 0 ? fR[k - 1] : 0, inR = i < N - 1 ? fL[k + 1] : 0, inU = j > 0 ? fD[k - N] : 0, inD = j < N - 1 ? fU[k + N] : 0;
@@ -249,13 +259,14 @@ function simStep(dt) {
       vx[k] = ux; vz[k] = uz;
     }
     // back towards what the blocks say (rule 4)
-    if (t !== NONE) { const want = t - bed[k]; nd += (want - nd) * (nd < want ? kf : ke); if (nd < 0) nd = 0; }
-    else if (nd > 0) { nd -= nd * ks + 0.02 * dt; if (nd < 0) nd = 0; }
+    if (t !== NONE) { const want = t - bed[k]; nd += (want - nd) * (nd < want ? kf : ke); if (nd > want + HEAP) nd = want + HEAP; if (nd < 0) nd = 0; }
+    else if (nd > 0) { nd -= nd * ks + 0.02 * dt; if (nd < 0) nd = 0; if (nd > WET) stray++; }
+    if (sink[k]) nd = 0;   // over the edge of what is read: it falls out of the picture
     if (i < 2 || j < 2 || i > N - 3 || j > N - 3) nd = t !== NONE && t > bed[k] ? t - bed[k] : 0;   // the rim is held at rest: water comes and goes through it
     d[k] = nd;
     if (nd > WET) wet++;
   }
-  stats.wet = wet;
+  stats.wet = wet; stats.stray = stray;
 }
 
 // ---------- the mesh ----------
@@ -347,7 +358,9 @@ void main() {
   float mv = smoothstep(0.03, 0.3, sp);
   vec4 a = mix(texture2D(uRwNoise, uv + dr), mix(a0, a1, w), mv), b = mix(texture2D(uRwNoise, uv2 - dr * 1.7), mix(b0, b1, w), mv);
   vec2 n = (a.xy - 0.5) * 2.0 + (b.xy - 0.5) * 1.2;
-  float st = 0.07 + 0.42 * clamp(sp, 0.0, 2.2);
+  float e = min(min(vL.x, vL.z), min(${WB}.0 - vL.x, ${WB}.0 - vL.z));
+  // towards the rim the flow's roughness eases to still water's, which is what the chunks' block water beyond it draws
+  float st = 0.07 + 0.42 * clamp(sp, 0.0, 2.2) * smoothstep(${EDGE}.0, ${EDGE + 14}.0, e);
   vec4 c0 = texture2D(uRwNoise, xz * 3.0 - vVel * p0 * 5.8), c1 = texture2D(uRwNoise, xz * 3.0 + 0.23 - vVel * p1 * 5.8);
   vec4 c = mix(texture2D(uRwNoise, xz * 3.0), mix(c0, c1, w), mv);
   vec2 n3 = c.xy - 0.5;
@@ -357,7 +370,6 @@ void main() {
   vec3 col = rwShade(Nn, Vd, vDepth, vFoam, fn, 1.0, alpha);
   alpha *= smoothstep(0.0, 0.03, vDepth);
   // cross-fade to the chunks' block water at the window's rim (rule 5)
-  float e = min(min(vL.x, vL.z), min(${WB}.0 - vL.x, ${WB}.0 - vL.z));
   alpha *= smoothstep(1.0, ${EDGE}.0, e);
   gl_FragColor = vec4(col, alpha);
   #include <tonemapping_fragment>
@@ -378,9 +390,11 @@ function updateMesh(dt) {
     const sp = Math.sqrt(vx[k] * vx[k] + vz[k] * vz[k]), fr = sp / Math.sqrt(G * Math.max(dk, 0.03));
     let f = (fr - 0.5) * 1.5, a = 0; if (f < 0) f = 0;
     if (i > 0 && i < N - 1 && j > 0 && j < N - 1) {
-      const sh = Math.abs(vx[k + 1] - vx[k - 1]) + Math.abs(vz[k + N] - vz[k - N]) + Math.abs(vx[k + N] - vx[k - N]) + Math.abs(vz[k + 1] - vz[k - 1]);
+      // (a dry neighbour, a bank, counts as this cell: a bank is not a shear line or a drop, or every shore would be a white strip)
+      const a1 = d[k + 1] > WET ? k + 1 : k, a0 = d[k - 1] > WET ? k - 1 : k, b1 = d[k + N] > WET ? k + N : k, b0 = d[k - N] > WET ? k - N : k;
+      const sh = Math.abs(vx[a1] - vx[a0]) + Math.abs(vz[b1] - vz[b0]) + Math.abs(vx[b1] - vx[b0]) + Math.abs(vz[a1] - vz[a0]);
       if (sh > 0.7) f += (sh - 0.7) * 0.5;
-      const hd = Math.abs(bed[k + 1] + d[k + 1] - bed[k - 1] - d[k - 1]) + Math.abs(bed[k + N] + d[k + N] - bed[k - N] - d[k - N]);
+      const hd = Math.abs(bed[a1] + d[a1] + lift[a1] - bed[a0] - d[a0] - lift[a0]) + Math.abs(bed[b1] + d[b1] + lift[b1] - bed[b0] - d[b0] - lift[b0]);
       if (hd > 0.12 && sp > 0.3) f += (hd - 0.12) * 2.5;
       let fx = i - vx[k] * adv, fz = j - vz[k] * adv;
       if (fx < 0) fx = 0; else if (fx > N - 1.001) fx = N - 1.001; if (fz < 0) fz = 0; else if (fz > N - 1.001) fz = N - 1.001;
@@ -401,7 +415,7 @@ function updateMesh(dt) {
         const k = a + b * N, dk = d[k];
         if (bed[k] < lo) lo = bed[k];
         if (dk <= WET) continue;
-        n++; sy += bed[k] + dk; sd += dk + deep[k]; sx += vx[k]; sz += vz[k]; sf += foam[k];
+        n++; sy += bed[k] + dk + lift[k]; sd += dk + deep[k]; sx += vx[k]; sz += vz[k]; sf += foam[k];
       }
     }
     if (n) {
@@ -480,9 +494,14 @@ if (uRwOn > 0.5) {
   vec3 q = vRwPos - uRwOrg;
   float e = min(min(q.x, q.z), min(${WB}.0 - q.x, ${WB}.0 - q.z));
   if (e > 1.0) {
-    vec4 o = texture2D(uRwOwn, q.xz / ${WB}.0);
-    float top = o.r * 255.0, bot = o.g * 255.0;
-    if (o.a > 0.5 && q.y <= top + 0.03 && q.y >= bot - 0.03) {
+    // a face on the edge of a column belongs to the columns on both sides of it: owned if either owns its height
+    bool own = false;
+    for (int t = 0; t < 4; t++) {
+      vec2 off = vec2(t == 0 || t == 2 ? -0.03 : 0.03, t < 2 ? -0.03 : 0.03);
+      vec4 o = texture2D(uRwOwn, (q.xz + off) / ${WB}.0);
+      if (o.a > 0.5 && q.y <= o.r * 255.0 + 0.03 && q.y >= o.g * 255.0 - 0.03) own = true;
+    }
+    if (own) {
       float keep = 1.0 - smoothstep(1.0, ${EDGE}.0, e);
       if (keep < 0.02) discard;
       diffuseColor.a *= keep;
@@ -580,7 +599,7 @@ RW = BF.real.water = {
   // Depth of the flowing water at atlas (x, z) in blocks (0 dry or outside the window), its surface height (null where dry or
   // outside), its speed in blocks a second (out.x, out.z) and its foam (0..1).
   depthAt(x, z) { const k = cellAt(x, z); return k < 0 || d[k] <= WET ? 0 : d[k] + deep[k]; },
-  surfaceAt(x, z) { const k = cellAt(x, z); return k < 0 || d[k] <= WET ? null : bed[k] + d[k]; },
+  surfaceAt(x, z) { const k = cellAt(x, z); return k < 0 || d[k] <= WET ? null : bed[k] + d[k] + lift[k]; },
   flowAt(x, z, out) { out = out || { x: 0, z: 0 }; const k = cellAt(x, z); out.x = k < 0 ? 0 : vx[k]; out.z = k < 0 ? 0 : vz[k]; return out; },
   foamAt(x, z) { const k = cellAt(x, z); return k < 0 ? 0 : foam[k]; },
   disturb,
@@ -588,7 +607,7 @@ RW = BF.real.water = {
   rebuild() { placed = false; },
   mesh, uniforms: U, stats,
   get window() { return { x: ox, z: oz, y: baseY, size: WB, height: YH, cells: N }; },
-  _fields: { d, bed, tgt, vx, vz, foam, cSurf, cBed, cKnown },
+  _fields: { d, bed, tgt, vx, vz, foam, cSurf, cBed, cKnown, cSink },
 };
 // Splashes (the contract's BF.real.splash, atlas coordinates): for now the water's own answer, a ring of waves and foam.
 BF.real.splash = (x, y, z, strength) => { const s = Math.max(0.1, Math.min(3, strength || 1)); return disturb(x, z, 0.12 * s, 0.6 + 0.5 * s); };

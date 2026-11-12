@@ -58,6 +58,17 @@ module.exports = async (pg) => {
   const settled = await pg.evaluate(s => BF.real.water.surfaceAt(s.x + 0.5, s.z + 0.5), spot);
   check('a splash lifts the surface and it settles back', sp.hit && sp.b > sp.a + 0.05 && Math.abs(settled - sp.a) < 0.08, { ...sp, settled });
 
+  // from any height the water stays in columns that have block water (it once spread over the bottom of the heights read, as a sheet
+  // in the air, when the view came down towards a river from above) and never heaps far above the blocks' level
+  for (const up of [50, 30, 12, 6]) {
+    await pg.evaluate(([s, up]) => { BF.player.spawn(s.x + 0.5, s.wl + up, s.z + 0.5); BF.player.setFlying(true); }, [spot, up]);
+    await run(80);
+    const r = await pg.evaluate(() => { const w = BF.real.water, f = w._fields; let stray = 0, high = 0; for (let k = 0; k < f.d.length; k++) if (f.d[k] > 0.004) { if (f.tgt[k] < -1e8) stray++; else if (f.bed[k] + f.d[k] > f.tgt[k] + 0.7) high++; } return { stray, high, wet: w.stats.wet }; });
+    check('from ' + up + ' blocks up: no water outside the blocks\' water, none heaped above it', r.stray === 0 && r.high === 0, r);
+  }
+  await pg.evaluate(s => { BF.player.spawn(s.x + 0.5, s.wl + 6, s.z + 0.5); BF.player.setFlying(true); }, spot);
+  await run(10);
+
   // the window follows the player
   const w0 = await pg.evaluate(() => BF.real.water.window);
   await pg.evaluate(s => { BF.player.spawn(s.x + 30.5, s.wl + 6, s.z + 0.5); BF.player.setFlying(true); }, spot);
