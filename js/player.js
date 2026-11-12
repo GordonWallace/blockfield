@@ -219,6 +219,19 @@ const optsHTML = o => { const G = BF.gameOpts, ts = G ? G.types() : []; return `
   `<span class="bfp-hint">Coarse: villages beyond your view distance think a few times a second and walk their routes cell by cell. They do the same work, for less computer time.</span></div>`; };
 const readOpts = box => { const o = {}; for (const b of box.querySelectorAll('[data-act="mon"], [data-act="far"]')) o[b.dataset.mon] = b.classList.contains("on"); return o; };
 const flipOpt = b => { const on = !b.classList.contains("on"); b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); b.textContent = b.dataset.act === "far" ? farLabel(on) : BF.gameOpts.name(b.dataset.mon) + ": " + (on ? "On" : "Off"); return on; };
+// The block outline (Gordon, 2026-11-12): the black box around the block under the crosshair is off unless this browser turned it on in
+// the pause menu's Game options. A display choice, kept like the render distance (store "outline" = on | off), not with the world.
+let showOutline = store.get("outline") === "on";
+const outlineLabel = on => "Block outline: " + (on ? "On" : "Off");
+const outlineHTML = () => `<div class="bfp-opts">Display<div class="bfp-optgrid"><button type="button" data-act="outline" class="${showOutline ? "on" : ""}" aria-pressed="${showOutline}">${outlineLabel(showOutline)}</button></div>` +
+  `<span class="bfp-hint">On: a black box marks the block under the crosshair. Kept for every world in this browser.</span></div>`;
+function setOutline(on) {
+  showOutline = !!on;
+  store.set("outline", showOutline ? "on" : "off");
+  if (outline) outline.visible = showOutline && !!target;
+  const b = pauseEl && pauseEl.querySelector('[data-act="outline"]');
+  if (b) { b.classList.toggle("on", showOutline); b.setAttribute("aria-pressed", showOutline); b.textContent = outlineLabel(showOutline); }
+}
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
 
 function buildDOM() {
@@ -336,7 +349,8 @@ function buildDOM() {
     else if (a === "host") cycleHost();
     else if (a === "mode") setGameMode(act.dataset.mode);
     else if (a === "help") helpEl.hidden = !helpEl.hidden;
-    else if (a === "opts") { const p = pauseEl.querySelector(".bfp-pauseopts"); p.hidden = !p.hidden; if (!p.hidden) p.innerHTML = optsHTML(BF.gameOpts.all()); }
+    else if (a === "opts") { const p = pauseEl.querySelector(".bfp-pauseopts"); p.hidden = !p.hidden; if (!p.hidden) p.innerHTML = optsHTML(BF.gameOpts.all()) + outlineHTML(); }
+    else if (a === "outline") setOutline(!showOutline);
     else if (a === "mon" || a === "far") {   // in game: applies at once (where the simulation is too: js/protocol.js meta), and saves
       BF.gameOpts.set(act.dataset.mon, flipOpt(act));
       if (BF.simHost && BF.simHost.worker && BF.client) BF.client.meta({ id: BF.save && BF.save.current ? BF.save.current.id : null, monsters: BF.gameOpts.all() });
@@ -2553,6 +2567,7 @@ function turnPlanet(dx, dy) {
   faceNorth();
 }
 P.turnPlanet = turnPlanet;   // tests
+P.blockOutline = { on: () => showOutline, set: setOutline, visible: () => !!(outline && outline.visible) };   // the option, and whether the box is drawn now (test/block-outline.js)
 P.showMenu = name => showScreen(name || null);   // tests: a menu shown or closed as a player would, without starting play (test/budget-menu.js)
 
 // ---------- detached view (r15-98, Gordon 2026-11-04) ----------
@@ -2689,7 +2704,7 @@ function updateOverlays(dt) {
 function updateTarget() {
   target = P.dead || offPlanet ? null : BF.world.raycast(eyeVec(), dirVec(), REACH);
   if (target) {
-    outline.visible = true;
+    outline.visible = showOutline;
     const ob = BF.blocks[target.id], bb = ob && ob.shape ? ob.cboxes.reduce((m, c) => [Math.min(m[0], c[0]), Math.min(m[1], c[1]), Math.min(m[2], c[2]), Math.max(m[3], c[3]), Math.max(m[4], c[4]), Math.max(m[5], c[5])], [16, 16, 16, 0, 0, 0]) : null;
     if (bb) { // slabs / stairs: outline the real box
       outline.scale.set((bb[3] - bb[0]) / 16, (bb[4] - bb[1]) / 16, (bb[5] - bb[2]) / 16);
