@@ -8,12 +8,17 @@
 // - Plants are batched by region (32 x 32 blocks, the contract's limit for one rigid object): one InstancedMesh per region, model,
 //   level and part, so a region out of view costs nothing (batches are culled against the camera here; three.js can't cull an
 //   InstancedMesh by its instances). A model is one variant of one registry entry (BF.real.assets.species / cover / rocks).
-// - Each level of a model (the registry's build(rand, detail), detail 0 to 2) covers a band of distance from the camera. A region
-//   builds the batches of every level whose band it reaches into, and the vertex shader drops each instance outside its batch's band,
-//   so the level is picked per plant, not per region. Every plant's switch distances are shifted by a hash of its position (jitter),
-//   so levels change tree by tree instead of along a line, and ground cover thins out instead of ending at an edge.
-// - Past its last mesh level a tree is an impostor: a camera-facing card showing the tree from the nearest of FRAMES directions,
-//   baked from its medium mesh into one atlas for all species (bake()). A region's impostors of every species are one draw call.
+// - Each level of a model covers a band of distance from the camera. Level 0 is the registry's full model (build(rand, 0)); levels 1
+//   and 2 are that same mesh thinned here (thin(): its small branches dropped, a share of its leaf cards kept and enlarged), so a
+//   tree is the same tree at every distance. (The registry's own build(rand, 1 or 2) grows a different tree from the same seed: its
+//   coarser levels draw fewer random numbers.) A region builds the batches of every level whose band it reaches into, and the vertex
+//   shader drops each instance outside its batch's band, so the level is picked per plant, not per region. Every plant's switch
+//   distances are shifted by a hash of its position (jitter), so levels change tree by tree instead of along a line, and ground
+//   cover thins out instead of ending at an edge.
+// - Past its last mesh level a tree is an impostor: a card that faces the camera and shows the tree from that direction (the two
+//   nearest of FRAMES baked views, blended), plus a level card with its crown seen from above, so a forest holds up from the air.
+//   Every variant of every species has its own row of one atlas, baked from its own mesh (bakeRow()). A region's impostors of every
+//   species are one draw call. The same cards draw the trees past the loaded chunks (js/lod.js, through BF.real.lod.cards).
 // - Geometry is built the first time a level is needed, at most one build a frame; batches are (re)built a few per frame, nearest
 //   first, within config.budgetMs. A region keeps showing its old batches until the new ones are ready, so nothing blinks while
 //   chunks stream in or a tree is felled.
@@ -23,7 +28,7 @@
 // Light: a plant's sky and block light (the record's `extra`) go into its instance colour; the materials' own cell light stays open.
 //
 // API: BF.real.lod = { config, place(key, ox, oz, F), remove(key), clear(), update(camera), stats(), bake(), impostor, models,
-//                      bandsOf(model) }
+//                      bandsOf(model), cards }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -39,32 +44,40 @@ const config = {
   // distances vary (a share of the distance), and the level from which all variants of an entry are drawn as its first one (share).
   // Tuned on the 1.6 models: a tree is about 4,400 / 1,300 / 370 triangles at detail 0 / 1 / 2 and a tuft of ground cover 36 / 24, so
   // a dense forest (10 trees a chunk) is about 1.3 million triangles of trees all round, under half of that in view, and ground cover
-  // costs draw calls rather than triangles (two levels, variants only next to the player).
+  // costs draw calls rather than triangles (two levels, variants only near the player). A tree never shares (3): it keeps its own
+  // variant all the way out, as a mesh and as a card.
   kinds: [
-    { dist: [24, 60, 120], impostor: true, maxDist: 0, jitter: 0.2, share: 2 },
-    { dist: [18, 44, 110], impostor: false, maxDist: 110, jitter: 0.4, share: 2 },
-    { dist: [12, 72, 72], impostor: false, maxDist: 72, jitter: 0.6, share: 1 },
-    { dist: [24, 60, 220], impostor: false, maxDist: 220, jitter: 0.3, share: 1 },
-    { dist: [30, 76, 150], impostor: true, maxDist: 0, jitter: 0.2, share: 2 },
+    { dist: [24, 60, 120], impostor: true, maxDist: 0, jitter: 0.2, share: 3 },
+    { dist: [18, 44, 110], impostor: false, maxDist: 110, jitter: 0.4, share: 3 },
+    { dist: [28, 72, 72], impostor: false, maxDist: 72, jitter: 0.5, share: 1 },
+    { dist: [24, 60, 220], impostor: false, maxDist: 220, jitter: 0.3, share: 3 },
+    { dist: [30, 76, 150], impostor: true, maxDist: 0, jitter: 0.2, share: 3 },
   ],
+  // levels 1 and 2 of a model, from its level 0: the share of its wood (largest branches first) and of its leaf cards that stay, and
+  // how much larger the leaf cards that stay are drawn (the crown keeps its cover). A part of fewer than minParts pieces is left whole.
+  thin: { wood: [1, 0.35, 0.1], leaves: [1, 0.35, 0.1], grow: [1, 1.6, 2.6], minParts: 24 },
   scale: 1,               // multiplies every distance (set from BF.real.quality.level each frame unless fixedScale)
   fixedScale: false,
   budgetMs: 2,            // batch building per frame
   keepMs: 4000,           // a batch no longer wanted is kept this long (walking back and forth across a band's edge)
-  frames: 8, cellW: 128, cellH: 256,   // impostor atlas: directions per species, pixels per frame
+  frames: 7, cellW: 64, cellH: 128,    // impostor atlas: directions per row (one more cell holds the view from above), pixels per cell
+                          // (a 12-block tree is about 80 pixels tall where its card takes over)
   crown: 2.5,             // a tree stands this many blocks taller than its log column
   big: 1.5,               // a 2 x 2 trunk's tree is this much larger
   enabled: true,
 };
 const QUALITY = [0.55, 0.8, 1];   // config.scale by BF.real.quality.level
-const MAXROW = 32;        // species with impostors (rows of the atlas, and the size of the shader's range table)
+const MAXROW = 64;        // rows of the impostor atlas (one per variant of a species; the size of the shaders' row tables)
+const VARROWS = 40;       // past this many rows a new variant shares a row of its species (a species always gets its first row)
+const COLS = 2;           // rows side by side in the atlas
 const STRIDE = 7;         // x, y, z (atlas), height, seed, sky light, block light
 
 const models = new Map(), modelById = [];   // "kind:species:variant" -> model
 const rows = [];             // impostor atlas rows: the model each one is baked from
+const toBake = [];           // rows not baked yet
 const chunks = new Map();    // chunk key -> { rk, by: Map(model id -> Float32Array(n * STRIDE)) }
 const regions = new Map();   // "rx,rz" -> region
-let scene = null, atlasDirty = false, builtThisFrame = false;
+let scene = null, builtThisFrame = false;
 const st = { buildMs: 0, built: 0, pending: 0, drawn: 0, batches: 0, tris: 0, inst: 0, geo: 0 };
 
 // ---------------------------------------------------------------- models
@@ -137,42 +150,119 @@ function modelOf(kind, def, variant) {
   let M = models.get(key);
   if (M) return M;
   const K = config.kinds[kind] || config.kinds[TREE];
-  M = { id: modelById.length, key, kind, def, variant, K, jit: { value: K.jitter }, lods: [null, null, null], modelH: def.modelHeight || (def.height ? (def.height[0] + def.height[1]) / 2 : 0), row: -1, imp: null,
-    cull: true, seed: (di * 7919 + variant * 104729 + 17) | 0, failed: false };
+  M = { id: modelById.length, key, kind, def, variant, K, jit: { value: K.jitter }, lods: [null, null, null], modelH: def.modelHeight || (def.height ? (def.height[0] + def.height[1]) / 2 : 0), row: -1,
+    cull: true, seed: (di * 7919 + variant * 104729 + 17) | 0, failed: false, flat: false };
   if (K.impostor) {
-    // one atlas row per registry entry (variants share it: past the last mesh level they can't be told apart)
-    const owner = rows.findIndex(r => r.def === def);
-    if (owner >= 0) { M.row = owner; M.imp = rows[owner].imp; }
-    else if (rows.length < MAXROW) { M.row = rows.length; rows.push(M); atlasDirty = true; }
+    // an atlas row of its own (a tree's card is its own variant's picture); when the atlas is nearly full, a row of its species
+    const owner = rows.find(r => r.def === def);
+    if (rows.length < (owner ? VARROWS : MAXROW)) { M.row = rows.length; rows.push(M); toBake.push(M); }
+    else if (owner) M.row = owner.row;
   }
   models.set(key, M); modelById.push(M);
   // from its kind's share level on, a model is drawn as its entry's first variant (far enough that they can't be told apart): a
   // region then draws an entry's far plants in one batch per part, not one per variant
-  M.far = variant === 0 ? M : modelOf(kind, def, 0);
+  M.far = variant === 0 || K.share > 2 ? M : modelOf(kind, def, 0);
   return M;
 }
-// Level i of a model, built on first use: [{geometry, material, depthMaterial}] plus its band uniform and triangle count.
+// The pieces of a geometry (sets of triangles that share no vertex: one per branch tube or leaf card), each with its triangles, its
+// area and its middle.
+function piecesOf(g) {
+  const pos = g.attributes.position, ix = g.index ? g.index.array : null;
+  if (!ix) return null;
+  const n = pos.count, par = new Int32Array(n);
+  for (let i = 0; i < n; i++) par[i] = i;
+  const find = x => { while (par[x] !== x) x = par[x] = par[par[x]]; return x; };
+  for (let i = 0; i < ix.length; i += 3) { const a = find(ix[i]); par[find(ix[i + 1])] = a; par[find(ix[i + 2])] = a; }
+  const of = new Map(), list = [];
+  for (let i = 0; i < ix.length; i += 3) {
+    const r = find(ix[i]);
+    let c = of.get(r);
+    if (!c) { of.set(r, c = { tris: [], area: 0, nv: 0, cx: 0, cy: 0, cz: 0 }); list.push(c); }
+    c.tris.push(i);
+    const a = ix[i], b = ix[i + 1], d = ix[i + 2];
+    const ux = pos.getX(b) - pos.getX(a), uy = pos.getY(b) - pos.getY(a), uz = pos.getZ(b) - pos.getZ(a);
+    const vx = pos.getX(d) - pos.getX(a), vy = pos.getY(d) - pos.getY(a), vz = pos.getZ(d) - pos.getZ(a);
+    c.area += 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+  }
+  for (let v = 0; v < n; v++) { const c = of.get(find(v)); if (c) { c.nv++; c.cx += pos.getX(v); c.cy += pos.getY(v); c.cz += pos.getZ(v); } }
+  for (const c of list) { c.cx /= c.nv; c.cy /= c.nv; c.cz /= c.nv; }
+  return list;
+}
+// A geometry with only the pieces `keep` picks (a list of piecesOf's), each scaled by `grow` about its middle.
+function subset(g, keep, grow) {
+  const ix = g.index.array, n = g.attributes.position.count, map = new Int32Array(n).fill(-1), from = [], centre = [], idx = [];
+  for (const c of keep) for (const t of c.tris) for (let k = 0; k < 3; k++) {
+    const v = ix[t + k];
+    if (map[v] < 0) { map[v] = from.length; from.push(v); centre.push(c); }
+    idx.push(map[v]);
+  }
+  const out = new THREE.BufferGeometry();
+  for (const name in g.attributes) {
+    const a = g.attributes[name], m = a.itemSize, arr = new a.array.constructor(from.length * m);
+    for (let i = 0; i < from.length; i++) for (let k = 0; k < m; k++) arr[i * m + k] = a.array[from[i] * m + k];
+    if (name === "position" && grow !== 1) for (let i = 0; i < from.length; i++) {
+      const c = centre[i];
+      arr[i * 3] = c.cx + (arr[i * 3] - c.cx) * grow; arr[i * 3 + 1] = c.cy + (arr[i * 3 + 1] - c.cy) * grow; arr[i * 3 + 2] = c.cz + (arr[i * 3 + 2] - c.cz) * grow;
+    }
+    out.setAttribute(name, new THREE.BufferAttribute(arr, m, a.normalized));
+  }
+  out.setIndex(idx);
+  out.computeBoundingBox();
+  return out;
+}
+// Level `lod` (1 or 2) of a level-0 part: the same mesh with less in it. Wood keeps its largest pieces (the trunk and main limbs: the
+// twigs go first); leaves keep an even share of their cards, drawn larger. A part too simple to thin comes back as it is.
+function thin(part, lod, leafy) {
+  const T = config.thin, P = part.pieces;
+  if (!P || P.length < T.minParts) return part.geometry;
+  if (part.foliage) {
+    const f = T.leaves[lod], keep = P.filter((c, i) => (i * 0.6180339887) % 1 < f);
+    return keep.length ? subset(part.geometry, keep, T.grow[lod]) : part.geometry;
+  }
+  if (!leafy) return part.geometry;   // (a cactus or a bare tree is all wood: its shape is its branches)
+  const total = P.reduce((a, c) => a + c.tris.length, 0), keep = [];
+  let got = 0;
+  for (const c of P.slice().sort((a, b) => b.area - a.area)) { if (got >= total * T.wood[lod] && keep.length) break; keep.push(c); got += c.tris.length; }
+  return subset(part.geometry, keep, 1);
+}
+// Level i of a model, built on first use: [{geometry, material, depthMaterial}] plus its band uniform and triangle count. Level 0 is
+// the registry's model; levels 1 and 2 are thinned from it.
 function levelOf(M, i) {
   if (M.lods[i]) return M.lods[i];
   if (M.failed) return null;
+  const range = { value: new THREE.Vector2(0, 1e9) }, count = g => (g.index ? g.index.count : g.attributes.position.count) / 3;
+  if (i > 0) {
+    const L0 = levelOf(M, 0);
+    if (!L0) return null;
+    const leafy = L0.parts.some(p => p.foliage);
+    let tris = 0;
+    const parts = L0.parts.map(p => {
+      const g = thin(p, i, leafy);
+      tris += count(g);
+      return { geometry: g, src: p.src, foliage: p.foliage, material: levelMaterial(p.src, range, M.jit), depthMaterial: p.depthMaterial };
+    });
+    return (M.lods[i] = { parts, range, tris });
+  }
   let out;
-  try { out = M.def.build(mulberry(M.seed), i); } catch (e) { console.error("BF.real.lod: build failed for " + (M.def.id || M.key), e); M.failed = true; return null; }
+  try { out = M.def.build(mulberry(M.seed), 0); } catch (e) { console.error("BF.real.lod: build failed for " + (M.def.id || M.key), e); M.failed = true; return null; }
   st.geo++; builtThisFrame = true;
   const named = out && out.isBufferGeometry ? [["one", out]] : Object.keys(out || {}).filter(k => out[k] && out[k].isBufferGeometry).map(k => [k, out[k]])
     .filter(([, g]) => g.attributes.position && (g.index ? g.index.count : g.attributes.position.count) > 0);   // (a leafless tree's foliage is empty)
   if (!named.length) { M.failed = true; return null; }
-  const range = { value: new THREE.Vector2(0, 1e9) };
   let tris = 0, top = 0;
   const parts = named.map(([name, g]) => {
     const src = partMaterial(M.def, name);
     if (!canCull(src)) M.cull = false;
-    tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+    tris += count(g);
     if (!g.boundingBox) g.computeBoundingBox();
     top = Math.max(top, g.boundingBox.max.y);
-    return { geometry: g, src, foliage: name === "foliage", material: levelMaterial(src, range, M.jit), depthMaterial: (out.depth && out.depth[name]) || null };
+    return { geometry: g, src, foliage: name === "foliage", pieces: piecesOf(g), material: levelMaterial(src, range, M.jit), depthMaterial: (out.depth && out.depth[name]) || null };
   });
   if (!M.modelH) M.modelH = top || 1;   // (an entry that doesn't declare its model's height: measured)
-  return (M.lods[i] = { parts, range, tris });
+  // a model with nothing to thin is one mesh at every distance: its levels below the share level are drawn as level 0 (bandsOf)
+  const leafy = parts.some(p => p.foliage);
+  M.flat = parts.every(p => thin(p, 1, leafy) === p.geometry);
+  return (M.lods[0] = { parts, range, tris });
 }
 // A plant's scale from its record, as the foundation's simple placer sizes it: a tree's model reaches a little past its log column
 // (the crown the leaf blocks made), a big tree (2 x 2 trunk) is half as large again; the rest keep the model's size. All vary a little.
@@ -183,93 +273,151 @@ function scaleOf(M, height, seed) {
 }
 
 // The distance bands of a model at the current settings: [from, to) of mesh levels 0 to 2, then the impostor's (or null).
+const ready = M => M.row >= 0 && cardU.uRow.value[M.row].y > 0;   // its card is baked
 function bandsOf(M) {
-  const k = config.scale, K = M.K, end = K.maxDist ? K.maxDist * k : 1e9, out = [];
+  const k = config.scale, K = M.K, end = K.maxDist ? K.maxDist * k : 1e9, card = ready(M), to = [0, 0, 0], out = [];
+  for (let i = 0; i < 3; i++) to[i] = i === 2 && !card ? end : Math.min(end, K.dist[i] * k);
+  // (a model that can't be thinned: each level below the share level is the same mesh as the one before, which draws its band too)
+  if (M.flat) for (let i = 2; i >= 1; i--) if (i < K.share) to[i - 1] = to[i];
   let from = 0;
-  for (let i = 0; i < 3; i++) {
-    let to = Math.min(end, K.dist[i] * k);
-    if (i === 2 && !(M.row >= 0 && M.imp)) to = end;
-    out.push([from, Math.max(from, to)]);
-    from = Math.max(from, to);
-  }
-  out.push(M.row >= 0 && M.imp ? [from, Math.max(from, end)] : null);
+  for (let i = 0; i < 3; i++) { out.push([from, Math.max(from, to[i])]); from = Math.max(from, to[i]); }
+  out.push(card ? [from, Math.max(from, end)] : null);
   return out;
 }
 
 // ---------------------------------------------------------------- impostors
-const IMP_VERT = `
-attribute vec4 iA;   // x, y, z (from the region's corner), yaw
-attribute vec4 iB;   // half width, height, base offset, atlas row
-attribute vec3 iC;   // tint
-uniform vec2 uRange[${MAXROW}];
-uniform float uJit[${MAXROW}];
-uniform vec2 uGrid;  // frames across, rows
+// A tree as cards (shared with js/lod.js, which draws the trees past the loaded chunks with them: BF.real.lod.cards). Per atlas row,
+// uRow holds the model's size (crown radius, height, lowest point, crown height above the foot; a height of 0: not baked yet, nothing
+// is drawn) and uRowCol its average colour (for trees a few pixels tall).
+const cardU = { map: { value: null }, uGrid: { value: new THREE.Vector3(config.frames, COLS, 4) }, uRow: { value: [] }, uRowCol: { value: [] } };
+for (let i = 0; i < MAXROW; i++) { cardU.uRow.value.push(new THREE.Vector4()); cardU.uRowCol.value.push(new THREE.Vector3()); }
+// rlCard(): the view-space place of one corner of a tree's cards (w = 0: not drawn). foot, up, xV, zV: the tree's foot and the
+// world's up, x and z axes in view space; corner: x -1..1, y 0..1, z 0 for the upright card or 1 for the level one; s: the tree's
+// scale; yaw: its turn.
+// The upright card faces the camera round the tree's axis and shows it from that side (the two nearest baked views, blended by
+// vMix); it leans back as the camera rises, so it isn't seen edge-on from the air. The level card lies in the crown and shows the
+// tree from above; it is drawn once the camera is well above the tree, and the upright one is dropped straight overhead.
+const CARD_VERT = `
+uniform vec4 uRow[${MAXROW}];
+uniform vec3 uGrid;   // views round the tree, rows side by side, lines of rows
 varying vec2 vUv;
-varying vec3 vTint;
+varying vec2 vUv2;
+varying float vMix;
 varying float vX;
+varying float vTop;
 varying vec3 vRight;
 varying vec3 vFront;
 varying vec3 vUp;
+vec4 rlCard(vec3 foot, vec3 up, vec3 xV, vec3 zV, vec3 corner, float row, float s, float yaw) {
+  vec4 I = uRow[int(row + 0.5)];
+  if (I.y <= 0.0) return vec4(0.0);
+  vec3 toCam = normalize(-foot);
+  float el = dot(toCam, up);
+  vec3 side = cross(up, toCam);
+  float sl = length(side);
+  vec3 right = sl > 1e-3 ? side / sl : xV;
+  vec3 front = cross(right, up);
+  float cells = uGrid.x + 1.0, col = mod(floor(row + 0.5), uGrid.y), line = floor((row + 0.5) / uGrid.y);
+  vX = corner.x; vTop = corner.z; vRight = right; vFront = front; vUp = up;
+  if (corner.z < 0.5) {
+    if (el > 0.93) return vec4(0.0);
+    float fr = fract((atan(dot(toCam, xV), dot(toCam, zV)) - yaw) / 6.2831853) * uGrid.x;
+    float f0 = floor(fr), f1 = mod(f0 + 1.0, uGrid.x), v = (line + 0.02 + corner.y * 0.96) / uGrid.z;
+    vMix = smoothstep(0.25, 0.75, fr - f0);
+    vUv = vec2((col * cells + f0 + 0.5 + corner.x * 0.48) / (uGrid.y * cells), v);
+    vUv2 = vec2((col * cells + f1 + 0.5 + corner.x * 0.48) / (uGrid.y * cells), v);
+    float a = el > 0.0 ? min(asin(min(el, 1.0)), 1.0) * 0.8 : 0.0;
+    vec3 upC = up * cos(a) - front * sin(a);
+    return vec4(foot + up * ((I.z + 0.5 * I.y) * s) + right * (corner.x * I.x * s) + upC * ((corner.y - 0.5) * I.y * s), 1.0);
+  }
+  if (el < 0.3) return vec4(0.0);
+  float c = cos(yaw), sn = sin(yaw), z = corner.y * 2.0 - 1.0;
+  vec3 xT = xV * c - zV * sn, zT = xV * sn + zV * c;
+  vMix = 0.0;
+  vUv = vec2((col * cells + uGrid.x + 0.5 - corner.x * 0.48) / (uGrid.y * cells), (line + (0.5 + z * 0.48) * CARD_SQUARE) / uGrid.z);
+  vUv2 = vUv;
+  return vec4(foot + up * (I.w * s) + (xT * corner.x + zT * z) * (I.x * s), 1.0);
+}`;
+// rlCardTexel(): the card's baked surface colour (sRGB) and cover. rlCardNormal(): the card shaded as the round crown it stands for
+// (a normal that turns from one edge to the other and leans up; straight up on the level card), so a tree lit from one side stays lit
+// from that side as a card and a backlit forest stays dark: the switch from mesh to card doesn't change a tree's brightness.
+const CARD_FRAG = `
+uniform sampler2D map;
+varying vec2 vUv;
+varying vec2 vUv2;
+varying float vMix;
+varying float vX;
+varying float vTop;
+varying vec3 vRight;
+varying vec3 vFront;
+varying vec3 vUp;
+vec4 rlCardTexel() {
+  vec4 c = texture2D(map, vUv);
+  if (vMix > 0.0) c = mix(c, texture2D(map, vUv2), vMix);
+  return c;
+}
+vec3 rlCardNormal() {
+  if (vTop > 0.5) return normalize(vUp);
+  float x = clamp(vX, -1.0, 1.0) * 0.85;
+  return normalize(vRight * x + vFront * sqrt(1.0 - x * x) + vUp * 0.45);
+}`;
+const CARD_DEFINES = () => ({ CARD_SQUARE: (config.cellW / config.cellH).toFixed(4) });
+// the two cards of a tree: corners as rlCard takes them
+const CARD_QUADS = { pos: new Float32Array([-1, 0, 0, 1, 0, 0, 1, 1, 0, -1, 1, 0, -1, 0, 1, 1, 0, 1, 1, 1, 1, -1, 1, 1]), idx: [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7] };
+
+const IMP_VERT = `
+attribute vec4 iA;   // x, y, z (from the region's corner), yaw
+attribute vec3 iB;   // scale, atlas row, kind
+attribute vec3 iC;   // tint
+uniform vec2 uRange[5];   // by kind: the cards' band of distance
+uniform float uJit[5];
+varying vec3 vTint;
 #include <fog_pars_vertex>
+` + CARD_VERT + `
 void main() {
   vec4 mvPosition = modelViewMatrix * vec4(iA.xyz, 1.0);
-  int row = int(iB.w + 0.5);
+  int kind = int(iB.z + 0.5);
   vec2 P = iA.xz;
-  float d = length(mvPosition.xyz) * (1.0 + uJit[row] * (${HASH}));
+  float d = length(mvPosition.xyz) * (1.0 + uJit[kind] * (${HASH}));
   vec3 up = normalize((modelViewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
-  vec3 toCam = normalize(-mvPosition.xyz);
-  vec3 right = normalize(cross(up, toCam));
-  vec3 xV = (modelViewMatrix * vec4(1.0, 0.0, 0.0, 0.0)).xyz, zV = (modelViewMatrix * vec4(0.0, 0.0, 1.0, 0.0)).xyz;
-  float ang = atan(dot(toCam, xV), dot(toCam, zV)) - iA.w;
-  float f = mod(floor(fract(ang / 6.2831853) * uGrid.x + 0.5), uGrid.x);
-  vUv = vec2((f + 0.5 + position.x * 0.48) / uGrid.x, (iB.w + 0.02 + position.y * 0.96) / uGrid.y);
+  vec3 xV = normalize((modelViewMatrix * vec4(1.0, 0.0, 0.0, 0.0)).xyz), zV = normalize((modelViewMatrix * vec4(0.0, 0.0, 1.0, 0.0)).xyz);
+  vec4 q = rlCard(mvPosition.xyz, up, xV, zV, position, iB.y, iB.x, iA.w);
   vTint = iC;
-  vX = position.x; vRight = right; vUp = up; vFront = normalize(cross(right, up));
-  mvPosition.xyz += right * (position.x * iB.x) + up * (iB.z + position.y * iB.y);
+  mvPosition.xyz = q.xyz;
   gl_Position = projectionMatrix * mvPosition;
-  if (d < uRange[row].x || d >= uRange[row].y) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  if (q.w < 0.5 || d < uRange[kind].x || d >= uRange[kind].y) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   #include <fog_vertex>
 }`;
-// The card's colour is the baked surface colour under the frame's light. The card is shaded as the round crown it stands for (a
-// normal that turns from one edge to the other and leans up), so a tree lit from one side stays lit from that side as a card, and a
-// backlit forest stays dark: the switch from mesh to card doesn't change a tree's brightness.
 const IMP_FRAG = `
-uniform sampler2D map;
 uniform vec3 uSunCol;
 uniform vec3 uSunDir;
 uniform vec3 uSkyCol;
 uniform vec3 uGroundCol;
-varying vec2 vUv;
 varying vec3 vTint;
-varying float vX;
-varying vec3 vRight;
-varying vec3 vFront;
-varying vec3 vUp;
 #include <common>
 #include <fog_pars_fragment>
+` + CARD_FRAG + `
 void main() {
-  vec4 c = texture2D(map, vUv);
+  vec4 c = rlCardTexel();
   if (c.a < 0.4) discard;
-  float x = clamp(vX, -1.0, 1.0) * 0.85;
-  vec3 n = normalize(vRight * x + vFront * sqrt(1.0 - x * x) + vUp * 0.45);
+  vec3 n = rlCardNormal();
   vec3 sunV = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz);
-  vec3 light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, vUp)) + uSunCol * max(dot(n, sunV), 0.0);
+  vec3 light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, normalize(vUp))) + uSunCol * max(dot(n, sunV), 0.0);
   gl_FragColor = vec4(pow(c.rgb, vec3(2.2)) * vTint * light, 1.0);
   #include <tonemapping_fragment>
   #include <encodings_fragment>
   #include <fog_fragment>
 }`;
-const imp = { material: null, atlas: null, quad: null, rows: 0 };
+const imp = { material: null, atlas: null, data: null, lines: 0, rows: 0, dirty: false, flushed: 0, waiting: [], rt: null, scene: null };
 function impostorMaterial() {
   if (imp.material) return imp.material;
   const ranges = [], jits = [];
-  for (let i = 0; i < MAXROW; i++) { ranges.push(new THREE.Vector2(1e9, 1e9)); jits.push(0); }
+  for (let i = 0; i < 5; i++) { ranges.push(new THREE.Vector2(1e9, 1e9)); jits.push(0); }
   const U = real.U;
-  const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { map: { value: null }, uRange: { value: ranges }, uJit: { value: jits },
-    uGrid: { value: new THREE.Vector2(config.frames, 1) } }]);
+  const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uRange: { value: ranges }, uJit: { value: jits } }]);
+  Object.assign(uniforms, cardU);
   uniforms.uSunCol = U.uSunCol; uniforms.uSunDir = U.uSunDir; uniforms.uSkyCol = U.uSkyCol; uniforms.uGroundCol = U.uGroundCol;   // (shared by reference, contract section 3)
-  imp.material = new THREE.ShaderMaterial({ uniforms, vertexShader: IMP_VERT, fragmentShader: IMP_FRAG, fog: true, side: THREE.DoubleSide });
-  imp.quad = { pos: new Float32Array([-1, 0, 0, 1, 0, 0, 1, 1, 0, -1, 1, 0]), idx: [0, 1, 2, 0, 2, 3] };
+  imp.material = new THREE.ShaderMaterial({ uniforms, defines: CARD_DEFINES(), vertexShader: IMP_VERT, fragmentShader: IMP_FRAG, fog: true, side: THREE.DoubleSide });
   return imp.material;
 }
 
@@ -296,66 +444,116 @@ function dilate(px, w, h, rounds) {
   return src;
 }
 
-// Bakes every impostor row into one atlas (again whenever a new species is first seen): each tree's medium mesh from FRAMES
-// directions, lit flat and white so the card holds surface colour. Needs the renderer.
-function bake() {
+// The atlas: COLS rows side by side, each FRAMES views round the tree and one from above; lines of rows are added as species are met
+// (the texture doubles in height when it runs out).
+function atlasFor(nRows) {
+  const W = COLS * (config.frames + 1) * config.cellW, need = Math.ceil(nRows / COLS);
+  let lines = imp.lines || 4;
+  while (lines < need) lines *= 2;
+  if (imp.data && lines === imp.lines) return;
+  const data = new Uint8Array(W * lines * config.cellH * 4);
+  if (imp.data) data.set(imp.data);
+  const tex = new THREE.DataTexture(data, W, lines * config.cellH, THREE.RGBAFormat, THREE.UnsignedByteType);
+  tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true; tex.needsUpdate = true;
+  if (imp.atlas) imp.atlas.dispose();
+  imp.atlas = tex; imp.data = data; imp.lines = lines;
+  cardU.map.value = tex; cardU.uGrid.value.set(config.frames, COLS, lines);
+}
+// Bakes one row: the model's medium mesh from FRAMES directions round it and from above, lit flat and white so the card holds
+// surface colour. Needs the renderer. False while it can't be done yet (no renderer, or the mesh's geometry has to wait a frame).
+function bakeRow(M) {
   const R = real.renderer || BF.renderer;
   if (!R) return false;
-  atlasDirty = false;
-  if (!rows.length) return true;
-  const F = config.frames, cw = config.cellW, ch = config.cellH, W = F * cw, H = rows.length * ch;
-  const rt = new THREE.WebGLRenderTarget(W, H, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, format: THREE.RGBAFormat });
-  rt.texture.encoding = THREE.sRGBEncoding;
-  const bs = new THREE.Scene();
-  bs.add(new THREE.AmbientLight(0xffffff, 0.82));
-  const sun = new THREE.DirectionalLight(0xffffff, 0.3); bs.add(sun); bs.add(sun.target);
-  const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+  if (!M.lods[0] && builtThisFrame) return false;
+  const L = levelOf(M, 1) || levelOf(M, 0);
+  if (!L) return true;
+  const F = config.frames, cw = config.cellW, ch = config.cellH, W = (F + 1) * cw, row = M.row;
+  atlasFor(rows.length);
+  if (!imp.rt) {
+    imp.rt = new THREE.WebGLRenderTarget(W, ch, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, format: THREE.RGBAFormat });
+    imp.rt.texture.encoding = THREE.sRGBEncoding;
+    const bs = (imp.scene = new THREE.Scene());
+    bs.add(new THREE.AmbientLight(0xffffff, 0.82));
+    imp.sun = new THREE.DirectionalLight(0xffffff, 0.3); bs.add(imp.sun); bs.add(imp.sun.target);
+    imp.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+  }
+  const rt = imp.rt, bs = imp.scene, sun = imp.sun, cam = imp.cam;
   const prev = { rt: R.getRenderTarget(), color: R.getClearColor(new THREE.Color()), alpha: R.getClearAlpha(), auto: R.autoClear, tone: R.toneMapping,
     shadow: R.shadowMap.autoUpdate };
   R.shadowMap.autoUpdate = false; R.toneMapping = THREE.NoToneMapping;
   R.setClearColor(0x000000, 0); R.autoClear = false;
-  rt.scissorTest = false; rt.viewport.set(0, 0, W, H);
+  rt.scissorTest = false; rt.viewport.set(0, 0, W, ch);
   R.setRenderTarget(rt); R.clear(true, true, true);
+  // (the registry's own materials: a level's copy would cut the tree by the bake camera's distance)
+  const srcs = L.parts.map(p => { const m = new THREE.Mesh(p.geometry, p.src); m.frustumCulled = false; bs.add(m); return m; });
   const box = new THREE.Box3();
-  rows.forEach((M, row) => {
-    const L = levelOf(M, 1) || levelOf(M, 2) || levelOf(M, 0);
-    if (!L) return;
-    const srcs = L.parts.map(p => { const m = new THREE.Mesh(p.geometry, p.src)   /* the registry's own material: the level's copy would cut the tree by the bake camera's distance */; m.frustumCulled = false; bs.add(m); return m; });
-    box.makeEmpty();
-    let rad = 0;
-    for (const p of L.parts) {
-      box.union(p.geometry.boundingBox);
-      const a = p.geometry.attributes.position;
-      for (let i = 0; i < a.count; i++) rad = Math.max(rad, Math.hypot(a.getX(i), a.getZ(i)));
-    }
-    rad *= 1.04;
-    const y0 = box.min.y, hgt = (box.max.y - box.min.y) * 1.04, D = rad * 4 + 10;
-    M.imp = { r: rad, h: hgt, y0 };
-    for (const o of modelById) if (o.row === row) o.imp = M.imp;
-    cam.left = -rad; cam.right = rad; cam.bottom = y0; cam.top = y0 + hgt; cam.near = 0.1; cam.far = D * 2; cam.updateProjectionMatrix();
-    for (let f = 0; f < F; f++) {
+  let rad = 0, cy = 0, cn = 0;
+  for (const p of L.parts) {
+    box.union(p.geometry.boundingBox);
+    const a = p.geometry.attributes.position;
+    for (let i = 0; i < a.count; i++) rad = Math.max(rad, Math.hypot(a.getX(i), a.getZ(i)));
+    if (p.foliage) for (let i = 0; i < a.count; i++) { cy += a.getY(i); cn++; }
+  }
+  rad *= 1.04;
+  const y0 = box.min.y, hgt = (box.max.y - box.min.y) * 1.04, D = rad * 4 + hgt + 10;
+  rt.scissorTest = true;
+  for (let f = 0; f <= F; f++) {
+    if (f < F) {
       const a = f / F * Math.PI * 2;
+      cam.left = -rad; cam.right = rad; cam.bottom = y0; cam.top = y0 + hgt;
       cam.position.set(Math.sin(a) * D, 0, Math.cos(a) * D); cam.up.set(0, 1, 0); cam.lookAt(0, 0, 0);
-      sun.position.set(Math.sin(a) * D, D * 0.8, Math.cos(a) * D);   // (from the camera's side and above: only depth inside the crown is baked in) sun.target.position.set(0, y0 + hgt / 2, 0);
-      rt.viewport.set(f * cw, row * ch, cw, ch); rt.scissor.set(f * cw, row * ch, cw, ch); rt.scissorTest = true;
-      R.setRenderTarget(rt);
-      R.clearDepth();
-      R.render(bs, cam);
+      sun.position.set(Math.sin(a) * D, D * 0.8, Math.cos(a) * D);   // (from the camera's side and above: only depth inside the crown is baked in)
+      rt.viewport.set(f * cw, 0, cw, ch); rt.scissor.set(f * cw, 0, cw, ch);
+    } else {
+      // from above, x to the left and z up the picture (rlCard's level card reads it so)
+      cam.left = -rad; cam.right = rad; cam.bottom = -rad; cam.top = rad;
+      cam.position.set(0, y0 + hgt + D, 0); cam.up.set(0, 0, 1); cam.lookAt(0, 0, 0);
+      sun.position.set(D * 0.3, D, D * 0.3);
+      rt.viewport.set(f * cw, 0, cw, cw); rt.scissor.set(f * cw, 0, cw, cw);
     }
-    for (const m of srcs) bs.remove(m);
-  });
-  const px = new Uint8Array(W * H * 4);
-  R.readRenderTargetPixels(rt, 0, 0, W, H, px);
+    cam.near = 0.1; cam.far = D * 3; cam.updateProjectionMatrix();
+    R.setRenderTarget(rt);
+    R.clearDepth();
+    R.render(bs, cam);
+  }
+  for (const m of srcs) bs.remove(m);
+  let px = new Uint8Array(W * ch * 4);
+  R.readRenderTargetPixels(rt, 0, 0, W, ch, px);
   R.setRenderTarget(prev.rt); R.setClearColor(prev.color, prev.alpha); R.autoClear = prev.auto; R.toneMapping = prev.tone; R.shadowMap.autoUpdate = prev.shadow;
-  rt.dispose();
-  const tex = new THREE.DataTexture(dilate(px, W, H, 6), W, H, THREE.RGBAFormat, THREE.UnsignedByteType);
-  tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true; tex.needsUpdate = true;
-  const mat = impostorMaterial();
-  if (imp.atlas) imp.atlas.dispose();
-  imp.atlas = tex; imp.rows = rows.length;
-  mat.uniforms.map.value = tex; mat.uniforms.uGrid.value.set(F, rows.length);
-  for (const r of regions.values()) r.ver++;   // rows and card sizes may have changed
+  // the tree's average colour (linear, as the cards' shader reads the atlas)
+  let cr = 0, cg = 0, cb = 0, n = 0;
+  for (let o = 0; o < px.length; o += 4) if (px[o + 3] > 127) { cr += Math.pow(px[o] / 255, 2.2); cg += Math.pow(px[o + 1] / 255, 2.2); cb += Math.pow(px[o + 2] / 255, 2.2); n++; }
+  px = dilate(px, W, ch, 4);
+  const AW = COLS * W, x0 = (row % COLS) * W, y1 = Math.floor(row / COLS) * ch;
+  for (let y = 0; y < ch; y++) imp.data.set(px.subarray(y * W * 4, (y + 1) * W * 4), ((y1 + y) * AW + x0) * 4);
+  imp.dirty = true;
+  imp.waiting.push({ row, info: [rad, hgt, y0, cn ? cy / cn : y0 + hgt * 0.6], col: n ? [cr / n, cg / n, cb / n] : [0.1, 0.2, 0.05] });
   return true;
+}
+// Bakes the rows that wait (one a frame), and shows the baked ones once the atlas is uploaded with them (a few times a second at most:
+// the whole texture goes up again).
+function bake(all) {
+  let did = false;
+  while (toBake.length && (all || !did)) {
+    if (!bakeRow(toBake[0])) break;
+    toBake.shift(); did = true;
+  }
+  const now = performance.now();
+  if (imp.dirty && (all || now - imp.flushed > 250)) {
+    imp.atlas.needsUpdate = true; imp.dirty = false; imp.flushed = now; imp.rows = rows.length;
+    for (const w of imp.waiting) { cardU.uRow.value[w.row].set(w.info[0], w.info[1], w.info[2], w.info[3]); cardU.uRowCol.value[w.row].set(w.col[0], w.col[1], w.col[2]); }
+    imp.waiting.length = 0;
+  }
+  return !toBake.length;
+}
+// For the trees past the loaded chunks (js/lod.js): the atlas row and scale of the tree a flora record would give ([row, scale], or
+// null when the registry has no tree for it). far: its species' first variant (a few pixels tall, variants can't be told apart).
+function cardFor(kind, block, biomeName, logs, seed, far) {
+  let M = modelFor(kind, block, biomeName, logs, seed);
+  if (!M || !M.K.impostor) return null;
+  if (far && M.variant) M = modelOf(kind, M.def, 0);
+  if (M.row < 0) return null;
+  return [M.row, scaleOf(M, logs, seed)];
 }
 // ---------------------------------------------------------------- data in
 function regionFor(x, z) {
@@ -489,27 +687,26 @@ function buildMeshBatch(r, M, lod) {
 }
 function buildImpostorBatch(r) {
   let n = 0;
-  for (const [id, c] of r.count) { const M = modelById[id]; if (M.row >= 0 && M.imp) n += c; }
-  const b = { ver: r.ver, meshes: [], n, tris: n * 2, last: 0 };
+  for (const [id, c] of r.count) if (modelById[id].row >= 0) n += c;
+  const b = { ver: r.ver, meshes: [], n, tris: n * 4, last: 0 };
   if (!n) return b;
-  const A = new Float32Array(n * 4), B = new Float32Array(n * 4), C = new Float32Array(n * 3);
+  const A = new Float32Array(n * 4), B = new Float32Array(n * 3), C = new Float32Array(n * 3);
   let o = 0, q = 0;
   for (const k of r.chunks) for (const [id, a] of chunks.get(k).by) {
-    const M = modelById[id], I = M.imp;
-    if (M.row < 0 || !I) continue;
+    const M = modelById[id];
+    if (M.row < 0) continue;
     for (let i = 0; i < a.length; i += STRIDE) {
-      const s = scaleOf(M, a[i + 3], a[i + 4]);
       A[o] = a[i] - r.ox; A[o + 1] = a[i + 1] - r.oy; A[o + 2] = a[i + 2] - r.oz; A[o + 3] = a[i + 4] * 6.2831853;
-      B[o] = I.r * s; B[o + 1] = I.h * s; B[o + 2] = I.y0 * s; B[o + 3] = M.row;
+      B[q] = scaleOf(M, a[i + 3], a[i + 4]); B[q + 1] = M.row; B[q + 2] = M.kind;
       tintOf(a, i, C, q);
       o += 4; q += 3;
     }
   }
   const mat = impostorMaterial(), g = new THREE.InstancedBufferGeometry();
-  g.setAttribute("position", new THREE.BufferAttribute(imp.quad.pos, 3));
-  g.setIndex(imp.quad.idx);
+  g.setAttribute("position", new THREE.BufferAttribute(CARD_QUADS.pos, 3));
+  g.setIndex(CARD_QUADS.idx);
   g.setAttribute("iA", new THREE.InstancedBufferAttribute(A, 4));
-  g.setAttribute("iB", new THREE.InstancedBufferAttribute(B, 4));
+  g.setAttribute("iB", new THREE.InstancedBufferAttribute(B, 3));
   g.setAttribute("iC", new THREE.InstancedBufferAttribute(C, 3));
   g.instanceCount = n;
   const m = new THREE.Mesh(g, mat);
@@ -538,18 +735,19 @@ function update(camera) {
   if (!config.enabled) { for (const r of regions.values()) for (const b of r.built.values()) for (const m of b.meshes) m.visible = false; return; }
   if (!config.fixedScale && real.quality) config.scale = QUALITY[Math.max(0, Math.min(2, real.quality.level | 0))];
   builtThisFrame = false;
-  if (atlasDirty) bake();
+  if (toBake.length || imp.dirty) bake();
   // this frame's bands
   const mat = imp.material, bands = [];
   for (const M of modelById) {
     const bd = bandsOf(M); bands.push(bd);
     for (let i = 0; i < 3; i++) if (M.lods[i]) M.lods[i].range.value.set(bd[i][0], bd[i][1]);
-    if (mat && M.row >= 0) {
-      const ib = bd[3];
-      mat.uniforms.uRange.value[M.row].set(ib ? ib[0] : 1e9, ib ? ib[1] : 1e9);
-      mat.uniforms.uJit.value[M.row] = M.jit.value;
-    }
   }
+  // (cards: from the end of the last mesh level, the same for every model of a kind; a tree whose card isn't baked yet stays a mesh)
+  if (mat) config.kinds.forEach((K, i) => {
+    if (!K.impostor) return;
+    mat.uniforms.uRange.value[i].set(K.dist[2] * config.scale, K.maxDist ? K.maxDist * config.scale : 1e9);
+    mat.uniforms.uJit.value[i] = K.jitter;
+  });
   // culling in atlas space holds while the view is flat and the region is on the camera's face (js/view.js); otherwise everything shows
   const V = BF.view && BF.view.state, flat = !V || !V.on || V.k <= 0, cp = camera.position;
   const camFace = BF.planet && BF.planet.face ? BF.planet.face(cp.x, cp.z) : -1;
@@ -631,7 +829,8 @@ function stats() {
     pending: st.pending, built: st.built, buildMs: +st.buildMs.toFixed(2), models: modelById.length, geometries: st.geo, rows: rows.length, scale: config.scale };
 }
 
-real.lod = { config, models, place, remove, clear, update, stats, bake, impostor: imp, bandsOf };
+real.lod = { config, models, place, remove, clear, update, stats, bake, impostor: imp, bandsOf,
+  cards: { uniforms: cardU, VERT: CARD_VERT, FRAG: CARD_FRAG, defines: CARD_DEFINES, quads: CARD_QUADS, rowOf: cardFor, MAXROW } };
 // Take over the flora placer (contract section 4): now, and again at init in case the foundation's placer was installed after this file.
 function takeOver() { real.flora = real.flora || {}; real.flora.place = place; real.flora.remove = remove; }
 takeOver();

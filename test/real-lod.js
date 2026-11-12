@@ -1,8 +1,9 @@
 // @ci integration suite=world
 // The realistic look's plant levels of detail (js/real/lod.js, docs/REALISTIC_CONTRACT.md section 4): with the look off the module
 // is not there; with it on it takes over BF.real.flora.place / remove, batches a chunk's flora records by region, builds each level's
-// geometry from the registry, bakes the impostor atlas, picks levels by distance, and lets everything go again on remove. The species
-// here are the test's own (cones), so it holds whatever the registry ships. The distant rings must still build with the look on.
+// geometry (the registry's full model, and two thinner levels made from that same mesh so a tree keeps its shape), bakes the impostor
+// atlas (a row per variant), picks levels by distance, and lets everything go again on remove. The species here are the test's own
+// (cones), so it holds whatever the registry ships. The distant rings must still build with the look on.
 // node test/run.js /tmp/rl test/real-lod.js
 module.exports = async (pg, out) => {
   let fails = 0;
@@ -25,13 +26,30 @@ module.exports = async (pg, out) => {
     const first = BF.B.oak_log, cover = BF.B.fern;
     const mat = c => R.lit(new T.MeshLambertMaterial({ color: c }), { light: "cell" });
     let bm, fm, cm;
+    const join = gs => {
+      let n = 0, ni = 0;
+      for (const g of gs) { n += g.attributes.position.count; ni += g.index.count; }
+      const pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3), ix = new Uint32Array(ni);
+      let o = 0, oi = 0;
+      for (const g of gs) {
+        pos.set(g.attributes.position.array, o * 3); nrm.set(g.attributes.normal.array, o * 3);
+        for (let k = 0; k < g.index.count; k++) ix[oi++] = g.index.array[k] + o;
+        o += g.attributes.position.count;
+      }
+      const G = new T.BufferGeometry();
+      G.setAttribute("position", new T.BufferAttribute(pos, 3)); G.setAttribute("normal", new T.BufferAttribute(nrm, 3)); G.setIndex(new T.BufferAttribute(ix, 1));
+      return G;
+    };
     window.__builds = [];
     R.assets.species.push({ id: "test_cone", kind: "tree", log: "oak_log", variants: 2, height: [8, 8],
       build(rand, detail) {
         __builds.push(detail);
-        const seg = [12, 7, 4][detail], bark = new T.CylinderGeometry(0.2, 0.4, 3, seg), fol = new T.ConeGeometry(2.5 + rand(), 6, seg * 2);
-        bark.translate(0, 1.5, 0); fol.translate(0, 5, 0);
-        return { bark, foliage: fol };
+        // a trunk, 30 twigs and 40 leaf cones, each its own piece (as the registry's trees are tubes and leaf cards)
+        const seg = [12, 7, 4][detail], trunk = new T.CylinderGeometry(0.2, 0.4, 3, seg), wood = [trunk], leaves = [], w = 2.5 + rand();
+        trunk.translate(0, 1.5, 0);
+        for (let i = 0; i < 30; i++) { const g = new T.CylinderGeometry(0.03, 0.05, 1, 4); g.translate(Math.cos(i) * w * 0.4, 3 + i * 0.15, Math.sin(i) * w * 0.4); wood.push(g); }
+        for (let i = 0; i < 40; i++) { const g = new T.ConeGeometry(0.5, 0.8, 5); g.translate(Math.cos(i * 2.4) * w * (1 - i / 50), 3 + i * 0.12, Math.sin(i * 2.4) * w * (1 - i / 50)); leaves.push(g); }
+        return { bark: join(wood), foliage: join(leaves) };
       },
       barkMaterial: () => bm || (bm = mat(0x5a4028)), foliageMaterial: () => fm || (fm = mat(0x3f7a35)) });
     R.assets.cover.push({ id: "test_tuft", block: "fern", build(rand, detail) { const g = new T.ConeGeometry(0.4, 0.7, [8, 5, 3][detail]); g.translate(0, 0.35, 0); return g; },
@@ -65,7 +83,10 @@ module.exports = async (pg, out) => {
   const r = await pg.evaluate(() => {
     const L = BF.real.lod, s = L.stats(), tree = [...L.models.values()].find(m => m.def.id === "test_cone" && m.variant === 0), bands = tree && L.bandsOf(tree);
     const mine = BF.scene.children.filter(c => c.userData.rlod);
-    return { s, bands, levels: tree && tree.lods.map(l => !!l), imp: tree && tree.imp, atlas: L.impostor.atlas ? [L.impostor.atlas.image.width, L.impostor.atlas.image.height] : null,
+    const U = L.cards.uniforms, other = [...L.models.values()].find(m => m.def.id === "test_cone" && m.variant === 1);
+    const top = l => Math.max(...l.parts.map(p => p.geometry.boundingBox.max.y));
+    return { s, bands, levels: tree && tree.lods.map(l => !!l), tris: tree && tree.lods.map(l => l && Math.round(l.tris)), tops: tree && tree.lods.map(l => l && +top(l).toFixed(2)),
+      imp: tree && tree.row >= 0 && U.uRow.value[tree.row].toArray(), rowsApart: !!(other && other.row >= 0 && other.row !== tree.row), atlas: L.impostor.atlas ? [L.impostor.atlas.image.width, L.impostor.atlas.image.height] : null,
       direct: mine.length, cards: mine.filter(c => !c.isInstancedMesh).length, builds: __builds.slice().sort().join("") };
   });
   console.log("stats:", JSON.stringify(r.s));
@@ -73,9 +94,12 @@ module.exports = async (pg, out) => {
   check(r.s.pending === 0 && r.s.batches > 0 && r.direct === r.s.batches, "batches built, all direct scene children", [r.s.pending, r.s.batches, r.direct]);
   check(r.levels && r.levels.every(Boolean), "all three mesh levels of a tree built", r.levels);
   check(r.bands && r.bands[3] && r.bands[0][1] === r.bands[1][0] && r.bands[1][1] === r.bands[2][0] && r.bands[2][1] === r.bands[3][0], "a tree's bands join, impostors last", r.bands);
-  check(r.atlas && r.imp && r.imp.h > 0 && r.cards > 0, "impostor atlas baked and cards drawn", [r.atlas, r.imp, r.cards]);
+  check(r.tris && r.tris[0] > r.tris[1] && r.tris[1] > r.tris[2] && r.tris[2] > 0, "each level is thinner than the one before", r.tris);
+  check(r.tops && Math.abs(r.tops[1] - r.tops[0]) < 1.5 && Math.abs(r.tops[2] - r.tops[0]) < 1.5, "a thinned level is the same tree (same height)", r.tops);
+  check(r.atlas && r.imp && r.imp[1] > 0 && r.cards > 0, "impostor atlas baked and cards drawn", [r.atlas, r.imp, r.cards]);
+  check(r.rowsApart, "each variant of a tree has its own impostor row");
   check(r.s.regions > 4 && r.s.regions < r.s.chunks, "batched by region, several chunks to a region", [r.s.regions, r.s.chunks]);
-  check(/^0+1+2+$/.test(r.builds) && r.builds.length <= 12, "each level's geometry built once per model", r.builds);
+  check(/^0+$/.test(r.builds) && r.builds.length <= 4, "only the full model is asked of the registry, once per model", r.builds);
   await pg.screenshot({ path: out + "-plants.png" });
 
   // the quality level pulls every band in
