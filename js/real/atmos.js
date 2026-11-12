@@ -33,7 +33,7 @@ const HEMI_GND_DAY = COL(0.23, 0.23, 0.13), HEMI_GND_NIGHT = COL(0.11, 0.13, 0.1
 const CLOUD_LIT_DAY = COL(1.08, 1.06, 1.02), CLOUD_LIT_NIGHT = COL(0.05, 0.065, 0.11), CLOUD_LIT_DUSK = COL(1.15, 0.58, 0.34);
 const CLOUD_DARK_DAY = COL(0.56, 0.62, 0.73), CLOUD_DARK_NIGHT = COL(0.012, 0.016, 0.03), CLOUD_DARK_DUSK = COL(0.30, 0.25, 0.36);
 const SPACE = COL(0.001, 0.0015, 0.004);
-const SUN_MAX = 1.7, HEMI_MAX = 0.6, MOON_MAX = 0.55;
+const SUN_MAX = 1.5, HEMI_MAX = 0.6, MOON_MAX = 0.55;
 const CLOUD_SCALE = 0.006;       // noise units per block: the first octave's cells are about 170 blocks
 const SKY_R = 420;
 
@@ -439,7 +439,8 @@ atmos.update = function (real) {
   if (probeT <= 0) { probeT = 0.5; probePlace(cam); }
   stepSplash(cam, BF.state && BF.state.paused ? 0 : real, wr, under);
   const open = covered || under ? 0 : 1, step = BF.state && BF.state.paused ? 0 : real;
-  stepSwarm(motes, cam, step, airTime, open * sunUp * clear * (1 - space) * 0.12, (a, j, s, k, h, tm) => {
+  // dust shows only in the low sun of the golden hours, not all day
+  stepSwarm(motes, cam, step, airTime, open * sunUp * clear * (1 - space) * 0.12 * smooth(0.0, 0.05, sh) * (1 - smooth(0.2, 0.36, sh)), (a, j, s, k, h, tm) => {
     const ph = s[k + 3] * 6.28 + tm * 0.5;
     a[j] += ((s[k] - 0.5) * 0.12 + Math.sin(ph) * 0.05 + atmos.wind.x * 0.05) * h;
     a[j + 1] += ((s[k + 1] - 0.6) * 0.05 + Math.cos(ph * 1.3) * 0.03) * h;

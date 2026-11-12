@@ -173,6 +173,9 @@ real.lit = function (mat, opts) {
   #ifdef ALPHATEST
     // leaves and grass blades (alpha-tested cards with bent normals): the sun's highlight on them burnt out to white patches
     reflectedLight.directSpecular *= 0.06;
+  #else
+    // everything else is matte ground, bark, rock and hide: keep only a little of the sun's sheen
+    reflectedLight.directSpecular *= 0.35;
   #endif
   float bfB = min(1.0, 1.1 * pow(clamp(vBFL.y, 0.0, 1.0), 1.25));
   reflectedLight.indirectDiffuse += diffuseColor.rgb * vec3(1.0, 0.72, 0.42) * bfB * 0.9;
