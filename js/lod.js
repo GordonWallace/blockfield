@@ -329,11 +329,124 @@ void main() {
 const STAND_FRAG_USED = !REAL ? STAND_FRAG : STAND_FRAG.replace("#include <fog_pars_fragment>", REAL_PARS)
   .replace(/  gl_FragColor = vec4\(col \* max\(0\.1, uDay\), 1\.0\);[\s\S]*$/, `  vec3 alb = col;
   vec3 light = mix(uGroundCol, uSkyCol, 0.8) + uSunCol * 0.4;` + REAL_OUT);
+// The realistic look's trees (js/real/lod.js, BF.real.lod.cards): a stand-in that is a tree with a real model (attribute card: its
+// row of the impostor atlas, scale, turn and seed; row -1: none) is drawn as that model's cards instead of two boxes, the very cards
+// the loaded chunks' far trees are, so a tree looks the same on either side of the chunks' edge. Among the boxes: the upright card and
+// the level one (BF.real.lod.cards.quads, parts 2 and 3 of the instance; its boxes are dropped). Among the points, further out: one
+// point showing the model from the side, or from above when seen from above; a flat colour, the model's average, under 4 pixels.
+// Until a row is baked its trees stay boxes. Buildings stay boxes, shaded by the sun on each face as the real walls and roofs are.
+let standShaders = null;
+function realStandShaders() {
+  if (standShaders) return standShaders;
+  const C = BF.real.lod && BF.real.lod.cards;
+  if (!C) return (standShaders = { vert: STAND_VERT, frag: STAND_FRAG_USED, cards: null });
+  const rep = (s, a, b) => { if (!s.includes(a)) throw new Error("js/lod.js: stand-in shader changed under the realistic look's patch: " + a.slice(0, 40)); return s.replace(a, b); };
+  let v = STAND_VERT, f = STAND_FRAG_USED;
+  v = rep(v, "attribute float c;  // crown bottom", `attribute float c;  // crown bottom
+attribute vec4 card;   // atlas row (-1: not a tree with a model), scale, turn, seed
+uniform vec3 uRowCol[${C.MAXROW}];
+varying float vCard;   // 0: boxes or the plain point, 1: cards or a flat point, 2: a point showing the model
+varying vec3 vTint;
+varying vec3 vN;
+#ifndef BOXES
+varying vec4 vCell;
+varying vec2 vSpr;
+#endif` + C.VERT);
+  // the axes at the stand-in's foot, in view space
+  const AXES = `
+  vec3 upL = vec3(0.0, 1.0, 0.0), xL = vec3(1.0, 0.0, 0.0), zL = vec3(0.0, 0.0, 1.0);
+  if (uK > 0.0) { mat3 fr = mat3(sphM) * frame; upL = normalize(mix(upL, fr * upL, uK)); xL = normalize(mix(xL, fr * xL, uK)); zL = normalize(mix(zL, fr * zL, uK)); }
+  vec3 upV = normalize((modelViewMatrix * vec4(upL, 0.0)).xyz), xV = normalize((modelViewMatrix * vec4(xL, 0.0)).xyz), zV = normalize((modelViewMatrix * vec4(zL, 0.0)).xyz);
+  vec3 footV = (modelViewMatrix * vec4(w0, 1.0)).xyz;
+  vec4 rowI = uRow[int(max(card.x, 0.0) + 0.5)];
+  bool tree = card.x >= 0.0 && rowI.y > 0.0;
+  float tv = 0.9 + 0.2 * fract(card.w * 5.3);
+  vTint = pow(vec3(tv, tv * (0.94 + 0.12 * fract(card.w * 9.1)), tv), vec3(1.0 / 2.2));
+  vCard = 0.0; vN = upV;
+  vec4 cardAt = vec4(0.0);`;
+  v = rep(v, "#ifdef BOXES\n  bool up = part > 0.5;", AXES + `
+#ifdef BOXES
+  if (part > 1.5) {
+    if (!tree) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+    cardAt = rlCard(footV, upV, xV, zV, vec3(position.xy, part - 2.0), card.x, card.y, card.z);
+    if (cardAt.w < 0.5) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+    vCard = 1.0;
+  } else if (tree) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+  bool up = part > 0.5;`);
+  // (a box face's normal from its block shade: 1 the top, 0.8 the x sides, 0.65 the z sides; the colour then goes without the shade)
+  v = rep(v, "  vColor = (up ? top : low) * shade;\n  vMask = ((toHole * vec3(g.xy + l.xz, 1.0)).xy - maskO) / CHUNK;", `  vColor = up ? top : low;
+  if (vCard < 0.5) vN = shade > 0.9 ? upV : shade > 0.7 ? xV * sign(position.x) : zV * sign(position.z);
+  if (card.w < -0.5) {
+    // a house as worldgen.js builds it: walls to the eaves, two blocks over the stand-in's; on them a gable roof, its ridge along
+    // the longer side, rising half its span and overhanging the walls on the slopes' sides only, with the gable ends wall (the
+    // slopes are steps: lit mostly from above); or, where the village builds flat roofs, a slab
+    float eaves = c + 2.0;
+    if (!up) l.y = position.y * eaves;
+    else if (card.z > 0.5) l = vec3(position.x * (b.x - 2.0), eaves + position.y, position.z * (b.y - 2.0));
+    else {
+      bool alongX = b.x >= b.y, xFace = shade > 0.7 && shade < 0.9, zFace = shade < 0.7;
+      float span = alongX ? b.y : b.x, hR = 0.5 * span, narrow = 1.0 - position.y;
+      l = alongX ? vec3(position.x * (b.x - 2.0), eaves + position.y * hR, position.z * b.y * narrow) : vec3(position.x * b.x * narrow, eaves + position.y * hR, position.z * (b.y - 2.0));
+      if (alongX ? xFace : zFace) vColor = low;
+      if (alongX ? zFace : xFace) vN = normalize((alongX ? zV * sign(position.z) : xV * sign(position.x)) * 0.4 + upV);
+    }
+  }
+  vMask = ((toHole * vec3(g.xy + (vCard > 0.5 ? vec2(0.0) : l.xz), 1.0)).xy - maskO) / CHUNK;`);
+  v = rep(v, "  gl_PointSize = size;\n  vec3 l = vec3(0.0, 0.5 * tall, 0.0);", `  gl_PointSize = size;
+  vec3 l = vec3(0.0, 0.5 * tall, 0.0);
+  if (tree) {
+    float tr = rowI.x * card.y, tH = rowI.y * card.y, cells = uGrid.x + 1.0, col = mod(floor(card.x + 0.5), uGrid.y), line = floor((card.x + 0.5) / uGrid.y);
+    vec3 toCam = normalize(-footV);
+    bool above = dot(toCam, upV) > 0.7;
+    float sz = (above ? 2.0 * tr : max(tH, 2.0 * tr)) * k;
+    gl_PointSize = clamp(sz, 1.0, 64.0);
+    vSpr = above ? vec2(1.0) : vec2(sz / (2.0 * tr * k), sz / (tH * k));
+    float f0 = mod(floor(fract((atan(dot(toCam, xV), dot(toCam, zV)) - card.z) / 6.2831853) * uGrid.x + 0.5), uGrid.x);
+    vCell = above ? vec4((col * cells + uGrid.x + 0.02) / (uGrid.y * cells), (line + 0.02 * CARD_SQUARE) / uGrid.z, 0.96 / (uGrid.y * cells), 0.96 * CARD_SQUARE / uGrid.z)
+      : vec4((col * cells + f0 + 0.02) / (uGrid.y * cells), (line + 0.02) / uGrid.z, 0.96 / (uGrid.y * cells), 0.96 / uGrid.z);
+    vCard = sz < 4.0 ? 1.0 : 2.0;
+    vColor = pow(uRowCol[int(card.x + 0.5)], vec3(1.0 / 2.2)) * vTint;
+    vRows = vec4(0.0);
+    l = vec3(0.0, above ? rowI.w * card.y : (rowI.z + 0.5 * rowI.y) * card.y, 0.0);
+  }`);
+  v = rep(v, "  vec4 mvPosition = modelViewMatrix * vec4(t, 1.0);", "  vec4 mvPosition = modelViewMatrix * vec4(t, 1.0);\n  if (cardAt.w > 0.5) mvPosition = vec4(cardAt.xyz, 1.0);");
+  f = rep(f, "uniform sampler2D chunkMask;", `uniform sampler2D chunkMask;
+varying float vCard;
+varying vec3 vTint;
+varying vec3 vN;
+#ifndef BOXES
+varying vec4 vCell;
+varying vec2 vSpr;
+#endif` + C.FRAG);
+  f = rep(f, "  vec3 alb = col;\n  vec3 light = mix(uGroundCol, uSkyCol, 0.8) + uSunCol * 0.4;", `  vec3 alb = col;
+  vec3 light = mix(uGroundCol, uSkyCol, 0.8) + uSunCol * 0.4;
+  vec3 sunV = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz), upV = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+#ifdef BOXES
+  vec3 n = normalize(vN);
+  if (vCard > 0.5) {
+    vec4 tc = rlCardTexel();
+    if (tc.a < 0.4) discard;
+    alb = tc.rgb * vTint; n = rlCardNormal(); upV = normalize(vUp);
+  }
+  light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, upV)) + uSunCol * max(dot(n, sunV), 0.0);
+  if (vCard > 0.5) light += uSunCol * 0.3 * max(-dot(n, sunV), 0.0);   // (leaves let the sun through, as BF.real.lod's cards)
+#else
+  if (vCard > 1.5) {
+    vec2 q = vec2(gl_PointCoord.x - 0.5, 0.5 - gl_PointCoord.y) * vSpr + 0.5;
+    if (q.x < 0.0 || q.x > 1.0 || q.y < 0.0 || q.y > 1.0) discard;
+    vec4 tc = texture2D(map, vCell.xy + q * vCell.zw);
+    if (tc.a < 0.4) discard;
+    alb = tc.rgb * vTint;
+  }
+  if (vCard > 0.5) light = mix(uGroundCol, uSkyCol, 0.72) + uSunCol * max(dot(normalize(upV * 0.6 + vec3(0.0, 0.0, 0.8)), sunV), 0.0);
+#endif`);
+  return (standShaders = { vert: v, frag: f, cards: C });
+}
 function standMaterial(boxes) {
-  const sphM = new THREE.Matrix4();
+  const sphM = new THREE.Matrix4(), SH = REAL ? realStandShaders() : null;
   const m = new THREE.ShaderMaterial({
-    vertexShader: STAND_VERT, fragmentShader: STAND_FRAG_USED, fog: true,
-    defines: Object.assign({ FACE_N: P().N.toFixed(1), MASK_N: MASK_N.toFixed(1), CHUNK: BF.CS.toFixed(1) }, boxes ? { BOXES: 1 } : {}),
+    vertexShader: SH ? SH.vert : STAND_VERT, fragmentShader: SH ? SH.frag : STAND_FRAG_USED, fog: true,
+    defines: Object.assign({ FACE_N: P().N.toFixed(1), MASK_N: MASK_N.toFixed(1), CHUNK: BF.CS.toFixed(1) }, boxes ? { BOXES: 1 } : {}, SH && SH.cards ? SH.cards.defines() : {}),
     uniforms: Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), {
       sphM: { value: sphM }, uK: BF.world.roundK, uDay: BF.world.dayUniform, pxScale, frame: { value: new THREE.Matrix3() },
       edge: { value: new THREE.Vector2(1e30, 2e30) }, hole: { value: new THREE.Vector3() }, hole2: { value: new THREE.Vector3() },
@@ -341,7 +454,7 @@ function standMaterial(boxes) {
       toHole2: { value: new THREE.Matrix3() }, seam2: { value: 0 }, chunkMask, maskO,
     }),
   });
-  if (REAL) Object.assign(m.uniforms, realUniforms());
+  if (REAL) Object.assign(m.uniforms, realUniforms(), SH.cards ? SH.cards.uniforms : {});
   m.userData.sphM = sphM;
   return m;
 }
@@ -364,16 +477,58 @@ function box() {
 // the stand-ins S (joined arrays, see keep) as boxes or points, one instance each
 const SK = { base: 3, sph: 3, top: 3, low: 3, a: 4, b: 4, c: 1, bin: 2 };
 const SA = { base: Float32Array, sph: Float32Array, bin: Uint16Array };
+if (REAL) { SK.k = 4; SA.k = Float32Array; }   // (the realistic look: each tree's flora record, js/grid.js)
+// The realistic look: each stand-in's card (atlas row, scale, turn, seed) from its record k, as js/real/lod.js would draw the loaded
+// chunk's tree; far: rings where a tree is a few pixels (its species' first variant).
+function cardsOf(S, far) {
+  const n = S.c.length, out = new Float32Array(n * 4), C = realStandShaders().cards, names = BF.worldgen.NAMES || [];
+  for (let i = 0; i < n; i++) {
+    const o = i * 4, block = S.k ? S.k[o] : 0;
+    out[o] = -1;
+    if (!block && S.k) { out[o + 2] = S.k[o + 2]; out[o + 3] = S.k[o + 3]; }   // (a house: -1 last, and whether its roof is flat)
+    if (!block || !C) continue;
+    const logs = Math.floor(S.k[o + 2]), big = S.k[o + 2] - logs > 0.25, seed = S.k[o + 3];
+    const r = C.rowOf(big ? 4 : 0, block, names[S.k[o + 1]] || "", logs, seed, far);
+    if (r) { out[o] = r[0]; out[o + 1] = r[1]; out[o + 2] = seed * 6.2831853; out[o + 3] = seed; }
+  }
+  return out;
+}
 // (points as plain vertices: software rendering draws instances one by one, tens of times slower)
-function standGeometry(S, boxes) {
+function standGeometry(S, boxes, far) {
   if (!boxes) {
     const g = new THREE.BufferGeometry();
-    for (const k in SK) if (k !== "bin") g.setAttribute(k, new THREE.BufferAttribute(S[k], SK[k], k === "top" || k === "low"));
+    for (const k in SK) if (k !== "bin" && k !== "k") g.setAttribute(k, new THREE.BufferAttribute(S[k], SK[k], k === "top" || k === "low"));
+    if (REAL && realStandShaders().cards) g.setAttribute("card", new THREE.BufferAttribute(cardsOf(S, true), 4));
     g.setAttribute("position", g.getAttribute("base"));
     return g;
   }
   const g = new THREE.InstancedBufferGeometry(), B = box();
   g.setAttribute("position", B.pos); g.setAttribute("part", B.part); g.setAttribute("shade", B.shade); g.setIndex(B.idx);
+  if (REAL && realStandShaders().cards) {
+    // the realistic look: the trees with a real model are their own object, two cards each (g.userData.cards; drawn with the boxes'
+    // material, as the boxes' child: finish()); the boxes are the rest
+    const card = cardsOf(S, !!far), n = S.c.length, boxes = [], trees = [];
+    for (let i = 0; i < n; i++) (card[i * 4] >= 0 ? trees : boxes).push(i);
+    const pick = (G, list) => {
+      const A = Object.assign({ card }, S);
+      for (const k in A) {
+        if (k === "bin" || k === "k") continue;
+        const m = k === "card" ? 4 : SK[k], src = A[k], a = new src.constructor(list.length * m);
+        for (let p = 0; p < list.length; p++) for (let x = 0; x < m; x++) a[p * m + x] = src[list[p] * m + x];
+        G.setAttribute(k, new THREE.InstancedBufferAttribute(a, m, k === "top" || k === "low"));
+      }
+      G.instanceCount = list.length;
+    };
+    pick(g, boxes);
+    if (trees.length) {
+      const Q = realStandShaders().cards.quads, c = new THREE.InstancedBufferGeometry();
+      c.setAttribute("position", new THREE.BufferAttribute(Q.pos, 3)); c.setIndex(Q.idx);
+      c.setAttribute("part", new THREE.Float32BufferAttribute([2, 2, 2, 2, 3, 3, 3, 3], 1)); c.setAttribute("shade", new THREE.Float32BufferAttribute([1, 1, 1, 1, 1, 1, 1, 1], 1));
+      pick(c, trees);
+      g.userData.cards = c;
+    }
+    return g;
+  }
   for (const k in SK) if (k !== "bin") g.setAttribute(k, new THREE.InstancedBufferAttribute(S[k], SK[k], k === "top" || k === "low"));
   g.instanceCount = S.c.length;
   return g;
@@ -438,6 +593,13 @@ function palette() {
     const t = BF.world._faceTint ? BF.world._faceTint[id * 6] : 0;
     tint[id] = t === 4 ? 0 : t;
   }
+  // the realistic look: natural ground in the colours its smooth terrain has in the loaded chunks (BF.real.assets.ground; a later
+  // entry for a block wins), so the land keeps its colour where the chunks end
+  if (REAL && BF.real.assets && BF.real.assets.ground) for (const g of BF.real.assets.ground) {
+    const c = typeof g.color === "string" ? new THREE.Color(g.color).toArray() : g.color;
+    // (0.88: the terrain's detail texture darkens its colour by about that much; measured on Plains turf at midday)
+    if (c) for (const name of g.blocks || []) if (BF.B[name] != null) top[BF.B[name]] = [c[0] * 0.88, c[1] * 0.88, c[2] * 0.88];
+  }
   return { top, side, tint };
 }
 
@@ -471,6 +633,7 @@ function off() {
 }
 function dispose(m) {
   if (m.parent) m.parent.remove(m);
+  for (const ch of m.children) ch.geometry.dispose();   // (the realistic look: a ring's tree cards, with its boxes)
   m.geometry.dispose(); for (const x of [].concat(m.material)) x.dispose();
 }
 
@@ -479,7 +642,7 @@ function start(L, f, cu, cv) {
   const Pl = P(), c = L.cell, n = 2 * EXT + 1, gu0 = cu - EXT * c, gv0 = cv - EXT * c;
   const anchor = Pl.pos(f, cu, cv, BF.SEA, [0, 0, 0]);
   const stand = L.lv < STAND_LEVELS && lod.standIns ? { cu, cv, anchor, gu0, gv0, m: THIN[L.lv], max: STAND_MAX + MOVE * L.half, exact: L.lv === 0,
-    houses: L.lv < HOUSE_LEVELS, villages: L.lv < HOUSE_LEVELS } : null;
+    houses: L.lv < HOUSE_LEVELS, villages: L.lv < HOUSE_LEVELS, real: REAL } : null;
   const b = { f, cu, cv, gu0, gv0, n, anchor, pending: 0, t0: performance.now(), raw: BF.gridJob.alloc({ nx: n, ny: n }), fresh: true, parts: stand ? [] : null };
   let rects = [[0, n, 0, n]];   // [j0, j1, i0, i1] still to sample
   const old = L.raw && L.f === f ? L : null;
@@ -569,9 +732,9 @@ function finish(L, b, m) {
   // the stand-ins: their own object, placed the same way (kept with their material, like the ring)
   const S = b.parts ? join(b.parts) : null;
   L.mat.uniforms.stand.value = S ? 1 / (1 << 2 * THIN[L.lv]) : 0;   // the share of tree cells drawn as stand-ins
-  if (L.si) { L.si.parent && L.si.parent.remove(L.si); L.si.geometry.dispose(); }
+  if (L.si) { L.si.parent && L.si.parent.remove(L.si); for (const ch of L.si.children) ch.geometry.dispose(); L.si.geometry.dispose(); }
   if (S) {
-    const boxes = L.lv < BOX_LEVELS, mat = L.si ? L.si.material : standMaterial(boxes), geo = standGeometry(S, boxes);
+    const boxes = L.lv < BOX_LEVELS, mat = L.si ? L.si.material : standMaterial(boxes), geo = standGeometry(S, boxes, L.lv > 0);
     geo.boundingSphere = g.boundingSphere;   // (js/view.js culls by it while the view is flat)
     const si = boxes ? new THREE.Mesh(geo, mat) : new THREE.Points(geo, mat);
     const fr = Pl.frame(b.f, b.cu, b.cv, BF.SEA, {}), U = fr.eu, Up = fr.up, W = fr.ev;
@@ -581,6 +744,11 @@ function finish(L, b, m) {
     si.position.copy(mesh.position); si.updateMatrix();
     si.userData = { anchor: b.anchor, lod: L.lv, stand: true };
     si.visible = false;
+    if (geo.userData.cards) {   // (the realistic look: the ring's trees as cards, placed and shown with the boxes)
+      const tc = new THREE.Mesh(geo.userData.cards, mat);
+      tc.frustumCulled = false; tc.matrixAutoUpdate = false; tc.matrixWorld = si.matrixWorld;
+      si.add(tc);
+    }
     L.si = si;
     lod.scene.add(si);
   } else L.si = null;
@@ -872,6 +1040,7 @@ function ribbons(V, top) {
 
 // for the globe (js/globe.js): the same material and cuts
 lod.material = material; lod.cuts = cuts; lod.HIDE = HIDE;
+if (REAL) { lod.standMaterial = standMaterial; lod.standGeometry = standGeometry; }   // (test/real-lod.js)
 
 // Numbers for tests and the debug overlay.
 lod.stats = () => ({

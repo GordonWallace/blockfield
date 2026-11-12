@@ -115,6 +115,34 @@ module.exports = async (pg, out) => {
   // the distant rings' materials take the look's shared light (js/lod.js)
   const ring = await pg.evaluate(() => { const m = BF.lod.material(false), U = BF.real.U; return { sun: m.uniforms.uSunCol === U.uSunCol, sky: m.uniforms.uSkyCol === U.uSkyCol, tone: /tonemapping_fragment/.test(m.fragmentShader) }; });
   check(ring.sun && ring.sky && ring.tone, "distant rings use the look's shared light", ring);
+  // the trees past the loaded chunks are cards of the same models (js/lod.js with BF.real.lod.cards): a stand-in with a tree's flora
+  // record gets that tree's atlas row and goes to the ring's cards, a house stays a box; both materials compile
+  const far = await pg.evaluate(() => {
+    const L = BF.real.lod, C = L.cards, T = THREE, seed = 0.3;
+    const tree = [...L.models.values()].find(m => m.def.id === "test_cone" && m.variant === Math.floor(seed * 9973) % 2);
+    const row = C.rowOf(0, BF.B.oak_log, "", 6, seed, false);
+    const S = { base: new Float32Array(6), sph: new Float32Array(6), top: new Uint8Array(6), low: new Uint8Array(6), a: new Uint8Array(8), b: new Uint8Array(8), c: new Uint8Array(2),
+      bin: new Uint16Array(4), k: new Float32Array([BF.B.oak_log, 0, 6, seed, 0, 0, 0, -1]) };
+    const errs = [], ce = console.error;
+    console.error = (...a) => { errs.push(a.map(String).join(" ").slice(0, 300)); };
+    let boxes = -1, cards = -1, card = null, shared = false, pts = false;
+    try {
+      const g = BF.lod.standGeometry(S, true), mb = BF.lod.standMaterial(true), mp = BF.lod.standMaterial(false), gp = BF.lod.standGeometry(S, false);
+      boxes = g.instanceCount; cards = g.userData.cards ? g.userData.cards.instanceCount : 0;
+      card = g.userData.cards ? Array.from(g.userData.cards.attributes.card.array) : null;
+      shared = mb.uniforms.uRow === C.uniforms.uRow && mp.uniforms.map === C.uniforms.map && /rlCard\(/.test(mb.vertexShader);
+      pts = !!gp.attributes.card && gp.attributes.card.array[0] >= 0 && gp.attributes.card.array[4] === -1;
+      const sc = new T.Scene(), a = new T.Mesh(g, mb), b = new T.Mesh(g.userData.cards, mb), c = new T.Points(gp, mp);
+      for (const o of [a, b, c]) { o.frustumCulled = false; sc.add(o); }
+      const rt = new T.WebGLRenderTarget(8, 8), R = BF.renderer, prev = R.getRenderTarget();
+      R.setRenderTarget(rt); R.render(sc, BF.camera); R.setRenderTarget(prev); rt.dispose();
+    } catch (e) { errs.push(String(e)); }
+    console.error = ce;
+    return { row, treeRow: tree ? tree.row : -2, boxes, cards, card, shared, pts, errs };
+  });
+  check(far.row && far.row[0] === far.treeRow && far.row[1] > 0, "a far tree's record gives the row and scale of the loaded tree's model", [far.row, far.treeRow]);
+  check(far.boxes === 1 && far.cards === 1 && far.card && far.card[0] === far.treeRow, "a ring's trees are cards of their models, its houses boxes", [far.boxes, far.cards, far.card]);
+  check(far.shared && far.pts && !far.errs.length, "the rings' stand-in materials draw the cards and compile", [far.shared, far.pts, far.errs]);
   await pg.waitForTimeout(1500);
   await pg.evaluate(() => localStorage.setItem("bf.look", "blocks"));
   console.log(fails ? "real-lod FAIL " + fails : "real-lod PASS");

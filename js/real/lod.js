@@ -402,7 +402,8 @@ void main() {
   if (c.a < 0.4) discard;
   vec3 n = rlCardNormal();
   vec3 sunV = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz);
-  vec3 light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, normalize(vUp))) + uSunCol * max(dot(n, sunV), 0.0);
+  // (a crown lets the sun through: its far side isn't black)
+  vec3 light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, normalize(vUp))) + uSunCol * (max(dot(n, sunV), 0.0) + 0.3 * max(-dot(n, sunV), 0.0));
   gl_FragColor = vec4(pow(c.rgb, vec3(2.2)) * vTint * light, 1.0);
   #include <tonemapping_fragment>
   #include <encodings_fragment>

@@ -147,7 +147,7 @@ BF.gridJob = {
   },
   buffers(out) {
     const b = [out.y.buffer, out.col.buffer, out.can.buffer, out.ok.buffer, out.dir.buffer];
-    if (out.stand) for (const k of STAND) b.push(out.stand[k].buffer);
+    if (out.stand) { for (const k of STAND) b.push(out.stand[k].buffer); if (out.stand.k) b.push(out.stand.k.buffer); }
     return b;
   },
   stand,
@@ -169,6 +169,9 @@ BF.gridJob = {
 //   top, low: crown (roof) and trunk (wall) colours; a: trunk width x and z, height, crown top width (of 255, of the crown's width);
 //   b: crown width x and z, height, a random byte; c: crown bottom above the foot; bin: its sample's column and row in the ring (from
 //   gu0, gv0), so a moved ring keeps it with its sample.
+// With job.stand.real (the realistic look, 1.6: js/lod.js draws a tree as cards of its real model, js/real/lod.js) also k, what the
+// loaded chunk's flora record of the same tree holds (js/real/mesh.js): its log block, its sample's biome, its log count (plus 0.5
+// for a 2 x 2 trunk) and its seed; all 0 for anything but a tree (for a house the last is -1, and the third 1 where its village builds flat roofs).
 const STAND = ["base", "sph", "top", "low", "a", "b", "c", "bin"];
 // [foot offset (0.5, or 1 for a 2 x 2 trunk), trunk width, trunk height, crown bottom, crown height, crown width, crown top width
 // (share), trunk block, crown block] of tree t (worldgen.js treeOf; heights in blocks above t.y). Crown sizes are the leaves' extent.
@@ -205,6 +208,7 @@ function stand(job, out) {
   const P = BF.planet, N = P.N, W = P.W, WG = BF.worldgen, B = BF.B, R = job.stand, c = job.cell, nx = job.nx, ny = job.ny, f = job.f;
   const K = {}, w = {}, d = [0, 0, 0], M = 1 << R.m, BS = 4 * M, cols = out.cols, col = { h: 0, biome: 0, wl: 0 };
   for (const k of STAND) K[k] = [];
+  if (R.real) K.k = [];
   const C = (x) => Math.max(0, Math.min(255, Math.round(x * 255)));
   const rgb = (id, tintK, fol, k) => {
     const T = PAL[tintK === -1 ? "side" : "top"][id] || PAL.top[id];
@@ -222,6 +226,7 @@ function stand(job, out) {
     K.sph.push(d[0] * rr - R.anchor[0], d[1] * rr - R.anchor[1], d[2] * rr - R.anchor[2]);
     K.top.push(top[0], top[1], top[2]); K.low.push(low[0], low[1], low[2]);
     K.a.push(lx, lz, Math.min(255, lh), Math.round(taper * 255)); K.b.push(ux, uz, Math.min(255, uh), Math.floor(r * 255.99)); K.c.push(Math.min(255, ub));
+    if (K.k) K.k.push(0, 0, 0, 0);
   };
   const lo = c > 4 ? c / 2 : 0;   // a sample's cells start this far before its grid point (whole cells: c is 4 or a multiple of 8)
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
@@ -262,6 +267,10 @@ function stand(job, out) {
       if (cb < 0) { layer += cb; trunk = 0; cb = 0; }
       const k = 0.85 + 0.15 * WG.hash(gx, gz, 108);   // a little variety in brightness
       emit(g, gu, gv, x, y, layer, e, rgb(leaf, 1, fol, k), rgb(log, -1, null, 0.9), tw, tw, trunk, taper, cw, cw, ch, cb, WG.hash(gx, gz, 109), i, j);
+      if (K.k && th > 0 && trunk > 0) {   // (the seed as js/real/mesh.js makes it, from the trunk's lowest log)
+        const hs = ((t.x * 73856093) ^ (t.z * 19349663) ^ (t.y * 83492791)) >>> 0, q = K.k.length - 4;
+        K.k[q] = log; K.k[q + 1] = col.biome; K.k[q + 2] = th + (off === 1 ? 0.5 : 0); K.k[q + 3] = (hs % 65521) / 65521;
+      }
     }
   }
   // village buildings: walls and a roof (fields and other low plots as a patch), from the villages' own layouts; each belongs to the sample
@@ -298,11 +307,13 @@ function stand(job, out) {
         // walls to two blocks under the top, then a roof overhanging them by a block, rising to a ridge
         const wh = Math.max(2, F.h - 3);
         emit(g, gu, gv, x, y, F.y, e, rgb(B[S[1]], 0, null, 0.9), rgb(B[S[0]], -1, null, 0.95), wx, wz, wh, 0.3, wx + 2, wz + 2, F.h - wh + 1, wh - 1, r, i, j);
+        if (K.k) { K.k[K.k.length - 1] = -1; K.k[K.k.length - 2] = ((F.village && F.village.style) || 0) === 1 ? 1 : 0; }   // (a house, and whether its style's roofs are flat: the realistic look draws its real roof, js/lod.js)
       }
     }
   }
   out.stand = { base: new Float32Array(K.base), sph: new Float32Array(K.sph), top: new Uint8Array(K.top), low: new Uint8Array(K.low),
     a: new Uint8Array(K.a), b: new Uint8Array(K.b), c: new Uint8Array(K.c), bin: new Uint16Array(K.bin) };
+  if (K.k) out.stand.k = new Float32Array(K.k);
   out.cols = null;
 }
 
