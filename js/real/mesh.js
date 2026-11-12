@@ -3,7 +3,8 @@
 // helpers the mesher hands it.
 //   prepare(J, TB, h) -> R: finds the trees and the cells the cube pass must leave out
 //     R.NAT[b] natural ground (drawn by the smooth pass), R.skip(b, x, y, z) -> true when the cube pass leaves this cell out
-//   finish(R) -> { T, F }: T the smooth terrain pass { pos, nrm, col, sky, bl, mat, sphere, ind }, F the flora list (8 floats a record)
+//   finish(R) -> { T, F }: T the smooth terrain pass { pos, nrm, col, sky, bl, mat, sphere, ind } (mat: the 4 layers' weights, adding
+//     up to 1 + the share of turf), F the flora list (8 floats a record)
 // h: { get, lget, skyAt, tint(vx, vz, kind, out), sphere(pos) }
 (() => {
 "use strict";
@@ -195,11 +196,42 @@ function finish(R) {
   if (!nv) return { T: null, F: R.F.length ? new Float32Array(R.F) : null };
   const at = (i, j, k) => (i < -2 || i > CS || k < -2 || k > CS || j < 0 || j >= NY - 1) ? -1 : vid[j * NC + (k + 2) * CW + i + 2];
   // the vertices the chunk's quads use (cells -1 .. 15), eased once, with normal, light and ground
-  const out = new Int32Array(nv).fill(-1);
+  // A vertex is listed once per face kind that uses it: 0 for faces that look up (the ground's top), 1 for the rest (walls, the
+  // undersides of overhangs). Both have the same place, normal and light; what differs is which ground they show. A top shows the
+  // ground whose top it is, so the floor of a dug hole is the soil that was dug down to, not the turf around its rim. A wall shows
+  // what a cut through the ground shows: turf is green on top only, and its side is the soil under it (RT.GSIDE), unless the foot of
+  // that side is turf too, which is how a grassy slope's steps look.
+  const out = new Int32Array(nv * 2).fill(-1);
   const P = [], Nn = [], C = [], SK = [], BLt = [], MT = [], tc = [1, 1, 1];
-  const SKB = TB.SKB;
-  const vert = v => {
-    if (out[v] >= 0) return out[v];
+  const gc = RT.GCOL, GLAY = RT.GLAY, GTINT = RT.GTINT, GSIDE = RT.GSIDE;
+  const acc = new Float64Array(9);   // r, g, b, the 4 layers, turf, count
+  const addG = (g, x, z, w) => {
+    let r = gc[g * 3], gg = gc[g * 3 + 1], b = gc[g * 3 + 2];
+    if (GTINT[g]) { h.tint(Math.max(0, Math.min(CS, Math.round(x))), Math.max(0, Math.min(CS, Math.round(z))), 1, tc); r *= tc[0]; gg *= tc[1]; b *= tc[2]; acc[7] += w; }
+    acc[0] += r * w; acc[1] += gg * w; acc[2] += b * w; acc[3 + GLAY[g]] += w; acc[8] += w;
+  };
+  // The cut edge of turf (the rim of a dug hole, the lip of a bank): the side of a turf cell at band row Y that shows soil, seen
+  // from the 2 x 2 columns at (i, k). Returns the turf's ground index + 1, or 0. The line where turf ends is not drawn at the rim
+  // itself: the top's rim vertices carry a little soil and the wall's top vertices are turf, so the material (js/real/terrain.js)
+  // breaks the edge up, soil biting into the sward and turf hanging over the cut.
+  const cutTurf = (i, Y, k) => {
+    if (Y < 0 || Y >= NY) return 0;
+    for (let e = 0; e < 4; e++) {
+      const X0 = i + (e === 1 ? 1 : 0), Z0 = k + (e === 3 ? 1 : 0), X1 = e < 2 ? X0 : X0 + 1, Z1 = e < 2 ? Z0 + 1 : Z0;
+      const a = m(X0, Y, Z0), b = m(X1, Y, Z1);
+      if (!a === !b) continue;
+      const g = (a || b) - 1;
+      if (GSIDE[g] === g) continue;
+      const ox = a ? X1 : X0, oz = a ? Z1 : Z0, sx = a ? X0 : X1, sz = a ? Z0 : Z1;
+      if (hm(ox, Y, oz) || (Y + 1 < NY && m(sx, Y + 1, sz))) continue;   // against something built, or not the top of the turf
+      const foot = Y > 0 ? m(ox, Y - 1, oz) : 0;
+      if (!foot || GSIDE[foot - 1] === foot - 1) return g + 1;
+    }
+    return 0;
+  };
+  const vert = (v, side) => {
+    const slot = v * 2 + side;
+    if (out[slot] >= 0) return out[slot];
     const i = cellOf[v * 3], j = cellOf[v * 3 + 1], k = cellOf[v * 3 + 2];
     let x = raw[v * 3], y = raw[v * 3 + 1], z = raw[v * 3 + 2], ax = 0, ay = 0, az = 0, an = 0;
     if (!square[v]) for (let d = 0; d < 6; d++) {
@@ -218,7 +250,7 @@ function finish(R) {
         }
       }
     }
-    // normal: away from the ground in the 4 x 4 x 4 cells around; ground: the highest natural cell of the 8; light: the open cells' mean
+    // normal: away from the ground in the 4 x 4 x 4 cells around; light: the open cells' mean
     let nx = 0, ny = 0, nz = 0;
     for (let dz = -1; dz <= 2; dz++) for (let dy = -1; dy <= 2; dy++) for (let dx = -1; dx <= 2; dx++) {
       const X = i + dx, Y = j + dy, Z = k + dz;
@@ -234,21 +266,44 @@ function finish(R) {
       if (mv) { if (Yi > gy) { gy = Yi; g = mv - 1; } }
       else { sk += h.skyAt(X, ya + Yi, Z); bl += h.lget(X, ya + Yi, Z); on++; }
     }
-    const id = P.length / 3;
+    // ground
+    acc.fill(0);
+    if (!side) {
+      // a top: the grounds of the (up to 4) cells of the lower level whose tops are open, mixed
+      for (let c = 0; c < 4; c++) {
+        const X = i + (c & 1), Z = k + (c >> 1), mv = m(X, j, Z);
+        if (mv && !m(X, j + 1, Z)) addG(mv - 1, x, z, 1);
+      }
+      const ct = cutTurf(i, j, k);
+      if (ct && acc[8]) addG(GSIDE[ct - 1], x, z, 0.16 * acc[8]);
+    } else if (cutTurf(i, j, k)) addG(cutTurf(i, j, k) - 1, x, z, 1);   // (the top of a cut through turf: the sward's own edge)
+    else {
+      // a wall: the sides of the cells that have an open cell beside them, mixed
+      for (let Y = j; Y <= j + 1; Y++) for (let e = 0; e < 4; e++) {
+        const X0 = i + (e === 1 ? 1 : 0), Z0 = k + (e === 3 ? 1 : 0), X1 = e < 2 ? X0 : X0 + 1, Z1 = e < 2 ? Z0 + 1 : Z0;
+        const a = m(X0, Y, Z0), b = m(X1, Y, Z1);
+        if (!a === !b) continue;
+        let sg = (a || b) - 1;
+        if (GSIDE[sg] !== sg) {
+          const foot = Y > 0 ? (a ? m(X1, Y - 1, Z1) : m(X0, Y - 1, Z0)) : 0;
+          if (!foot || GSIDE[foot - 1] === foot - 1) sg = GSIDE[sg];
+        }
+        addG(sg, x, z, 1);
+      }
+    }
+    if (!acc[8]) addG(side ? GSIDE[g] : g, x, z, 1);
+    const id = P.length / 3, w = 1 / acc[8], tf = 1 + acc[7] * w;   // (the layers' weights add up to 1 + the share of turf: terrain.js)
     P.push(x, y + ya, z); Nn.push(nx / l, ny / l, nz / l);
     SK.push(on ? sk / on : 0); BLt.push(on ? bl / on / 15 : 0);
-    const gc = RT.GCOL, lay = RT.GLAY[g];
-    let r = gc[g * 3], gg = gc[g * 3 + 1], b = gc[g * 3 + 2];
-    if (RT.GTINT[g]) { h.tint(Math.max(0, Math.min(CS, Math.round(x))), Math.max(0, Math.min(CS, Math.round(z))), 1, tc); r *= tc[0]; gg *= tc[1]; b *= tc[2]; }
-    C.push(r, gg, b);
-    MT.push(lay === 0 ? 1 : 0, lay === 1 ? 1 : 0, lay === 2 ? 1 : 0, lay === 3 ? 1 : 0);
-    return (out[v] = id);
+    C.push(acc[0] * w, acc[1] * w, acc[2] * w);
+    MT.push(acc[3] * w * tf, acc[4] * w * tf, acc[5] * w * tf, acc[6] * w * tf);
+    return (out[slot] = id);
   };
   const I = [];
   // edges from a cell of the chunk (x, y, z) to the next along each axis; the 4 cells of vertices around the edge
-  const quad = (a, b, c, d, flip) => {
+  const quad = (a, b, c, d, flip, side) => {
     if (a < 0 || b < 0 || c < 0 || d < 0) return;
-    const A = vert(a), B = vert(b), Cc = vert(c), D = vert(d);
+    const A = vert(a, side), B = vert(b, side), Cc = vert(c, side), D = vert(d, side);
     if (flip) I.push(A, Cc, B, A, D, Cc); else I.push(A, B, Cc, A, Cc, D);
   };
   for (let y = 1; y < NY - 1; y++) for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
@@ -256,11 +311,11 @@ function finish(R) {
     // +x edge: cells (x, y-1..y, z-1..z)
     // (no quad against a built block: its vertices are all on the grid, so it would lie in the block's own face)
     let t = m(x + 1, y, z) ? 1 : 0;
-    if (s !== t && !hm(x + s, y, z)) quad(at(x, y - 1, z - 1), at(x, y, z - 1), at(x, y, z), at(x, y - 1, z), !s);
+    if (s !== t && !hm(x + s, y, z)) quad(at(x, y - 1, z - 1), at(x, y, z - 1), at(x, y, z), at(x, y - 1, z), !s, 1);
     t = m(x, y + 1, z) ? 1 : 0;
-    if (s !== t && !hm(x, y + s, z)) quad(at(x - 1, y, z - 1), at(x - 1, y, z), at(x, y, z), at(x, y, z - 1), !s);
+    if (s !== t && !hm(x, y + s, z)) quad(at(x - 1, y, z - 1), at(x - 1, y, z), at(x, y, z), at(x, y, z - 1), !s, s ? 0 : 1);
     t = m(x, y, z + 1) ? 1 : 0;
-    if (s !== t && !hm(x, y, z + s)) quad(at(x - 1, y - 1, z), at(x, y - 1, z), at(x, y, z), at(x - 1, y, z), !s);
+    if (s !== t && !hm(x, y, z + s)) quad(at(x - 1, y - 1, z), at(x, y - 1, z), at(x, y, z), at(x - 1, y, z), !s, 1);
   }
   const F = R.F.length ? new Float32Array(R.F) : null;
   if (!I.length) return { T: null, F };
