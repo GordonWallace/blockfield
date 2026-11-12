@@ -628,8 +628,8 @@ function broadleaf(sp, detail) {
     const flare = (a, y) => 1 + fl * Math.exp(-Math.max(0, y) / fh) * (lob ? 0.4 + 0.6 * Math.pow(Math.abs(Math.cos(a * lob * 0.5 + ph)), 1.5) : 1);
     const bc = sp.base || [0.7, 0.95, 0.5];
     const tcol = (kk, pp) => { const m = Math.max(0, 1 - Math.max(0, pp.y) / 1.1) * 0.8, q = rr(0.94, 1.04); return [q * (1 - m * (1 - bc[0])), q * (1 - m * (1 - bc[1])), q * (1 - m * (1 - bc[2]))]; };
-    tube(B, tp.slice(0, 5), tr.slice(0, 5), detail ? 12 : far ? 5 : 7, { flare, col: tcol });
-    tube(B, tp.slice(4), tr.slice(4), detail ? 8 : far ? 4 : 5, { col: tcol, v0: TH * 0.45 / BH });
+    // (one tube for the whole trunk: two tubes with different sides, frames and flare left a see-through seam where they met)
+    tube(B, tp, tr, detail ? 12 : far ? 5 : 7, { flare, col: tcol });
     const np = Math.max(1, Math.round(sp.np / (stems > 1 ? stems * 0.6 : 1)));
     for (let k = 0; k < np; k++) {
       const t = sp.t0 + (1 - sp.t0) * (k + R() * 0.5) / np, tc = np > 1 ? k / (np - 1) : 1;
@@ -661,11 +661,9 @@ function conifer(sp, detail) {
   const bc = sp.base || [0.7, 1.25, 0.5];
   const tcol = (kk, pp) => { const m = Math.max(0, 1 - Math.max(0, pp.y) / 1.6) * 0.75, q = rr(0.92, 1.05); return [q * (1 - m * (1 - bc[0])), q * (1 - m * (1 - bc[1])), q * (1 - m * (1 - bc[2]))]; };
   const lod = K.lod, thinT = lod >= 2 ? tp.filter((p, k) => k % 2 === 0 || k === nT) : null, thinR = lod >= 2 ? tr.filter((p, k) => k % 2 === 0 || k === nT) : null;
+  // (one tube for the whole trunk, so no seam can open along it)
   if (thinT) tube(B, thinT, thinR, lod >= 3 ? 4 : 5, { flare, col: tcol });
-  else {
-    tube(B, tp.slice(0, 9), tr.slice(0, 9), detail ? 14 : 8, { flare, col: tcol });
-    tube(B, tp.slice(8), tr.slice(8), detail ? 8 : 5, { col: tcol, v0: 3.1 });
-  }
+  else tube(B, tp, tr, detail ? 12 : 7, { flare, col: tcol });
   function trunkAt(yy, out) {
     let q = 1;
     for (; q < nT; q++) if (tp[q + 1].y >= yy) break;

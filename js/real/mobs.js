@@ -11,13 +11,14 @@
 //   - light(v, mob, x, y, z): once a frame: the cell's light into the material and the contact shadow's strength. Returns the
 //     model's albedo scale: the colour mobview.js then sets is only that and the tint (red when hurt, white for a creeper's fuse),
 //     no longer the light level.
-// API: BF.real.mobs = { material(), part(mesh), view(v, mob), light(v, mob, x, y, z) -> albedo scale }
+//   - ease(v, mob, y, dt): the height the model is drawn at: it glides up and down one-block steps, which the ground draws as slopes.
+// API: BF.real.mobs = { material(), part(mesh), view(v, mob), light(v, mob, x, y, z) -> albedo scale, ease(v, mob, y, dt) -> y }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
 if (!BF.real || !BF.real.on || typeof THREE === "undefined") return;
 
-// The painted colours are bright (pure whites, pinks); under a sun of 3 they would burn out, so the models reflect a little less.
+// The painted colours are bright (pure whites, pinks); under the noon sun they would burn out, so the models reflect a little less.
 const ALBEDO = 0.7;
 let blobGeo = null, blobTex = null;
 function blobTexture() {
@@ -50,6 +51,14 @@ const mobs = {
     v.root.add(blob);
     v.blob = blob;
   },
+  // The height a mob is drawn at. The simulation lifts it a whole block in one tick where the ground rises a block; the ground is
+  // drawn as a slope there, so the model catches up over a moment instead of hopping (and the same going down).
+  ease(v, m, y, dt) {
+    const d = y - v.easeY;
+    if (!(Math.abs(d) < 1.3) || m.sleeping || m.riding != null || m.dead) return (v.easeY = y);   // first frame, a jump, a fall, a teleport
+    const s = Math.max(5, Math.abs(d) * 16) * dt;
+    return (v.easeY = Math.abs(d) <= s ? y : v.easeY + Math.sign(d) * s);
+  },
   light(v, m, x, y, z) {
     BF.real.cellLight(x, y, z, cell);
     if (BF.skyLight) { const l = BF.skyLight.get(x, y, z); cell.x = l === 15 ? 1 : BF.skyLight.bright(l); }   // (the sky light mobview.js lights mobs by)
@@ -58,7 +67,7 @@ const mobs = {
     const b = v.blob;
     if (b) {
       // darkest under an open bright sky, gone in the dark, in a bed, in water and once dead; under a roof a faint one from the room's light
-      const A = BF.atmos, day = A ? Math.min(1, A.hemiIntensity / 0.6 + A.sunIntensity / 3.3) : 1;
+      const A = BF.atmos, day = A ? Math.min(1, A.hemiIntensity / 0.6 + A.sunIntensity / 1.7) : 1;
       const want = m.sleeping || m.dead || m.inWater || m.riding != null ? 0 : 0.5 * Math.min(1, day) * (0.35 + 0.65 * cell.x);
       b.material = blobMat(want);
       b.visible = want > 0.02;

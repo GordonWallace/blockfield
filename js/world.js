@@ -1226,9 +1226,13 @@ function meshJob(c, copy) {
   return {
     ox, oz, lo: c.lo, hi: c.hi, y0: c.y0, y1: c.y1,
     secs: copy ? c.secs.map(cp) : c.secs, light: copy && c.light ? c.light.map(cp) : c.light, sky: copy && c.sky ? c.sky.map(cp) : c.sky,
-    Y0, Y1, rb, rl, rs, tint, ext, real: !!T.real,
+    Y0, Y1, rb, rl, rs, tint, ext, real: T.real ? (homeOfClay(ox + 8, oz + 8) ? 1 : 2) : false,   // (2: terracotta and sandstone stay cubes here, js/real/terrain.js)
     sph: Object.assign(sphereFrame(ox, oz), { R: BF.planet.R, sea: BF.SEA }),
   };
+}
+// The realistic look: is this chunk in the biome where terracotta is the ground itself (the badlands)? Elsewhere it is only ever built with.
+function homeOfClay(x, z) {
+  try { const b = BF.worldgen.biomeAt(x, z); return !!b && b.name === "Badlands"; } catch (_) { return false; }
 }
 // The arrays of a job copied for a worker (to transfer them).
 function jobBuffers(J) {
@@ -1818,6 +1822,7 @@ world.setGate = function (x, y, z, open) {
 // saved spots rely on it).
 const HIT = { x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0, inside: false };
 let firmInside = false;   // set by moveBox for the player (opts.firm): see boxHit
+let passIds = null;       // set by moveBox (opts.pass): a table by block id of solid blocks the box does not collide with
 function boxHit(px, py, pz, hw, h, axis, prev) {
   HIT.inside = false;
   const x0 = Math.floor(px - hw), x1 = Math.floor(px + hw - 1e-6);
@@ -1828,6 +1833,7 @@ function boxHit(px, py, pz, hw, h, axis, prev) {
     if (y < y0 && !BF.TALLBOX[world.getBlock(x, y, z)]) continue;   // the layer below the feet only matters for fences / gates (1.5 tall)
     if (!world.isSolid(x, y, z)) continue;
     const bid = world.getBlock(x, y, z);
+    if (passIds && passIds[bid]) continue;   // (moveBox opts.pass: blocks this box goes through, e.g. leaves for item drops)
     const cbl = (BF.DYNBOXES[bid] && BF.DYNBOXES[bid](world.getBlock, x, y, z, bid)) || BF.CBOXES[bid] || (BF.CBOX[bid] ? [BF.CBOX[bid]] : [null]); // slabs/stairs: several boxes, each tested on its own
     for (const cb of cbl) {
     let ax = x, ay = y, az = z, bx = x + 1, by = y + 1, bz = z + 1;
@@ -1860,12 +1866,14 @@ world.boxCollides = (px, py, pz, hw, h) => boxHit(px, py, pz, hw, h);
 // Moves an entity box through the world with per-axis collision.
 // pos: {x,y,z} feet centre (mutated). vel: {x,y,z} (mutated: blocked axes zeroed).
 // opts.stepUp: max auto-step height in blocks (1.05 climbs one-block ledges; 0 disables).
+// opts.pass: a table by block id (1: the box goes through that block as if it were air).
 // opts.swim: the box is swimming (it was in water last step): it steps up onto a ledge too, as off the ground, so a mob swimming in a
 // channel or a pond flush with the land climbs out onto the bank (only a bank no higher than stepUp above its feet).
 // Returns {onGround, hitX, hitZ, hitCeil, inWater}.
 world.moveBox = function (pos, vel, hw, h, dt, opts) {
   const stepUp = (opts && opts.stepUp) || 0;
   firmInside = !!(opts && opts.firm);
+  passIds = (opts && opts.pass) || null;
   const res = { onGround: false, hitX: false, hitZ: false, hitCeil: false, inWater: false };
   let top = 0; // top of the last obstacle hit (for stepping up onto beds and blocks)
   const moveAxis = (axis, d) => {
@@ -1911,7 +1919,7 @@ world.moveBox = function (pos, vel, hw, h, dt, opts) {
   if (!res.onGround && vel.y <= 0 && world.boxCollides(pos.x, pos.y - 0.02, pos.z, hw, 0.02)) res.onGround = true;
   res.inWater = BF.RENDER[world.getBlock(pos.x, pos.y + 0.4, pos.z)] === 3;
   res.headInWater = BF.RENDER[world.getBlock(pos.x, pos.y + h - 0.15, pos.z)] === 3;
-  firmInside = false;
+  firmInside = false; passIds = null;
   return res;
 };
 })();

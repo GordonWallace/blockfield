@@ -44,6 +44,35 @@ const root = path.resolve(__dirname, '..');
       const log = renderer.info.programs.filter(pr => pr.diagnostics && !pr.diagnostics.runnable);
       if (log.length) bad(id + ': a shader did not compile');
     };
+    const ray = new T.Raycaster(), slitMat = new T.MeshBasicMaterial({ side: T.DoubleSide });
+    function slit(geo, upTo) {
+      const mesh = new T.Mesh(geo, slitMat), p = geo.attributes.position, O = new T.Vector3(), D = new T.Vector3();
+      geo.computeBoundingSphere(); mesh.updateMatrixWorld();
+      for (let d = 0; d < 6; d++) {
+        const a = d * 1.05 + 0.3, near = [], thick = [];   // per height: how far the ray travels to the bark, and how thick the wood is there
+        let tx = null, tz = 0;
+        for (let y = 0.1; y < upTo; y += 0.01) {
+          if (tx == null) {   // start from the middle of the wood near the ground; from there follow the trunk itself (it leans, and limbs and arms pull an average aside)
+            let cx = 0, cz = 0, n = 0;
+            for (let i = 0; i < p.count; i++) if (Math.abs(p.getY(i) - y) < 0.3 && Math.hypot(p.getX(i), p.getZ(i)) < 1) { cx += p.getX(i); cz += p.getZ(i); n++; }
+            if (!n) { near.push(null); thick.push(0); continue; }
+            tx = cx / n; tz = cz / n;
+          }
+          O.set(tx - Math.cos(a) * 30, y, tz - Math.sin(a) * 30); D.set(Math.cos(a), 0, Math.sin(a)); ray.set(O, D);
+          const h = ray.intersectObject(mesh);
+          if (h.length > 1) { tx = (h[0].point.x + h[1].point.x) / 2; tz = (h[0].point.z + h[1].point.z) / 2; }
+          else if (!near.some(v => v != null)) tx = null;
+          near.push(h.length ? h[0].distance : Infinity); thick.push(h.length > 1 ? h[1].distance - h[0].distance : 0);
+        }
+        // a seam: at one height the ray goes past the bark it meets just below and just above (through to the far wall, or out the other side)
+        for (let k = 3; k < near.length - 3; k++) {
+          const lo = Math.min(near[k - 2] == null ? Infinity : near[k - 2], near[k - 3] == null ? Infinity : near[k - 3]), hi2 = Math.min(near[k + 2], near[k + 3]), t = Math.max(thick[k - 2], thick[k - 3]);
+          // (the same surface below and above, and wood thick enough to be a trunk and not a twig crossing the ray)
+          if (near[k] != null && isFinite(lo) && isFinite(hi2) && Math.abs(lo - hi2) < 0.04 && t > 0.12 && near[k] > lo + t * 0.5) return 0.1 + k * 0.01;
+        }
+      }
+      return null;
+    }
     let count = 0, t3 = 0, t3mid = 0, t3low = 0;
     for (const sp of A.species) {
       const id = 'tree ' + sp.id;
@@ -65,6 +94,8 @@ const root = path.resolve(__dirname, '..');
         const top = hi.bark.boundingBox.max.y;
         if (top < sp.height[0] * 0.6 || top > sp.height[1] * 1.3) bad(id + ': stands ' + top.toFixed(1) + ' blocks tall, outside its height range ' + sp.height);
         draw(id + ' bark', hi.bark, sp.barkMaterial()); draw(id + ' foliage', hi.foliage, sp.foliageMaterial());
+        // no seam across the lower trunk (below the first limbs): a level ray must not pass the bark it meets just below and just above
+        for (const [lv, g] of [[0, hi], [1, mid], [2, lo]]) { const y = slit(g.bark, Math.min(3, top * 0.25)); if (y != null) bad(id + ': detail ' + lv + ' has a gap across the trunk at height ' + y.toFixed(2)); }
         t3 += h; t3low += l; count++;
       } catch (e) { bad(id + ': build threw ' + (e.stack || e.message)); }
     }

@@ -52,7 +52,7 @@ chunkMask.value.generateMipmaps = false;
 chunkMask.value.needsUpdate = true;
 const maskO = { value: new THREE.Vector2() };   // its corner in the view face's grid
 
-const lod = (BF.lod = { EXT, THIN, levels: [], active: false, eyeHole: 0, ribbon: null, scene: null, view: { f: 0, u: 0, v: 0 }, standIns: true });
+const lod = (BF.lod = { EXT, THIN, levels: [], active: false, eyeHole: 0, ribbon: null, scene: null, view: { f: 0, u: 0, v: 0 }, standIns: true, cap: Infinity });   // cap: rings with cells this size or wider aren't drawn (js/globe.js)
 
 // ---- materials ----
 const P = () => BF.planet;
@@ -706,6 +706,7 @@ function update(budgetMs) {
   const ff = !!(BF.warp && BF.warp.speed >= 10);
   for (const L of lod.levels) {
     L.show = above < HIDE * L.cell;
+    L.draw = L.show && L.cell < lod.cap;   // (from planet height the coarser rings are left to the globe's finer tiles: js/globe.js)
     if (!L.show) { if (L.building) { BF.sampler.cancel(L); L.building = null; } if (L.si) L.si.visible = false; continue; }
     if (L.building || (L.mesh && (ff || offset(L, V.f, V.u, V.v) <= MOVE * L.half))) continue;
     // too fast for this ring: coarser rings cover until the player slows (while the player is still over it)
@@ -718,18 +719,19 @@ function update(budgetMs) {
   lod.eyeHole = Math.min(BF.world.viewDist * BF.CS, BF.world.covered || 0) * 0.95;
   if (BF.player.detached && !BF.world.replica) lod.eyeHole = 0;   // (detached in the page: the chunks load round the body, not the view; the chunk mask alone keeps the rings off them, r15-98)
   markChunks(pp, V);
-  let prev = null;
+  let prev = null, outer = top;   // outer: the coarsest ring drawn when the globe has taken the rest (it meets the globe as the top ring does)
+  if (lod.cap < Infinity) for (const L of lod.levels) if (L.draw) outer = L;
   const lastStand = lod.levels[STAND_LEVELS - 1];
   for (const L of lod.levels) {
     if (!L.mesh) continue;
-    L.mesh.visible = L.show;
-    if (!L.show) continue;
-    const u = L.mat.uniforms, fine = prev && prev.mesh && prev.show ? prev : null;
+    L.mesh.visible = L.draw;
+    if (!L.draw) { if (L.si) L.si.visible = false; continue; }
+    const u = L.mat.uniforms, fine = prev && prev.mesh && prev.draw ? prev : null;
     cuts(u, V, lod.eyeHole, fine);
     u.outer.value.set(0, 0, L.half);
     // the middle that the finer ring or the loaded chunks certainly cover isn't drawn at all (its cells come first in the index)
     L.skip = Math.floor(covered(L, V, fine) / L.cell);
-    u.morph.value.set(L === top ? 1e30 : L.half * MORPH0, L === top ? 2e30 : L.half * MORPH1);
+    u.morph.value.set(L === outer ? 1e30 : L.half * MORPH0, L === outer ? 2e30 : L.half * MORPH1);
     // stand-ins fade out across the outer part of the last ring that has them
     if (L === lastStand) u.edge.value.set(L.half * 0.7, L.half * 0.95);
     if (L.si) {
