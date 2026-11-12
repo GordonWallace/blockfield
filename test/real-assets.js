@@ -78,6 +78,7 @@ const root = path.resolve(__dirname, '..');
       const id = 'tree ' + sp.id;
       if (BF.B[sp.log] == null) bad(id + ': no block named ' + sp.log);
       if (!(sp.height && sp.height[0] > 0 && sp.height[1] >= sp.height[0])) bad(id + ': bad height range');
+      if (sp.barkMaterial().roughness !== 1 || sp.barkMaterial().metalness !== 0) bad(id + ': bark must be matte (roughness 1, no metal; the kit drops its highlight)');
       try {
         const hi = sp.build(K.mulberry(11), 0), lo = sp.build(K.mulberry(11), 2), again = sp.build(K.mulberry(11), 0), other = sp.build(K.mulberry(12), 0);
         check(id + ' bark', hi.bark); check(id + ' foliage', hi.foliage, sp.leafless); check(id + ' bark (low)', lo.bark); check(id + ' foliage (low)', lo.foliage, sp.leafless);

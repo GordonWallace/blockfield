@@ -87,12 +87,16 @@ function barkTex(paint, opts) {
     },
     // blocky plates: a jittered grid of cracks (pine, oak, juniper, alligator bark)
     plates(cw, ch, lw, dark, jit, a) {
-      for (let x = 0; x < W; x += cw) {
-        const pts = P.furrow(x + rr(-jit, jit), 0, H, jit * 0.5, 24);
+      // (whole columns across the tile, and every groove ends where it began, so the grooves run on unbroken where the tile repeats
+      // up the trunk and around it)
+      const cols = Math.max(1, Math.round(W / cw)), cw2 = W / cols;
+      for (let c = 0; c < cols; c++) {
+        const x = c * cw2, pts = P.furrow(x + rr(-jit, jit), 0, H, jit * 0.5, 24), n = pts.length / 2 - 1, drift = pts[n * 2] - pts[0];
+        for (let q = 0; q <= n; q++) { pts[q * 2] -= drift * q / n; pts[q * 2 + 1] = H * q / n; }
         P.poly(g, pts, dark, lw * rr(0.7, 1.3), a); P.poly(h, pts, "#0a0a0a", lw * 1.2, 0.9);
         for (let y = rr(0, ch); y < H; y += ch * rr(0.6, 1.5)) {
-          const d = P.dash(x + rr(-jit, jit), y, cw + rr(-jit, jit), jit * 0.6);
-          P.poly(g, d, dark, lw * rr(0.4, 0.9), a * 0.85); P.poly(h, d, "#141414", lw * 0.8, 0.8);
+          const d = P.dash(x + rr(-jit, jit), y, cw2 + rr(-jit, jit), jit * 0.6);
+          P.poly(g, d, dark, lw * rr(0.3, 0.6), a * 0.6); P.poly(h, d, "#141414", lw * 0.6, 0.55);
         }
       }
     },
@@ -116,8 +120,13 @@ function barkTex(paint, opts) {
   map.encoding = T.sRGBEncoding; map.wrapS = map.wrapT = bump.wrapS = bump.wrapT = T.RepeatWrapping; map.anisotropy = bump.anisotropy = 8;
   return { map, bump };
 }
-function barkMat(tex, bumpScale, rough) {
-  return lit(new T.MeshStandardMaterial({ map: tex.map, bumpMap: tex.bump, bumpScale: bumpScale == null ? 0.04 : bumpScale, roughness: rough == null ? 0.95 : rough, metalness: 0, vertexColors: true }), "bark");
+// Bark is matte: no highlight at all (dry bark scatters light; a sheen under the game's strong sun reads as plastic), so the material's
+// specular terms are dropped and only the diffuse light and the bump's shading remain.
+const MATTE_GLSL = "#include <lights_fragment_end>\nreflectedLight.directSpecular = vec3( 0.0 ); reflectedLight.indirectSpecular = vec3( 0.0 );";
+function barkMat(tex, bumpScale) {
+  const m = new T.MeshStandardMaterial({ map: tex.map, bumpMap: tex.bump, bumpScale: bumpScale == null ? 0.04 : bumpScale, roughness: 1, metalness: 0, vertexColors: true });
+  m.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace("#include <lights_fragment_end>", MATTE_GLSL); };
+  return lit(m, "bark");
 }
 
 // =====================================================================
@@ -629,7 +638,7 @@ function broadleaf(sp, detail) {
     const bc = sp.base || [0.7, 0.95, 0.5];
     const tcol = (kk, pp) => { const m = Math.max(0, 1 - Math.max(0, pp.y) / 1.1) * 0.8, q = rr(0.94, 1.04); return [q * (1 - m * (1 - bc[0])), q * (1 - m * (1 - bc[1])), q * (1 - m * (1 - bc[2]))]; };
     // (one tube for the whole trunk: two tubes with different sides, frames and flare left a see-through seam where they met)
-    tube(B, tp, tr, detail ? 12 : far ? 5 : 7, { flare, col: tcol });
+    tube(B, tp, tr, detail ? 12 : far ? 5 : 10, { flare, col: tcol });   // (ten sides up close: fewer show as flat faces)
     const np = Math.max(1, Math.round(sp.np / (stems > 1 ? stems * 0.6 : 1)));
     for (let k = 0; k < np; k++) {
       const t = sp.t0 + (1 - sp.t0) * (k + R() * 0.5) / np, tc = np > 1 ? k / (np - 1) : 1;
