@@ -148,6 +148,9 @@ function tripTest(BF) {
 // out their cluster), a few round each village's centre, alike in every copy. With --plan the first meeting gives every group to the
 // first worker (nothing measured yet), so the others run no pass that interval: they must still send and replace those items by
 // their cluster at the meeting (js/mobs.js thingBase; until it they kept their own copies, and the worlds drifted apart).
+// The items lie out of the player's reach: the player's inventory lives on the first worker only (nothing sends it to the others), so
+// an item the player picks up shows as a difference in every other worker's copy of the player. They used to lie round the centre itself,
+// the first one right under the player and just outside the reach as it was measured until 1.6 (js/drops.js); now that one would be picked up.
 function restoredDrops(BF) {
   const ids = ['oak_log', 'stick', 'apple', 'cobblestone'].map(k => BF.resolveItem(k)).filter(x => x != null);
   let i = 0;
@@ -155,7 +158,7 @@ function restoredDrops(BF) {
     const [x, z] = k.split(',').map(Number);
     if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
     for (let j = 0; j < 4; j++) {
-      const px = x + 0.5 + (j % 2) * 2, pz = z + 0.5 + (j >> 1) * 2;
+      const px = x + 3.5 + (j % 2) * 2, pz = z + 0.5 + (j >> 1) * 2;   // (3 blocks off the centre, where the player stands: see below)
       if (!BF.world.isLoaded(px, pz)) continue;
       BF.drops.spawn(ids[i++ % ids.length], 1 + (j % 3), px, BF.worldgen.heightAt(Math.floor(px), Math.floor(pz)) + 2, pz, { vel: new THREE.Vector3(0, 0, 0), pickupDelay: 0 });
     }
