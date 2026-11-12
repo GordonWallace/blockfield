@@ -39,13 +39,13 @@ const d2 = (q, p) => (q.x - p.x) ** 2 + (q.y - p.y) ** 2 + (q.z - p.z) ** 2;
 // entities of one kind in the mirror, in the order they came
 function* ofKind(kind) { for (const e of M.entities.values()) if (e.kind === kind) yield e; }
 function drawDrops(seen, a) {
-  const light = BF.sky ? 0.35 + 0.65 * BF.sky.light : 1;
+  const light = BF.sky ? 0.35 + 0.65 * BF.sky.light : 1, RD = BF.real && BF.real.on && BF.real.drops;   // (RD: the realistic look draws the items)
   for (const d of ofKind("drop")) {
     let sp = dropViews.get(d.n);
-    if (!sp || sp.material !== dropMat(d.item)) {
+    if (!sp || (RD ? sp.userData.item !== d.item : sp.material !== dropMat(d.item))) {
       if (sp) scene.remove(sp);
-      sp = new THREE.Sprite(dropMat(d.item));
-      sp.scale.set(0.38, 0.38, 0.38);
+      if (RD) { sp = RD.make(d.item); sp.userData.item = d.item; }   // (a lump of the ground or a lit icon, js/real/drops.js)
+      else { sp = new THREE.Sprite(dropMat(d.item)); sp.scale.set(0.38, 0.38, 0.38); }
       scene.add(sp);
       dropViews.set(d.n, sp);
     }
@@ -57,7 +57,7 @@ function drawDrops(seen, a) {
     let y = snap ? p.y : q.y * j + p.y * k;
     if (!d.pulled && BF.real && BF.real.on && BF.real.fell) y = BF.real.fell.itemY(d.n, x, y, z);   // (on the smooth ground as drawn, js/real/fell.js)
     sp.position.set(x, d.pulled ? y : y + 0.22 + Math.sin(age * 2.5 + d.phase) * 0.06, z);   // one flying into the player doesn't bob
-    sp.material.color.setScalar(light);
+    if (RD) RD.light(sp, x, y, z, age); else sp.material.color.setScalar(light);
   }
 }
 
