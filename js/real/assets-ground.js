@@ -23,7 +23,7 @@ add("clay", 0, "#8e9498", ["clay"]);
 add("mycelium", 0, "#7a6a78", ["mycelium"]);
 add("moss", 0, "#51702c", ["moss_block"]);
 // sand and gravel
-add("quartz_sand", 2, "#d6c8a0", ["sand"]);
+add("quartz_sand", 2, "#b48e50", ["sand"]);              // warm and well under white: under the midday sun a pale sand reads as snow
 add("red_sand", 2, "#b8683c", ["red_sand"]);
 add("gravel", 2, "#85807a", ["gravel"]);
 // rock
