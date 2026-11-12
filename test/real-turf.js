@@ -100,8 +100,9 @@ const BLADES = ([x, z, top]) => {
       const hole = await pg.evaluate(COLUMN, [x, z, y - 4]), low = hole.filter(v => v[0] < y + 0.6), high = hole.filter(v => v[0] >= y + 0.6);
       check(low.length >= 4 && low.every(v => v[1] < 0.01), 'the floor of a dug hole is bare soil', low);
       check(low.every(v => v[2] > v[3] * 1.05), 'and brown, not green', low);
-      // (the rim is a rough edge, not a line: the top's rim vertices carry a little soil, the wall's top vertices are the sward's lip)
-      check(high.some(v => v[1] > 0.99) && high.some(v => v[1] > 0.8 && v[1] < 0.95) && high.every(v => v[1] > 0.8), 'its rim is turf with a little soil worked in, for a rough edge', high);
+      // (the rim is a rough edge, not a line: the rim's vertices carry a little soil, and the side of a hole one block deep runs from
+      // them down to the floor as one surface)
+      check(high.length >= 4 && high.every(v => v[1] > 0.8 && v[1] < 0.95), 'its rim is turf with a little soil worked in, for a rough edge', high);
       const shaft = await pg.evaluate(COLUMN, [x + 3, z, y - 4]), walls = shaft.filter(v => v[0] < y + 0.6);
       check(walls.length >= 12 && walls.every(v => v[1] < 0.01 && v[2] > v[3]), 'the walls of a shaft are soil all the way up, with no turf', walls);
       check(shaft.some(v => v[0] >= y + 0.6 && v[1] > 0.99), 'and the ground around its mouth is still turf');
@@ -118,6 +119,23 @@ const BLADES = ([x, z, top]) => {
       check(healed.length >= 4 && healed.every(v => v[1] > 0.99), 'and the hole is turf again, floor and sides', healed);
       const b3 = await pg.evaluate(BLADES, [x, z, y + 0.6]);
       check(b3.n > 0, 'with blades on it', b3);
+      // a step of a slope, grass above and a path at its foot: one ground runs into the other across the step (no vertex there is
+      // listed twice, which is what a cut edge does)
+      const stepped = await pg.evaluate(([x, y, z]) => {
+        const W = BF.world, B = BF.B;
+        for (let a = -1; a <= 1; a++) { W.setBlock(x + 1 + a, y + 1, z - 2, B.grass); W.setBlock(x + 1 + a, y, z - 1, B.dirt_path); }
+        W.flushDirty();
+        const c = W.chunkAt(x + 1, z - 2), T = W.meshArrays(c).T, lx = x + 1 - c.cx * 16, lz = z - 1 - c.cz * 16, seen = new Set();
+        let n = 0, twice = 0;
+        for (let i = 0; i < T.pos.length / 3; i++) {
+          const vx = T.pos[i * 3] - lx, vy = T.pos[i * 3 + 1], vz = T.pos[i * 3 + 2] - lz;
+          if (vx < -0.2 || vx > 1.2 || vz < -0.3 || vz > 0.3 || vy < y + 0.5 || vy > y + 2.2) continue;
+          const k = Math.round(vx * 64) + ',' + Math.round(vy * 64) + ',' + Math.round(vz * 64);
+          n++; if (seen.has(k)) twice++; seen.add(k);
+        }
+        return { n, twice };
+      }, spot);
+      check(stepped.n >= 4 && stepped.twice === 0, 'across a one-block step of a slope grass runs into the path without a cut edge', stepped);
       if (out) await pg.screenshot({ path: path.join(out, 'turf-regrown.png') });
     }
     check(errors.length === 0, 'no page or shader errors with the look on', errors);
