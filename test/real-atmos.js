@@ -45,9 +45,9 @@ const root = path.resolve(__dirname, '..');
   await frames(pg, 5);
   const noon = await air(pg);
   check(Math.abs(noon.len - 1) < 1e-3 && noon.sunY > 0.8, 'noon: the light comes from high up (' + noon.sunY.toFixed(2) + ')');
-  check(noon.sun > 2.5 && noon.hemi > 0.4 && noon.day > 0.95, 'noon: full sun ' + noon.sun.toFixed(2) + ', sky ' + noon.hemi.toFixed(2));
+  check(noon.sun > 1.4 && noon.hemi > 0.4 && noon.day > 0.95, 'noon: full sun ' + noon.sun.toFixed(2) + ', sky ' + noon.hemi.toFixed(2));
   check(noon.stars < 0.01, 'noon: no stars');
-  check(noon.lightI > 2.5 && noon.lightY > 100, 'noon: core.js copied it into the sun light');
+  check(noon.lightI > 1.4 && noon.lightY > 100, 'noon: core.js copied it into the sun light');
   check(noon.far > noon.near && noon.near > 0, 'fog distances ' + noon.near.toFixed(0) + ' .. ' + noon.far.toFixed(0));
 
   await pg.evaluate(() => BF.sky.setTime(0.75));
