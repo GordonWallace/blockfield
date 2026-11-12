@@ -172,6 +172,20 @@ module.exports = async (pg, out) => {
   check(land.wat && land.old, "only the look's ring samples and meshes carry water and slope", [land.wat, land.old]);
   check(land.mesh && land.mesh[0] === 255 && land.mesh[2] === 0 && land.nrm && land.nrm[0] < -60 && land.nrm[1] > 60 && land.nrm[2] === 0 && land.shade[0] === 200, "a ring's mesh says where water is, its ground's slope, and keeps its colours unshaded", [land.mesh, land.nrm, land.shade]);
   check(!land.errs.length, "the rings' ground and water material compiles", land.errs);
+  // the atlas' smaller copies are made by hand (js/real/lod.js mipRow): a tree drawn small keeps the share of its picture that passes
+  // the cards' alpha test, and its colour isn't darkened by the empty texels round it
+  const mips = await pg.evaluate(() => {
+    const L = BF.real.lod, tex = L.cards.uniforms.map.value, m = tex.mipmaps, M = [...L.models.values()].find(x => x.row >= 0 && L.cards.uniforms.uRow.value[x.row].y > 0);
+    if (!m || !M) return null;
+    const cw = L.config.cellW, ch = L.config.cellH, W = (L.config.frames + 1) * cw, x0 = (M.row % 2) * W, y0 = Math.floor(M.row / 2) * ch;
+    const at = l => { const d = m[l].data, w = m[l].width; let n = 0, lum = 0, k = 0;
+      for (let y = 0; y < ch >> l; y++) for (let x = 0; x < cw >> l; x++) { const o = (((y0 >> l) + y) * w + (x0 >> l) + x) * 4; if (d[o + 3] >= 102) { n++; lum += d[o] + d[o + 1] + d[o + 2]; } k++; }
+      return [n / k, n ? lum / n : 0]; };
+    return { n: m.length, last: [m[m.length - 1].width, m[m.length - 1].height], gen: tex.generateMipmaps, a0: at(0), a2: at(2), a3: at(3) };
+  });
+  check(mips && !mips.gen && mips.last[0] === 1 && mips.last[1] === 1, "the atlas carries its own smaller copies, down to one texel", mips && [mips.n, mips.last, mips.gen]);
+  check(mips && mips.a0[0] > 0.02 && mips.a2[0] >= mips.a0[0] * 0.9 && mips.a3[0] >= mips.a0[0] * 0.9 && mips.a3[1] > mips.a0[1] * 0.8,
+    "a tree drawn small keeps its cover and its colour", mips && [mips.a0, mips.a2, mips.a3].map(a => a.map(v => +v.toFixed(2))));
   await pg.waitForTimeout(1500);
   await pg.evaluate(() => localStorage.setItem("bf.look", "blocks"));
   console.log(fails ? "real-lod FAIL " + fails : "real-lod PASS");

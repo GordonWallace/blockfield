@@ -323,6 +323,8 @@ varying vec2 vUv2;
 varying float vMix;
 varying float vX;
 varying float vTop;
+varying float vLean;   // how far the upright card's normal leans up: more from above, where the crown's sunlit top is what shows
+varying float vShow;   // how much of the card is drawn (dithered): the level card comes in as the eye rises, the upright one goes
 varying vec3 vRight;
 varying vec3 vFront;
 varying vec3 vUp;
@@ -339,6 +341,8 @@ vec4 rlCard(vec3 foot, vec3 up, vec3 xV, vec3 zV, vec3 corner, float row, float 
   vX = corner.x; vTop = corner.z; vRight = right; vFront = front; vUp = up;
   if (corner.z < 0.5) {
     if (el > 0.93) return vec4(0.0);
+    vShow = 1.0 - smoothstep(0.8, 0.93, el);
+    vLean = 0.45 + 0.7 * max(el, 0.0);
     float fr = fract((atan(dot(toCam, xV), dot(toCam, zV)) - yaw) / 6.2831853) * uGrid.x;
     float f0 = floor(fr), f1 = mod(f0 + 1.0, uGrid.x), v = (line + 0.02 + corner.y * 0.96) / uGrid.z;
     vMix = smoothstep(0.25, 0.75, fr - f0);
@@ -349,6 +353,7 @@ vec4 rlCard(vec3 foot, vec3 up, vec3 xV, vec3 zV, vec3 corner, float row, float 
     return vec4(foot + up * ((I.z + 0.5 * I.y) * s) + right * (corner.x * I.x * s) + upC * ((corner.y - 0.5) * I.y * s), 1.0);
   }
   if (el < 0.3) return vec4(0.0);
+  vShow = smoothstep(0.3, 0.62, el);
   float c = cos(yaw), sn = sin(yaw), z = corner.y * 2.0 - 1.0;
   vec3 xT = xV * c - zV * sn, zT = xV * sn + zV * c;
   vMix = 0.0;
@@ -366,18 +371,21 @@ varying vec2 vUv2;
 varying float vMix;
 varying float vX;
 varying float vTop;
+varying float vLean;   // how far the upright card's normal leans up: more from above, where the crown's sunlit top is what shows
+varying float vShow;   // how much of the card is drawn (dithered): the level card comes in as the eye rises, the upright one goes
 varying vec3 vRight;
 varying vec3 vFront;
 varying vec3 vUp;
 vec4 rlCardTexel() {
   vec4 c = texture2D(map, vUv);
   if (vMix > 0.0) c = mix(c, texture2D(map, vUv2), vMix);
+  if (${DITHER} >= vShow) c.a = 0.0;
   return c;
 }
 vec3 rlCardNormal() {
   if (vTop > 0.5) return normalize(vUp);
   float x = clamp(vX, -1.0, 1.0) * 0.85;
-  return normalize(vRight * x + vFront * sqrt(1.0 - x * x) + vUp * 0.45);
+  return normalize(vRight * x + vFront * sqrt(1.0 - x * x) + vUp * vLean);
 }`;
 const CARD_DEFINES = () => ({ CARD_SQUARE: (config.cellW / config.cellH).toFixed(4) });
 // the two cards of a tree: corners as rlCard takes them
@@ -434,7 +442,7 @@ void main() {
   #include <encodings_fragment>
   #include <fog_fragment>
 }`;
-const imp = { material: null, atlas: null, data: null, lines: 0, rows: 0, dirty: false, flushed: 0, waiting: [], rt: null, scene: null };
+const imp = { baked: [], material: null, atlas: null, data: null, lines: 0, rows: 0, dirty: false, flushed: 0, waiting: [], rt: null, scene: null };
 function impostorMaterial() {
   if (imp.material) return imp.material;
   const ranges = [], jits = [];
@@ -481,10 +489,54 @@ function atlasFor(nRows) {
   const data = new Uint8Array(W * lines * config.cellH * 4);
   if (imp.data) data.set(imp.data);
   const tex = new THREE.DataTexture(data, W, lines * config.cellH, THREE.RGBAFormat, THREE.UnsignedByteType);
-  tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true; tex.needsUpdate = true;
+  tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
+  const mips = [{ data, width: W, height: lines * config.cellH }];
+  for (let w = W, h = lines * config.cellH; w > 1 || h > 1;) { w = Math.max(1, w >> 1); h = Math.max(1, h >> 1); mips.push({ data: new Uint8Array(w * h * 4), width: w, height: h }); }
+  tex.mipmaps = mips;
   if (imp.atlas) imp.atlas.dispose();
   imp.atlas = tex; imp.data = data; imp.lines = lines;
   cardU.map.value = tex; cardU.uGrid.value.set(config.frames, COLS, lines);
+  for (const row of imp.baked) mipRow(row);
+}
+// A row's smaller copies (the atlas' mip levels), made here and not by the graphics card: a tree far off is drawn from them, and plain
+// halving would leave it thin and dark (a crown's gaps averaged in: fewer texels pass the cards' alpha test, and the empty texels'
+// black gets into the leaves' colour). Colour is averaged by cover, and each view's cover is scaled so the share of it that passes
+// the test (0.4) stays the share that passes in the full picture.
+const CUT = 102;   // 0.4 of 255: the cards' alpha test
+function mipRow(row) {
+  const F = config.frames, cw = config.cellW, ch = config.cellH, W = (F + 1) * cw, m = imp.atlas.mipmaps;
+  const x0 = (row % COLS) * W, y0 = Math.floor(row / COLS) * ch;
+  const share = [];
+  for (let f = 0; f <= F; f++) {
+    const hh = f < F ? ch : cw, d = m[0].data, w0 = m[0].width;
+    let n = 0;
+    for (let y = 0; y < hh; y++) for (let x = 0; x < cw; x++) if (d[((y0 + y) * w0 + x0 + f * cw + x) * 4 + 3] >= CUT) n++;
+    share.push(n / (cw * hh));
+  }
+  for (let l = 1; l < m.length; l++) {
+    const S = m[l - 1], D = m[l], sd = S.data, dd = D.data;
+    const X = x0 >> l, Y = y0 >> l, w = Math.min(D.width - X, Math.max(1, W >> l)), h = Math.min(D.height - Y, Math.max(1, ch >> l));
+    for (let y = Y; y < Y + h; y++) for (let x = X; x < X + w; x++) {
+      let r = 0, g = 0, b = 0, a = 0, ws = 0;
+      for (let k = 0; k < 4; k++) {
+        const o = (Math.min(S.height - 1, 2 * y + (k >> 1)) * S.width + Math.min(S.width - 1, 2 * x + (k & 1))) * 4, wt = sd[o + 3] + 1;
+        r += sd[o] * wt; g += sd[o + 1] * wt; b += sd[o + 2] * wt; a += sd[o + 3]; ws += wt;
+      }
+      const o = (y * D.width + x) * 4;
+      dd[o] = r / ws; dd[o + 1] = g / ws; dd[o + 2] = b / ws; dd[o + 3] = a / 4;
+    }
+    const c = cw >> l;
+    if (c < 2) continue;
+    for (let f = 0; f <= F; f++) {
+      if (!share[f]) continue;
+      const hh = (f < F ? ch : cw) >> l, n = c * hh, xa = X + f * c;
+      const pass = k => { let q = 0; for (let y = 0; y < hh; y++) for (let x = 0; x < c; x++) if (dd[((Y + y) * D.width + xa + x) * 4 + 3] * k >= CUT) q++; return q / n; };
+      let lo = 1, hi = 16;
+      if (pass(lo) >= share[f]) continue;
+      for (let i = 0; i < 10; i++) { const mid = (lo + hi) / 2; if (pass(mid) >= share[f]) hi = mid; else lo = mid; }
+      for (let y = 0; y < hh; y++) for (let x = 0; x < c; x++) { const o = ((Y + y) * D.width + xa + x) * 4 + 3; dd[o] = Math.min(255, Math.round(dd[o] * hi)); }
+    }
+  }
 }
 // Bakes one row: the model's medium mesh from FRAMES directions round it and from above, lit flat and white so the card holds
 // surface colour. Needs the renderer. False while it can't be done yet (no renderer, or the mesh's geometry has to wait a frame).
@@ -553,6 +605,7 @@ function bakeRow(M) {
   px = dilate(px, W, ch, 4);
   const AW = COLS * W, x0 = (row % COLS) * W, y1 = Math.floor(row / COLS) * ch;
   for (let y = 0; y < ch; y++) imp.data.set(px.subarray(y * W * 4, (y + 1) * W * 4), ((y1 + y) * AW + x0) * 4);
+  imp.baked.push(row); mipRow(row);
   imp.dirty = true;
   imp.waiting.push({ row, info: [rad, hgt, y0, cn ? cy / cn : y0 + hgt * 0.6], col: n ? [cr / n, cg / n, cb / n] : [0.1, 0.2, 0.05] });
   return true;
