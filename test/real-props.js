@@ -64,9 +64,11 @@ module.exports = async (pg, out) => {
   const MESH = s => {
     const W = BF.world, c = W.chunkC(s.cx, s.cz), r = W.meshArrays(c), F = r.F || [], props = [];
     for (let o = 0; o < F.length; o += 8) if (F[o + 3] === 6) props.push([F[o], F[o + 1], F[o + 2], F[o + 4], F[o + 7] & 15]);
-    let drawn = 0;
-    for (const m of BF.scene.children) if (m.isInstancedMesh && m.userData.prop && m.visible) drawn += m.count;
-    return { cubes: r.S.pos.length / 3, ground: r.T ? r.T.ind.length / 3 : 0, props, drawn, st: BF.real.props.stats() };
+    // (this chunk's only: other chunks keep streaming in while the test runs, with pumpkins of their own)
+    let drawn = 0, placed = 0;
+    for (const m of BF.scene.children) if (m.isInstancedMesh && m.userData.prop && m.visible && m.position.x === s.cx * 16 && m.position.z === s.cz * 16) drawn += m.count;
+    for (const k of BF.real.props._test.chunks.values()) if (k.ox === s.cx * 16 && k.oz === s.cz * 16) placed += k.recs.length / 8;
+    return { cubes: r.S.pos.length / 3, ground: r.T ? r.T.ind.length / 3 : 0, props, drawn, placed, st: BF.real.props.stats() };
   };
   const plank = await pg.evaluate(s => { BF.world.setBlock(s.x + 2, s.y, s.z, BF.B.planks); return 1; }, spot);
   await pg.waitForTimeout(1200);
@@ -74,7 +76,8 @@ module.exports = async (pg, out) => {
   check(a.props.length === 0 && plank === 1, "before: no prop records in the chunk", { cubes: a.cubes, ground: a.ground });
 
   await pg.evaluate(s => { const W = BF.world, B = BF.B; W.setBlock(s.x, s.y, s.z, B.pumpkin); W.setBlock(s.x + 1, s.y, s.z, B.pumpkin); W.setBlock(s.x - 1, s.y, s.z + 1, B.beehive); }, spot);
-  await pg.waitForFunction(() => BF.real.props.stats().props >= 3, null, { timeout: 30000, polling: 100 }).catch(() => {});
+  const placedIn = s => { let n = 0; for (const k of BF.real.props._test.chunks.values()) if (k.ox === s.cx * 16 && k.oz === s.cz * 16) n += k.recs.length / 8; return n; };
+  await pg.waitForFunction("(" + placedIn + ")(" + JSON.stringify(spot) + ") === 3", null, { timeout: 30000, polling: 100 }).catch(() => {});
   await pg.waitForTimeout(800);
   const b = await pg.evaluate(MESH, spot);
   const lx = spot.x - spot.cx * 16, lz = spot.z - spot.cz * 16;
@@ -82,7 +85,7 @@ module.exports = async (pg, out) => {
   check(b.props.some(p => p[0] === lx + 0.5 && p[2] === lz + 0.5) && b.props.every(p => p[4] >= 12), "at the middle of their cells, lit by the open sky", b.props);
   check(b.cubes === a.cubes, "they add no cube faces and hide none of the planks beside them", { before: a.cubes, after: b.cubes });
   check(b.ground === a.ground, "the ground under them is still drawn", { before: a.ground, after: b.ground });
-  check(b.st.props >= 3 && b.drawn >= 3, "they are drawn as models", { st: b.st, drawn: b.drawn });
+  check(b.placed === 3 && b.drawn === 3, "they are drawn as models", { placed: b.placed, drawn: b.drawn, st: b.st });
   const game = await pg.evaluate(s => {
     const W = BF.world, B = BF.B, id = W.getBlock(s.x, s.y, s.z);
     return { pumpkin: id === B.pumpkin, hive: W.getBlock(s.x - 1, s.y, s.z + 1) === B.beehive, solid: BF.SOLID[id] === 1, opaque: BF.OPAQUE[id] === 1 };
@@ -92,9 +95,9 @@ module.exports = async (pg, out) => {
   await pg.screenshot({ path: out + "-props.png" });
 
   await pg.evaluate(s => { BF.world.setBlock(s.x, s.y, s.z, 0); BF.world.setBlock(s.x - 1, s.y, s.z + 1, 0); }, spot);
-  await pg.waitForFunction(n => BF.real.props.stats().props <= n - 2, b.st.props, { timeout: 30000, polling: 100 }).catch(() => {});
+  await pg.waitForFunction("(" + placedIn + ")(" + JSON.stringify(spot) + ") === 1", null, { timeout: 30000, polling: 100 }).catch(() => {});
   const c = await pg.evaluate(MESH, spot);
-  check(c.props.length === 1 && c.st.props === b.st.props - 2 && c.drawn === b.drawn - 2, "a prop goes when its block goes", { props: c.props.length, st: c.st, drawn: c.drawn });
+  check(c.props.length === 1 && c.placed === 1 && c.drawn === 1, "a prop goes when its block goes", { props: c.props.length, placed: c.placed, drawn: c.drawn });
   check(errors.length === 0, "no page or shader errors", errors.slice(0, 3));
   if (fails) console.log("FAIL real-props: " + fails + " check(s) failed");
 };
