@@ -66,13 +66,15 @@ const config = {
                           // (a 12-block tree is about 80 pixels tall where its card takes over)
   crown: 2.5,             // a tree stands this many blocks taller than its log column
   big: 1.5,               // a 2 x 2 trunk's tree is this much larger
+  lean: 0.5,              // how far a ground plant leans with its slope: 0 straight up, 1 square to the ground
+  sink: 0.12,             // and how far it goes into the ground, by the slope's rise per block (its downhill side must not hang)
   enabled: true,
 };
 const QUALITY = [0.55, 0.8, 1];   // config.scale by BF.real.quality.level
 const MAXROW = 64;        // rows of the impostor atlas (one per variant of a species; the size of the shaders' row tables)
 const VARROWS = 40;       // past this many rows a new variant shares a row of its species (a species always gets its first row)
 const COLS = 2;           // rows side by side in the atlas
-const STRIDE = 7;         // x, y, z (atlas), height, seed, sky light, block light
+const STRIDE = 9;         // x, y, z (atlas), height, seed, sky light, block light, the ground's rise per block along x and z
 
 const models = new Map(), modelById = [];   // "kind:species:variant" -> model
 const rows = [];             // impostor atlas rows: the model each one is baked from
@@ -668,6 +670,7 @@ function tally(r) {
 }
 
 // A record's `extra` is the sky light level at the plant's base (0..15) plus 16 x the block light level (0..15).
+const seat = [0, 0, 0];
 const skyOf = ex => ((ex | 0) & 15) / 15, blockOf = ex => (((ex | 0) >> 4) & 15) / 15;
 
 // The flora of one chunk (contract section 4), replacing what it had: F holds 8 floats per plant, [x, y, z, kind, block, height,
@@ -691,8 +694,10 @@ function place(key, ox, oz, F) {
     const M = ms[i];
     if (!M) continue;
     const o = i * 8, a = by.get(M.id), q = at.get(M.id), ex = F[o + 7];
-    a[q] = ox + F[o]; a[q + 1] = F[o + 1]; a[q + 2] = oz + F[o + 2]; a[q + 3] = F[o + 5]; a[q + 4] = F[o + 6];
-    a[q + 5] = skyOf(ex); a[q + 6] = blockOf(ex);
+    real.seat(ex, seat);   // (on a slope the smooth ground is not at the block top: the plant stands on the ground)
+    a[q] = ox + F[o]; a[q + 1] = F[o + 1] + seat[0]; a[q + 2] = oz + F[o + 2]; a[q + 3] = F[o + 5]; a[q + 4] = F[o + 6];
+    a[q + 5] = skyOf(ex); a[q + 6] = blockOf(ex); a[q + 7] = seat[1]; a[q + 8] = seat[2];
+    if (M.kind === COVER) a[q + 1] -= config.sink * Math.hypot(seat[1], seat[2]);
     at.set(M.id, q + STRIDE);
   }
   const r = regionFor(ox + 8, oz + 8);
@@ -753,6 +758,16 @@ function buildMeshBatch(r, M, lod) {
     for (let i = 0; i < a.length; i += STRIDE) {
       const s = scaleOf(M, a[i + 3], a[i + 4]), rot = a[i + 4] * 6.2831853, c = Math.cos(rot) * s, sn = Math.sin(rot) * s;
       mats[o] = c; mats[o + 2] = -sn; mats[o + 5] = s; mats[o + 8] = sn; mats[o + 10] = c;
+      if (M.kind === COVER && (a[i + 7] || a[i + 8])) {
+        // a ground plant leans with its slope: its up axis goes part of the way (config.lean) from straight up to the ground's normal
+        let ux = -a[i + 7] * config.lean, uz = -a[i + 8] * config.lean;
+        const uy = 1 / Math.hypot(ux, 1, uz), k = 1 / (1 + uy);
+        ux *= uy; uz *= uy;
+        const xx = 1 - ux * ux * k, xz = -ux * uz * k, zz = 1 - uz * uz * k;   // the turn that takes up to (ux, uy, uz)
+        mats[o] = c * xx - sn * xz; mats[o + 1] = -c * ux + sn * uz; mats[o + 2] = c * xz - sn * zz;
+        mats[o + 4] = s * ux; mats[o + 5] = s * uy; mats[o + 6] = s * uz;
+        mats[o + 8] = sn * xx + c * xz; mats[o + 9] = -sn * ux - c * uz; mats[o + 10] = sn * xz + c * zz;
+      }
       mats[o + 12] = a[i] - r.ox; mats[o + 13] = a[i + 1] - r.oy; mats[o + 14] = a[i + 2] - r.oz; mats[o + 15] = 1;
       tintOf(a, i, cols, q);
       o += 16; q += 3;

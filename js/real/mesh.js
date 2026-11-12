@@ -254,6 +254,42 @@ function finish(R) {
   }
   const F = R.F.length ? new Float32Array(R.F) : null;
   if (!I.length) return { T: null, F };
+  // seat the plants on the smooth ground: where the ground slopes, its surface under a plant is not the block top the record's y
+  // names. Each record's `extra` gains 256 x (d + 64 tx + 2048 tz): d (1 .. 63) how far the surface under the plant is above y,
+  // (d - 32) / 31 blocks; tx, tz (1 .. 31) the surface's rise per block along x and z, (t - 16) / 15. A trunk goes down a little
+  // further so its downhill side is in the ground. y itself stays the block's (the game's logic reads it). BF.real.seat decodes it.
+  if (F) {
+    const sf = [0, 0, 0];
+    // the ground's top face under the cell (x, y, z), as the plane through its 4 corners (eased, they are not at the block's own
+    // corners: on a stair of blocks the top faces are half as long as the blocks), read at (px, pz)
+    const V = (v, a) => P[out[v] * 3 + a];
+    const cl = v => Math.max(-1, Math.min(1, v));
+    const surf = (x, y, z, px, pz) => {
+      const Y = y - 1 - ya;
+      if (x < 0 || x >= CS || z < 0 || z >= CS || Y < 1 || Y >= NY - 1 || !m(x, Y, z)) return false;
+      const a = at(x - 1, Y, z - 1), b = at(x, Y, z - 1), c = at(x, Y, z), d = at(x - 1, Y, z);
+      if (a < 0 || b < 0 || c < 0 || d < 0 || out[a] < 0 || out[b] < 0 || out[c] < 0 || out[d] < 0) return false;
+      const wx = Math.max(0.25, (V(b, 0) + V(c, 0) - V(a, 0) - V(d, 0)) / 2), wz = Math.max(0.25, (V(c, 2) + V(d, 2) - V(a, 2) - V(b, 2)) / 2);
+      sf[1] = cl((V(b, 1) + V(c, 1) - V(a, 1) - V(d, 1)) / 2 / wx); sf[2] = cl((V(c, 1) + V(d, 1) - V(a, 1) - V(b, 1)) / 2 / wz);
+      sf[0] = (V(a, 1) + V(b, 1) + V(c, 1) + V(d, 1)) / 4 - y
+        + sf[1] * cl(px - (V(a, 0) + V(b, 0) + V(c, 0) + V(d, 0)) / 4) + sf[2] * cl(pz - (V(a, 2) + V(b, 2) + V(c, 2) + V(d, 2)) / 4);
+      return true;
+    };
+    const code = (v, n) => n + 1 + Math.round(Math.max(-1, Math.min(1, v)) * n);
+    for (let o = 0; o < F.length; o += 8) {
+      const kind = F[o + 3], x = Math.floor(F[o]), y = F[o + 1], z = Math.floor(F[o + 2]);
+      const big = kind === 4 || (kind === 5 && F[o] % 1 === 0);   // on a 2 x 2 trunk: x and z are its middle
+      let n = 0, dy = 0, gx = 0, gz = 0, lo = 9;
+      for (let c = big ? 0 : 3; c < 4; c++) {
+        if (!surf(x - 1 + (c & 1), y, z - 1 + (c >> 1), F[o], F[o + 2])) continue;
+        n++; dy += sf[0]; gx += sf[1]; gz += sf[2]; if (sf[0] < lo) lo = sf[0];
+      }
+      if (!n) continue;
+      dy /= n; gx /= n; gz /= n;
+      if (kind !== 2) dy = (big ? lo : dy) - 0.3 * Math.hypot(gx, gz);
+      F[o + 7] += 256 * (code(dy, 31) + 64 * code(gx, 15) + 2048 * code(gz, 15));
+    }
+  }
   const pos = new Float32Array(P);
   const T = {
     pos, nrm: new Float32Array(Nn), col: new Float32Array(C), sky: new Float32Array(SK), bl: new Float32Array(BLt), mat: new Float32Array(MT),

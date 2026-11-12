@@ -164,6 +164,8 @@ function dispose(root) {
     if (c.isInstancedMesh) c.dispose();
   }
 }
+const seatOf = rec => (real.seat ? real.seat(rec.extra, SEAT)[0] : 0);   // the smooth ground under it, from the record's y (js/real/mesh.js)
+const SEAT = [0, 0, 0];
 const lightOf = extra => [((extra | 0) & 15) / 15, (((extra | 0) >> 4) & 15) / 15];
 // The trunk of look L cut at `cut` blocks above its base, as a group at the origin: the tree above the cut (with its crown) or the
 // stump below it, with the cut face. The group's origin is the middle of the cut for the tree, the base for the stump.
@@ -243,7 +245,7 @@ function startFall(rec, cut) {
   // it comes to rest along the ground: on its trunk where the crown is small, propped up a little by a wide crown
   const gy = groundAt(rec.x + ax * d, py, rec.z + az * d) + (root.userData.radius || 0.3) + 0.08 * len;
   const end = Math.PI / 2 + Math.max(-0.45, Math.min(0.5, Math.atan2(py - gy, d)));
-  root.position.set(rec.x, py, rec.z);
+  root.position.set(rec.x, py + seatOf(rec), rec.z);
   scene.add(root);
   const time = Math.min(2.6, 1.25 + 0.07 * len);
   falls.push({ root, rec, cut, t: 0, age: 0, ids: new Set(), time, end, axis: new T.Vector3(az, 0, -ax), ax, az, len, landed: false, y1: rec.y + rec.height + 4 });
@@ -370,7 +372,7 @@ function stumpObject(rec) {
   if (!L) return null;
   const root = build(L, rec, rec.height, false);
   if (!root) return null;
-  root.position.set(rec.x, rec.y, rec.z);
+  root.position.set(rec.x, rec.y + seatOf(rec), rec.z);
   scene.add(root);
   return root;
 }

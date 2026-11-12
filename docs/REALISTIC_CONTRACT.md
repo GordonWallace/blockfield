@@ -108,6 +108,12 @@ page and in the mesher workers), also:
   plant, 4 big tree (a 2 x 2 trunk, x and z at its centre), 1 and 3 reserved (bushes, rocks); `block` the block id of the
   tree's log or of the plant; `height` the log column's height in blocks; `seed` a stable hash of the atlas cell (0 .. 1);
   `extra` the sky light level at the base (0 .. 15) plus 16 x the block light level (0 .. 15).
+  On top of that `extra` carries how the plant sits on the smooth ground, as 256 x (d + 64 tx + 2048 tz): d (1 .. 63) how far the
+  surface under the plant is above `y`, (d - 32) / 31 blocks (for a trunk a little lower, so its downhill side is in the ground);
+  tx, tz (1 .. 31) the surface's rise per block along x and z, (t - 16) / 15; 0 means not known. `y` itself stays the block's
+  height, which the game's logic reads. `BF.real.seat(extra, out)` (js/real/core.js) decodes it to `[dy, gx, gz]`; read the light
+  with `& 15` and `>> 4 & 15`. A placer draws the plant at `y + dy`; ground plants lean part of the way to the ground's normal
+  (`BF.real.lod.config.lean`), trees and stumps stay upright.
   `kind` 5 is a stump: one to three logs of a tree species standing alone on natural ground with nothing on top (what a felled
   tree leaves). Its logs leave `S` too; `height` is its log count, x and z the middle of a 2 x 2 stump. `js/real/fell.js` takes
   these records out of the list before the placer sees it and draws them, so a placer never meets kind 5. A log that carries a

@@ -146,6 +146,36 @@ module.exports = async (pg) => {
     await run(10);
   }
 
+  // a village well (a 2 x 2 basin in a ring of blocks, posts on the ring's corners, a roof over it all): water in the basin at the
+  // blocks' level, the ring's ground is the ring (not the roof over it), and no part of the surface climbs towards the roof at the
+  // posts: every corner of the mesh round the basin is at the water's level or below
+  const well = await pg.evaluate(() => {
+    const p = BF.player.position;
+    const vs = BF.worldgen.villagesNear(p.x, p.z, 4000).filter(v => BF.view.kAt(v.x, v.y + 3, v.z) === 0 && BF.planet.face(v.x - 60, v.z - 60) === BF.planet.face(v.x + 60, v.z + 60))
+      .sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z));
+    return vs.length ? { x: vs[0].x, y: vs[0].y, z: vs[0].z } : null;
+  });
+  check('found a village well', !!well, well);
+  if (well) {
+    await pg.evaluate(v => { BF.player.spawn(v.x - 1.5, v.y + 3.6, v.z - 1.5); BF.player.setFlying(true); }, well);
+    await pg.waitForFunction(v => BF.world.isLoaded(v.x, v.z) && BF.FLUID[BF.world.getBlock(v.x, v.y, v.z)] === 8, well, { timeout: 120000, polling: 250 });
+    await run(60);
+    const wl = await pg.evaluate(v => {
+      const w = BF.real.water, f = w._fields, W = w.window, pos = w.mesh.geometry.attributes.position.array, n = W.cells + 1;
+      const level = w.surfaceAt(v.x + 1, v.z + 1);
+      let high = 0;
+      for (let z = v.z - 0.5; z <= v.z + 2.5; z += 0.5) for (let x = v.x - 0.5; x <= v.x + 2.5; x += 0.5) {   // (every corner of a quad that touches the water)
+        const i = Math.round((x - W.x) * 2), j = Math.round((z - W.z) * 2);
+        if (pos[(i + j * n) * 3 + 1] + W.y > level + 0.01) high++;
+      }
+      const q = (v.x - 1 - W.x) + (v.z - 1 - W.z) * W.size;
+      return { depth: +w.depthAt(v.x + 1, v.z + 1).toFixed(2), level: +(level - v.y).toFixed(2), ring: f.cBed[q] - v.y, ringDry: f.cSurf[q] < -1e8, high };
+    }, well);
+    check('the well holds water in its basin, and none of the surface stands above it at the posts', wl.depth > 2 && Math.abs(wl.level - 0.889) < 0.05 && wl.ring === 2 && wl.ringDry && wl.high === 0, wl);
+    await pg.evaluate(s => { BF.player.spawn(s.x + 0.5, s.wl + 6, s.z + 0.5); BF.player.setFlying(true); }, spot);
+    await run(10);
+  }
+
   // drawing only: no block changed beyond the test's own edits (put back above)
   const same = await pg.evaluate(([s, ids]) => ids.every(([y, id]) => BF.world.getBlock(s.x, y, s.z) === id), [spot, ids]);
   check('the water changed no block', same);
