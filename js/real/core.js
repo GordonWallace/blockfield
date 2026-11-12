@@ -27,6 +27,13 @@ real.assets = { species: [], cover: [], ground: [], rocks: [] };
 real.flora = real.flora || { place() {}, remove() {} };
 real.water = real.water || null;
 real.splash = real.splash || (() => {});
+// How a flora record sits on the smooth ground (js/real/mesh.js writes it into the record's `extra`, contract section 4):
+// out[0] how far the ground under the plant is above the record's y, out[1] and out[2] its rise per block along x and z.
+real.seat = (extra, out) => {
+  const s = Math.floor(extra / 256), d = s & 63, tx = (s >> 6) & 31, tz = (s >> 11) & 31;
+  out[0] = d ? (d - 32) / 31 : 0; out[1] = tx ? (tx - 16) / 15 : 0; out[2] = tz ? (tz - 16) / 15 : 0;
+  return out;
+};
 if (!T) return;
 
 // ---------- shared uniforms and the air ----------

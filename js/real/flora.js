@@ -748,6 +748,7 @@ real.flora.remove = function (key) {
   for (const o of b.objs) { real.scene.remove(o); if (o.dispose) o.dispose(); }
   batches.delete(key);
 };
+const SEAT = [0, 0, 0];
 real.flora.place = function (key, ox, oz, F) {
   real.flora.remove(key);
   if (!F || !F.length || !real.scene) return;
@@ -779,7 +780,7 @@ real.flora.place = function (key, ox, oz, F) {
         // a tree's model reaches a little past its log column (the crown the leaf blocks made)
         const want = tree ? logs + 2.5 : 1, mh = g.e.modelHeight || (g.e.height ? (g.e.height[0] + g.e.height[1]) / 2 : 1);
         const s = tree ? (want / mh) * (0.92 + 0.16 * ((seed * 13.7) % 1)) * (kind === 4 ? 1.5 : 1) : 0.85 + 0.3 * ((seed * 13.7) % 1);
-        P3.set(F[i], F[i + 1], F[i + 2]); Q.setFromAxisAngle(YA, seed * 6.2831853); S3.set(s, s, s);
+        P3.set(F[i], F[i + 1] + (real.seat ? real.seat(extra, SEAT)[0] : 0), F[i + 2]);   // (on the smooth ground, js/real/mesh.js) Q.setFromAxisAngle(YA, seed * 6.2831853); S3.set(s, s, s);
         im.setMatrixAt(j, M4.compose(P3, Q, S3));
         const sky = (extra % 16) / 15, l = (0.35 + 0.65 * sky) * (0.9 + 0.2 * ((seed * 5.3) % 1));
         im.setColorAt(j, COL.setRGB(l, l, l));
