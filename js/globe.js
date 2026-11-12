@@ -29,6 +29,7 @@
 const BF = (globalThis.BF = globalThis.BF || {});
 const T = 64, TILES = 10, CELLS = T * TILES;   // cells per tile edge, tiles per face edge, cells per face edge
 const n = T + 5;                               // samples across a tile: its T + 1 vertices and two more each side
+const REAL = !!(BF.real && BF.real.on && BF.real.U);   // the realistic look, as js/lod.js has it
 const PEAK = 300;                              // blocks: how high a mountain past the horizon can still show over it
 const FINE_LEVELS = 3;                         // levels of finer tiles: cells of 128, 64 and 32 blocks
 const PX = 2;                                  // a tile is split while its cells are wider than this many pixels on screen
@@ -115,7 +116,7 @@ const angle = (t) => Math.acos(Math.max(-1, Math.min(1, (eye[0] * t.dir[0] + eye
 
 function request(tile) {
   const P = BF.planet, f = tile.f, CELL = tile.c, u0 = (tile.ti * T - 2) * CELL, v0 = (tile.tj * T - 2) * CELL;
-  const job = { f, u0, v0, cell: CELL, nx: n, ny: n };
+  const job = { f, u0, v0, cell: CELL, nx: n, ny: n, real: REAL };   // (real: the samples also say where water is, as the rings': js/lod.js)
   tile.req = true;
   // after the rings (their priorities are below 10), nearest the player first; the finer tiles after the planet-scale ones, coarser first
   const first = () => (tile.lv ? 11 + tile.lv : 10) + angle(tile) / 4, then = () => 9 + angle(tile) / 4;
@@ -134,11 +135,12 @@ function request(tile) {
       raw.y[o] = raw.y[q]; raw.ok[o] = 1;
       for (let k = 0; k < 3; k++) { raw.col[3 * o + k] = raw.col[3 * q + k]; raw.dir[3 * o + k] = d[k] / l; }
       for (let k = 0; k < 4; k++) raw.can[4 * o + k] = raw.can[4 * q + k];
+      if (raw.wat) raw.wat[o] = raw.wat[q];
     }
     for (let j = 1; j <= T + 3 && full; j++) for (let i = 1; i <= T + 3; i++) if (!raw.ok[j * n + i]) { full = false; break; }
     const own = full ? null : index(raw.ok.slice());
     const anchor = P.pos(f, tile.cu, tile.cv, BF.SEA, [0, 0, 0]);
-    const p = { n, c: CELL, gu0: u0, gv0: v0, cu: tile.cu, cv: tile.cv, anchor, noMorph: true };
+    const p = { n, c: CELL, gu0: u0, gv0: v0, cu: tile.cu, cv: tile.cv, anchor, noMorph: true, real: REAL };
     BF.sampler.request({ mesh: true, p, raw }, then, (m) => finish(tile, anchor, m, own), globe);
   }, globe);
 }
@@ -153,6 +155,9 @@ function finish(tile, anchor, m, own) {
   g.setAttribute("sphere", attr(m.sph, 3));
   g.setAttribute("col", attr(m.col, 3, true));
   g.setAttribute("canopy", attr(m.can, 4, true));
+  // (the realistic look lights the far ground by its slope and draws its water itself, js/lod.js: without these a tile is black)
+  if (m.wat) g.setAttribute("wat", attr(m.wat, 1, true));
+  if (m.nrm) g.setAttribute("nrm", attr(m.nrm, 3, true));
   g.setIndex(own || idx);
   g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), T * tile.c + 4000);
   const mat = BF.lod.material(false);
