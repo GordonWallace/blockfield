@@ -36,7 +36,8 @@ changes no block and the game never reads it, so a world plays the same with the
    above the ground, near the planet's cube corners) or the window would straddle two faces of the planet.
    `BF.real.water.setEnabled(false)` does the same by hand.
 7. **Changed rivers run free.** Where a block has been changed in a river at the height of its water (a dam, a dug bank, a
-   trench: any edit, the player's or a villager's, within 3 blocks of the river and between 6 blocks under its surface and
+   trench: an edit, the player's or a villager's, that puts something solid above the generated ground or opens the ground
+   at or under it, so not grass spreading or a tilled field; within 3 blocks of the river and between 6 blocks under its surface and
    one above), rule 4 is lifted for 14 blocks around and eases back over the next 12. There the water is only the
    simulation's: it is not pulled to the blocks' level, and once it stands 0.15 above its rest level it may leave the block
    water's columns. Where the free water meets the held river, the river keeps sending what it carries however high the

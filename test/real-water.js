@@ -97,6 +97,14 @@ module.exports = async (pg) => {
   if (site) {
     await pg.evaluate(s => { BF.player.spawn(s.x + 0.5, s.y + 7, s.z + 0.5); BF.player.setFlying(true); }, site);
     await pg.waitForFunction(s => BF.world.isLoaded(s.x - 40, s.z - 40) && BF.world.isLoaded(s.x + 40, s.z + 40) && BF.world.isLoaded(s.x, s.z), site, { timeout: 120000, polling: 250 });
+    // (ground swapped for other ground on the bank, as grass spreading does, is not a change to the river)
+    await pg.evaluate(s => {
+      const dirt = BF.blocks.find(b => b && b.name === 'dirt').id, coarse = BF.blocks.find(b => b && b.name === 'coarse_dirt').id;
+      for (const e of [-1, 1]) for (let c = 0; c <= 2; c++) {
+        const x = Math.floor(s.x + 0.5 - s.dz * e * (s.w + c)), z = Math.floor(s.z + 0.5 + s.dx * e * (s.w + c)), y = BF.worldgen.heightAt(x, z);
+        if (BF.SOLID[BF.world.getBlock(x, y, z)]) BF.world.setBlock(x, y, z, BF.world.getBlock(x, y, z) === dirt ? coarse : dirt);
+      }
+    }, site);
     await run(120);
     // the river's cells for 2 to 14 blocks above and below the site: how far over their rest level they stand; and water off the blocks' water
     const levels = () => pg.evaluate(s => {
