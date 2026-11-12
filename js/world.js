@@ -1226,9 +1226,13 @@ function meshJob(c, copy) {
   return {
     ox, oz, lo: c.lo, hi: c.hi, y0: c.y0, y1: c.y1,
     secs: copy ? c.secs.map(cp) : c.secs, light: copy && c.light ? c.light.map(cp) : c.light, sky: copy && c.sky ? c.sky.map(cp) : c.sky,
-    Y0, Y1, rb, rl, rs, tint, ext, real: !!T.real,
+    Y0, Y1, rb, rl, rs, tint, ext, real: T.real ? (homeOfClay(ox + 8, oz + 8) ? 1 : 2) : false,   // (2: terracotta and sandstone stay cubes here, js/real/terrain.js)
     sph: Object.assign(sphereFrame(ox, oz), { R: BF.planet.R, sea: BF.SEA }),
   };
+}
+// The realistic look: is this chunk in the biome where terracotta is the ground itself (the badlands)? Elsewhere it is only ever built with.
+function homeOfClay(x, z) {
+  try { const b = BF.worldgen.biomeAt(x, z); return !!b && b.name === "Badlands"; } catch (_) { return false; }
 }
 // The arrays of a job copied for a worker (to transfer them).
 function jobBuffers(J) {

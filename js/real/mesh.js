@@ -12,7 +12,7 @@ const BF = (G.BF = G.BF || {});
 const CS = 16, W = 20;   // the chunk and the 2-block ring around it
 
 function prepare(J, TB, h) {
-  const RT = TB.real, NAT = RT.NAT, TREE = RT.TREE, COVER = RT.COVER, get = h.get;
+  const RT = TB.real, NAT = J.real === 2 && RT.NATB ? RT.NATB : RT.NAT, TREE = RT.TREE, COVER = RT.COVER, get = h.get;
   const ya = J.y0 - 2, yb = J.y1 + 2, NY = yb - ya;
   // the natural-ground mask over the chunk and its ring: the ground index + 1, or 0
   const mask = new Uint8Array(W * W * NY);
