@@ -102,6 +102,10 @@ page and in the mesher workers), also:
   plant, 4 big tree (a 2 x 2 trunk, x and z at its centre), 1 and 3 reserved (bushes, rocks); `block` the block id of the
   tree's log or of the plant; `height` the log column's height in blocks; `seed` a stable hash of the atlas cell (0 .. 1);
   `extra` the sky light level at the base (0 .. 15) plus 16 x the block light level (0 .. 15).
+  `kind` 5 is a stump: one to three logs of a tree species standing alone on natural ground with nothing on top (what a felled
+  tree leaves). Its logs leave `S` too; `height` is its log count, x and z the middle of a 2 x 2 stump. `js/real/fell.js` takes
+  these records out of the list before the placer sees it and draws them, so a placer never meets kind 5. A log that carries a
+  block, or stands in a row of logs or against something built, stays a cube.
   A tree is a column of a registered species' logs standing on natural ground with that species' leaves at its top (a
   `leafless` species, such as a cactus, needs no leaves). Its logs, any logs joined to them, and all leaves of registered
   species leave `S`. Logs without leaves (village posts, what the player builds) stay cubes. A ground plant is a block
@@ -114,6 +118,14 @@ page and in the mesher workers), also:
     BF.real.flora.place(key, ox, oz, F)   // key: the chunk's key; ox, oz: its corner in atlas coordinates; F may be null
     BF.real.flora.remove(key)
     BF.real.flora.resolve(block, biome, logs, seed) -> registry entry or null   // the one rule for which model a record gets
+
+Felled trees (`js/real/fell.js`, loaded after `lod.js`) stands in front of whatever `place` and `remove` are installed: it
+remembers each chunk's tree records, and when one goes while its trunk's blocks above the cut are gone from the world it plays the
+tree's fall with the same model, hides the item drops of that tree until it lands (`BF.real.fell.hides(drop)`, asked by
+`js/entityview.js`), and draws the stumps. It also gives the height an item on natural ground is drawn at
+(`BF.real.fell.itemY`: on the smooth surface, not the block grid). The simulation is as in 1.5 with two changes that hold with
+the look on or off: item drops fall through leaves (`js/drops.js`, `moveBox` `opts.pass`), and the player's felling
+(`fallAbove`) takes trees of up to 512 logs, so a giant cut through comes down.
 
 The foundation ships a simple placer (an InstancedMesh per model part per chunk, hidden beyond about 176 blocks). The
 performance thread **replaces `place` and `remove`** with its scheduler (region batching, level of detail, impostors,
@@ -171,6 +183,7 @@ foundation thread for the attribute you need). Water physics is 1.5's fluid simu
 | Water | `js/real/water.js` | the liquid part of `js/mesher.js`, `js/planetrivers.js` (drawing only) |
 | Performance | `js/real/lod.js` | `js/lod.js`, `js/lodworker.js`, `js/grid.js`, `js/globe.js` |
 | Biome assets | `js/real/assets-biomes.js` (stub on the branch), more `js/real/assets-*.js` on request | `js/textures*.js` only if a block texture must change |
+| Felled trees and items | `js/real/fell.js` | the stump rule in `js/real/mesh.js`, the drop lines of `js/entityview.js`, `js/drops.js`, `fallAbove` in `js/forester.js` |
 | Atmosphere and creatures | `js/real/atmos.js`, `js/real/mobs.js` | `js/sky.js`, `js/weather.js`, `js/mobs.js`, `js/mobview.js`, `js/entityview.js`, `js/audio.js` |
 
 `index.html` already loads every file above (empty stubs are on the branch), so nobody else needs to touch it. If you need

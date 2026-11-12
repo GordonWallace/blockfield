@@ -18,7 +18,8 @@ module.exports = async (pg, out) => {
 
   const placed = await pg.evaluate(() => {
     const T = THREE, R = BF.real, L = R.lod;
-    const takeover = R.flora.place === L.place && R.flora.remove === L.remove;
+    const P = (R.fell && R.fell.placer) || R.flora;   // (js/real/fell.js stands in front of the placer and hands every list on)
+    const takeover = P.place === L.place && P.remove === L.remove;
     // from here on only the test's own chunks ("t...") reach the module: the world's flora would change every count below
     R.flora.place = (key, ox, oz, F) => { if (String(key)[0] === "t") L.place(key, ox, oz, F); };
     L.clear();
