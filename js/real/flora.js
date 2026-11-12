@@ -714,7 +714,11 @@ function candidates(block) {
 function resolve(block, biome, logs, seed) {
   const all = candidates(block);
   if (!all) return null;
-  let list = all.filter(e => (!e.biomes || e.biomes.includes(biome)) && (!e.logs || (logs >= e.logs[0] && logs <= e.logs[1])));
+  // entries that name this biome first; the general ones (no biomes list) only where none does
+  const fits = e => !e.logs || (logs >= e.logs[0] && logs <= e.logs[1]);
+  let list = all.filter(e => e.biomes && e.biomes.includes(biome) && fits(e));
+  if (!list.length) list = all.filter(e => !e.biomes && fits(e));
+  if (!list.length) list = all.filter(e => e.biomes && e.biomes.includes(biome));
   if (!list.length) list = all.filter(e => !e.biomes);
   if (!list.length) list = all;
   let w = 0; for (const e of list) w += e.weight || 1;

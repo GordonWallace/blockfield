@@ -13,7 +13,7 @@ const T = THREE, real = BF.real;
 const hex = h => { const c = new T.Color(h); return [c.r, c.g, c.b]; };
 const G = real.assets.ground;
 const add = (blocks, color, layer, tint) => G.push({ id: blocks[0], blocks, color: typeof color === "string" ? hex(color) : color, layer, tint: !!tint });
-add(["grass"], [0.62, 0.64, 0.6], 0, true);
+add(["grass"], [0.56, 0.58, 0.54], 0, true);
 add(["dirt", "rooted_dirt", "farmland_soil"], "#6e4e36", 0);
 add(["coarse_dirt"], "#6b523c", 2);
 add(["podzol"], "#5a4126", 0);
@@ -49,7 +49,8 @@ real.meshTables = function () {
   const list = G.slice(0, 254);
   const GCOL = new Float32Array(list.length * 3), GLAY = new Uint8Array(list.length), GTINT = new Uint8Array(list.length);
   list.forEach((g, i) => {
-    GCOL[i * 3] = g.color[0]; GCOL[i * 3 + 1] = g.color[1]; GCOL[i * 3 + 2] = g.color[2]; GLAY[i] = g.layer | 0; GTINT[i] = g.tint ? 1 : 0;
+    const col = typeof g.color === "string" ? hex(g.color) : g.color || [0.5, 0.5, 0.5];
+    GCOL[i * 3] = col[0]; GCOL[i * 3 + 1] = col[1]; GCOL[i * 3 + 2] = col[2]; GLAY[i] = g.layer | 0; GTINT[i] = g.tint ? 1 : 0;
     for (const name of g.blocks) if (B[name] != null) NAT[B[name]] = i + 1;
   });
   for (const b of BF.blocks) {

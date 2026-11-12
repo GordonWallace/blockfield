@@ -36,18 +36,14 @@ function prepare(J, TB, h) {
   const leafOf = (b, x, y, z) => { const n = get(x, y, z); return TREE[n] === 2 && RT.SPEC[n] === b; };
   for (let i = 0; i < logs.length; i += 4) {
     const x = logs[i], y = logs[i + 1], z = logs[i + 2], b = logs[i + 3];
+    if (gone.has(ck(x, y, z))) continue;   // (already part of a tree found before)
     let hgt = 1;
     while (get(x, y + hgt, z) === b && hgt < 64) hgt++;
-    const ty = y + hgt;
-    let leafy = TREE[b] === 3 || leafOf(b, x, ty, z);
-    for (let d = 0; d < 4 && !leafy; d++) {
-      const dx = d === 0 ? 1 : d === 1 ? -1 : 0, dz = d === 2 ? 1 : d === 3 ? -1 : 0;
-      leafy = leafOf(b, x + dx, ty - 1, z + dz) || leafOf(b, x + dx, ty, z + dz) || leafOf(b, x + dx, ty - 2, z + dz);
-    }
-    if (!leafy) continue;
-    // its logs: the column and whatever touches it (branches), within the ring
-    const q = [];
-    for (let k = 0; k < hgt; k++) { gone.add(ck(x, y + k, z)); q.push(x, y + k, z); }
+    // its logs: the column and whatever touches it (a bent trunk, branches), within the ring
+    const q = [], mine = [];
+    for (let k = 0; k < hgt; k++) { mine.push(ck(x, y + k, z)); q.push(x, y + k, z); }
+    const seen = new Set(mine);
+    let top = y + hgt;
     for (let qi = 0, n = 0; qi < q.length && n < 400; qi += 3, n++) {
       const qx = q[qi], qy = q[qi + 1], qz = q[qi + 2];
       for (let dy = 0; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
@@ -55,10 +51,20 @@ function prepare(J, TB, h) {
         if (nx < -2 || nx > CS + 1 || nz < -2 || nz > CS + 1 || ny >= yb) continue;
         if (ny === y && (dx || dz)) continue;   // not along the ground: the next trunk is its own tree
         const k = ck(nx, ny, nz);
-        if (gone.has(k) || get(nx, ny, nz) !== b) continue;
-        gone.add(k); q.push(nx, ny, nz);
+        if (seen.has(k) || get(nx, ny, nz) !== b) continue;
+        seen.add(k); mine.push(k); q.push(nx, ny, nz);
+        if (ny + 1 > top) top = ny + 1;
       }
     }
+    // a tree has its own leaves against one of its logs (a leafless species needs none)
+    let leafy = TREE[b] === 3;
+    for (let qi = 0; qi < q.length && !leafy; qi += 3) {
+      const qx = q[qi], qy = q[qi + 1], qz = q[qi + 2];
+      leafy = leafOf(b, qx, qy + 1, qz) || leafOf(b, qx + 1, qy, qz) || leafOf(b, qx - 1, qy, qz) || leafOf(b, qx, qy, qz + 1) || leafOf(b, qx, qy, qz - 1);
+    }
+    if (!leafy) continue;
+    for (const k of mine) gone.add(k);
+    const ty = top; hgt = top - y;
     if (x < 0 || x >= CS || z < 0 || z >= CS) continue;   // a neighbour's tree: it lists it
     // a 2 x 2 trunk is one big tree, listed at its low corner
     if (get(x - 1, y, z) === b || get(x, y, z - 1) === b || get(x - 1, y, z - 1) === b) continue;
