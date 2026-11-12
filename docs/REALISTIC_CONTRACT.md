@@ -107,7 +107,7 @@ page and in the mesher workers), also:
   looks up shows the ground whose top it is (so the floor of a dug hole is the soil dug down to), every other face shows a cut
   through the ground, where turf shows the soil under it (the entry's `under` block, dirt by default) unless the foot of that
   side is turf too (the steps of a grassy slope). The `mat` weights add up to 1 + the share of turf at the vertex; the terrain
-  material draws that share as short grass and `js/real/turf.js` stands blades on it near the player (`BF.real.turf`, by
+  material draws that share as short grass, the rest of the soil layer as crumbly earth (lumps, grit, a few stones), and `js/real/turf.js` stands blades on it near the player (`BF.real.turf`, by
   quality level; it reads the ground meshes world.js shows and needs no hook).
 - `F`: the flora list, plain data, a `Float32Array` with one record of 8 floats per plant:
   `[x, y, z, kind, block, height, seed, extra]`: x, y, z chunk-local (y the base, on the ground); `kind` 0 tree, 2 ground

@@ -58,6 +58,9 @@ const BLADES = ([x, z, top]) => {
   {
     const { pg, errors } = await boot(b, 'real');
     check(await pg.evaluate(() => !!(BF.real.on && BF.real.turf)), 'the look is on and the turf module is loaded');
+    // bare earth has a texture of its own: lumps with height (not a flat tone), and a few stones
+    const soil = await pg.evaluate(() => { const d = BF.real.soilTexture().image.data; let lo = 255, hi = 0, st = 0; for (let i = 0; i < d.length; i += 4) { lo = Math.min(lo, d[i + 2]); hi = Math.max(hi, d[i + 2]); if (d[i + 1] > 128) st++; } return { lo, hi, st: st / (d.length / 4) }; });
+    check(soil.hi - soil.lo > 120 && soil.st > 0.002 && soil.st < 0.1, 'the soil texture has relief and a few stones', soil);
     // a flat stretch of grass away from a chunk border, cleared of plants; the player stands over it
     const spot = await pg.evaluate(() => {
       const W = BF.world, B = BF.B, p = BF.player.position;

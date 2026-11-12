@@ -173,23 +173,75 @@ function turfTexture() {
 }
 real.turfTexture = turfTexture;   // (tests)
 
+// ---------- the soil texture ----------
+// Bare earth seen close: lumps a hand across, crumbs and grit on and between them (lighter on top, darker in the hollows), and a
+// few small stones.
+// r: how light it is, g: stone (0 earth .. 1 a pebble), b: height. It repeats every 2 blocks (8 times a chunk).
+function soilTexture() {
+  const S = 256, N = S * S, d = new Uint8Array(N * 4);
+  let s = 0x2545f491;
+  const rnd = () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+  // a tiling layer of cells: per pixel, how far inside its clod it is (0 in a crevice .. 1) and the clod's own shade
+  const layer = n => {
+    const px = new Float32Array(n * n), py = new Float32Array(n * n), tone = new Float32Array(n * n);
+    for (let i = 0; i < n * n; i++) { px[i] = rnd(); py[i] = rnd(); tone[i] = rnd(); }
+    const E = new Float32Array(N), Tn = new Float32Array(N);
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const fx = x * n / S, fy = y * n / S, cx = Math.floor(fx), cy = Math.floor(fy);
+      let f1 = 9, f2 = 9, t = 0;
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+        const c = (((cy + j) % n + n) % n) * n + ((cx + i) % n + n) % n, dx = cx + i + px[c] - fx, dy = cy + j + py[c] - fy, dd = Math.hypot(dx, dy);
+        if (dd < f1) { f2 = f1; f1 = dd; t = tone[c]; } else if (dd < f2) f2 = dd;
+      }
+      // a rounded lump around each point, sunk a little where two lumps meet (no drawn lines: earth crumbles, it does not crack)
+      const dome = Math.max(0, 1 - f1 / 0.75), e = Math.min(1, (f2 - f1) / 0.3);
+      E[y * S + x] = dome * (2 - dome) * (0.55 + 0.45 * e * e * (3 - 2 * e)); Tn[y * S + x] = t;
+    }
+    return [E, Tn];
+  };
+  const [E1, T1] = layer(11), [E2, T2] = layer(29), [E3, T3] = layer(71);
+  const H = new Float32Array(N), R = new Float32Array(N), St = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const clod = E1[i] * (0.5 + 0.5 * T1[i]), crumb = E2[i] * (0.4 + 0.6 * T2[i]), grit = E3[i] * (0.3 + 0.7 * T3[i]);
+    H[i] = 0.45 * clod + 0.33 * crumb + 0.22 * grit;
+    R[i] = (0.4 + 0.75 * H[i]) * (0.82 + 0.18 * T2[i]) * (0.93 + 0.14 * rnd());
+  }
+  // small stones, half sunk
+  for (let k = 0; k < 30; k++) {
+    const cx = rnd() * S, cy = rnd() * S, ra = 2.5 + 4.5 * rnd() * rnd(), rb = ra * (0.6 + 0.4 * rnd()), ang = rnd() * 3.1416, ca = Math.cos(ang), sa = Math.sin(ang), tone = 0.7 + 0.3 * rnd();
+    for (let y = -8; y <= 8; y++) for (let x = -8; x <= 8; x++) {
+      const u = (x * ca + y * sa) / ra, v = (-x * sa + y * ca) / rb, q = u * u + v * v;
+      if (q >= 1) continue;
+      const o = (((Math.round(cy) + y) % S + S) % S) * S + ((Math.round(cx) + x) % S + S) % S, dome = Math.sqrt(1 - q);
+      St[o] = Math.min(1, dome * 3); H[o] = Math.max(H[o], 0.55 + 0.45 * dome); R[o] = tone * (0.75 + 0.25 * dome - 0.12 * u);
+    }
+  }
+  for (let i = 0; i < N; i++) { d[i * 4] = Math.min(1, R[i]) * 255; d[i * 4 + 1] = St[i] * 255; d[i * 4 + 2] = Math.min(1, H[i]) * 255; d[i * 4 + 3] = 255; }
+  const t = new T.DataTexture(d, S, S, T.RGBAFormat);
+  t.wrapS = t.wrapT = T.RepeatWrapping; t.magFilter = T.LinearFilter; t.minFilter = T.LinearMipmapLinearFilter; t.generateMipmaps = true;
+  t.anisotropy = 4; t.needsUpdate = true;
+  return t;
+}
+real.soilTexture = soilTexture;   // (tests)
+
 // ---------- the material ----------
 // The mesher's mat attribute holds the 4 layers' weights, adding up to 1 + the share of turf at the vertex (js/real/mesh.js): turf is
 // soil's layer, drawn as short grass.
 let mat = null;
 real.terrainMaterial = function () {
   if (mat) return mat;
-  const detail = { value: detailTexture() }, turf = { value: turfTexture() };
+  const detail = { value: detailTexture() }, turf = { value: turfTexture() }, soil = { value: soilTexture() };
   mat = new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0 });
   mat.onBeforeCompile = sh => {
-    sh.uniforms.uDetail = detail; sh.uniforms.uTurf = turf; sh.uniforms.uWet = real.U.uWet;
+    sh.uniforms.uDetail = detail; sh.uniforms.uTurf = turf; sh.uniforms.uSoil = soil; sh.uniforms.uWet = real.U.uWet;
     sh.vertexShader = "attribute vec4 mat;\nvarying vec4 vMat;\nvarying vec3 vLp;\nvarying vec3 vLn;\n" +
       sh.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\nvMat = mat; vLp = position; vLn = normal;");
-    sh.fragmentShader = "uniform sampler2D uDetail;\nuniform sampler2D uTurf;\nuniform float uWet;\nvarying vec4 vMat;\nvarying vec3 vLp;\nvarying vec3 vLn;\n" +
+    sh.fragmentShader = "uniform sampler2D uDetail;\nuniform sampler2D uTurf;\nuniform sampler2D uSoil;\nuniform float uWet;\nvarying vec4 vMat;\nvarying vec3 vLp;\nvarying vec3 vLn;\n" +
       `float bfDetail(vec3 p, vec3 w, vec4 m, float s) {
         vec4 tx = texture2D(uDetail, p.zy * s), ty = texture2D(uDetail, p.xz * s), tz = texture2D(uDetail, p.xy * s);
         return dot(tx * w.x + ty * w.y + tz * w.z, m);
       }
+      vec4 bfSoil(vec3 p, vec3 w) { return texture2D(uSoil, p.zy * 0.5) * w.x + texture2D(uSoil, p.xz * 0.5) * w.y + texture2D(uSoil, p.xy * 0.5) * w.z; }
       // how much of the ground here is turf: the vertices' share, with a ragged edge where turf meets bare ground
       float bfTurf(float share, vec4 g) { return smoothstep(0.3, 0.7, share + (g.b - 0.45) * 0.7 * step(0.001, share) * step(share, 0.999)); }\n` +
       sh.fragmentShader
@@ -206,6 +258,11 @@ real.terrainMaterial = function () {
   vec3 c = pow(diffuseColor.rgb, vec3(2.2));
   c = mix(c, vec3(0.19, 0.18, 0.17), steep * m.x * mix(0.2, 0.75, turf));
   vec3 bare = c * 0.5 * (0.7 + 0.6 * d1) * (0.7 + 0.6 * d2);
+  // bare earth: clods and the dark crevices between them, a few small stones, damper and darker in patches
+  vec4 so = bfSoil(vLp, bw);
+  vec3 earth = c * 0.5 * (0.45 + 0.85 * so.r) * (0.72 + 0.56 * d2);
+  earth = mix(earth, vec3(0.085, 0.072, 0.058) * (0.5 + 0.7 * so.r), so.g * 0.8);
+  bare = mix(bare, earth, m.x);
   // short grass: blades light at the tip over dark roots, some drier than others, in patches a few blocks across
   float pch = texture2D(uDetail, vLp.xz * 0.0625).r, dry = clamp(g1.g * 0.35 + g2.g * 0.65 + (pch - 0.5) * 1.1, 0.0, 1.0);
   vec3 blade = c * mix(vec3(0.84, 1.0, 0.8), vec3(1.16, 1.08, 0.68), smoothstep(0.3, 0.95, dry));
@@ -221,7 +278,7 @@ real.terrainMaterial = function () {
   vec4 m = vMat / ms;
   vec4 g1 = texture2D(uTurf, vLp.xz * 0.625);
   float turf = bfTurf(clamp(ms - 1.0, 0.0, 1.0), g1);
-  float h = mix(bfDetail(vLp, bw, m, 0.25), g1.b * 1.6, turf);
+  float h = mix(mix(bfDetail(vLp, bw, m, 0.25), bfSoil(vLp, bw).b * 2.0, m.x), g1.b * 1.6, turf);
   vec3 dp1 = dFdx(-vViewPosition), dp2 = dFdy(-vViewPosition);
   float dh1 = dFdx(h), dh2 = dFdy(h);
   vec3 r1 = cross(dp2, normal), r2 = cross(normal, dp1);
