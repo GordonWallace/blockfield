@@ -116,6 +116,9 @@ module.exports = async (pg, out) => {
   // the distant rings' materials take the look's shared light (js/lod.js)
   const ring = await pg.evaluate(() => { const m = BF.lod.material(false), U = BF.real.U; return { sun: m.uniforms.uSunCol === U.uSunCol, sky: m.uniforms.uSkyCol === U.uSkyCol, tone: /tonemapping_fragment/.test(m.fragmentShader) }; });
   check(ring.sun && ring.sky && ring.tone, "distant rings use the look's shared light", ring);
+  // fog on the far land goes by distance from the eye, so a far island is as hazy at the side of the view as straight ahead
+  const fog = await pg.evaluate(() => [BF.lod.material(false).vertexShader, BF.lod.standMaterial(true).vertexShader, BF.lod.standMaterial(false).vertexShader].map(v => /fogDepth = length\(mvPosition\.xyz\)/.test(v)));
+  check(fog.every(Boolean), "far land is fogged by its distance from the eye", fog);
   // the trees past the loaded chunks are cards of the same models (js/lod.js with BF.real.lod.cards): a stand-in with a tree's flora
   // record gets that tree's atlas row and goes to the ring's cards, a house stays a box; both materials compile
   const far = await pg.evaluate(() => {

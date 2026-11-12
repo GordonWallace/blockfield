@@ -156,8 +156,11 @@ const REAL_OUT = `
 #include <fog_fragment>
 }`;
 const realUniforms = () => { const U = BF.real.U; return { uSunCol: U.uSunCol, uSunDir: U.uSunDir, uSkyCol: U.uSkyCol, uGroundCol: U.uGroundCol, uFogCol: U.uFogCol, uWet: U.uWet }; };
+// (fog by the distance from the eye, not by the depth along its line of sight: far land at the side of the view is as hazy as it is
+// straight ahead, and doesn't fade as the eye turns to it)
+const REAL_FOG = ["#include <fog_vertex>", "#include <fog_vertex>\n#ifdef USE_FOG\n  fogDepth = length(mvPosition.xyz);\n#endif"];
 const VERT_USED = !REAL ? VERT : VERT.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;\nattribute float wat;\nattribute vec3 nrm;\nvarying float vWat;\nvarying vec3 vN;")
-  .replace("  vDist = length(mvPosition.xyz);", "  vDist = length(mvPosition.xyz);\n  vV = mvPosition.xyz;\n  vWat = wat;\n  vN = (modelViewMatrix * vec4(nrm, 0.0)).xyz;");
+  .replace("  vDist = length(mvPosition.xyz);", "  vDist = length(mvPosition.xyz);\n  vV = mvPosition.xyz;\n  vWat = wat;\n  vN = (modelViewMatrix * vec4(nrm, 0.0)).xyz;").replace(REAL_FOG[0], REAL_FOG[1]);
 // The ground is the loaded chunks' terrain seen from afar (js/real/terrain.js: half its colour's light, its detail texture's average;
 // darker when wet); water is theirs too (js/real/water.js, rwShade on a flat surface: its own dark colour, the sky by the angle it is
 // seen at, the floor through the shallows). `wat` is 0 on land and 0.55 (the shore) to 1 (16 blocks deep and more) on water, whose
@@ -389,9 +392,9 @@ let standShaders = null;
 function realStandShaders() {
   if (standShaders) return standShaders;
   const C = BF.real.lod && BF.real.lod.cards;
-  if (!C) return (standShaders = { vert: STAND_VERT, frag: STAND_FRAG_USED, cards: null });
+  if (!C) return (standShaders = { vert: STAND_VERT.replace(REAL_FOG[0], REAL_FOG[1]), frag: STAND_FRAG_USED, cards: null });
   const rep = (s, a, b) => { if (!s.includes(a)) throw new Error("js/lod.js: stand-in shader changed under the realistic look's patch: " + a.slice(0, 40)); return s.replace(a, b); };
-  let v = STAND_VERT, f = STAND_FRAG_USED;
+  let v = STAND_VERT.replace(REAL_FOG[0], REAL_FOG[1]), f = STAND_FRAG_USED;
   v = rep(v, "attribute float c;  // crown bottom", `attribute float c;  // crown bottom
 attribute vec4 card;   // atlas row (-1: not a tree with a model), scale, turn, seed
 uniform vec3 uRowCol[${C.MAXROW}];
