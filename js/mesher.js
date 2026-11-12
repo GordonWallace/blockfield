@@ -278,6 +278,7 @@ function build(J, tables) {
   // the realistic look (1.6, js/real/mesh.js): natural ground and trees leave the cube pass for the smooth pass and the flora list
   const RM = J.real && TB.real && BF.realMesh ? BF.realMesh.prepare(J, TB, { get, lget, skyAt, tint: tintAtCorner, sphere: P => spherePositions(P, J.sph) }) : null;
   const RNAT = RM ? RM.NAT : null;
+  const RSEE = RM ? RM.SEE : null;   // blocks that hide no face of a neighbour: smooth ground and props (drawn as models)
 
   for (let si = 0; si < J.hi - J.lo; si++) {
   const sec = J.secs[si];
@@ -332,8 +333,8 @@ function build(J, tables) {
       if (isFluid) {
         if (FLUID[n] || OPAQUE[n]) continue;
       } else if (r === 2) {
-        if ((OPAQUE[n] && !(RNAT && RNAT[n])) || n === b) continue;
-      } else if (OPAQUE[n] && !(RNAT && RNAT[n])) continue;   // (smooth ground hides nothing: it may slope away from the block)
+        if ((OPAQUE[n] && !(RSEE && RSEE[n])) || n === b) continue;
+      } else if (OPAQUE[n] && !(RSEE && RSEE[n])) continue;   // (smooth ground hides nothing: it may slope away from the block)
       const rect = faceUV[b * 6 + f];
       if (!rect) continue;
       const sky = skyAt(ax, ay, az);

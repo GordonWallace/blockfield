@@ -42,7 +42,7 @@ add(["packed_ice", "blue_ice"], "#a8c4ee", 3);
 add(["bedrock"], "#333333", 1);
 
 // The tables the mesher gets (js/world.js meshTables): NAT block -> ground index + 1, the ground's colours, layers and tints, and
-// which blocks are tree logs (1), tree leaves (2) with the log they belong to, and ground plants with a registered model.
+// which blocks are tree logs (1), tree leaves (2) with the log they belong to, ground plants with a registered model, and props.
 real.meshTables = function () {
   const n = BF.MAX_BLOCK + 1, NAT = new Uint8Array(n), TREE = new Uint8Array(n), SPEC = new Uint16Array(n), COVER = new Uint8Array(n);
   const B = BF.B;
@@ -68,13 +68,16 @@ real.meshTables = function () {
     if (!s.leafless && leaves != null) { TREE[leaves] = 2; SPEC[leaves] = log; }
   }
   for (const c of real.assets.cover) if (B[c.block] != null) COVER[B[c.block]] = 1;
+  // props: full blocks drawn as models (js/real/props.js)
+  const PROP = new Uint8Array(n);
+  for (const p of real.assets.props || []) if (B[p.block] != null) PROP[B[p.block]] = 1;
   // Blocks that are ground in one biome and a building material everywhere else (terracotta is the badlands' rock and the savanna
   // villages' roofs; sandstone is the desert villages' walls): NATB is the table without them, used outside their home biome, so
   // what is built of them stays cubes. An entry can ask for the same with built: true.
   const NATB = NAT.slice();
   for (const b of BF.blocks) if (b && NATB[b.id] && /terracotta|sandstone/.test(b.name)) NATB[b.id] = 0;
   list.forEach(g => { if (g.built) for (const name of g.blocks) if (B[name] != null) NATB[B[name]] = 0; });
-  return { NAT, NATB, TREE, SPEC, COVER, GCOL, GLAY, GTINT };
+  return { NAT, NATB, TREE, SPEC, COVER, PROP, GCOL, GLAY, GTINT };
 };
 
 // ---------- the detail texture ----------

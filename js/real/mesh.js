@@ -10,9 +10,15 @@
 const G = globalThis;
 const BF = (G.BF = G.BF || {});
 const CS = 16, W = 20;   // the chunk and the 2-block ring around it
+const NONE = new Uint8Array(4096);
 
 function prepare(J, TB, h) {
   const RT = TB.real, NAT = J.real === 2 && RT.NATB ? RT.NATB : RT.NAT, TREE = RT.TREE, COVER = RT.COVER, get = h.get, OPAQUE = TB.OPAQUE;
+  // props (js/real/props.js): objects that are a full block to the game but drawn as a model (a pumpkin, a beehive). They leave the
+  // cube pass, are listed as kind 6, and are not built cells: the ground runs on under them.
+  const PROP = RT.PROP || NONE;
+  const SEE = NAT.slice();   // what hides no face of a cube beside it
+  for (let i = 0; i < SEE.length; i++) if (PROP[i]) SEE[i] = 1;
   // the band is the job's ring band: with the look on it covers the neighbours' bands too (js/world.js meshJob), so the chunks on both
   // sides of a border see the same cells around it and their ground meets
   const ya = J.Y0, yb = J.Y1, NY = yb - ya;
@@ -30,7 +36,7 @@ function prepare(J, TB, h) {
         const n = NAT[b];
         if (n) mask[o + i] = n;
         else {
-          if ((OPAQUE[b] && TREE[b] !== 2) || b === TB.FARM || b === TB.FARM_DRY) hard[o + i] = 1;
+          if (((OPAQUE[b] && TREE[b] !== 2) || b === TB.FARM || b === TB.FARM_DRY) && !PROP[b]) hard[o + i] = 1;
           if ((TREE[b] & 1) && NAT[below]) logs.push(x, ya + i, z, b);
         }
       }
@@ -118,9 +124,21 @@ function prepare(J, TB, h) {
       Math.round(h.skyAt(x + 1, ty, z) * 15) + 16 * h.lget(x + 1, y + 1, z));
   }
   return {
-    J, TB, h, mask, hard, ya, NY, F, NAT,
+    J, TB, h, mask, hard, ya, NY, F, NAT, PROP, SEE,
     skip(b, x, y, z) {
       if (NAT[b]) return true;
+      if (PROP[b]) {
+        // its light: the brightest open cell around it (the block itself is opaque to the game's light)
+        let sk = 0, bl = 0;
+        for (let d = 0; d < 5; d++) {
+          const nx = x + (d === 1) - (d === 2), ny = y + (d === 0), nz = z + (d === 3) - (d === 4), n = get(nx, ny, nz);
+          if (n && OPAQUE[n] && !PROP[n]) continue;
+          sk = Math.max(sk, h.skyAt(nx, ny, nz)); bl = Math.max(bl, h.lget(nx, ny, nz));
+        }
+        const hs = (((J.ox + x) * 73856093) ^ ((J.oz + z) * 19349663) ^ (y * 83492791)) >>> 0;
+        F.push(x + 0.5, y, z + 0.5, 6, b, 1, (hs % 65521) / 65521, Math.round(sk * 15) + 16 * bl);
+        return true;
+      }
       const t = TREE[b];
       if (t === 2) return true;
       if (t & 1) return gone.has(ck(x, y, z));
@@ -286,7 +304,7 @@ function finish(R) {
       }
       if (!n) continue;
       dy /= n; gx /= n; gz /= n;
-      if (kind !== 2) dy = (big ? lo : dy) - 0.3 * Math.hypot(gx, gz);
+      if (kind !== 2 && kind !== 6) dy = (big ? lo : dy) - 0.3 * Math.hypot(gx, gz);
       F[o + 7] += 256 * (code(dy, 31) + 64 * code(gx, 15) + 2048 * code(gz, 15));
     }
   }
