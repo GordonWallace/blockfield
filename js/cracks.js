@@ -295,12 +295,15 @@ BF.cracks = {
     const stage = Math.max(0, Math.min(STAGES - 1, Math.floor(progress * STAGES)));
     mesh.material = mats[stage];
     mesh.visible = true;
+    // the realistic look (1.6): smooth ground is no cube, so its wear is drawn on the ground itself (js/real/dig.js)
+    const dig = BF.real && BF.real.on && BF.real.dig && BF.real.dig.show(x, y, z, id, progress, normal) ? BF.real.dig : null;
+    if (dig) mesh.visible = false;
     hitT -= dt || 0;
     if (hitT > 0) return false;
     hitT = HIT_EVERY;
     const n = normal || [0, 1, 0];
     pulse = 1;
-    try { spawnDebris(x, y, z, id, n, 4); } catch (e) { console.error(e); }
+    try { if (dig) dig.hit(n); else spawnDebris(x, y, z, id, n, 4); } catch (e) { console.error(e); }
     if (!rafOn) { rafOn = true; lastT = performance.now(); requestAnimationFrame(tick); }
     if (BF.emit) BF.emit("blockHit", x, y, z, id, progress);
     return true;
@@ -308,6 +311,7 @@ BF.cracks = {
   hide() {
     curKey = ""; hitT = 0; pulse = 0;
     if (mesh) { mesh.visible = false; mesh.scale.set(1, 1, 1); }
+    if (BF.real && BF.real.on && BF.real.dig) BF.real.dig.hide();
   },
   get visible() { return !!(mesh && mesh.visible); },
   get stage() { return mesh && mesh.visible ? mats.indexOf(mesh.material) : -1; },

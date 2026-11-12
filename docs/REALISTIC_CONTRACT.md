@@ -95,7 +95,13 @@ page and in the mesher workers), also:
   over the natural ground blocks listed in `BF.real.assets.ground` (grass, dirt, sand, gravel, stone and its variants, snow,
   ores under their rock, ...). Those blocks are left out of `S`; every other block stays a cube, and a cube's face against
   natural ground is drawn (the ground may slope away from it). Digging and placing ground materials reshapes the surface.
-  A flat floor comes out exactly on the block tops, and collision stays on the block grid. `col` is the ground's colour
+  A flat floor comes out exactly on the block tops, and collision stays on the block grid. Three rules keep the smooth
+  surface honest against the block grid: (1) a vertex that touches a built full block (planks, a job site, a log border,
+  farmland) sits exactly on the block grid and is not eased, so the ground is flat under such a block and square against
+  it, and no quad is drawn against the block's face; (2) beside a wall two blocks high or more (a dug shaft, a trench, a
+  cliff foot) a vertex leans at most 0.08 of a block into the open cells, so a player standing in them never ends up
+  behind the surface; (3) with the look on a job's ring band (`Y0`..`Y1`) covers the 8 neighbours' loaded bands too, and
+  an edit within 3 blocks of a chunk border re-meshes the neighbour, so both sides of a border build the same vertices. `col` is the ground's colour
   (times the biome grass tint where the entry says so), `mat` four weights for the detail layers (section 5).
 - `F`: the flora list, plain data, a `Float32Array` with one record of 8 floats per plant:
   `[x, y, z, kind, block, height, seed, extra]`: x, y, z chunk-local (y the base, on the ground); `kind` 0 tree, 2 ground
@@ -185,6 +191,7 @@ foundation thread for the attribute you need). Water physics is 1.5's fluid simu
 | Biome assets | `js/real/assets-biomes.js` (stub on the branch), more `js/real/assets-*.js` on request | `js/textures*.js` only if a block texture must change |
 | Felled trees and items | `js/real/fell.js` | the stump rule in `js/real/mesh.js`, the drop lines of `js/entityview.js`, `js/drops.js`, `fallAbove` in `js/forester.js` |
 | Atmosphere and creatures | `js/real/atmos.js`, `js/real/mobs.js` | `js/sky.js`, `js/weather.js`, `js/mobs.js`, `js/mobview.js`, `js/entityview.js`, `js/audio.js` |
+| Digging | `js/real/dig.js` (the wear drawn on smooth ground while it is mined, `BF.real.dig`) | `js/cracks.js`, the break particles' line in `js/player.js` |
 
 `index.html` already loads every file above (empty stubs are on the branch), so nobody else needs to touch it. If you need
 another new file, name it `js/real/<yours>-*.js` and ask the foundation thread for the script tag.

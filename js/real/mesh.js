@@ -12,10 +12,14 @@ const BF = (G.BF = G.BF || {});
 const CS = 16, W = 20;   // the chunk and the 2-block ring around it
 
 function prepare(J, TB, h) {
-  const RT = TB.real, NAT = J.real === 2 && RT.NATB ? RT.NATB : RT.NAT, TREE = RT.TREE, COVER = RT.COVER, get = h.get;
-  const ya = J.y0 - 2, yb = J.y1 + 2, NY = yb - ya;
+  const RT = TB.real, NAT = J.real === 2 && RT.NATB ? RT.NATB : RT.NAT, TREE = RT.TREE, COVER = RT.COVER, get = h.get, OPAQUE = TB.OPAQUE;
+  // the band is the job's ring band: with the look on it covers the neighbours' bands too (js/world.js meshJob), so the chunks on both
+  // sides of a border see the same cells around it and their ground meets
+  const ya = J.Y0, yb = J.Y1, NY = yb - ya;
   // the natural-ground mask over the chunk and its ring: the ground index + 1, or 0
   const mask = new Uint8Array(W * W * NY);
+  // built cells: full blocks the cube pass draws (planks, job sites, a log border). The ground against them stays square.
+  const hard = new Uint8Array(W * W * NY);
   const logs = [];   // candidate trunk bases
   for (let z = -2; z < CS + 2; z++) for (let x = -2; x < CS + 2; x++) {
     const o = ((z + 2) * W + x + 2) * NY;
@@ -25,7 +29,10 @@ function prepare(J, TB, h) {
       if (b) {
         const n = NAT[b];
         if (n) mask[o + i] = n;
-        else if ((TREE[b] & 1) && NAT[below]) logs.push(x, ya + i, z, b);
+        else {
+          if ((OPAQUE[b] && TREE[b] !== 2) || b === TB.FARM || b === TB.FARM_DRY) hard[o + i] = 1;
+          if ((TREE[b] & 1) && NAT[below]) logs.push(x, ya + i, z, b);
+        }
       }
       below = b;
     }
@@ -35,6 +42,8 @@ function prepare(J, TB, h) {
   const ck = (x, y, z) => ((y - ya) * W + z + 2) * W + x + 2;
   const leafOf = (b, x, y, z) => { const n = get(x, y, z); return TREE[n] === 2 && RT.SPEC[n] === b; };
   // stumps: the low corner of the full 2 x 2 square of log b at height y that holds (x, z), or null
+  // a log that leaves the cube pass (a tree's, a stump's) is not a built cell: the ground around it stays smooth
+  const soft = k => { const c = k % (W * W); hard[c * NY + (k - c) / (W * W)] = 0; };
   const square = (x, y, z, b) => {
     for (let dz = -1; dz <= 0; dz++) for (let dx = -1; dx <= 0; dx++) {
       const cx = x + dx, cz = z + dz;
@@ -86,7 +95,9 @@ function prepare(J, TB, h) {
     if (!leafy) {
       // a stump (what a felled tree leaves, js/real/fell.js): one to three logs of a tree species standing alone on natural ground
       // with nothing on top. Its logs leave the cube pass and it is listed as kind 5. Posts and what the player builds stay cubes.
-      if (TREE[b] === 1 && hgt <= 3 && q.length === hgt * 3 && x >= 0 && x < CS && z >= 0 && z < CS && stump(x, y, z, b, hgt)) {   // (a neighbour's: it hides and lists it)
+      if (TREE[b] === 1 && hgt <= 3 && q.length === hgt * 3 && x >= -1 && x <= CS && z >= -1 && z <= CS && stump(x, y, z, b, hgt)) {
+        for (const k of mine) soft(k);   // (a neighbour's next to the border too: both sides must shape the ground around it alike)
+        if (x < 0 || x >= CS || z < 0 || z >= CS) continue;   // a neighbour's: it hides and lists it
         for (const k of mine) gone.add(k);
         const sq = square(x, y, z, b);
         if (sq && (sq[0] !== x || sq[1] !== z)) continue;   // listed at the square's low corner
@@ -96,7 +107,7 @@ function prepare(J, TB, h) {
       }
       continue;
     }
-    for (const k of mine) gone.add(k);
+    for (const k of mine) { gone.add(k); soft(k); }
     const ty = top; hgt = top - y;
     if (x < 0 || x >= CS || z < 0 || z >= CS) continue;   // a neighbour's tree: it lists it
     // a 2 x 2 trunk is one big tree, listed at its low corner
@@ -107,7 +118,7 @@ function prepare(J, TB, h) {
       Math.round(h.skyAt(x + 1, ty, z) * 15) + 16 * h.lget(x + 1, y + 1, z));
   }
   return {
-    J, TB, h, mask, ya, NY, F, NAT,
+    J, TB, h, mask, hard, ya, NY, F, NAT,
     skip(b, x, y, z) {
       if (NAT[b]) return true;
       const t = TREE[b];
@@ -127,16 +138,27 @@ function prepare(J, TB, h) {
 // crossings, eased once towards its neighbours; a quad across every ground-to-open edge the chunk owns. A flat floor comes out
 // exactly on the block tops, so the smooth ground agrees with the block grid the game collides with.
 function finish(R) {
-  const { J, TB, h, mask, ya, NY } = R, RT = TB.real;
+  const { J, TB, h, mask, hard, ya, NY } = R, RT = TB.real;
   const CW = W - 1, NC = CW * CW;   // cells (i, k) from -2 .. 16, index i + 2
   const m = (x, y, z) => mask[((z + 2) * W + x + 2) * NY + y];   // y: index into the band
+  const hm = (x, y, z) => hard[((z + 2) * W + x + 2) * NY + y];
   // raw vertices, layer by layer (cell j spans band rows j and j + 1)
   const vid = new Int32Array(NC * (NY - 1)).fill(-1);
-  const raw = [], cellOf = [];
+  const raw = [], cellOf = [], square = [];
   for (let j = 0; j < NY - 1; j++) for (let k = -2; k < CS + 1; k++) for (let i = -2; i < CS + 1; i++) {
-    let bits = 0, n = 0;
-    for (let c = 0; c < 8; c++) if (m(i + (c & 1), j + ((c >> 1) & 1), k + (c >> 2))) { bits |= 1 << c; n++; }
+    let bits = 0, n = 0, sq = 0;
+    for (let c = 0; c < 8; c++) {
+      const X = i + (c & 1), Y = j + ((c >> 1) & 1), Z = k + (c >> 2);
+      if (m(X, Y, Z)) { bits |= 1 << c; n++; } else if (hm(X, Y, Z)) sq = 1;
+    }
     if (n === 0 || n === 8) continue;
+    // against a built block the vertex sits on the block grid and is not eased: the ground there is the blocks' own shape, flat under
+    // a beehive and square against a wall, with no gap for the cube to hang over
+    if (sq) {
+      vid[j * NC + (k + 2) * CW + i + 2] = raw.length / 3;
+      raw.push(i + 1, j + 1, k + 1); cellOf.push(i, j, k); square.push(1);
+      continue;
+    }
     let sx = 0, sy = 0, sz = 0, e = 0;
     for (let c = 0; c < 8; c++) for (let a = 0; a < 3; a++) {
       if (c & (1 << a)) continue;
@@ -146,8 +168,19 @@ function finish(R) {
     }
     vid[j * NC + (k + 2) * CW + i + 2] = raw.length / 3;
     raw.push(i + 0.5 + sx / e, j + 0.5 + sy / e, k + 0.5 + sz / e);
-    cellOf.push(i, j, k);
+    cellOf.push(i, j, k); square.push(0);
   }
+  // a wall cell: one of its 4 columns is ground at both levels and another is open at both
+  const LEAN = 0.08;
+  const wall = (i, j, k) => {
+    if (j < 0) return false;
+    let full = 0, open = 0;
+    for (let c = 0; c < 4; c++) {
+      const X = i + (c & 1), Z = k + (c >> 1), a = m(X, j, Z) || hm(X, j, Z), b = m(X, j + 1, Z) || hm(X, j + 1, Z);
+      if (a && b) full = 1; else if (!a && !b) open = 1;
+    }
+    return full && open;
+  };
   const nv = raw.length / 3;
   if (!nv) return { T: null, F: R.F.length ? new Float32Array(R.F) : null };
   const at = (i, j, k) => (i < -2 || i > CS || k < -2 || k > CS || j < 0 || j >= NY - 1) ? -1 : vid[j * NC + (k + 2) * CW + i + 2];
@@ -159,11 +192,22 @@ function finish(R) {
     if (out[v] >= 0) return out[v];
     const i = cellOf[v * 3], j = cellOf[v * 3 + 1], k = cellOf[v * 3 + 2];
     let x = raw[v * 3], y = raw[v * 3 + 1], z = raw[v * 3 + 2], ax = 0, ay = 0, az = 0, an = 0;
-    for (let d = 0; d < 6; d++) {
+    if (!square[v]) for (let d = 0; d < 6; d++) {
       const u = at(i + (d === 0) - (d === 1), j + (d === 2) - (d === 3), k + (d === 4) - (d === 5));
       if (u >= 0) { ax += raw[u * 3]; ay += raw[u * 3 + 1]; az += raw[u * 3 + 2]; an++; }
     }
     if (an) { x = 0.5 * x + 0.5 * ax / an; y = 0.5 * y + 0.5 * ay / an; z = 0.5 * z + 0.5 * az / an; }
+    // beside a wall two blocks high or more (a dug shaft, a trench, a cliff foot) the surface must not lean into the open cells: the
+    // player stands in them against the blocks, and a wall pulled in past the eye is seen from behind, that is, not at all
+    if (!square[v] && (wall(i, j, k) || wall(i, j - 1, k))) {
+      const gx = i + 1, gz = k + 1, dx = x - gx, dz = z - gz;
+      if (dx || dz) {
+        const cx = i + (dx > 0 ? 1 : 0), cz = k + (dz > 0 ? 1 : 0);
+        if (!m(cx, j, cz) && !hm(cx, j, cz) && !m(cx, j + 1, cz) && !hm(cx, j + 1, cz)) {
+          x = gx + Math.max(-LEAN, Math.min(LEAN, dx)); z = gz + Math.max(-LEAN, Math.min(LEAN, dz));
+        }
+      }
+    }
     // normal: away from the ground in the 4 x 4 x 4 cells around; ground: the highest natural cell of the 8; light: the open cells' mean
     let nx = 0, ny = 0, nz = 0;
     for (let dz = -1; dz <= 2; dz++) for (let dy = -1; dy <= 2; dy++) for (let dx = -1; dx <= 2; dx++) {
@@ -200,12 +244,13 @@ function finish(R) {
   for (let y = 1; y < NY - 1; y++) for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
     const s = m(x, y, z) ? 1 : 0;
     // +x edge: cells (x, y-1..y, z-1..z)
+    // (no quad against a built block: its vertices are all on the grid, so it would lie in the block's own face)
     let t = m(x + 1, y, z) ? 1 : 0;
-    if (s !== t) quad(at(x, y - 1, z - 1), at(x, y, z - 1), at(x, y, z), at(x, y - 1, z), !s);
+    if (s !== t && !hm(x + s, y, z)) quad(at(x, y - 1, z - 1), at(x, y, z - 1), at(x, y, z), at(x, y - 1, z), !s);
     t = m(x, y + 1, z) ? 1 : 0;
-    if (s !== t) quad(at(x - 1, y, z - 1), at(x - 1, y, z), at(x, y, z), at(x, y, z - 1), !s);
+    if (s !== t && !hm(x, y + s, z)) quad(at(x - 1, y, z - 1), at(x - 1, y, z), at(x, y, z), at(x, y, z - 1), !s);
     t = m(x, y, z + 1) ? 1 : 0;
-    if (s !== t) quad(at(x - 1, y - 1, z), at(x, y - 1, z), at(x, y, z), at(x - 1, y, z), !s);
+    if (s !== t && !hm(x, y, z + s)) quad(at(x - 1, y - 1, z), at(x, y - 1, z), at(x, y, z), at(x - 1, y, z), !s);
   }
   const F = R.F.length ? new Float32Array(R.F) : null;
   if (!I.length) return { T: null, F };
