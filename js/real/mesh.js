@@ -52,6 +52,15 @@ function prepare(J, TB, h) {
     return null;
   };
   const SOLID = TB.SOLID;
+  // J.stood: the cells (atlas x, y, z in threes) where a tree's trunk stands or stood, in and around the chunk (js/real/fell.js): only
+  // there is a short leafless column of logs a stump. A log the player places anywhere else is a block.
+  const ST = J.stood || null;
+  const stood = (x, y, z) => {
+    if (!ST) return false;
+    const ax = J.ox + x, az = J.oz + z;
+    for (let i = 0; i < ST.length; i += 3) if (ST[i] === ax && ST[i + 1] === y && ST[i + 2] === az) return true;
+    return false;
+  };
   const stump = (x, y, z, b, hgt) => {
     const top = get(x, y + hgt, z);
     if (top && TREE[top] !== 2 && SOLID[top]) return false;   // something stands on it: a post
@@ -94,8 +103,9 @@ function prepare(J, TB, h) {
     }
     if (!leafy) {
       // a stump (what a felled tree leaves, js/real/fell.js): one to three logs of a tree species standing alone on natural ground
-      // with nothing on top. Its logs leave the cube pass and it is listed as kind 5. Posts and what the player builds stay cubes.
-      if (TREE[b] === 1 && hgt <= 3 && q.length === hgt * 3 && x >= -1 && x <= CS && z >= -1 && z <= CS && stump(x, y, z, b, hgt)) {
+      // with nothing on top, where a tree stood (J.stood). Its logs leave the cube pass and it is listed as kind 5. Posts and what the
+      // player builds or places stay cubes.
+      if (TREE[b] === 1 && hgt <= 3 && q.length === hgt * 3 && x >= -1 && x <= CS && z >= -1 && z <= CS && stood(x, y, z) && stump(x, y, z, b, hgt)) {
         for (const k of mine) soft(k);   // (a neighbour's next to the border too: both sides must shape the ground around it alike)
         if (x < 0 || x >= CS || z < 0 || z >= CS) continue;   // a neighbour's: it hides and lists it
         for (const k of mine) gone.add(k);

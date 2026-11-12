@@ -82,6 +82,8 @@ module.exports = async (pg, out) => {
   check(after.logs === T.logs - 1, "the logs above the cut lie as items (" + (T.logs - 1) + ")", after.logs);
   check(after.onGround > 0 && after.off < 0.35, "items on natural ground are drawn on the smooth surface (bobbing within 0.35 of it)", after.off);
   check(after.st.stumps === 1, "the stump stays", after.st);
+  const known = await pg.evaluate(T => { const a = BF.real.fell.stood(Math.floor(T.x / 16) * 16, Math.floor(T.z / 16) * 16) || []; for (let i = 0; i < a.length; i += 3) if (a[i] === T.x && a[i + 1] === T.y && a[i + 2] === T.z) return true; return false; }, T);
+  check(known, "the stump's cell is known as a place where a tree stood");
   await pg.screenshot({ path: out + "-landed.png" });
 
   // the stump's last log
@@ -90,7 +92,7 @@ module.exports = async (pg, out) => {
   const gone = await pg.evaluate(() => BF.real.fell.stats());
   check(st && st.ok && gone.stumps === 0 && gone.falls === 0, "chopping the stump removes it, and nothing falls", gone);
 
-  // a log standing alone that carries something is a post, not a stump; a row of logs is a wall
+  // a stump is only where a tree stood: a log placed on the ground is a block
   const post = await pg.evaluate(async T => {
     const W = BF.world, L = BF.B.oak_log, x = T.x + 3, z = T.z + 3;
     let y = T.y + 6; while (y > 0 && !BF.SOLID[W.getBlock(x, y - 1, z)]) y--;
@@ -104,7 +106,7 @@ module.exports = async (pg, out) => {
     await new Promise(r => setTimeout(r, 1500));
     return { a, b, c: BF.real.fell.stats().stumps };
   }, T);
-  check(post.a === 0 && post.b === 1 && post.c === 0, "a log under a block stays a cube; alone on the ground it is a stump", post);
+  check(post.a === 0 && post.b === 0 && post.c === 0, "a log the player places is a block, never a stump: alone on the ground or under a block", post);
 
   // items fall through leaves: dropped over the second tree's crown they come to rest on the ground, not in the crown
   const leaf = await pg.evaluate(async T => {
