@@ -139,7 +139,7 @@ void main() {
 }`;
 // The realistic look (1.6, docs/REALISTIC_CONTRACT.md; js/real/lod.js is this file's other half there): the same rings and stand-ins, lit
 // by the frame's sun and sky like the terrain of the loaded chunks and put through the renderer's tone mapping, so the land doesn't
-// change brightness where the chunks end. The ground's normal comes from the surface's own slope on screen (the rings carry none); the
+// change brightness where the chunks end. The ground's normal is its samples' slope (attribute nrm, js/grid.js); the
 // stand-ins' from their faces' block shades. With the look off none of this is used and the shaders are 1.5's, byte for byte.
 const REAL = !!(BF.real && BF.real.on && BF.real.U);
 const REAL_PARS = `
@@ -155,14 +155,55 @@ const REAL_OUT = `
 #include <encodings_fragment>
 #include <fog_fragment>
 }`;
-const realUniforms = () => { const U = BF.real.U; return { uSunCol: U.uSunCol, uSunDir: U.uSunDir, uSkyCol: U.uSkyCol, uGroundCol: U.uGroundCol }; };
-const VERT_USED = !REAL ? VERT : VERT.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;").replace("  vDist = length(mvPosition.xyz);", "  vDist = length(mvPosition.xyz);\n  vV = mvPosition.xyz;");
-const FRAG_USED = !REAL ? FRAG : FRAG.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;").replace("#include <fog_pars_fragment>", REAL_PARS)
+const realUniforms = () => { const U = BF.real.U; return { uSunCol: U.uSunCol, uSunDir: U.uSunDir, uSkyCol: U.uSkyCol, uGroundCol: U.uGroundCol, uFogCol: U.uFogCol, uWet: U.uWet }; };
+const VERT_USED = !REAL ? VERT : VERT.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;\nattribute float wat;\nattribute vec3 nrm;\nvarying float vWat;\nvarying vec3 vN;")
+  .replace("  vDist = length(mvPosition.xyz);", "  vDist = length(mvPosition.xyz);\n  vV = mvPosition.xyz;\n  vWat = wat;\n  vN = (modelViewMatrix * vec4(nrm, 0.0)).xyz;");
+// The ground is the loaded chunks' terrain seen from afar (js/real/terrain.js: half its colour's light, its detail texture's average;
+// darker when wet); water is theirs too (js/real/water.js, rwShade on a flat surface: its own dark colour, the sky by the angle it is
+// seen at, the floor through the shallows). `wat` is 0 on land and 0.55 (the shore) to 1 (16 blocks deep and more) on water, whose
+// vertex colour is its floor's (js/grid.js).
+const FRAG_USED = !REAL ? FRAG : FRAG.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;\nvarying float vWat;\nvarying vec3 vN;\nuniform vec3 uFogCol;\nuniform float uWet;\nuniform sampler2D chunkMask;\nuniform vec2 maskO;\nuniform mat4 projectionMatrix;").replace("#include <fog_pars_fragment>", REAL_PARS)
   .replace(/  vec3 col = mix\(vColor, vCanopy\.rgb, a\) \* max\(0\.1, uDay\);[\s\S]*$/, `  vec3 alb = mix(vColor, vCanopy.rgb, a);
   vec3 upV = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz), sunV = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz);
-  vec3 n = normalize(cross(dFdx(vV), dFdy(vV)));
+  vec3 n = normalize(vN);
   n = normalize(mix(n, upV, 0.5 * a));   // (a canopy is rough: its light follows the slope less)
-  vec3 light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, upV)) + uSunCol * max(dot(n, sunV), 0.0);` + REAL_OUT);
+  vec3 light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, upV)) + uSunCol * max(dot(n, sunV), 0.0);
+  vec3 ground = pow(vColor, vec3(2.2)) * 0.5;
+  ground = mix(ground, ground * 0.55, uWet);
+  vec3 lin = mix(ground, pow(vCanopy.rgb, vec3(2.2)), a) * light;
+  gl_FragColor = vec4(lin, 1.0);
+  float wa = smoothstep(0.0, 0.5, vWat);
+#include <tonemapping_fragment>
+#include <encodings_fragment>
+  if (wa > 0.0) {   // (less light reaches a deeper floor, as the chunks' block light has it: none 16 blocks down)
+    float sh = 1.0 - clamp((vWat - 0.55) / 0.45, 0.0, 1.0);
+    gl_FragColor.rgb *= mix(1.0, sh * sh, wa);
+  }
+  // Where the chunks reach past the hole both are drawn: there the ring stands back (drawn a little further along the eye's ray), so
+  // the chunks' own ground shows and not the two in stripes; and under the chunks' water only its floor is drawn.
+  vec2 mk = (gh - maskO) / CHUNK;
+  gl_FragDepthEXT = gl_FragCoord.z;
+  if (all(greaterThanEqual(mk, vec2(0.0))) && all(lessThan(mk, vec2(MASK_N))) && texture2D(chunkMask, (floor(mk) + 0.5) / MASK_N).r > 0.5) {
+    wa = 0.0;
+    vec4 cp = projectionMatrix * vec4(vV * (1.0 + (3.0 + 0.04 * vDist) / vDist), 1.0);
+    gl_FragDepthEXT = 0.5 + 0.5 * cp.z / cp.w;
+  }
+  if (wa > 0.0) {
+    vec3 Vn = normalize(-vV);
+    float cs = max(dot(upV, Vn), 0.0), F = 0.02 + 0.98 * pow(1.0 - cs, 5.0);
+    float sd = max(dot(reflect(-Vn, upV), sunV), 0.0);
+    vec3 refl = mix(uFogCol * 0.9, uSkyCol * vec3(0.55, 0.75, 1.1), pow(cs, 0.55)) + uSunCol * (pow(sd, 60.0) * 0.1);
+    vec3 body = vec3(0.018, 0.075, 0.06) * (0.25 + 0.75 * max(uSunDir.y, 0.0)) * max(uDay, 0.04);
+    vec4 w = vec4(mix(body, refl, F), 1.0);
+#if defined( TONE_MAPPING )
+    w.rgb = toneMapping(w.rgb);
+#endif
+    w = linearToOutputTexel(w);
+    // (blended as the chunks' water is over its floor, on the screen's colours; 0.74: rwShade's alpha for it)
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, w.rgb, wa * mix(0.74, 1.0, F));
+  }
+#include <fog_fragment>
+}`);
 let shared = null;
 function material(morph) {
   const Pl = P();
@@ -176,7 +217,7 @@ function material(morph) {
   const sphM = new THREE.Matrix4();
   const m = new THREE.ShaderMaterial({
     vertexShader: VERT_USED, fragmentShader: FRAG_USED, fog: true,
-    defines: Object.assign({ FACE_N: Pl.N.toFixed(1) }, morph ? { MORPH: 1 } : {}),
+    defines: Object.assign({ FACE_N: Pl.N.toFixed(1) }, morph ? { MORPH: 1 } : {}, REAL ? { MASK_N: MASK_N.toFixed(1), CHUNK: BF.CS.toFixed(1) } : {}),
     uniforms: Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), shared, {
       sphM: { value: sphM }, uK: BF.world.roundK, uDay: BF.world.dayUniform,
       morph: { value: new THREE.Vector2(1e30, 2e30) }, anchor: { value: new THREE.Vector3() },
@@ -185,7 +226,7 @@ function material(morph) {
       stand: { value: 0 }, edge: { value: new THREE.Vector2(1e30, 2e30) }, pxScale,
     }),
   });
-  if (REAL) { Object.assign(m.uniforms, realUniforms()); m.extensions.derivatives = true; }
+  if (REAL) { Object.assign(m.uniforms, realUniforms(), { chunkMask, maskO }); m.extensions.fragDepth = true; }
   m.userData.sphM = sphM;   // js/view.js sets it each frame (the round placement in the mesh's own frame)
   return m;
 }
@@ -597,8 +638,7 @@ function palette() {
   // entry for a block wins), so the land keeps its colour where the chunks end
   if (REAL && BF.real.assets && BF.real.assets.ground) for (const g of BF.real.assets.ground) {
     const c = typeof g.color === "string" ? new THREE.Color(g.color).toArray() : g.color;
-    // (0.88: the terrain's detail texture darkens its colour by about that much; measured on Plains turf at midday)
-    if (c) for (const name of g.blocks || []) if (BF.B[name] != null) top[BF.B[name]] = [c[0] * 0.88, c[1] * 0.88, c[2] * 0.88];
+    if (c) for (const name of g.blocks || []) if (BF.B[name] != null) top[BF.B[name]] = [c[0], c[1], c[2]];
   }
   return { top, side, tint };
 }
@@ -643,7 +683,7 @@ function start(L, f, cu, cv) {
   const anchor = Pl.pos(f, cu, cv, BF.SEA, [0, 0, 0]);
   const stand = L.lv < STAND_LEVELS && lod.standIns ? { cu, cv, anchor, gu0, gv0, m: THIN[L.lv], max: STAND_MAX + MOVE * L.half, exact: L.lv === 0,
     houses: L.lv < HOUSE_LEVELS, villages: L.lv < HOUSE_LEVELS, real: REAL } : null;
-  const b = { f, cu, cv, gu0, gv0, n, anchor, pending: 0, t0: performance.now(), raw: BF.gridJob.alloc({ nx: n, ny: n }), fresh: true, parts: stand ? [] : null };
+  const b = { f, cu, cv, gu0, gv0, n, anchor, pending: 0, t0: performance.now(), raw: BF.gridJob.alloc({ nx: n, ny: n, real: REAL }), fresh: true, parts: stand ? [] : null };
   let rects = [[0, n, 0, n]];   // [j0, j1, i0, i1] still to sample
   const old = L.raw && L.f === f ? L : null;
   if (old) {
@@ -657,6 +697,7 @@ function start(L, f, cu, cv) {
         b.raw.col.set(old.raw.col.subarray(3 * (s + i0), 3 * (s + i1)), 3 * (d + i0));
         b.raw.dir.set(old.raw.dir.subarray(3 * (s + i0), 3 * (s + i1)), 3 * (d + i0));
         b.raw.can.set(old.raw.can.subarray(4 * (s + i0), 4 * (s + i1)), 4 * (d + i0));
+        if (b.raw.wat && old.raw.wat) b.raw.wat.set(old.raw.wat.subarray(s + i0, s + i1), d + i0);
       }
       if (stand && L.stand) b.parts.push(keep(old, b, i0, i1, j0, j1, di, dj));   // the old ring's stand-ins on the samples kept
       b.fresh = false;
@@ -675,7 +716,7 @@ function start(L, f, cu, cv) {
     // about 12,000 samples a job (a few hundred ms in a worker): few enough answers that a slow frame doesn't leave workers idle
     const w = i1 - i0, step = Math.max(1, Math.floor(12000 / w));
     for (let j = j0; j < j1; j += step) {
-      const job = { f, u0: gu0 + i0 * c, v0: gv0 + j * c, cell: c, nx: w, ny: Math.min(step, j1 - j), stand };
+      const job = { f, u0: gu0 + i0 * c, v0: gv0 + j * c, cell: c, nx: w, ny: Math.min(step, j1 - j), stand, real: REAL };   // (real: the samples also say where water is, its colour its floor's: js/grid.js)
       b.pending++;
       BF.sampler.request(job, prio, (res) => {
         if (L.building !== b) return;
@@ -686,6 +727,7 @@ function start(L, f, cu, cv) {
           b.raw.col.set(res.col.subarray(3 * s, 3 * (s + w)), 3 * d);
           b.raw.dir.set(res.dir.subarray(3 * s, 3 * (s + w)), 3 * d);
           b.raw.can.set(res.can.subarray(4 * s, 4 * (s + w)), 4 * d);
+          if (b.raw.wat && res.wat) b.raw.wat.set(res.wat.subarray(s, s + w), d);
         }
         if (res.stand && b.parts) b.parts.push(res.stand);
         if (--b.pending === 0) build(L, b);
@@ -697,10 +739,10 @@ function start(L, f, cu, cv) {
 
 // Builds ring L's mesh from its samples (in a worker), then swaps it in.
 function build(L, b) {
-  const p = { n: b.n, c: L.cell, gu0: b.gu0, gv0: b.gv0, cu: b.cu, cv: b.cv, anchor: b.anchor, bridge: L.lv === CELLS.length - 1, ext: EXT, disc: HALF };
+  const p = { n: b.n, c: L.cell, gu0: b.gu0, gv0: b.gv0, cu: b.cu, cv: b.cv, anchor: b.anchor, bridge: L.lv === CELLS.length - 1, ext: EXT, disc: HALF, real: REAL };
   const raw = b.raw;
   b.tm = performance.now();
-  const copy = BF.sampler.inline ? raw : { y: raw.y.slice(), col: raw.col.slice(), can: raw.can.slice(), ok: raw.ok.slice(), dir: raw.dir.slice() };
+  const copy = BF.sampler.inline ? raw : { y: raw.y.slice(), col: raw.col.slice(), can: raw.can.slice(), ok: raw.ok.slice(), dir: raw.dir.slice(), wat: raw.wat && raw.wat.slice() };
   BF.sampler.request({ mesh: true, p, raw: copy }, -100, (m) => { if (L.building === b) finish(L, b, m); }, L);
 }
 let fullIdx = null, fullCounts = null;
@@ -715,6 +757,8 @@ function finish(L, b, m) {
   g.setAttribute("msph", attr(m.msph, 3));
   g.setAttribute("mcol", attr(m.mcol, 3, true));
   g.setAttribute("canopy", attr(m.can, 4, true));
+  if (m.wat) g.setAttribute("wat", attr(m.wat, 1, true));
+  if (m.nrm) g.setAttribute("nrm", attr(m.nrm, 3, true));
   if (m.idx) g.setIndex(attr(m.idx, 1));
   else g.setIndex(fullIdx);
   L.counts = m.idx ? m.counts : fullCounts; L.bounds = m.bounds;
@@ -1025,6 +1069,11 @@ function ribbons(V, top) {
   geo.setAttribute("sphere", new THREE.Float32BufferAttribute(sph, 3));
   geo.setAttribute("col", new THREE.BufferAttribute(new Uint8Array(col), 3, true));
   geo.setAttribute("canopy", new THREE.BufferAttribute(new Uint8Array(nv * 4), 4, true));
+  if (REAL) {   // (a river is water, and flat: FRAG_USED)
+    geo.setAttribute("wat", new THREE.BufferAttribute(new Uint8Array(nv).fill(255), 1, true));
+    const up = new Int8Array(nv * 3); for (let i = 1; i < up.length; i += 3) up[i] = 127;
+    geo.setAttribute("nrm", new THREE.BufferAttribute(up, 3, true));
+  }
   geo.setIndex(new THREE.Uint32BufferAttribute(idx, 1));
   const mat = material(false);
   mat.side = THREE.DoubleSide;

@@ -92,6 +92,7 @@ BF.gridJob = {
     const n = job.nx * job.ny;
     const out = { id: job.id, y: new Float32Array(n), col: new Uint8Array(3 * n), can: new Uint8Array(4 * n), ok: new Uint8Array(n), dir: new Float32Array(3 * n) };
     // stand-ins (job.stand): each sample's column (ground, water level, biome) and foliage tint, kept only until stand() has run
+    if (job.real) out.wat = new Uint8Array(n);   // (the realistic look: where water is and how deep, js/lod.js FRAG_USED)
     if (job.stand) out.cols = { h: new Float32Array(n), wl: new Float32Array(n), bio: new Uint8Array(n), fol: new Float32Array(3 * n) };
     return out;
   },
@@ -112,7 +113,12 @@ BF.gridJob = {
       const ice = wet && c.tb === 0 && (wl - h < 4 || ((gu * 7 + gv * 13) & 3) !== 0);
       const t = TB;
       let r, gg, bb;
-      if (wet && !ice) {
+      if (wet && !ice && out.wat) {   // (the realistic look draws the water itself: here its floor's colour, and its depth)
+        const T = PAL.top[top];
+        tmp[0] = T[0]; tmp[1] = T[1]; tmp[2] = T[2]; tint(tmp, 0, PAL.tint[top], t);
+        r = tmp[0]; gg = tmp[1]; bb = tmp[2];
+        out.wat[o] = Math.round(255 * (0.55 + 0.45 * Math.min(1, (wl - h) / 16)));
+      } else if (wet && !ice) {
         const W = PAL.top[B.water], depth = wl - h;
         tmp[0] = W[0]; tmp[1] = W[1]; tmp[2] = W[2]; tint(tmp, 0, 3, t);
         const k = 1 - 0.55 * smooth(2, 60, depth), F = PAL.top[top], s = 0.45 * (1 - smooth(1, 6, depth));
@@ -147,11 +153,12 @@ BF.gridJob = {
   },
   buffers(out) {
     const b = [out.y.buffer, out.col.buffer, out.can.buffer, out.ok.buffer, out.dir.buffer];
+    if (out.wat) b.push(out.wat.buffer);
     if (out.stand) { for (const k of STAND) b.push(out.stand[k].buffer); if (out.stand.k) b.push(out.stand.k.buffer); }
     return b;
   },
   stand,
-  mesh, meshBuffers: (m) => [m.pos, m.sph, m.col, m.mpos, m.msph, m.mcol, m.can, m.idx].filter(Boolean).map((a) => a.buffer),
+  mesh, meshBuffers: (m) => [m.pos, m.sph, m.col, m.mpos, m.msph, m.mcol, m.can, m.wat, m.nrm, m.idx].filter(Boolean).map((a) => a.buffer),
   topOf, CROWNS,
 };
 
@@ -353,6 +360,9 @@ function mesh(p, raw) {
   const pos = new Float32Array(NV * 3), sph = new Float32Array(NV * 3), col = new Uint8Array(NV * 3), can = new Uint8Array(NV * 4);
   const mpos = p.noMorph ? null : new Float32Array(NV * 3), msph = p.noMorph ? null : new Float32Array(NV * 3), mcol = p.noMorph ? null : new Uint8Array(NV * 3);
   const C = (v) => Math.min(255, Math.round(v));
+  // (p.real, the realistic look: no slope shade in the colours, the ring is lit by its slope each frame; and where its water is)
+  const wat = p.real && raw.wat ? raw.wat.slice(0, NV) : null, lit = p.real ? () => 1 : shade, nrm = p.real ? new Int8Array(NV * 3) : null;
+  const yAt = (i, j, o) => { const q = Math.min(n - 1, Math.max(0, j)) * n + Math.min(n - 1, Math.max(0, i)); return raw.ok[q] ? raw.y[q] : raw.y[o]; };
   let full = true;
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
     const o = j * n + i;
@@ -360,18 +370,22 @@ function mesh(p, raw) {
     const r = R + raw.y[o] - SEA;
     pos[o * 3] = p.gu0 + i * c - p.cu; pos[o * 3 + 1] = raw.y[o]; pos[o * 3 + 2] = p.gv0 + j * c - p.cv;
     for (let k = 0; k < 3; k++) sph[o * 3 + k] = raw.dir[o * 3 + k] * r - A[k];
-    const sh = shade(raw, n, i, j, 1);
+    const sh = lit(raw, n, i, j, 1);
     for (let k = 0; k < 3; k++) col[o * 3 + k] = C(raw.col[o * 3 + k] * sh);
     for (let k = 0; k < 3; k++) can[o * 4 + k] = C(raw.can[o * 4 + k] * sh);
     can[o * 4 + 3] = raw.can[o * 4 + 3];
+    if (nrm) {   // (the ground's slope in the ring's flat frame: x = u, y = up, z = v)
+      const dx = (yAt(i - 1, j, o) - yAt(i + 1, j, o)) / (2 * c), dz = (yAt(i, j - 1, o) - yAt(i, j + 1, o)) / (2 * c), l = 127 / Math.hypot(dx, 1, dz);
+      nrm[o * 3] = Math.round(dx * l); nrm[o * 3 + 1] = Math.round(l); nrm[o * 3 + 2] = Math.round(dz * l);
+    }
   }
-  if (p.noMorph) return { pos, sph, col, mpos, msph, mcol, can, idx: null };
+  if (p.noMorph) return { pos, sph, col, mpos, msph, mcol, can, idx: null };   // (the globe: never p.real)
   // a point on the coarser grid (even i and j) stays put and takes the coarser ring's shading; any other point goes to the middle of the
   // coarser triangle edge it lies on (that ring splits its cells along the same diagonal)
   for (let j = 0; j < n; j += 2) for (let i = 0; i < n; i += 2) {
     const o = j * n + i;
     if (!raw.ok[o]) continue;
-    const sh = shade(raw, n, i, j, 2);
+    const sh = lit(raw, n, i, j, 2);
     for (let k = 0; k < 3; k++) { mpos[o * 3 + k] = pos[o * 3 + k]; msph[o * 3 + k] = sph[o * 3 + k]; mcol[o * 3 + k] = C(raw.col[o * 3 + k] * sh); }
   }
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
@@ -403,7 +417,10 @@ function mesh(p, raw) {
     idx = new Uint32Array(q);
   }
   const bounds = sectorBounds(n, p.ext, p.disc, raw.ok, pos, mpos, sph, msph);
-  return { pos, sph, col, mpos, msph, mcol, can, idx, counts, bounds };
+  const out = { pos, sph, col, mpos, msph, mcol, can, idx, counts, bounds };
+  if (wat) out.wat = wat;
+  if (nrm) out.nrm = nrm;
+  return out;
 }
 // The coarsest ring has no coarser ring to fill the strip along its corner wedge (see js/lod.js), so it closes the wedge itself: the
 // samples along one side of the wedge are joined to those the same distance along the other side, which are neighbours on the sphere,

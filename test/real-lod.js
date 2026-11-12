@@ -143,6 +143,34 @@ module.exports = async (pg, out) => {
   check(far.row && far.row[0] === far.treeRow && far.row[1] > 0, "a far tree's record gives the row and scale of the loaded tree's model", [far.row, far.treeRow]);
   check(far.boxes === 1 && far.cards === 1 && far.card && far.card[0] === far.treeRow, "a ring's trees are cards of their models, its houses boxes", [far.boxes, far.cards, far.card]);
   check(far.shared && far.pts && !far.errs.length, "the rings' stand-in materials draw the cards and compile", [far.shared, far.pts, far.errs]);
+  // the far ground and water are the loaded chunks' (js/lod.js FRAG_USED): a ring's samples say where water is and how deep, its mesh
+  // carries that and the ground's slope, and its material (the terrain's half-light, the water's own shading) compiles
+  const land = await pg.evaluate(() => {
+    const T = THREE, G = BF.gridJob, n = 5, NV = n * n;
+    const raw = G.alloc({ nx: n, ny: n, real: true }), plain = G.alloc({ nx: n, ny: n });
+    for (let o = 0; o < NV; o++) { raw.ok[o] = 1; raw.y[o] = 70 + (o % n) * 4; raw.dir[3 * o + 1] = 1; raw.col[3 * o] = 200; raw.wat[o] = o < n ? 255 : 0; }
+    const p = { n, c: 4, gu0: 0, gv0: 0, cu: 8, cv: 8, anchor: [0, 0, 0], ext: 2, disc: 2, real: true };
+    const m = G.mesh(p, raw), m15 = G.mesh(Object.assign({}, p, { real: false }), raw);
+    const errs = [], ce = console.error;
+    console.error = (...a) => { errs.push(a.map(String).join(" ").slice(0, 300)); };
+    try {
+      const g = new T.BufferGeometry(), at = (a, k, nm) => new T.BufferAttribute(a, k, !!nm);
+      g.setAttribute("position", at(m.pos, 3)); g.setAttribute("sphere", at(m.sph, 3)); g.setAttribute("col", at(m.col, 3, true));
+      g.setAttribute("mflat", at(m.mpos, 3)); g.setAttribute("msph", at(m.msph, 3)); g.setAttribute("mcol", at(m.mcol, 3, true));
+      g.setAttribute("canopy", at(m.can, 4, true)); g.setAttribute("wat", at(m.wat, 1, true)); g.setAttribute("nrm", at(m.nrm, 3, true));
+      g.setIndex([0, 1, 5, 1, 6, 5]);
+      const sc = new T.Scene(), o = new T.Mesh(g, BF.lod.material(true)); o.frustumCulled = false; sc.add(o);
+      const rt = new T.WebGLRenderTarget(8, 8), R = BF.renderer, prev = R.getRenderTarget();
+      R.setRenderTarget(rt); R.render(sc, BF.camera); R.setRenderTarget(prev); rt.dispose();
+    } catch (e) { errs.push(String(e)); }
+    console.error = ce;
+    const mid = 3 * (2 * n + 2);
+    return { wat: !!raw.wat && !plain.wat, mesh: m.wat && Array.from(m.wat.subarray(0, 2)).concat(m.wat[NV - 1]), nrm: m.nrm && Array.from(m.nrm.subarray(mid, mid + 3)),
+      shade: [m.col[mid], m15.col[mid]], old: !m15.wat && !m15.nrm, errs };
+  });
+  check(land.wat && land.old, "only the look's ring samples and meshes carry water and slope", [land.wat, land.old]);
+  check(land.mesh && land.mesh[0] === 255 && land.mesh[2] === 0 && land.nrm && land.nrm[0] < -60 && land.nrm[1] > 60 && land.nrm[2] === 0 && land.shade[0] === 200, "a ring's mesh says where water is, its ground's slope, and keeps its colours unshaded", [land.mesh, land.nrm, land.shade]);
+  check(!land.errs.length, "the rings' ground and water material compiles", land.errs);
   await pg.waitForTimeout(1500);
   await pg.evaluate(() => localStorage.setItem("bf.look", "blocks"));
   console.log(fails ? "real-lod FAIL " + fails : "real-lod PASS");
