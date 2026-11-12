@@ -11,11 +11,12 @@
 // - The stump. The logs below the cut stay in the world. The mesher lists such a leafless column of one to three logs as a record
 //   of kind 5 (js/real/mesh.js) and leaves its cubes out; this file takes those records out of the list the placer gets and draws
 //   each as the foot of its tree's trunk with a cut top.
+//   Only where a tree stood: the mesher asks stood() for the cells, so a log the player places is a block.
 //
 // - Items on the ground. An item lying on natural ground is drawn on the smooth surface there, not on the block grid under or over
 //   it (itemY, asked by js/entityview.js).
 //
-// API: BF.real.fell = { config, placer, hides(drop) -> bool, itemY(n, x, y, z, dt) -> y to draw at, surfaceY(x, y, z) -> y | null, stats() -> { falls, stumps, trees, felled }, _test }
+// API: BF.real.fell = { config, placer, stood(ox, oz) -> [x, y, z, ...] | null (where trees stand or stood near a chunk), hides(drop) -> bool, itemY(n, x, y, z, dt) -> y to draw at, surfaceY(x, y, z) -> y | null, stats() -> { falls, stumps, trees, felled }, _test }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -391,6 +392,58 @@ function setStumps(key, list) {
 }
 
 // ---------------------------------------------------------------- in front of the placer
+// Where a tree's trunk stands or stood: the base cells of every tree record and every stump record of the loaded chunks, and of the
+// stumps this browser remembers for the world (localStorage, so a stump is still a stump after a reload). The mesher only makes a
+// stump of a lone log there (js/world.js hands stood(ox, oz) to each mesh job), so a log the player places is drawn as a block.
+const stumpCells = new Map();   // "cx,cz" (16-block cells) -> [x, y, z, ...] of the stumps' columns there
+let storeKey = null, dirty = 0;
+function storeName() {
+  const seed = BF.state && BF.state.seed != null ? BF.state.seed : "";
+  return "bf.real.stumps:" + seed + ":" + (typeof location !== "undefined" ? location.hash : "");
+}
+function loadStumps() {
+  const k = storeName();
+  if (k === storeKey) return;
+  storeKey = k; stumpCells.clear();
+  try {
+    const a = JSON.parse(localStorage.getItem(k) || "[]");
+    for (let i = 0; i + 2 < a.length; i += 3) {
+      const c = Math.floor(a[i] / 16) + "," + Math.floor(a[i + 2] / 16);
+      let l = stumpCells.get(c); if (!l) stumpCells.set(c, l = []);
+      l.push(a[i], a[i + 1], a[i + 2]);
+    }
+  } catch (_) { /* no storage */ }
+}
+function saveStumps() {
+  dirty = 0;
+  const a = [];
+  for (const l of stumpCells.values()) for (const v of l) a.push(v);
+  try { localStorage.setItem(storeKey, JSON.stringify(a.slice(-9000))); } catch (_) { /* no storage */ }
+}
+function columnsInto(out, r, big) {
+  const x = Math.floor(r.x), z = Math.floor(r.z);
+  if (big) out.push(x - 1, r.y, z - 1, x, r.y, z - 1, x - 1, r.y, z, x, r.y, z); else out.push(x, r.y, z);
+}
+function stood(ox, oz) {
+  loadStumps();
+  const cx = Math.floor(ox / 16), cz = Math.floor(oz / 16), out = [];
+  for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+    const c = (cx + i) + "," + (cz + j), set = grid.get(c), l = stumpCells.get(c);
+    if (set) for (const r of set) if (r.x > ox - 3 && r.x < ox + 19 && r.z > oz - 3 && r.z < oz + 19) columnsInto(out, r, r.kind === BIG);
+    if (l) for (let k = 0; k < l.length; k += 3) if (l[k] >= ox - 2 && l[k] < ox + 18 && l[k + 2] >= oz - 2 && l[k + 2] < oz + 18) out.push(l[k], l[k + 1], l[k + 2]);
+  }
+  return out.length ? out : null;
+}
+// The chunk's stumps as this mesh lists them replace what was remembered for its cell.
+function rememberStumps(ox, oz, st) {
+  loadStumps();
+  const c = Math.floor(ox / 16) + "," + Math.floor(oz / 16), had = stumpCells.get(c), now = [];
+  for (const r of st) columnsInto(now, r, r.x % 1 === 0);
+  if (!had && !now.length) return;
+  if (had && had.length === now.length && had.every((v, i) => v === now[i])) return;
+  if (now.length) stumpCells.set(c, now); else stumpCells.delete(c);
+  dirty = 1;
+}
 const cellOf = r => Math.floor(r.x / 16) + "," + Math.floor(r.z / 16);
 function forget(key) {
   const m = trees.get(key);
@@ -428,6 +481,7 @@ function place(key, ox, oz, F) {
     for (let i = 0, q = 0; i < n && G; i++) { if ((F[i * 8 + 3] | 0) === STUMP) continue; G.set(F.subarray(i * 8, i * 8 + 8), q); q += 8; }
   }
   inner.place.call(real.flora, key, ox, oz, G);
+  rememberStumps(ox, oz, st);
   try { setStumps(key, st); } catch (e) { console.error("BF.real.fell", e); }
 }
 function remove(key) {
@@ -445,7 +499,7 @@ function wrap() {
 wrap();
 
 real.fell = {
-  config, hides, itemY, surfaceY,
+  config, hides, itemY, surfaceY, stood,
   get placer() { return inner; },   // the placer behind this one (js/real/lod.js)
   stats() { let s = 0, t = 0; for (const m of stumps.values()) s += m.size; for (const m of trees.values()) t += m.size; return { falls: falls.length, stumps: s, trees: t, felled }; },
   _test: { falls, stumps, trees, cutGeo, cutHeight },
@@ -453,6 +507,6 @@ real.fell = {
 real.module({
   name: "fell",
   init(ctx) { scene = ctx.scene; wrap(); },
-  frame(dt) { frameDt = dt; pruneLift(); if (falls.length) { for (const f of falls) f.age += dt; frame(Math.min(dt, 0.1)); } },
+  frame(dt) { frameDt = dt; pruneLift(); if (dirty && ++dirty > 120) saveStumps(); if (falls.length) { for (const f of falls) f.age += dt; frame(Math.min(dt, 0.1)); } },
 });
 })();

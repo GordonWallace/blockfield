@@ -115,7 +115,9 @@ page and in the mesher workers), also:
   with `& 15` and `>> 4 & 15`. A placer draws the plant at `y + dy`; ground plants lean part of the way to the ground's normal
   (`BF.real.lod.config.lean`), trees and stumps stay upright.
   `kind` 5 is a stump: one to three logs of a tree species standing alone on natural ground with nothing on top (what a felled
-  tree leaves). Its logs leave `S` too; `height` is its log count, x and z the middle of a 2 x 2 stump. `js/real/fell.js` takes
+  tree leaves). Only where a tree stood: the mesh job carries `J.stood`, the cells of the trunks of the trees and stumps drawn
+  in and around the chunk (`BF.real.fell.stood(ox, oz)`, which also remembers stumps per world in localStorage), so a log the
+  player places is a block. Its logs leave `S` too; `height` is its log count, x and z the middle of a 2 x 2 stump. `js/real/fell.js` takes
   these records out of the list before the placer sees it and draws them, so a placer never meets kind 5. A log that carries a
   block, or stands in a row of logs or against something built, stays a cube.
   A tree is a column of a registered species' logs standing on natural ground with that species' leaves at its top (a
