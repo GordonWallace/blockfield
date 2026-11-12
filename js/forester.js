@@ -215,6 +215,8 @@ if (BF.world && BF.world.clusterCells) {
 // ---------------------------------------------------------------- trees (felling)
 const NB6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 const NB18 = NB6.concat([[1, 1, 0], [1, -1, 0], [-1, 1, 0], [-1, -1, 0], [0, 1, 1], [0, 1, -1], [0, -1, 1], [0, -1, -1], [1, 0, 1], [1, 0, -1], [-1, 0, 1], [-1, 0, -1]]);
+// (a tree's logs join across corners too: an acacia's trunk leans a block sideways in x and z with each block up)
+const NB26 = NB18.concat([[1, 1, 1], [1, 1, -1], [-1, 1, 1], [-1, 1, -1], [1, -1, 1], [1, -1, -1], [-1, -1, 1], [-1, -1, -1]]);
 // Something that is part of the landscape rather than a building: air, plants, leaves, logs, soil, stone, snow, liquids, vines.
 function natural(id) {
   if (id === 0 || isLeaf(id) || isLog(id) || isPlant(id) || isLiquid(id) || isSoil(id)) return true;
@@ -228,14 +230,14 @@ function builtBlock(id) {
   const b = BF.blocks[id];
   return !(b && RAW.test(b.name));
 }
-// The connected logs reached from `seeds` (18-neighbourhood, only at y >= minY) and the leaves joined to them: {logs, leaves}, or null when it is
+// The connected logs reached from `seeds` (26-neighbourhood, only at y >= minY) and the leaves joined to them: {logs, leaves}, or null when it is
 // more than 64 logs, touches a block that is not landscape (a building), or has no leaves.
 function collectTree(seeds, minY, maxLogs = MAX_LOGS, maxLeaves = MAX_LEAVES) {
   const seen = new Set(), logs = [];
   for (const [x, y, z] of seeds) if (isLog(get(x, y, z)) && !seen.has(pk(x, y, z))) { seen.add(pk(x, y, z)); logs.push([x, y, z]); }
   for (let i = 0; i < logs.length; i++) {
     const [cx, cy, cz] = logs[i];
-    for (const [dx, dy, dz] of NB18) {
+    for (const [dx, dy, dz] of NB26) {
       const nx = cx + dx, ny = cy + dy, nz = cz + dz, k = pk(nx, ny, nz);
       if (ny < minY || seen.has(k)) continue;
       if (!isLog(get(nx, ny, nz))) continue;

@@ -124,6 +124,23 @@ module.exports = async (pg, out) => {
   }, trees[1]);
   check(leaf.leaves > 10 && leaf.n === 24 && leaf.onLeaves === 0 && leaf.high === 0, "items dropped over a crown fall through its leaves to the ground", leaf);
 
+  // a leaning trunk (an acacia: each log a block sideways in x and z from the one below) comes down whole
+  const lean = await pg.evaluate(async T => {
+    const W = BF.world, L = BF.B.acacia_log, F = BF.B.acacia_leaves, x = T.x - 6, z = T.z - 6;
+    let y = T.y + 8; while (y > 0 && !BF.SOLID[W.getBlock(x, y - 1, z)]) y--;
+    const logs = [[x, y, z], [x, y + 1, z], [x, y + 2, z], [x + 1, y + 3, z + 1], [x + 2, y + 4, z + 2], [x - 1, y + 2, z - 1], [x - 2, y + 3, z - 2]];
+    for (const [a, b, c] of logs) W.setBlock(a, b, c, L);
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) { W.setBlock(x + 2 + dx, y + 5, z + 2 + dz, F); W.setBlock(x - 2 + dx, y + 4, z - 2 + dz, F); }
+    await new Promise(r => setTimeout(r, 1500));
+    const before = BF.real.fell.stats().felled;
+    BF.req.player("player.break", x + "," + (y + 1) + "," + z, { id: L, harvest: true });
+    await new Promise(r => setTimeout(r, 2500));
+    let left = 0;
+    for (const [a, b, c] of logs.slice(2)) if (W.getBlock(a, b, c) === L) left++;
+    return { left, stump: W.getBlock(x, y, z) === L, fell: BF.real.fell.stats().felled - before };
+  }, T);
+  check(lean.left === 0 && lean.stump && lean.fell === 1, "a leaning, forked trunk falls whole: no log is left in the air", lean);
+
   // cutting a model: the part above keeps no triangle below the cut, and the other way round
   const geo = await pg.evaluate(() => {
     const g = new THREE.CylinderGeometry(0.3, 0.4, 8, 8, 8); g.translate(0, 4, 0);
