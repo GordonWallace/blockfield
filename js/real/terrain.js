@@ -247,6 +247,7 @@ real.terrainMaterial = function () {
       // the weights of the three projections from the face's own direction: the smoothed normal of a hole's wall still points
       // half up, and a texture laid on a wall from above is drawn out into streaks
       vec3 bfFaceW(vec3 p) { vec3 n = abs(normalize(cross(dFdx(p), dFdy(p)))); n = n * n * n; return n / max(1e-4, n.x + n.y + n.z); }
+      vec4 bfGrass(vec3 p, vec3 w, float s, float o) { return texture2D(uTurf, p.zy * s + o) * w.x + texture2D(uTurf, p.xz * s + o) * w.y + texture2D(uTurf, p.xy * s + o) * w.z; }
       vec4 bfSoil(vec3 p, vec3 w) { return texture2D(uSoil, p.zy * 0.5) * w.x + texture2D(uSoil, p.xz * 0.5) * w.y + texture2D(uSoil, p.xy * 0.5) * w.z; }
       // how much of the ground here is turf: the vertices' share, with a ragged edge where turf meets bare ground
       // (the edge sits where the share is about 0.8 and wanders with the blades and with a slower noise: the mesher gives the rim of
@@ -261,7 +262,8 @@ real.terrainMaterial = function () {
   vec3 bw = pow(abs(normalize(vLn)), vec3(4.0)); bw /= bw.x + bw.y + bw.z;
   float ms = max(1e-3, vMat.x + vMat.y + vMat.z + vMat.w);
   vec4 m = vMat / ms;
-  vec4 g1 = texture2D(uTurf, vLp.xz * 0.625), g2 = texture2D(uTurf, vLp.zx * 0.3125 + 0.37);
+  vec3 fw = bfFaceW(vLp);   // (the turf that hangs over a cut is on a wall: laid on from above it would be drawn out into streaks)
+  vec4 g1 = bfGrass(vLp, fw, 0.625, 0.0), g2 = bfGrass(vLp, fw, 0.3125, 0.37);
   float share = clamp(ms - 1.0, 0.0, 1.0), turf = bfTurf(share, g1, texture2D(uDetail, vLp.xz * 0.37 + vLp.y * 0.61).g);
   // steep turf shows the rock under it; steep soil (a bank, the wall of a dug hole) stays soil
   float steep = smoothstep(0.62, 0.42, normalize(vLn).y);
@@ -272,7 +274,7 @@ real.terrainMaterial = function () {
   c = mix(c, vec3(0.19, 0.18, 0.17), steep * m.x * 0.75);
   vec3 bare = cb * 0.5 * (0.7 + 0.6 * d1) * (0.7 + 0.6 * d2);
   // bare earth: clods and the dark crevices between them, a few small stones, damper and darker in patches
-  vec4 so = bfSoil(vLp, bfFaceW(vLp));
+  vec4 so = bfSoil(vLp, fw);
   vec3 earth = cb * 0.5 * (0.45 + 0.85 * so.r) * (0.72 + 0.56 * d2);
   earth = mix(earth, vec3(0.085, 0.072, 0.058) * (0.5 + 0.7 * so.r), so.g * 0.8);
   bare = mix(bare, earth, m.x);
@@ -289,9 +291,10 @@ real.terrainMaterial = function () {
   vec3 bw = pow(abs(normalize(vLn)), vec3(4.0)); bw /= bw.x + bw.y + bw.z;
   float ms = max(1e-3, vMat.x + vMat.y + vMat.z + vMat.w);
   vec4 m = vMat / ms;
-  vec4 g1 = texture2D(uTurf, vLp.xz * 0.625);
+  vec3 fw = bfFaceW(vLp);
+  vec4 g1 = bfGrass(vLp, fw, 0.625, 0.0);
   float turf = bfTurf(clamp(ms - 1.0, 0.0, 1.0), g1, texture2D(uDetail, vLp.xz * 0.37 + vLp.y * 0.61).g);
-  float h = mix(mix(bfDetail(vLp, bw, m, 0.25), bfSoil(vLp, bfFaceW(vLp)).b * 2.0, m.x), g1.b * 1.6, turf);
+  float h = mix(mix(bfDetail(vLp, bw, m, 0.25), bfSoil(vLp, fw).b * 2.0, m.x), g1.b * 1.6, turf);
   vec3 dp1 = dFdx(-vViewPosition), dp2 = dFdy(-vViewPosition);
   float dh1 = dFdx(h), dh2 = dFdy(h);
   vec3 r1 = cross(dp2, normal), r2 = cross(normal, dp1);

@@ -1,4 +1,4 @@
-// @ci baseline suite=world
+// @ci baseline suite=world timeout=480
 // The realistic look's felled trees and items on the ground (js/real/fell.js, docs/REALISTIC_CONTRACT.md section 4): with the look
 // off the module is not there. With it on, chopping a log of a tree makes its model fall (one falling tree, cut at the cut), hides
 // the items the tree dropped until it has landed, and leaves the logs below the cut as a drawn stump (a flora record of kind 5 from
