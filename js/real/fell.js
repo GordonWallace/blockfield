@@ -15,7 +15,7 @@
 // - Items on the ground. An item lying on natural ground is drawn on the smooth surface there, not on the block grid under or over
 //   it (itemY, asked by js/entityview.js).
 //
-// API: BF.real.fell = { config, hides(drop) -> bool, itemY(n, x, y, z, dt) -> y to draw at, surfaceY(x, y, z) -> y | null, stats() -> { falls, stumps, trees, felled }, _test }
+// API: BF.real.fell = { config, placer, hides(drop) -> bool, itemY(n, x, y, z, dt) -> y to draw at, surfaceY(x, y, z) -> y | null, stats() -> { falls, stumps, trees, felled }, _test }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -444,6 +444,7 @@ wrap();
 
 real.fell = {
   config, hides, itemY, surfaceY,
+  get placer() { return inner; },   // the placer behind this one (js/real/lod.js)
   stats() { let s = 0, t = 0; for (const m of stumps.values()) s += m.size; for (const m of trees.values()) t += m.size; return { falls: falls.length, stumps: s, trees: t, felled }; },
   _test: { falls, stumps, trees, cutGeo, cutHeight },
 };
