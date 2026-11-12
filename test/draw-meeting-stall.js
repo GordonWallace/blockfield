@@ -93,5 +93,33 @@ for (const [step, what] of [[1, 'stepped up a block'], [-1, 'dropped a block']])
   out(what + ' in the tick before a meeting: drawn ' + d.over.toFixed(2) + ' blocks past that height at most');
   check(d.over <= 0.05, 'a mob that ' + what + ' before a meeting is not drawn on past that height (' + d.over.toFixed(2) + ' blocks)');
 }
+// Ticks that come slowly for a while (the world server busy loading land): the clock stays past the newest tick through several ticks, and
+// a mob falling or walking down steps then must not gather a height offset (it was drawn up to 6 blocks above where it stood).
+{
+  const C = P.connect(() => {}), M = C.world, send = m => C.receive(P.encode(m));
+  send({ t: 'hello', version: P.VERSION });
+  let tick = 0, x = 0, y = 70, worst = 0;
+  send({ t: 'clock', tick, day: 0, time: 0.3, speed: 1, frozen: false, achieved: 1 });
+  send({ t: 'entities', tick, add: [{ n: 1, kind: 'mob', s: { type: 'villager', x, y, z: 0, yaw: 0, headYaw: 0, headPitch: 0, walkPhase: 0, walkAmt: 1, age: 0, deathT: 0, fuse: 0, swingT: 0, doorT: 0 } }], set: [], gone: [] });
+  const r1 = M.entities.get(1), o = { x: 0, y: 0, z: 0 }, FR = 1000 / 60;
+  let simAt = 0;
+  for (let now = 0; now < 30000; now += FR) {
+    while (simAt <= now) {
+      fake = simAt; tick++; x += 0.05;
+      const slow = tick % 200 >= 100 && tick % 200 < 130, was = y;
+      if (slow && tick % 200 < 120) y -= tick % 2 ? 0.6 : 0.15;   // a fall, then on along the ground
+      if (tick % 200 === 0) y = 70;
+      send({ t: 'entities', tick, add: [], set: [{ n: 1, s: Object.assign({ x, walkPhase: tick * 0.3, age: tick }, y !== was ? { y } : null) }], gone: [] });
+      simAt += slow ? 170 : 50;
+    }
+    fake = now;
+    M.draw(FR / 50, FR / 1000);
+    drawn(M, r1, o);
+    const hs = (r1.hist || []).map(s => s.y).concat(r1.y), hi = Math.max.apply(null, hs), lo = Math.min.apply(null, hs);
+    if (tick % 200 > 5) worst = Math.max(worst, o.y - hi, lo - o.y);
+  }
+  out('a fall while the ticks come slowly: drawn ' + worst.toFixed(2) + ' blocks outside the heights it had, at most');
+  check(worst <= 1.15, 'a mob falling while the ticks come slowly is never drawn more than a block from the heights it had (' + worst.toFixed(2) + ' blocks)');
+}
 out(fails ? fails + ' FAILED' : 'all passed');
 process.exit(fails ? 1 : 0);

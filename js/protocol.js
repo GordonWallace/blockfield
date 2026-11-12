@@ -799,7 +799,7 @@ function connect(send, mode) {
   // (r15-95) A mob drawn on along its last step past the newest tick is drawn from its real states again once they come: the difference
   // between where that step would have taken it by now and where it is drawn now goes into r.ox / oy / oz, which the renderer adds,
   // eased out over about SETTLE_MS, so a mob that turned or stopped meanwhile glides back on its way instead of jumping.
-  const SETTLE_MS = 300;
+  const SETTLE_MS = 300, OY_MAX = 1.1;   // OY_MAX: the most height eased out (a step up or down a block): never a mob drawn blocks off the ground
   const lin = (a, b, k) => a + (b - a) * k;
   function settle(r, now) {
     if (r.ox) {
@@ -811,10 +811,11 @@ function connect(send, mode) {
     const e = r.ex, on = r.k > 1;
     if (e && !(on && r.prev === e.p && r.xt === e.t)) {   // (it was drawn on along a step that is no longer the one drawn)
       const p = r.prev, B = r.k < 1 && r.to || r, k = p ? r.k : 1;
-      const x = p ? lin(p.x, B.x, k) : r.x, y = p ? lin(p.y, B.y, k) : r.y, z = p ? lin(p.z, B.z, k) : r.z;
-      // (the height is not drawn on along the step, js/mobview.js drawState: a step up a block takes one tick and would be drawn on blocks up into the air)
+      // (the height is not drawn on along a step, js/mobview.js drawState: past the newest tick it is the newest tick's, here as there.
+      // Worked out along the step it gave a mob falling or stepping while the ticks came slowly an offset of several blocks: drawn up in the air)
+      const x = p ? lin(p.x, B.x, k) : r.x, y = p && k <= 1 ? lin(p.y, B.y, k) : r.y, z = p ? lin(p.z, B.z, k) : r.z;
       const q = Math.min(world.rt - e.t, e.ext) / e.d, dx = lin(e.ax, e.bx, 1 + q) - x, dy = e.by - y, dz = lin(e.az, e.bz, 1 + q) - z;
-      if (dx * dx + dy * dy + dz * dz < 16) { r.ox = (r.ox || 0) + dx; r.oy = (r.oy || 0) + dy; r.oz = (r.oz || 0) + dz; }
+      if (dx * dx + dy * dy + dz * dz < 16) { r.ox = (r.ox || 0) + dx; r.oy = Math.max(-OY_MAX, Math.min(OY_MAX, (r.oy || 0) + dy)); r.oz = (r.oz || 0) + dz; }
     }
     r.ex = on ? { p: r.prev, t: r.xt, d: r.xt - r.prev.t, ext: world.ext, ax: r.prev.x, ay: r.prev.y, az: r.prev.z, bx: r.x, by: r.y, bz: r.z } : null;
   }
