@@ -14,7 +14,11 @@ const hex = h => { const c = new T.Color(h); return [c.r, c.g, c.b]; };
 const G = real.assets.ground;
 const add = (blocks, color, layer, tint) => G.push({ id: blocks[0], blocks, color: typeof color === "string" ? hex(color) : color, layer, tint: !!tint });
 add(["grass"], [0.56, 0.58, 0.54], 0, true);
-add(["dirt", "rooted_dirt", "farmland_soil"], "#6e4e36", 0);
+add(["dirt", "rooted_dirt"], "#6e4e36", 0);
+// tilled soil: ground like any other (a hoe turns dirt into it, as walking wears a path), so a field meets the earth around it without
+// a seam. till: drawn in furrows. Watered soil is the darker.
+G.push({ id: "tilled_soil", blocks: ["farmland"], color: hex("#523d2c"), layer: 0, tint: false, till: true });
+G.push({ id: "tilled_soil_dry", blocks: ["farmland_dry"], color: hex("#8a6a48"), layer: 0, tint: false, till: true });
 add(["coarse_dirt"], "#6b523c", 2);
 add(["dirt_path"], "#8a6a3e", 2);   // a village's trodden paths: part of the ground, a worn band through the turf
 add(["podzol"], "#5a4126", 0);
@@ -49,8 +53,9 @@ real.meshTables = function () {
   // ores take their rock's entry (the ore is found by digging, not by looking)
   const list = G.slice(0, 254);
   const GCOL = new Float32Array(list.length * 3), GLAY = new Uint8Array(list.length), GTINT = new Uint8Array(list.length);
-  const GSIDE = new Uint8Array(list.length);
+  const GSIDE = new Uint8Array(list.length), GTILL = new Uint8Array(list.length);
   list.forEach((g, i) => {
+    GTILL[i] = g.till ? 1 : 0;
     const col = typeof g.color === "string" ? hex(g.color) : g.color || [0.5, 0.5, 0.5];
     GCOL[i * 3] = col[0]; GCOL[i * 3 + 1] = col[1]; GCOL[i * 3 + 2] = col[2]; GLAY[i] = g.layer | 0; GTINT[i] = g.tint ? 1 : 0;
     for (const name of g.blocks) if (B[name] != null) NAT[B[name]] = i + 1;
@@ -81,7 +86,7 @@ real.meshTables = function () {
   const NATB = NAT.slice();
   for (const b of BF.blocks) if (b && NATB[b.id] && /terracotta|sandstone/.test(b.name)) NATB[b.id] = 0;
   list.forEach(g => { if (g.built) for (const name of g.blocks) if (B[name] != null) NATB[B[name]] = 0; });
-  return { NAT, NATB, TREE, SPEC, COVER, GCOL, GLAY, GTINT, GSIDE };
+  return { NAT, NATB, TREE, SPEC, COVER, GCOL, GLAY, GTINT, GSIDE, GTILL };
 };
 
 // ---------- the detail texture ----------
@@ -237,10 +242,13 @@ real.terrainMaterial = function () {
   mat = new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0 });
   mat.onBeforeCompile = sh => {
     sh.uniforms.uDetail = detail; sh.uniforms.uTurf = turf; sh.uniforms.uSoil = soil; sh.uniforms.uUnder = under; sh.uniforms.uWet = real.U.uWet;
-    sh.vertexShader = "attribute vec4 mat;\nvarying vec4 vMat;\nvarying vec3 vLp;\nvarying vec3 vLn;\n" +
-      sh.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\nvMat = mat; vLp = position; vLn = normal;");
-    sh.fragmentShader = "uniform sampler2D uDetail;\nuniform sampler2D uTurf;\nuniform sampler2D uSoil;\nuniform vec3 uUnder;\nuniform float uWet;\nvarying vec4 vMat;\nvarying vec3 vLp;\nvarying vec3 vLn;\n" +
-      `float bfDetail(vec3 p, vec3 w, vec4 m, float s) {
+    sh.vertexShader = "attribute vec4 mat;\nattribute float till;\nvarying vec4 vMat;\nvarying float vTill;\nvarying vec3 vLp;\nvarying vec3 vLn;\n" +
+      sh.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\nvMat = mat; vTill = till; vLp = position; vLn = normal;");
+    sh.fragmentShader = "uniform sampler2D uDetail;\nuniform sampler2D uTurf;\nuniform sampler2D uSoil;\nuniform vec3 uUnder;\nuniform float uWet;\nvarying vec4 vMat;\nvarying float vTill;\nvarying vec3 vLp;\nvarying vec3 vLn;\n" +
+      `// tilled soil (the mesher's till share): furrows two to a block, running along x. 0 in a furrow .. 1 on a ridge; chunk-local
+      // coordinates line up across chunks. Only where the ground faces up.
+      float bfRidge(vec3 p) { return 0.5 + 0.5 * cos(p.z * 12.5664); }
+      float bfDetail(vec3 p, vec3 w, vec4 m, float s) {
         vec4 tx = texture2D(uDetail, p.zy * s), ty = texture2D(uDetail, p.xz * s), tz = texture2D(uDetail, p.xy * s);
         return dot(tx * w.x + ty * w.y + tz * w.z, m);
       }
@@ -277,6 +285,7 @@ real.terrainMaterial = function () {
   vec4 so = bfSoil(vLp, fw);
   vec3 earth = cb * 0.5 * (0.45 + 0.85 * so.r) * (0.72 + 0.56 * d2);
   earth = mix(earth, vec3(0.085, 0.072, 0.058) * (0.5 + 0.7 * so.r), so.g * 0.8);
+  earth *= mix(1.0, 0.5 + 0.7 * bfRidge(vLp), vTill * fw.y);   // (a furrow is in its ridges' shade)
   bare = mix(bare, earth, m.x);
   // short grass: blades light at the tip over dark roots, some drier than others, in patches a few blocks across
   float pch = texture2D(uDetail, vLp.xz * 0.0625).r, dry = clamp(g1.g * 0.35 + g2.g * 0.65 + (pch - 0.5) * 1.1, 0.0, 1.0);
@@ -294,7 +303,7 @@ real.terrainMaterial = function () {
   vec3 fw = bfFaceW(vLp);
   vec4 g1 = bfGrass(vLp, fw, 0.625, 0.0);
   float turf = bfTurf(clamp(ms - 1.0, 0.0, 1.0), g1, texture2D(uDetail, vLp.xz * 0.37 + vLp.y * 0.61).g);
-  float h = mix(mix(bfDetail(vLp, bw, m, 0.25), bfSoil(vLp, fw).b * 2.0, m.x), g1.b * 1.6, turf);
+  float h = mix(mix(bfDetail(vLp, bw, m, 0.25), bfSoil(vLp, fw).b * 2.0, m.x), g1.b * 1.6, turf) + bfRidge(vLp) * 5.0 * vTill * fw.y;
   vec3 dp1 = dFdx(-vViewPosition), dp2 = dFdy(-vViewPosition);
   float dh1 = dFdx(h), dh2 = dFdy(h);
   vec3 r1 = cross(dp2, normal), r2 = cross(normal, dp1);
