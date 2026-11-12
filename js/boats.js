@@ -16,7 +16,7 @@ const BF = (globalThis.BF = globalThis.BF || {});
 
 const HW = 0.6875, H = 0.5625, RIDDEN_H = 1.5;   // collision box (vanilla 1.375 wide); with the player aboard it covers the sitting player
 const SINK = 0.15;                               // the hull bottom sits this far under the water surface (just under the inside floor)
-const GRAV = 26, SIT_EYE = 1.2;                  // SIT_EYE: the player's eye above the boat bottom while sitting in it
+const GRAV = 26, SIT_EYE = 1.32;                  // SIT_EYE: the player's eye above the boat bottom while sitting in it
 const WATER = { acc: 9.6, drag: 1.2, side: 5, turn: 2.2 };    // terminal speed acc / drag = 8 blocks/s
 const ICE = { acc: 8, drag: 0.2, side: 0.6, turn: 2.2 };      // 40 blocks/s
 const LAND = { acc: 1.6, drag: 4, side: 8, turn: 1.0 };       // 0.4 blocks/s: slides slowly

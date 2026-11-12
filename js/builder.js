@@ -792,7 +792,7 @@ const overlapsBody = (m, c) => m.position.x + 0.3 > c.x && m.position.x - 0.3 < 
 function otherInside(m, c) {   // the player or another mob stands where the block would go
   const hit = (p, hw, h) => p.x + hw > c.x && p.x - hw < c.x + 1 && p.z + hw > c.z && p.z - hw < c.z + 1 && p.y < c.y + 1 && p.y + h > c.y;
   const P = BF.player;
-  if (P && P.position && !P.dead && hit(P.position, 0.3, 1.8)) return true;
+  if (P && P.position && !P.dead && hit(P.position, P.halfWidth || 0.3, P.height || 1.95)) return true;
   return BF.regions.mobsInBox(c.x - 2, c.z - 2, c.x + 3, c.z + 3, o => o !== m && !o.dead && hit(o.position, o.halfWidth, o.height), { label: "builder block" }).length > 0;
 }
 function spotsFor(m, bs, c, e) {

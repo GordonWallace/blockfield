@@ -728,7 +728,7 @@ function explodeNow(m, part) {
   // away from the blast as seen from its own frame.
   if (own && playerAlive()) {
     const p = player();
-    const pc = new THREE.Vector3(p.position.x, p.position.y + (p.height || 1.8) / 2, p.position.z);
+    const pc = new THREE.Vector3(p.position.x, p.position.y + (p.height || 1.95) / 2, p.position.z);
     const d = seen(c, pc).distanceTo(c);
     if (d < 7) {
       const dmg = Math.round(22 * Math.pow(1 - d / 7, 1.3));
@@ -801,7 +801,7 @@ function playerArrowStep(a, p) {
   if (a.stuck) {   // stuck: falls when its block goes; walking over it picks it up
     if (!BF.world.isSolid(a.cell[0] + 0.5, a.cell[1] + 0.5, a.cell[2] + 0.5)) { a.stuck = false; a.pos.addScaledVector(a.dir, -0.1); a.vel.set(0, 0, 0); return false; }   // out of the freed cell, then down
     if (!a.pickup || !p) return false;
-    const pp = seen(a.pos, p.position, _sA), hw = (p.halfWidth || 0.3) + 0.6, h = p.height || 1.8;
+    const pp = seen(a.pos, p.position, _sA), hw = (p.halfWidth || 0.3) + 0.6, h = p.height || 1.95;
     if (Math.abs(a.pos.x - pp.x) > hw || Math.abs(a.pos.z - pp.z) > hw || a.pos.y < pp.y - 0.6 || a.pos.y > pp.y + h + 0.3) return false;
     if (a.pickup === 1 && BF.inventory && BF.I) { try { if (BF.inventory.add(BF.I.arrow, 1) > 0) return false; } catch (e) { console.error(e); return false; } }   // a full inventory leaves it there
     if (BF.emit) BF.emit("arrowPickedUp", a.pickup === 1);
@@ -895,7 +895,7 @@ function updateArrows(dt) {
         }
       }
       if (p) {
-        const pp = seen(a.pos, p.position, _sB), hw = (p.halfWidth || 0.3) + 0.1, h = p.height || 1.8;
+        const pp = seen(a.pos, p.position, _sB), hw = (p.halfWidth || 0.3) + 0.1, h = p.height || 1.95;
         if (a.pos.x > pp.x - hw && a.pos.x < pp.x + hw && a.pos.z > pp.z - hw && a.pos.z < pp.z + hw && a.pos.y > pp.y && a.pos.y < pp.y + h) {
           if (p.damage) p.damage(irnd(R(a), 2, 4), seen(p.position, a.owner && !a.owner.removed ? a.owner.position : a.pos.clone().sub(a.vel), new THREE.Vector3()).clone());
           hitPlayer = true;
@@ -1280,7 +1280,7 @@ function hostileAI(m, dt, out) {
     ai.aiming = ai.los && dist < 16;
     if (ai.aiming && ai.shootCd <= 0) {
       ai.shootCd = rnd(R(m), 1.6, 2.4);
-      shootArrow(m, new THREE.Vector3(pp.x, pp.y + (p.height || 1.8) * 0.6, pp.z));
+      shootArrow(m, new THREE.Vector3(pp.x, pp.y + (p.height || 1.95) * 0.6, pp.z));
     }
     return;
   }
@@ -1290,7 +1290,7 @@ function hostileAI(m, dt, out) {
   if (m.type === "spider" && m.onGround && hd > 2 && hd < 4 && ai.attackCd <= 0 && R(m).next() < dt * 2) {
     m.vel.y = 5.5; m.vel.x = nx * 6; m.vel.z = nz * 6; m.knockT = 0.4; // pounce
   }
-  if (hd < reach && Math.abs(dy + (p.height || 1.8) / 2 - m.height / 2) < 1.6 && ai.attackCd <= 0) {
+  if (hd < reach && Math.abs(dy + (p.height || 1.95) / 2 - m.height / 2) < 1.6 && ai.attackCd <= 0) {
     ai.attackCd = 1.0;
     ai.swingT = 0.35;
     if (p.damage) p.damage(T.attack || 2, seen(p.position, m.position, new THREE.Vector3()).clone());
@@ -1944,7 +1944,7 @@ function goFine(m) {
 function isOccupied(x, y, z) {
   const hit = (p, hw, h) => p.x + hw > x && p.x - hw < x + 1 && p.z + hw > z && p.z - hw < z + 1 && p.y < y + 2 && p.y + h > y;
   const c = { x: x + 0.5, z: z + 0.5 };   // (seen from the cell's frame)
-  if (playerLives() && hit(seen(c, playerPos(), _sA), 0.3, 1.8)) return true;
+  if (playerLives() && hit(seen(c, playerPos(), _sA), 0.3, 1.95)) return true;
   const any = L => L.some(o => !o.dead && !o.removed && hit(seen(c, o.position, _sB), o.halfWidth, o.height));
   return vq("mobs.isOccupied", any(nearMobs(c, 3, true)), any);
 }
@@ -1953,7 +1953,7 @@ function isOccupied(x, y, z) {
 function atDoor(x, y, z, but) {
   const c = { x: x + 0.5, z: z + 0.5 };
   const by = (p, h) => { const dx = p.x - c.x, dz = p.z - c.z; return dx * dx + dz * dz < 1.69 && p.y < y + 2 && p.y + h > y; };
-  if (playerLives() && by(seen(c, playerPos(), _sA), 1.8)) return true;
+  if (playerLives() && by(seen(c, playerPos(), _sA), 1.95)) return true;
   const any = L => L.some(o => o !== but && !o.dead && !o.removed && !o.sleeping && by(seen(c, o.position, _sB), o.height));
   return vq("mobs.atDoor", any(nearMobs(c, 3, true)), any);
 }
@@ -2769,7 +2769,7 @@ function separate(m, dt) {
     const p = player(), pp = pAt(m);
     const dx = m.position.x - pp.x, dz = m.position.z - pp.z;
     const min = m.halfWidth + (p.halfWidth || 0.3);
-    if (Math.abs(dx) < min && Math.abs(dz) < min && m.position.y < p.position.y + (p.height || 1.8) && p.position.y < m.position.y + m.height) {
+    if (Math.abs(dx) < min && Math.abs(dz) < min && m.position.y < p.position.y + (p.height || 1.95) && p.position.y < m.position.y + m.height) {
       const d = Math.hypot(dx, dz) || 0.01;
       m.vel.x += (dx / d) * 8 * dt; m.vel.z += (dz / d) * 8 * dt;
     }
