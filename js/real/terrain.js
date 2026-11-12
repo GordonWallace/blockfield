@@ -88,7 +88,31 @@ real.meshTables = function () {
   const NATB = NAT.slice();
   for (const b of BF.blocks) if (b && NATB[b.id] && /terracotta|sandstone/.test(b.name)) NATB[b.id] = 0;
   list.forEach(g => { if (g.built) for (const name of g.blocks) if (B[name] != null) NATB[B[name]] = 0; });
-  return { NAT, NATB, TREE, SPEC, COVER, GCOL, GLAY, GTINT, GSIDE, GTILL };
+  // The badlands' banded clay: STRAT the blocks its bands are made of (js/worldgen.js strata), GSTR their ground entries. The
+  // mesher draws such a block as ground only where the world was generated with it (js/real/mesh.js), and the material draws the
+  // bands themselves, level and sharp, instead of the vertices' mixed colour.
+  const STRAT = new Uint8Array(n), GSTR = new Uint8Array(list.length);
+  for (const b of BF.blocks) if (b && NAT[b.id] && /^([a-z]+_)?terracotta$/.test(b.name)) { STRAT[b.id] = 1; GSTR[NAT[b.id] - 1] = 1; }
+  return { NAT, NATB, TREE, SPEC, COVER, GCOL, GLAY, GTINT, GSIDE, GTILL, STRAT, GSTR };
+};
+
+// ---------- the badlands' bands ----------
+// The 64 bands of the world's banded clay (BF.worldgen.strata(), block ids) as a 64 x 1 texture of their grounds' colours: the
+// material looks a band up by height. Set by js/world.js when a chunk of the badlands is meshed (the bands come from the seed).
+const strataU = { value: new T.DataTexture(new Uint8Array(64 * 4).fill(128), 64, 1, T.RGBAFormat) };
+strataU.value.wrapS = T.RepeatWrapping; strataU.value.magFilter = strataU.value.minFilter = T.NearestFilter;
+strataU.value.generateMipmaps = false; strataU.value.needsUpdate = true;
+let strataOf = null;
+real.setStrata = function (table) {
+  if (table === strataOf || !table) return;
+  strataOf = table;
+  const tb = real.meshTables(), d = strataU.value.image.data;
+  for (let i = 0; i < 64; i++) {
+    const g = tb.NAT[table[i]] - 1;
+    for (let a = 0; a < 3; a++) d[i * 4 + a] = g < 0 ? 128 : Math.round(255 * Math.max(0, Math.min(1, tb.GCOL[g * 3 + a])));
+    d[i * 4 + 3] = 255;
+  }
+  strataU.value.needsUpdate = true;
 };
 
 // ---------- the detail texture ----------
@@ -243,13 +267,27 @@ real.terrainMaterial = function () {
   const under = { value: di < 0 ? new T.Vector3(0.11, 0.07, 0.04) : new T.Vector3(Math.pow(tb.GCOL[di * 3], 2.2), Math.pow(tb.GCOL[di * 3 + 1], 2.2), Math.pow(tb.GCOL[di * 3 + 2], 2.2)) };
   mat = new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0 });
   mat.onBeforeCompile = sh => {
-    sh.uniforms.uDetail = detail; sh.uniforms.uTurf = turf; sh.uniforms.uSoil = soil; sh.uniforms.uUnder = under; sh.uniforms.uWet = real.U.uWet;
-    sh.vertexShader = "attribute vec4 mat;\nattribute float till;\nvarying vec4 vMat;\nvarying float vTill;\nvarying vec3 vLp;\nvarying vec3 vLn;\n" +
-      sh.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\nvMat = mat; vTill = till; vLp = position; vLn = normal;");
-    sh.fragmentShader = "uniform sampler2D uDetail;\nuniform sampler2D uTurf;\nuniform sampler2D uSoil;\nuniform vec3 uUnder;\nuniform float uWet;\nvarying vec4 vMat;\nvarying float vTill;\nvarying vec3 vLp;\nvarying vec3 vLn;\n" +
+    sh.uniforms.uDetail = detail; sh.uniforms.uTurf = turf; sh.uniforms.uSoil = soil; sh.uniforms.uUnder = under; sh.uniforms.uWet = real.U.uWet; sh.uniforms.uStrata = strataU;
+    sh.vertexShader = "attribute vec4 mat;\nattribute float till;\nattribute vec2 strat;\nvarying vec4 vMat;\nvarying float vTill;\nvarying vec2 vStrat;\nvarying vec3 vLp;\nvarying vec3 vLn;\n" +
+      sh.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\nvMat = mat; vTill = till; vStrat = strat; vLp = position; vLn = normal;");
+    sh.fragmentShader = "uniform sampler2D uDetail;\nuniform sampler2D uTurf;\nuniform sampler2D uSoil;\nuniform vec3 uUnder;\nuniform float uWet;\nuniform sampler2D uStrata;\nvarying vec4 vMat;\nvarying float vTill;\nvarying vec2 vStrat;\nvarying vec3 vLp;\nvarying vec3 vLn;\n" +
       `// tilled soil (the mesher's till share): furrows two to a block, running along x. 0 in a furrow .. 1 on a ridge; chunk-local
       // coordinates line up across chunks. Only where the ground faces up.
       float bfRidge(vec3 p) { return 0.5 + 0.5 * cos(p.z * 12.5664); }
+// the badlands' banded clay: the colour (linear) of the beds at p, and in a how light the fine bedding within them is.
+      // sh: the shift of the bands here; up: how much the face looks up. A band is one block thick and lies where its blocks are
+      // (the block from y to y + 1 is band y + sh; a top face is the top of the block under it), so what is dug out of a band is
+      // its colour. The beds' edges wander a little and are sharp, as in a cut through sediment. Heights are the world's own and
+      // the wander repeats every chunk, so the beds run on across chunks.
+      vec4 bfBeds(vec3 p, float sh, float up) {
+        float along = (p.x + p.z) * 0.0625;
+        float wob = texture2D(uDetail, p.xz * 0.0625).r + 0.5 * texture2D(uDetail, p.xz * 0.25).r - 0.75;
+        float t = p.y + sh - 0.5 * up + wob * 0.34 - 0.5, i = floor(t), f = t - i;
+        vec3 a = texture2D(uStrata, vec2((i + 0.5) / 64.0, 0.5)).rgb, b = texture2D(uStrata, vec2((i + 1.5) / 64.0, 0.5)).rgb;
+        vec3 c = pow(mix(a, b, smoothstep(0.42, 0.58, f)), vec3(2.2));
+        float fine = texture2D(uDetail, vec2(along, t * 0.83)).g * 0.6 + texture2D(uDetail, vec2(along * 3.0 + 0.3, t * 2.9)).g * 0.4;
+        return vec4(c, fine);
+      }
       float bfDetail(vec3 p, vec3 w, vec4 m, float s) {
         vec4 tx = texture2D(uDetail, p.zy * s), ty = texture2D(uDetail, p.xz * s), tz = texture2D(uDetail, p.xy * s);
         return dot(tx * w.x + ty * w.y + tz * w.z, m);
@@ -282,6 +320,12 @@ real.terrainMaterial = function () {
   // (where turf gives way the vertex colour is still part green: the bare ground beside turf is the soil under it)
   vec3 cb = mix(c, uUnder, smoothstep(0.0, 0.5, share) * step(share, 0.999));
   c = mix(c, vec3(0.19, 0.18, 0.17), steep * m.x * 0.75);
+  if (vStrat.x > 0.001) {
+    vec4 beds = bfBeds(vLp, vStrat.y, fw.y);
+    // (where the clay goes under sand or soil the edge is ragged, not the blocks' outline)
+    float edge = vStrat.x + (texture2D(uDetail, vLp.xz * 0.25 + vLp.y * 0.37).r - 0.5) * 0.7 * step(vStrat.x, 0.999);
+    cb = mix(cb, beds.rgb * (0.74 + 0.52 * beds.a), smoothstep(0.4, 0.6, edge));
+  }
   vec3 bare = cb * 0.5 * (0.7 + 0.6 * d1) * (0.7 + 0.6 * d2);
   // bare earth: clods and the dark crevices between them, a few small stones, damper and darker in patches
   vec4 so = bfSoil(vLp, fw);

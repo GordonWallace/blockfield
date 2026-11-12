@@ -1750,6 +1750,17 @@ const GX = 5, GY_MAX = 50;
 const gA = new Float32Array(GX * GX * GY_MAX), gB = new Float32Array(GX * GX * GY_MAX), gC = new Float32Array(GX * GX * GY_MAX);
 const colA = new Float32Array(GY_MAX), colB = new Float32Array(GY_MAX), colC = new Float32Array(GY_MAX);
 let STRATA = null;                 // badlands terracotta bands (built from the seed)
+function strataTable() {
+  if (!STRATA) {
+    const B = BF.B, cols = [B.orange_terracotta, B.yellow_terracotta, B.orange_terracotta, B.white_terracotta,
+      B.brown_terracotta, B.orange_terracotta, B.red_terracotta, B.yellow_terracotta];
+    STRATA = new Uint16Array(64);
+    for (let i = 0; i < 64; i++) STRATA[i] = noise.hash(i, 0, 919) < 0.45 ? B.terracotta : cols[(noise.hash(i, 1, 919) * cols.length) | 0];
+  }
+  return STRATA;
+}
+// How far the bands are shifted in column (wx, wz): the block generated at height y is STRATA[(y + shift + 64) & 63].
+const strataShift = (wx, wz) => (N2(wx, wz, 160, 0, 0) * 3) | 0;
 
 let rs = 1;
 const rnd = () => (rs = (Math.imul(rs, 1664525) + 1013904223) >>> 0) / 4294967296;
@@ -1849,12 +1860,7 @@ let WY0 = 0, WY1 = 0;              // the vertical window being generated: absol
 function prep(cx, cz) {
   const { CS, SEA, B } = BF;
   const ox = cx * CS, oz = cz * CS;
-  if (!STRATA) {
-    const cols = [B.orange_terracotta, B.yellow_terracotta, B.orange_terracotta, B.white_terracotta,
-      B.brown_terracotta, B.orange_terracotta, B.red_terracotta, B.yellow_terracotta];
-    STRATA = new Uint16Array(64);
-    for (let i = 0; i < 64; i++) STRATA[i] = noise.hash(i, 0, 919) < 0.45 ? B.terracotta : cols[(noise.hash(i, 1, 919) * cols.length) | 0];
-  }
+  strataTable();
   fillTint(cx, cz);
 
   // heights with a 1-block margin (slopes / water adjacency)
@@ -2157,7 +2163,7 @@ function core(cx, cz, vox, Y0, NY) {
       else if (y > h) v = (y === wl && ice) ? B.ice : WATER;
       else if (strata) {
         if (y > h - depth) v = y === h ? top : fill;
-        else if (y > strataY) v = STRATA[(y + ((N2(wx, wz, 160, 0, 0) * 3) | 0) + 64) & 63];
+        else if (y > strataY) v = STRATA[(y + strataShift(wx, wz) + 64) & 63];
         else v = stone3(wx, y, wz);
       }
       else if (y === h) v = top;
@@ -2617,6 +2623,11 @@ BF.worldgen = {
   surfaceAt(x, z, tint) { climate(Math.floor(x), Math.floor(z)); if (tint) tintK(tint, 0); return C; },
   TREE_DENSITY,
   biomeAt, tintAt,
+  // The badlands' banded clay as it was generated (the realistic look tells it from terracotta that was placed, js/world.js):
+  // strata() the 64 bands, block ids; strataAt(x, z, out) -> 0 where column (x, z) has none, else 1 + its shift (the block generated
+  // at height y is strata()[(y + shift + 64) & 63]), with the generated ground height in out[0].
+  strata: () => strataTable(),
+  strataAt(x, z, out) { const h = climate(x, z); if (C.biome !== BADLANDS) return 0; if (out) out[0] = h; return 1 + strataShift(x, z); },
   villagesNear: (x, z, radius) => villagesNear(x, z, radius),   // the planet: across face edges, canonical records, planet distance
   nearestVillage: (x, z) => nearestVillage(x, z),
   villageAt: (x, z, m) => villageAt(Math.floor(x), Math.floor(z), m || 0),   // the village whose box holds column (x, z) (margin m), or null

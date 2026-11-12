@@ -332,8 +332,8 @@ function build(J, tables) {
       if (isFluid) {
         if (FLUID[n] || OPAQUE[n]) continue;
       } else if (r === 2) {
-        if ((OPAQUE[n] && !(RM && RM.nat(n, ax, az))) || n === b) continue;
-      } else if (OPAQUE[n] && !(RM && RM.nat(n, ax, az))) continue;   // (smooth ground hides nothing: it may slope away from the block)
+        if ((OPAQUE[n] && !(RM && RM.nat(n, ax, ay, az))) || n === b) continue;
+      } else if (OPAQUE[n] && !(RM && RM.nat(n, ax, ay, az))) continue;   // (smooth ground hides nothing: it may slope away from the block)
       const rect = faceUV[b * 6 + f];
       if (!rect) continue;
       const sky = skyAt(ax, ay, az);
