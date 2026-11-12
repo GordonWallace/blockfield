@@ -315,7 +315,9 @@ real.terrainMaterial = function () {
   float share = clamp(ms - 1.0, 0.0, 1.0), turf = bfTurf(share, g1, texture2D(uDetail, vLp.xz * 0.37 + vLp.y * 0.61).g);
   // steep turf shows the rock under it; steep soil (a bank, the wall of a dug hole) stays soil
   float steep = smoothstep(0.62, 0.42, normalize(vLn).y);
-  float d1 = bfDetail(vLp, bw, m, 0.25), d2 = bfDetail(vLp, bw, m, 0.031);
+  // (the grain by the face's own direction, like the soil and the turf: on the wall of a hole the smoothed normal still points half
+  // up, and sand or rock laid on from above is drawn out into streaks. The broad tone is too slow to streak and keeps the smooth one.)
+  float d1 = bfDetail(vLp, fw, m, 0.25), d2 = bfDetail(vLp, bw, m, 0.031);
   vec3 c = pow(diffuseColor.rgb, vec3(2.2));
   // (where turf gives way the vertex colour is still part green: the bare ground beside turf is the soil under it)
   vec3 cb = mix(c, uUnder, smoothstep(0.0, 0.5, share) * step(share, 0.999));
@@ -343,13 +345,12 @@ real.terrainMaterial = function () {
 }`)
         .replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>
 {
-  vec3 bw = pow(abs(normalize(vLn)), vec3(4.0)); bw /= bw.x + bw.y + bw.z;
   float ms = max(1e-3, vMat.x + vMat.y + vMat.z + vMat.w);
   vec4 m = vMat / ms;
   vec3 fw = bfFaceW(vLp);
   vec4 g1 = bfGrass(vLp, fw, 0.625, 0.0);
   float turf = bfTurf(clamp(ms - 1.0, 0.0, 1.0), g1, texture2D(uDetail, vLp.xz * 0.37 + vLp.y * 0.61).g);
-  float h = mix(mix(bfDetail(vLp, bw, m, 0.25), bfSoil(vLp, fw).b * 2.0, m.x), g1.b * 1.6, turf) + bfRidge(vLp) * 5.0 * vTill * fw.y;
+  float h = mix(mix(bfDetail(vLp, fw, m, 0.25), bfSoil(vLp, fw).b * 2.0, m.x), g1.b * 1.6, turf) + bfRidge(vLp) * 5.0 * vTill * fw.y;
   vec3 dp1 = dFdx(-vViewPosition), dp2 = dFdy(-vViewPosition);
   float dh1 = dFdx(h), dh2 = dFdy(h);
   vec3 r1 = cross(dp2, normal), r2 = cross(normal, dp1);
