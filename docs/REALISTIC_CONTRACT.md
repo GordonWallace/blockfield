@@ -120,6 +120,11 @@ page and in the mesher workers), also:
   player places is a block. Its logs leave `S` too; `height` is its log count, x and z the middle of a 2 x 2 stump. `js/real/fell.js` takes
   these records out of the list before the placer sees it and draws them, so a placer never meets kind 5. A log that carries a
   block, or stands in a row of logs or against something built, stays a cube.
+  `kind` 6 is a prop: a block that is one full block to the game but is not cube shaped in the world (a pumpkin, a beehive: the
+  blocks listed in `BF.real.assets.props`, js/real/props.js). Its cube leaves `S`, it hides no face of a cube beside it, and it is
+  not a built cell, so the ground runs on under it. x and z are the middle of its cell, `extra` its light (the brightest open cell
+  around it) and its seat as for a ground plant. `js/real/props.js` takes these records out of the list before the other placers
+  see it and draws them. Collision, light and every rule of the block are unchanged.
   A tree is a column of a registered species' logs standing on natural ground with that species' leaves at its top (a
   `leafless` species, such as a cactus, needs no leaves). Its logs, any logs joined to them, and all leaves of registered
   species leave `S`. Logs without leaves (village posts, what the player builds) stay cubes. A ground plant is a block
@@ -200,6 +205,7 @@ foundation thread for the attribute you need). Water physics is 1.5's fluid simu
 | Felled trees and items | `js/real/fell.js` | the stump rule in `js/real/mesh.js`, the drop lines of `js/entityview.js`, `js/drops.js`, `fallAbove` in `js/forester.js` |
 | Atmosphere and creatures | `js/real/atmos.js`, `js/real/mobs.js` | `js/sky.js`, `js/weather.js`, `js/mobs.js`, `js/mobview.js`, `js/entityview.js`, `js/audio.js` |
 | Digging | `js/real/dig.js` (the wear drawn on smooth ground while it is mined, `BF.real.dig`) | `js/cracks.js`, the break particles' line in `js/player.js` |
+| Props (objects that are not cubes) | `js/real/props.js` (`BF.real.props`, `BF.real.assets.props`) | the prop rule in `js/real/mesh.js` and `js/real/terrain.js` (the `PROP` table), the face rule in `js/mesher.js` (`RSEE`) |
 
 `index.html` already loads every file above (empty stubs are on the branch), so nobody else needs to touch it. If you need
 another new file, name it `js/real/<yours>-*.js` and ask the foundation thread for the script tag.
