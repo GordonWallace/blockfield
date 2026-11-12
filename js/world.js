@@ -383,6 +383,7 @@ function extendUp(c, newHi) {
   const oldHi = c.hi;
   c.hi = newHi; c.y1 = newHi * 16; c.ver++; for (let i = 0; i < CS * CS; i++) c.colVer[i]++;
   if (BF.skyLight) BF.skyLight.onExtendedUp(c, oldHi);
+  if (BF.real && BF.real.on) markNeighboursDirty(c);   // (their smooth ground is meshed over this chunk's band too, meshJob)
 }
 function markNeighboursDirty(c) {
   for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
@@ -480,9 +481,10 @@ world.setBlock = function (x, y, z, id) {
     }
   }
   // neighbours share faces / AO / shading at the border
+  const NBR = BF.real && BF.real.on ? 3 : 1;   // (the smooth ground reads further across the border: eased vertices and normals)
   for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
     if (!dx && !dz) continue;
-    const nx = lx + dx, nz = lz + dz;
+    const nx = lx + dx * NBR, nz = lz + dz * NBR;
     if (nx >= 0 && nx < CS && nz >= 0 && nz < CS) continue;
     const n = world.chunkC(c.cx + dx, c.cz + dz);
     if (n && n.mesh !== undefined) world._dirty.add(n.key);
@@ -521,7 +523,8 @@ function applyCell(key, i, id, replayed) {
   if (BF.skyLight) BF.skyLight.onSet(x, y, z, oldId, id);
   if (world.replica && BF.signs) BF.signs.onView(x, y, z, oldId, id);   // the page finds the sign to draw its text (js/signs.js, bug-097)
   if (replayed) for (let k = 0; k < replL.length; k++) replL[k](x, y, z, oldId, id);
-  if (lx === 0 || lz === 0 || lx === CS - 1 || lz === CS - 1) markNeighboursDirty(c);
+  const edge = BF.real && BF.real.on ? 3 : 1;   // (the smooth ground reads further across the border, as in setBlock)
+  if (lx < edge || lz < edge || lx >= CS - edge || lz >= CS - edge) markNeighboursDirty(c);
 }
 world.applyEdits = function (chunks, full, replayed) {
   let gone = null;
@@ -1174,7 +1177,16 @@ function meshJob(c, copy) {
   }
   // the ring: blocks (stone below a neighbour's band, air above it and where it is not loaded), block light (0 where unknown) and sky
   // light (15 where not loaded or above the band, 0 below it)
-  const Y0 = c.y0 - 2, Y1 = c.y1 + 2, NY = Y1 - Y0, RW = CS + 4;
+  let Y0 = c.y0 - 2, Y1 = c.y1 + 2;
+  if (T.real) {   // the realistic look: the band covers the neighbours' bands too, so both sides of a border mesh the same ground (js/real/mesh.js)
+    let lo = c.y0, hi = c.y1;
+    for (let dz = -1, i = 0; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++, i++) {
+      const n = NB[i] === EDGE_NB ? world.chunkC(c.cx + dx, c.cz + dz) : NB[i];
+      if (n) { if (n.y0 < lo) lo = n.y0; if (n.y1 > hi) hi = n.y1; }
+    }
+    Y0 = lo - 3; Y1 = hi + 3;
+  }
+  const NY = Y1 - Y0, RW = CS + 4;
   const rb = new Uint16Array(M.RN * NY), rl = new Uint8Array(M.RN * NY), rs = new Uint8Array(M.RN * NY);
   for (let z = -2; z < CS + 2; z++) for (let x = -2; x < CS + 2; x++) {
     const r = M.RING[(z + 2) * RW + x + 2];
