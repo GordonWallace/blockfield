@@ -163,6 +163,10 @@ real.lit = function (mat, opts) {
   float bfSky = clamp(vBFL.x, 0.0, 1.0); bfSky = max(0.06, bfSky * (0.6 + 0.4 * smoothstep(0.3, 0.7, bfSky)));
   reflectedLight.directDiffuse *= bfSky; reflectedLight.directSpecular *= bfSky;
   reflectedLight.indirectDiffuse *= bfSky; reflectedLight.indirectSpecular *= bfSky;
+  #ifdef ALPHATEST
+    // leaves and grass blades (alpha-tested cards with bent normals): the sun's highlight on them burnt out to white patches
+    reflectedLight.directSpecular *= 0.06;
+  #endif
   float bfB = min(1.0, 1.1 * pow(clamp(vBFL.y, 0.0, 1.0), 1.25));
   reflectedLight.indirectDiffuse += diffuseColor.rgb * vec3(1.0, 0.72, 0.42) * bfB * 0.9;
 }`);

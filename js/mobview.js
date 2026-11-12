@@ -698,6 +698,7 @@ function draw(v, m, dt) {
   if (v.look !== lookOf(m)) buildMeshes(v, m);   // a new variant: horse coat, shorn sheep, profession outfit, golem cracks
   const pos = drawState(m, S);
   v.root.position.set(pos.x, pos.y, pos.z);
+  if (REAL) v.root.position.y = BF.real.mobs.ease(v, m, pos.y, dt);   // a one-block step is drawn as a slope: the model glides up it (js/real/mobs.js)
   const r = v.model.rotation;
   if (m.sleeping && m.bedF != null && !m.dead) {   // lying flat on the bed, head on the pillow
     const [fx, fz] = BF.DIRS[m.bedF];

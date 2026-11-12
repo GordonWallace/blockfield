@@ -11,7 +11,7 @@ const BF = (globalThis.BF = globalThis.BF || {});
 const DAY = 1200;                              // seconds per in-game day (sky.dayLength); spells are measured in days
 const RAMP = 15;                               // seconds for intensity 0 -> 1
 const R = 20, BAND = 44, BAND_LO = 16;         // particle cylinder radius, vertical band (cam.y - 16 .. cam.y + 28)
-const N = 4000;                                // particles
+const N = BF.real && BF.real.on ? 11000 : 4000;   // particles (the realistic look's drops are short and fine, so there are more of them)
 const HM = 64;                                 // height-map window (HM x HM columns around the camera)
 const BOLT_SEGS = 64, BOLT_LIFE = 0.32;
 const ORDER = [[-1, 0], [1, 0], [1, 1], [-1, 0], [1, 1], [-1, 1]];   // (side, t) of a segment quad's 6 vertices
@@ -134,7 +134,7 @@ function makeParticles() {
     vertexShader: `
       attribute vec4 seed; attribute vec2 corner;
       uniform float uTime, uIntensity, uHide, uMinY, uReal; uniform sampler2D uHeight; uniform vec2 uOrigin, uWind; uniform vec3 uCam;
-      varying vec2 vUv; varying float vA; varying float vSnow;
+      varying vec2 vUv; varying float vA; varying float vSnow; varying float vThin;
       const float R = ${R.toFixed(1)}, BAND = ${BAND.toFixed(1)}, LO = ${BAND_LO.toFixed(1)}, HM = ${HM.toFixed(1)};
       void main() {
         // everything here is relative to the mesh's own position, a whole number of spans (floating origin, js/view.js): uCam is
@@ -155,9 +155,13 @@ function makeParticles() {
         x += snow * sin(uTime * 0.7 + ph) * 0.45;
         z += snow * cos(uTime * 0.6 + ph * 1.3) * 0.45;
         float dist = length(vec2(x, z) - cam.xz);
-        float len = mix(1.0 + 0.8 * uReal, 0.0, snow), wid = mix(0.03 - 0.012 * uReal, 0.06 - 0.02 * uReal, snow);
+        // the realistic look: a drop is the short blur of one frame's fall (its speed over a shutter time), hair thin, each a little different;
+        // far ones are kept a pixel wide and made fainter by as much (vThin), so they don't flicker
+        float rLen = speed * (0.028 + 0.022 * seed.x), rWid = 0.011 + 0.008 * seed.y, rMin = dist * 0.0015;
+        vThin = mix(1.0, min(1.0, rWid / rMin), uReal * (1.0 - snow));
+        float len = mix(mix(1.0, rLen, uReal), 0.0, snow), wid = mix(mix(0.03, max(rWid, rMin), uReal), 0.06 - 0.02 * uReal, snow);
         if (kind < 0.5 || y < top || seed.w > uIntensity || dist > R || uHide > 0.5) {
-          gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vA = 0.0; vUv = vec2(0.0); vSnow = 0.0; return;
+          gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vA = 0.0; vUv = vec2(0.0); vSnow = 0.0; vThin = 0.0; return;
         }
         vec4 mv;
         if (snow > 0.5) {
@@ -167,7 +171,7 @@ function makeParticles() {
           // cylindrical billboard: vertical streak facing the camera around the y axis
           vec2 side = normalize(vec2(-(z - cam.z), x - cam.x) + 1e-4);
           vec3 p = vec3(x + side.x * corner.x * wid, y + corner.y * len, z + side.y * corner.x * wid);
-          p.xz += uWind * (corner.y * len * 0.07 * uReal);
+          p.xz += uWind * (corner.y * len * 0.09 * uReal);   // slanted along its fall in the wind
           mv = modelViewMatrix * vec4(p, 1.0);
         }
         gl_Position = projectionMatrix * mv;
@@ -177,7 +181,7 @@ function makeParticles() {
       }`,
     fragmentShader: `
       uniform float uLight, uReal;
-      varying vec2 vUv; varying float vA; varying float vSnow;
+      varying vec2 vUv; varying float vA; varying float vSnow; varying float vThin;
       void main() {
         if (vA <= 0.0) discard;
         float a;
@@ -190,7 +194,13 @@ function makeParticles() {
           col = vec3(1.0);
         } else {
           a = 0.55 * (1.0 - abs(vUv.x) * 0.6) * smoothstep(0.0, 0.35, vUv.y);
-          col = mix(vec3(0.62, 0.70, 0.86), vec3(0.80, 0.85, 0.92), uReal); a *= 1.0 - 0.3 * uReal;
+          col = vec3(0.62, 0.70, 0.86);
+          if (uReal > 0.5) {
+            // a soft grey blur, brightest in the middle and fading out at both ends and both edges
+            float ax = 1.0 - abs(vUv.x); ax *= ax;
+            a = 0.62 * ax * sin(3.14159 * vUv.y) * vThin;
+            col = vec3(0.66, 0.71, 0.76);
+          }
         }
         gl_FragColor = vec4(col * uLight, a * vA);
       }`,

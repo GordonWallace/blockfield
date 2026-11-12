@@ -33,6 +33,11 @@ let flying = false, sprinting = false, sneaking = false, turbo = false;
 let lastSpaceTap = 0, lastWTap = 0, wTaps = 0;
 let fallStart = null;
 let eyeOffset = EYE, bobPhase = 0, bobAmt = 0, fov = BASE_FOV;
+// The realistic look (1.6) draws a one-block rise of natural ground as a slope, so there the player walks up it without a jump and
+// follows it down without a fall (the block look keeps the 0.6 step). The body still moves on the block grid: slopeOff is how far
+// the eye is drawn from where the body is, eased back to 0, so the view glides along the slope instead of popping a block.
+const REAL = !!(BF.real && BF.real.on);
+let slopeOff = 0, natGround = null, stoodNat = false;
 let exhaustion = 0, saturation = 5, regenT = 0, starveT = 0, drownT = 0, air = AIR_MAX;
 let hurtCd = 0, flashT = 0, attackCd = 0, swingT = 0;
 let hurtAmt = 0;   // the hit that started the current hurtCd window (Infinity: spawn protection)
@@ -219,6 +224,19 @@ const optsHTML = o => { const G = BF.gameOpts, ts = G ? G.types() : []; return `
   `<span class="bfp-hint">Coarse: villages beyond your view distance think a few times a second and walk their routes cell by cell. They do the same work, for less computer time.</span></div>`; };
 const readOpts = box => { const o = {}; for (const b of box.querySelectorAll('[data-act="mon"], [data-act="far"]')) o[b.dataset.mon] = b.classList.contains("on"); return o; };
 const flipOpt = b => { const on = !b.classList.contains("on"); b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); b.textContent = b.dataset.act === "far" ? farLabel(on) : BF.gameOpts.name(b.dataset.mon) + ": " + (on ? "On" : "Off"); return on; };
+// The block outline (Gordon, 2026-11-12): the black box around the block under the crosshair is off unless this browser turned it on in
+// the pause menu's Game options. A display choice, kept like the render distance (store "outline" = on | off), not with the world.
+let showOutline = store.get("outline") === "on";
+const outlineLabel = on => "Block outline: " + (on ? "On" : "Off");
+const outlineHTML = () => `<div class="bfp-opts">Display<div class="bfp-optgrid"><button type="button" data-act="outline" class="${showOutline ? "on" : ""}" aria-pressed="${showOutline}">${outlineLabel(showOutline)}</button></div>` +
+  `<span class="bfp-hint">On: a black box marks the block under the crosshair. Kept for every world in this browser.</span></div>`;
+function setOutline(on) {
+  showOutline = !!on;
+  store.set("outline", showOutline ? "on" : "off");
+  if (outline) outline.visible = showOutline && !!target;
+  const b = pauseEl && pauseEl.querySelector('[data-act="outline"]');
+  if (b) { b.classList.toggle("on", showOutline); b.setAttribute("aria-pressed", showOutline); b.textContent = outlineLabel(showOutline); }
+}
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
 
 function buildDOM() {
@@ -336,7 +354,8 @@ function buildDOM() {
     else if (a === "host") cycleHost();
     else if (a === "mode") setGameMode(act.dataset.mode);
     else if (a === "help") helpEl.hidden = !helpEl.hidden;
-    else if (a === "opts") { const p = pauseEl.querySelector(".bfp-pauseopts"); p.hidden = !p.hidden; if (!p.hidden) p.innerHTML = optsHTML(BF.gameOpts.all()); }
+    else if (a === "opts") { const p = pauseEl.querySelector(".bfp-pauseopts"); p.hidden = !p.hidden; if (!p.hidden) p.innerHTML = optsHTML(BF.gameOpts.all()) + outlineHTML(); }
+    else if (a === "outline") setOutline(!showOutline);
     else if (a === "mon" || a === "far") {   // in game: applies at once (where the simulation is too: js/protocol.js meta), and saves
       BF.gameOpts.set(act.dataset.mon, flipOpt(act));
       if (BF.simHost && BF.simHost.worker && BF.client) BF.client.meta({ id: BF.save && BF.save.current ? BF.save.current.id : null, monsters: BF.gameOpts.all() });
@@ -1456,7 +1475,7 @@ onAct("player.wake", () => {
 });
 
 // ---------- world interaction ----------
-function eyeVec() { return new THREE.Vector3(pos.x, pos.y + eyeOffset, pos.z); }
+function eyeVec() { return new THREE.Vector3(pos.x, pos.y + eyeOffset + slopeOff, pos.z); }
 function dirVec() { return new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)); }
 
 // Q: throw one item from the selected hotbar slot forward as a dropped item. The player can't catch it again for 2 seconds.
@@ -2424,9 +2443,22 @@ function physics(dt) {
     if (dz && !sup(pos.x + vel.x * dt, pos.z + dz)) vel.z = 0;
   }
 
-  const ox = pos.x, oz = pos.z;
-  const res = BF.world.moveBox(pos, vel, HW, HEIGHT, dt, { stepUp: 0.6, firm: true }); // vanilla step height: slabs, stairs and beds, not full blocks
+  const ox = pos.x, oy = pos.y, oz = pos.z;
+  const slopes = REAL && !flying && !climbing;
+  const res = BF.world.moveBox(pos, vel, HW, HEIGHT, dt, slopes ? SLOPE_STEP : STEP); // vanilla step height: slabs, stairs and beds, not full blocks
   const wasGround = onGround;
+  if (slopes && wasGround) {
+    if (res.onGround && pos.y > oy) slopeOff -= pos.y - oy;   // stepped up: the eye starts where it was
+    else if (!res.onGround && !inWater && !res.inWater && vel.y <= 0 && vel.y > -GRAVITY * dt * 1.5 && stoodNat && BF.world.boxCollides(pos.x, pos.y - 1.05, pos.z, HW, 1.05)) {
+      // walked off a one-block drop of natural ground: down the slope, not a fall
+      const py = pos.y, down = { x: 0, y: -1.05 / dt, z: 0 };
+      const r2 = BF.world.moveBox(pos, down, HW, HEIGHT, dt, STEP);
+      if (r2.onGround && pos.y < py && onNatural(pos.x, pos.y, pos.z) > 0) { slopeOff += py - pos.y; vel.y = 0; res.onGround = true; res.inWater = r2.inWater; res.headInWater = r2.headInWater; }
+      else pos.y = py;
+    }
+    slopeOff = clamp(slopeOff, -1.5, 1.5);
+  }
+  if (slopes && res.onGround) { const n = onNatural(pos.x, pos.y, pos.z); if (n) stoodNat = n > 0; }   // (0: over the edge already, still what it last stood on)
   onGround = res.onGround; inWater = res.inWater; headInWater = !!res.headInWater; ladderHit = res.hitX || res.hitZ;
   if (inWater && wantJump && (res.hitX || res.hitZ)) vel.y = Math.max(vel.y, 6.5); // climb out onto a ledge
   if (flying && onGround && !wasGround) flying = false;                             // landing ends flight
@@ -2445,6 +2477,23 @@ function physics(dt) {
   if ((res.hitX || res.hitZ) && sprinting && !inWater && !flying) sprinting = false;
   return moved;
 }
+
+// The realistic look: is everything the box stands on at feet height y natural ground (what the smooth terrain pass draws)?
+// 1 yes, -1 some of it is not (a cube: planks, a house's floor), 0 it stands on nothing.
+const STEP = { stepUp: 0.6, firm: true };
+function onNatural(x, y, z) {
+  if (!natGround) natGround = BF.real.meshTables().NAT;
+  const cy = Math.floor(y - 0.5);
+  let any = false;
+  for (let i = 0; i < 4; i++) {
+    const cx = Math.floor(x + (i & 1 ? HW : -HW)), cz = Math.floor(z + (i & 2 ? HW : -HW));
+    if (!BF.world.isSolid(cx, cy, cz)) continue;
+    if (!natGround[BF.world.getBlock(cx, cy, cz)]) return -1;
+    any = true;
+  }
+  return any ? 1 : 0;
+}
+const SLOPE_STEP = { stepUp: 1.05, firm: true, canStep: (x, y, z) => onNatural(x, y, z) > 0 };   // (moveBox asks canStep only for steps above half a block)
 
 // The planet (generator 4): when the player (or the boat or horse they ride) leaves their face's square, they carry on from the
 // same spot on the next face, with facing and speed turned by that edge's quarter turns (spec r14-03). The view switches faces in
@@ -2553,6 +2602,7 @@ function turnPlanet(dx, dy) {
   faceNorth();
 }
 P.turnPlanet = turnPlanet;   // tests
+P.blockOutline = { on: () => showOutline, set: setOutline, visible: () => !!(outline && outline.visible) };   // the option, and whether the box is drawn now (test/block-outline.js)
 P.showMenu = name => showScreen(name || null);   // tests: a menu shown or closed as a player would, without starting play (test/budget-menu.js)
 
 // ---------- detached view (r15-98, Gordon 2026-11-04) ----------
@@ -2662,10 +2712,11 @@ function syncCamera(dt) {
   if (det) { detCamera(); return; }
   const want = vehicle ? vehicle.ctl.sitEye(vehicle) : sneaking ? SNEAK_EYE : EYE;
   eyeOffset += (want - eyeOffset) * Math.min(1, dt * 14);
+  if (slopeOff) { const d = Math.max(5, Math.abs(slopeOff) * 12) * dt; slopeOff = Math.abs(slopeOff) <= d ? 0 : slopeOff - Math.sign(slopeOff) * d; }
   if (!BF.camera) return;   // headless (js/boot.js): no camera
   const by = Math.abs(Math.sin(bobPhase)) * 0.06 * bobAmt, bx = Math.cos(bobPhase) * 0.035 * bobAmt;
   const rx = Math.cos(yaw), rz = -Math.sin(yaw);
-  BF.camera.position.set(pos.x + rx * bx, pos.y + eyeOffset + by, pos.z + rz * bx);
+  BF.camera.position.set(pos.x + rx * bx, pos.y + eyeOffset + slopeOff + by, pos.z + rz * bx);
   BF.camera.rotation.set(pitch, yaw, 0, "YXZ");
   const df = drawT > 0 ? drawFrac() : 0;
   const wantFov = BASE_FOV * (turbo ? 1.25 : sprinting ? 1.12 : 1) * (1 - df * df * 0.15);   // drawing a bow zooms in up to 15% (vanilla)
@@ -2689,7 +2740,7 @@ function updateOverlays(dt) {
 function updateTarget() {
   target = P.dead || offPlanet ? null : BF.world.raycast(eyeVec(), dirVec(), REACH);
   if (target) {
-    outline.visible = true;
+    outline.visible = showOutline;
     const ob = BF.blocks[target.id], bb = ob && ob.shape ? ob.cboxes.reduce((m, c) => [Math.min(m[0], c[0]), Math.min(m[1], c[1]), Math.min(m[2], c[2]), Math.max(m[3], c[3]), Math.max(m[4], c[4]), Math.max(m[5], c[5])], [16, 16, 16, 0, 0, 0]) : null;
     if (bb) { // slabs / stairs: outline the real box
       outline.scale.set((bb[3] - bb[0]) / 16, (bb[4] - bb[1]) / 16, (bb[5] - bb[2]) / 16);
@@ -2766,7 +2817,7 @@ P.freeMouse = function () { if (locked) { releaseMouse(); return true; } return 
 P.relock = function () { if (!dragMode && !isTouch && started && !menuOpen && !P.dead && !invOpen() && !locked) requestLock(); };
 P.teleport = function (x, y, z) {
   dismount(true);
-  pos.set(x, y, z); vel.x = vel.y = vel.z = 0; fallStart = null; resetBreak();
+  pos.set(x, y, z); vel.x = vel.y = vel.z = 0; fallStart = null; slopeOff = 0; resetBreak();
   if (!BF.world.isLoaded(x, z)) waitingForChunk = true;   // hold still until the destination chunk exists
   if (y < BF.MIN_Y + 5) waitingForChunk = true;           // in the bedrock floor: lifted to the surface if stuck (bedrock can't be dug out)
   syncCamera(0.016);

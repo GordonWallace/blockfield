@@ -35,6 +35,7 @@ async function boot(b, look) {
       instanced: kids.filter(c => c.isInstancedMesh && c.material && c.material.type === 'MeshStandardMaterial').length,
       lights: kids.filter(c => c.isLight).length, tone: BF.renderer.toneMapping, meshed: BF.world.meshedCount(),
       species: BF.real && BF.real.assets ? BF.real.assets.species.length : 0,
+      built: BF.real && BF.real.meshTables ? (() => { const t = BF.real.meshTables(), B = BF.B; return [t.NAT[B.orange_terracotta], t.NATB[B.orange_terracotta], t.NATB[B.sandstone], t.NATB[B.grass], t.NATB[B.stone]]; })() : null,
     };
   });
   await pg.context().close();
@@ -50,6 +51,7 @@ async function boot(b, look) {
   check(real.r.ground >= 20 && real.r.verts > 1000, `chunks have a smooth terrain mesh (${real.r.ground} of ${real.r.meshed} chunks, ${real.r.verts} vertices)`);
   check(real.r.bad === 0, 'the terrain meshes are well formed (matching attribute counts, finite positions)');
   check(real.r.lights >= 2 && real.r.tone !== 0, 'the sun and sky lights exist and the renderer tone maps');
+  check(real.r.built && real.r.built[0] > 0 && real.r.built[1] === 0 && real.r.built[2] === 0 && real.r.built[3] > 0 && real.r.built[4] > 0, `outside the badlands terracotta and sandstone stay cubes (village roofs and walls), grass and stone stay ground (${real.r.built})`);
   check(real.r.species >= 3, `tree species are registered (${real.r.species})`);
   check(real.r.instanced > 0, `trees are drawn as instanced models (${real.r.instanced} batches' parts)`);
   for (const look of ['blocks', '']) {
