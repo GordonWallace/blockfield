@@ -535,7 +535,9 @@ const settle = (m, out) => { if (m.ox) { out.x += m.ox; out.y += m.oy; out.z += 
 function drawState(m, out) {
   const k = tickK(m), p = m.prev, P = k < 1 && m.to || m;   // (off the page: between prev and to at the drawing clock, js/protocol.js)
   if (k > 1) {   // (off the page, the drawing clock past the newest tick: on along its last step, js/protocol.js world.place)
-    out.x = mix(p.x, m.x, k); out.y = mix(p.y, m.y, k); out.z = mix(p.z, m.z, k); out.yaw = m.yaw; out.headYaw = m.headYaw; out.headPitch = m.headPitch;
+    // Only its way across the ground: the height stays the newest tick's. A mob steps up a block in one tick (js/mobs.js stepUp) and
+    // falls fast, and that step drawn on for half a second put it about 10 blocks up in the air (or under the ground) until the next tick.
+    out.x = mix(p.x, m.x, k); out.y = m.y; out.z = mix(p.z, m.z, k); out.yaw = m.yaw; out.headYaw = m.headYaw; out.headPitch = m.headPitch;
     out.walkPhase = mix(p.walkPhase, m.walkPhase, k); out.walkAmt = m.walkAmt; out.age = mix(p.age, m.age, k);
     return settle(m, out);
   }
