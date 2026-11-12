@@ -181,11 +181,17 @@ module.exports = async (pg, out) => {
     const at = l => { const d = m[l].data, w = m[l].width; let n = 0, lum = 0, k = 0;
       for (let y = 0; y < ch >> l; y++) for (let x = 0; x < cw >> l; x++) { const o = (((y0 >> l) + y) * w + (x0 >> l) + x) * 4; if (d[o + 3] >= 102) { n++; lum += d[o] + d[o + 1] + d[o + 2]; } k++; }
       return [n / k, n ? lum / n : 0]; };
-    return { n: m.length, last: [m[m.length - 1].width, m[m.length - 1].height], gen: tex.generateMipmaps, a0: at(0), a2: at(2), a3: at(3) };
+    // lines of the full picture that have something in them (a trunk, a twig), and how many of them still do three levels down
+    const lines = l => { const d = m[l].data, w = m[l].width, out = []; for (let y = 0; y < ch >> l; y++) { let n = 0; for (let x = 0; x < cw >> l; x++) if (d[(((y0 >> l) + y) * w + (x0 >> l) + x) * 4 + 3] >= 102) n++; out.push(n); } return out; };
+    const l0 = lines(0), l3 = lines(3);
+    let had = 0, kept = 0;
+    for (let y = 0; y < l3.length; y++) { let any = false; for (let k = 0; k < 8; k++) if (l0[y * 8 + k]) any = true; if (any) { had++; if (l3[y]) kept++; } }
+    return { n: m.length, last: [m[m.length - 1].width, m[m.length - 1].height], gen: tex.generateMipmaps, a0: at(0), a2: at(2), a3: at(3), had, kept };
   });
   check(mips && !mips.gen && mips.last[0] === 1 && mips.last[1] === 1, "the atlas carries its own smaller copies, down to one texel", mips && [mips.n, mips.last, mips.gen]);
   check(mips && mips.a0[0] > 0.02 && mips.a2[0] >= mips.a0[0] * 0.9 && mips.a3[0] >= mips.a0[0] * 0.9 && mips.a3[1] > mips.a0[1] * 0.8,
     "a tree drawn small keeps its cover and its colour", mips && [mips.a0, mips.a2, mips.a3].map(a => a.map(v => +v.toFixed(2))));
+  check(mips && mips.had > 4 && mips.kept === mips.had, "and every line of it that had something still does (a thin trunk stays)", mips && [mips.kept, mips.had]);
   await pg.waitForTimeout(1500);
   await pg.evaluate(() => localStorage.setItem("bf.look", "blocks"));
   console.log(fails ? "real-lod FAIL " + fails : "real-lod PASS");
