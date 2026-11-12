@@ -15,10 +15,6 @@ const G = real.assets.ground;
 const add = (blocks, color, layer, tint) => G.push({ id: blocks[0], blocks, color: typeof color === "string" ? hex(color) : color, layer, tint: !!tint });
 add(["grass"], [0.56, 0.58, 0.54], 0, true);
 add(["dirt", "rooted_dirt"], "#6e4e36", 0);
-// tilled soil: ground like any other (a hoe turns dirt into it, as walking wears a path), so a field meets the earth around it without
-// a seam. till: drawn in furrows. Watered soil is the darker.
-G.push({ id: "tilled_soil", blocks: ["farmland"], color: hex("#523d2c"), layer: 0, tint: false, till: true });
-G.push({ id: "tilled_soil_dry", blocks: ["farmland_dry"], color: hex("#8a6a48"), layer: 0, tint: false, till: true });
 add(["coarse_dirt"], "#6b523c", 2);
 add(["dirt_path"], "#8a6a3e", 2);   // a village's trodden paths: part of the ground, a worn band through the turf
 add(["podzol"], "#5a4126", 0);
@@ -51,7 +47,13 @@ real.meshTables = function () {
   const n = BF.MAX_BLOCK + 1, NAT = new Uint8Array(n), TREE = new Uint8Array(n), SPEC = new Uint16Array(n), COVER = new Uint8Array(n);
   const B = BF.B;
   // ores take their rock's entry (the ore is found by digging, not by looking)
-  const list = G.slice(0, 254);
+  // tilled soil: ground like any other (a hoe turns dirt into it, as walking wears a path), so a field meets the earth around it
+  // without a seam. till: drawn in furrows. Watered soil is the darker. Listed after every other entry (unless one names farmland
+  // itself), so the other grounds keep their places in the tables.
+  const list = G.slice(0, 252);
+  for (const g of [{ id: "tilled_soil", blocks: ["farmland"], color: hex("#523d2c"), layer: 0, tint: false, till: true },
+    { id: "tilled_soil_dry", blocks: ["farmland_dry"], color: hex("#8a6a48"), layer: 0, tint: false, till: true }])
+    if (!list.some(e => e.blocks.includes(g.blocks[0]))) list.push(g);
   const GCOL = new Float32Array(list.length * 3), GLAY = new Uint8Array(list.length), GTINT = new Uint8Array(list.length);
   const GSIDE = new Uint8Array(list.length), GTILL = new Uint8Array(list.length);
   list.forEach((g, i) => {
