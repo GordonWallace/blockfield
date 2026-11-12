@@ -38,6 +38,17 @@ let eyeOffset = EYE, bobPhase = 0, bobAmt = 0, fov = BASE_FOV;
 // the eye is drawn from where the body is, eased back to 0, so the view glides along the slope instead of popping a block.
 const REAL = !!(BF.real && BF.real.on);
 let slopeOff = 0, natGround = null, stoodNat = false;
+// The realistic look also draws trees as models whose crowns are not blocks, so there the player walks through leaf blocks (and the
+// leafy bushes drawn as plants): only trunks and what is drawn as a block stop them. Mobs keep colliding with leaves: the world's
+// simulation is shared and does not depend on how one player draws it. foliage: by block id, 1 for what the player goes through.
+let foliage = null;
+function foliagePass() {
+  if (foliage) return foliage;
+  const T = BF.real.meshTables(), t = new Uint8Array(BF.MAX_BLOCK + 1);
+  for (let b = 0; b < t.length; b++) if (T.TREE[b] === 2 || (T.COVER[b] && BF.SOLID[b])) t[b] = 1;
+  return (foliage = t);
+}
+const through = () => REAL ? foliagePass() : undefined;   // boxCollides' pass for the player's own body
 let exhaustion = 0, saturation = 5, regenT = 0, starveT = 0, drownT = 0, air = AIR_MAX;
 let hurtCd = 0, flashT = 0, attackCd = 0, swingT = 0;
 let hurtAmt = 0;   // the hit that started the current hurtCd window (Infinity: spawn protection)
@@ -2439,7 +2450,7 @@ function physics(dt) {
 
   // sneaking: never walk off an edge
   if (sneaking && onGround && !inWater) {
-    const sup = (x, z) => BF.world.boxCollides(x, pos.y - 0.1, z, HW, 0.1);
+    const sup = (x, z) => BF.world.boxCollides(x, pos.y - 0.1, z, HW, 0.1, through());
     const dx = vel.x * dt, dz = vel.z * dt;
     if (dx && !sup(pos.x + dx, pos.z)) vel.x = 0;
     if (dz && !sup(pos.x + vel.x * dt, pos.z + dz)) vel.z = 0;
@@ -2447,14 +2458,14 @@ function physics(dt) {
 
   const ox = pos.x, oy = pos.y, oz = pos.z;
   const slopes = REAL && !flying && !climbing;
-  const res = BF.world.moveBox(pos, vel, HW, HEIGHT, dt, slopes ? SLOPE_STEP : STEP); // vanilla step height: slabs, stairs and beds, not full blocks
+  const res = BF.world.moveBox(pos, vel, HW, HEIGHT, dt, slopes ? SLOPE_STEP : REAL ? realStep() : STEP); // vanilla step height: slabs, stairs and beds, not full blocks
   const wasGround = onGround;
   if (slopes && wasGround) {
     if (res.onGround && pos.y > oy) slopeOff -= pos.y - oy;   // stepped up: the eye starts where it was
-    else if (!res.onGround && !inWater && !res.inWater && vel.y <= 0 && vel.y > -GRAVITY * dt * 1.5 && stoodNat && BF.world.boxCollides(pos.x, pos.y - 1.05, pos.z, HW, 1.05)) {
+    else if (!res.onGround && !inWater && !res.inWater && vel.y <= 0 && vel.y > -GRAVITY * dt * 1.5 && stoodNat && BF.world.boxCollides(pos.x, pos.y - 1.05, pos.z, HW, 1.05, through())) {
       // walked off a one-block drop of natural ground: down the slope, not a fall
       const py = pos.y, down = { x: 0, y: -1.05 / dt, z: 0 };
-      const r2 = BF.world.moveBox(pos, down, HW, HEIGHT, dt, STEP);
+      const r2 = BF.world.moveBox(pos, down, HW, HEIGHT, dt, realStep());
       if (r2.onGround && pos.y < py && onNatural(pos.x, pos.y, pos.z) > 0) { slopeOff += py - pos.y; vel.y = 0; res.onGround = true; res.inWater = r2.inWater; res.headInWater = r2.headInWater; }
       else pos.y = py;
     }
@@ -2495,7 +2506,9 @@ function onNatural(x, y, z) {
   }
   return any ? 1 : 0;
 }
-const SLOPE_STEP = { stepUp: 1.05, firm: true, canStep: (x, y, z) => onNatural(x, y, z) > 0 };   // (moveBox asks canStep only for steps above half a block)
+const SLOPE_STEP = { stepUp: 1.05, firm: true, canStep: (x, y, z) => onNatural(x, y, z) > 0, get pass() { return foliagePass(); } };   // (moveBox asks canStep only for steps above half a block)
+let REAL_STEP = null;   // STEP with the realistic look: through leaves (flying, climbing)
+const realStep = () => REAL_STEP || (REAL_STEP = { stepUp: 0.6, firm: true, pass: foliagePass() });
 
 // The planet (generator 4): when the player (or the boat or horse they ride) leaves their face's square, they carry on from the
 // same spot on the next face, with facing and speed turned by that edge's quarter turns (spec r14-03). The view switches faces in
@@ -2905,7 +2918,7 @@ P.update = function (dt) {
       const bed = !vehicle && bedRespawn && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT) && bedStandSpot(bedRespawn);
       bedRespawn = null;
       if (bed) pos.set(bed[0], bed[1], bed[2]);
-      else if (pos.y < BF.MIN_Y || (!vehicle && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT))) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);   // in a boat the boat holds the player
+      else if (pos.y < BF.MIN_Y || (!vehicle && W.boxCollides(pos.x, pos.y, pos.z, HW, HEIGHT, through()))) pos.y = Math.max(pos.y, W.heightAt(pos.x, pos.z) + 1.01);   // in a boat the boat holds the player
       fallStart = null; vel.y = 0;
       if (faceOpen) { faceOpen = false; faceOpenDirection(); }
     } else { syncCamera(dt); updateViewModel(dt); updateOverlays(dt); return; }
