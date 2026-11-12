@@ -241,7 +241,7 @@ function probePlace(cam) {
 }
 
 // ---------- rain splashes ----------
-// Small rings where drops land, on the column tops of js/weather.js's height map (BF.atmos.rainMap, set while it rains). All on the
+// Small splashes where drops land (a few fine droplets thrown up, no rings), on the column tops of js/weather.js's height map (BF.atmos.rainMap, set while it rains). All on the
 // GPU: each quad lives 0.4 s at a spot hashed from its seed and the count of lives so far. Positions are relative to the mesh,
 // which sits on a whole-block grid near the camera (floating origin).
 const SPLASH_N = 420, SPLASH_R = 13;
@@ -269,26 +269,36 @@ function makeSplash() {
       uMinY: { value: 0 }, uSize: { value: 64 }, uCol: { value: COL(1, 1, 1) } },
     vertexShader: `attribute vec3 seed; attribute vec2 corner;
       uniform float uTime, uIntensity, uMinY, uSize; uniform sampler2D uHeight; uniform vec2 uOrigin; uniform vec3 uCam;
-      varying vec2 vUv; varying float vA;
+      varying vec2 vUv; varying float vA; varying vec2 vPh;
       float h2(vec2 p){ vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
       void main(){
-        float life = uTime / 0.4 + seed.z * 97.0, k = floor(life), ph = fract(life);
+        float life = uTime / 0.32 + seed.z * 97.0, k = floor(life), ph = fract(life);
         vec2 r = vec2(h2(vec2(seed.x * 91.0, k)), h2(vec2(seed.y * 57.0, k + 3.0)));
         // nearer spots are likelier: most of what the eye sees is close by
         vec2 off = (r * 2.0 - 1.0); off *= abs(off) * ${SPLASH_R.toFixed(1)};
         vec2 xz = uCam.xz + off;
         vec4 h = texture2D(uHeight, (floor(xz) - uOrigin + 0.5) / uSize);
         float top = floor(h.r * 255.0 + 0.5) + 256.0 * floor(h.b * 255.0 + 0.5) + uMinY, kind = floor(h.g * 255.0 + 0.5);
-        if (kind < 0.5 || kind > 1.5 || seed.z > uIntensity || top > uCam.y + 6.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vA = 0.0; vUv = vec2(0.0); return; }
-        float size = 0.04 + 0.2 * ph;
-        vec3 p = vec3(xz.x + corner.x * size, top + 0.03, xz.y + corner.y * size);
-        vUv = corner;
-        vA = (1.0 - ph) * (1.0 - ph) * (1.0 - smoothstep(${(SPLASH_R * 0.6).toFixed(1)}, ${SPLASH_R.toFixed(1)}, length(off)));
+        if (kind < 0.5 || kind > 1.5 || seed.z > uIntensity || top > uCam.y + 6.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vA = 0.0; vUv = vec2(0.0); vPh = vec2(0.0); return; }
+        // a small upright card facing the camera: the fragment shader throws a few fine droplets up across it
+        vec2 side = normalize(vec2(-(xz.y - uCam.z), xz.x - uCam.x) + 1e-4);
+        float w = 0.11 + 0.05 * r.x;
+        vec3 p = vec3(xz.x + side.x * corner.x * w, top + 0.02 + (corner.y * 0.5 + 0.5) * w * 1.2, xz.y + side.y * corner.x * w);
+        vUv = vec2(corner.x, corner.y * 0.5 + 0.5); vPh = vec2(ph, r.y);
+        vA = (1.0 - ph) * (1.0 - smoothstep(${(SPLASH_R * 0.6).toFixed(1)}, ${SPLASH_R.toFixed(1)}, length(off)));
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
       }`,
-    fragmentShader: `uniform vec3 uCol; varying vec2 vUv; varying float vA;
+    fragmentShader: `uniform vec3 uCol; varying vec2 vUv; varying float vA; varying vec2 vPh;
       void main(){
-        float r = length(vUv), a = smoothstep(0.5, 0.78, r) * (1.0 - smoothstep(0.86, 1.0, r)) * vA * 0.55;
+        // four droplets thrown out and up from the point of impact, each on its own little arc, and a faint puff at the foot
+        float ph = vPh.x, a = 0.0;
+        for (int i = 0; i < 4; i++) {
+          float f = float(i), dir = (f - 1.5) * 0.42 + (fract(vPh.y * (7.0 + f * 3.0)) - 0.5) * 0.3, up = 0.55 + 0.4 * fract(vPh.y * (13.0 + f * 5.0));
+          vec2 c = vec2(dir * ph, 0.06 + up * 3.4 * ph * (1.0 - ph));
+          a += 1.0 - smoothstep(0.03, 0.11, length(vUv - c));
+        }
+        a += 0.5 * (1.0 - smoothstep(0.0, 0.3, length((vUv - vec2(0.0, 0.05)) * vec2(1.0, 2.5)))) * (1.0 - ph);
+        a = min(a, 1.0) * vA * 0.3;
         if (a < 0.01) discard;
         gl_FragColor = vec4(uCol, a);
         #include <tonemapping_fragment>
