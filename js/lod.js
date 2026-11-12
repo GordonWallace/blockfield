@@ -139,7 +139,7 @@ void main() {
 }`;
 // The realistic look (1.6, docs/REALISTIC_CONTRACT.md; js/real/lod.js is this file's other half there): the same rings and stand-ins, lit
 // by the frame's sun and sky like the terrain of the loaded chunks and put through the renderer's tone mapping, so the land doesn't
-// change brightness where the chunks end. The ground's normal comes from the surface's own slope on screen (the rings carry none); the
+// change brightness where the chunks end. The ground's normal is its samples' slope (attribute nrm, js/grid.js); the
 // stand-ins' from their faces' block shades. With the look off none of this is used and the shaders are 1.5's, byte for byte.
 const REAL = !!(BF.real && BF.real.on && BF.real.U);
 const REAL_PARS = `
@@ -155,14 +155,55 @@ const REAL_OUT = `
 #include <encodings_fragment>
 #include <fog_fragment>
 }`;
-const realUniforms = () => { const U = BF.real.U; return { uSunCol: U.uSunCol, uSunDir: U.uSunDir, uSkyCol: U.uSkyCol, uGroundCol: U.uGroundCol }; };
-const VERT_USED = !REAL ? VERT : VERT.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;").replace("  vDist = length(mvPosition.xyz);", "  vDist = length(mvPosition.xyz);\n  vV = mvPosition.xyz;");
-const FRAG_USED = !REAL ? FRAG : FRAG.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;").replace("#include <fog_pars_fragment>", REAL_PARS)
+const realUniforms = () => { const U = BF.real.U; return { uSunCol: U.uSunCol, uSunDir: U.uSunDir, uSkyCol: U.uSkyCol, uGroundCol: U.uGroundCol, uFogCol: U.uFogCol, uWet: U.uWet }; };
+const VERT_USED = !REAL ? VERT : VERT.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;\nattribute float wat;\nattribute vec3 nrm;\nvarying float vWat;\nvarying vec3 vN;")
+  .replace("  vDist = length(mvPosition.xyz);", "  vDist = length(mvPosition.xyz);\n  vV = mvPosition.xyz;\n  vWat = wat;\n  vN = (modelViewMatrix * vec4(nrm, 0.0)).xyz;");
+// The ground is the loaded chunks' terrain seen from afar (js/real/terrain.js: half its colour's light, its detail texture's average;
+// darker when wet); water is theirs too (js/real/water.js, rwShade on a flat surface: its own dark colour, the sky by the angle it is
+// seen at, the floor through the shallows). `wat` is 0 on land and 0.55 (the shore) to 1 (16 blocks deep and more) on water, whose
+// vertex colour is its floor's (js/grid.js).
+const FRAG_USED = !REAL ? FRAG : FRAG.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;\nvarying float vWat;\nvarying vec3 vN;\nuniform vec3 uFogCol;\nuniform float uWet;\nuniform sampler2D chunkMask;\nuniform vec2 maskO;\nuniform mat4 projectionMatrix;").replace("#include <fog_pars_fragment>", REAL_PARS)
   .replace(/  vec3 col = mix\(vColor, vCanopy\.rgb, a\) \* max\(0\.1, uDay\);[\s\S]*$/, `  vec3 alb = mix(vColor, vCanopy.rgb, a);
   vec3 upV = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz), sunV = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz);
-  vec3 n = normalize(cross(dFdx(vV), dFdy(vV)));
+  vec3 n = normalize(vN);
   n = normalize(mix(n, upV, 0.5 * a));   // (a canopy is rough: its light follows the slope less)
-  vec3 light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, upV)) + uSunCol * max(dot(n, sunV), 0.0);` + REAL_OUT);
+  vec3 light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, upV)) + uSunCol * max(dot(n, sunV), 0.0);
+  vec3 ground = pow(vColor, vec3(2.2)) * 0.5;
+  ground = mix(ground, ground * 0.55, uWet);
+  vec3 lin = mix(ground, pow(vCanopy.rgb, vec3(2.2)), a) * light;
+  gl_FragColor = vec4(lin, 1.0);
+  float wa = smoothstep(0.0, 0.5, vWat);
+#include <tonemapping_fragment>
+#include <encodings_fragment>
+  if (wa > 0.0) {   // (less light reaches a deeper floor, as the chunks' block light has it: none 16 blocks down)
+    float sh = 1.0 - clamp((vWat - 0.55) / 0.45, 0.0, 1.0);
+    gl_FragColor.rgb *= mix(1.0, sh * sh, wa);
+  }
+  // Where the chunks reach past the hole both are drawn: there the ring stands back (drawn a little further along the eye's ray), so
+  // the chunks' own ground shows and not the two in stripes; and under the chunks' water only its floor is drawn.
+  vec2 mk = (gh - maskO) / CHUNK;
+  gl_FragDepthEXT = gl_FragCoord.z;
+  if (all(greaterThanEqual(mk, vec2(0.0))) && all(lessThan(mk, vec2(MASK_N))) && texture2D(chunkMask, (floor(mk) + 0.5) / MASK_N).r > 0.5) {
+    wa = 0.0;
+    vec4 cp = projectionMatrix * vec4(vV * (1.0 + (3.0 + 0.04 * vDist) / vDist), 1.0);
+    gl_FragDepthEXT = 0.5 + 0.5 * cp.z / cp.w;
+  }
+  if (wa > 0.0) {
+    vec3 Vn = normalize(-vV);
+    float cs = max(dot(upV, Vn), 0.0), F = 0.02 + 0.98 * pow(1.0 - cs, 5.0);
+    float sd = max(dot(reflect(-Vn, upV), sunV), 0.0);
+    vec3 refl = mix(uFogCol * 0.9, uSkyCol * vec3(0.55, 0.75, 1.1), pow(cs, 0.55)) + uSunCol * (pow(sd, 60.0) * 0.1);
+    vec3 body = vec3(0.018, 0.075, 0.06) * (0.25 + 0.75 * max(uSunDir.y, 0.0)) * max(uDay, 0.04);
+    vec4 w = vec4(mix(body, refl, F), 1.0);
+#if defined( TONE_MAPPING )
+    w.rgb = toneMapping(w.rgb);
+#endif
+    w = linearToOutputTexel(w);
+    // (blended as the chunks' water is over its floor, on the screen's colours; 0.74: rwShade's alpha for it)
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, w.rgb, wa * mix(0.74, 1.0, F));
+  }
+#include <fog_fragment>
+}`);
 let shared = null;
 function material(morph) {
   const Pl = P();
@@ -176,7 +217,7 @@ function material(morph) {
   const sphM = new THREE.Matrix4();
   const m = new THREE.ShaderMaterial({
     vertexShader: VERT_USED, fragmentShader: FRAG_USED, fog: true,
-    defines: Object.assign({ FACE_N: Pl.N.toFixed(1) }, morph ? { MORPH: 1 } : {}),
+    defines: Object.assign({ FACE_N: Pl.N.toFixed(1) }, morph ? { MORPH: 1 } : {}, REAL ? { MASK_N: MASK_N.toFixed(1), CHUNK: BF.CS.toFixed(1) } : {}),
     uniforms: Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), shared, {
       sphM: { value: sphM }, uK: BF.world.roundK, uDay: BF.world.dayUniform,
       morph: { value: new THREE.Vector2(1e30, 2e30) }, anchor: { value: new THREE.Vector3() },
@@ -185,7 +226,7 @@ function material(morph) {
       stand: { value: 0 }, edge: { value: new THREE.Vector2(1e30, 2e30) }, pxScale,
     }),
   });
-  if (REAL) { Object.assign(m.uniforms, realUniforms()); m.extensions.derivatives = true; }
+  if (REAL) { Object.assign(m.uniforms, realUniforms(), { chunkMask, maskO }); m.extensions.fragDepth = true; }
   m.userData.sphM = sphM;   // js/view.js sets it each frame (the round placement in the mesh's own frame)
   return m;
 }
@@ -329,11 +370,124 @@ void main() {
 const STAND_FRAG_USED = !REAL ? STAND_FRAG : STAND_FRAG.replace("#include <fog_pars_fragment>", REAL_PARS)
   .replace(/  gl_FragColor = vec4\(col \* max\(0\.1, uDay\), 1\.0\);[\s\S]*$/, `  vec3 alb = col;
   vec3 light = mix(uGroundCol, uSkyCol, 0.8) + uSunCol * 0.4;` + REAL_OUT);
+// The realistic look's trees (js/real/lod.js, BF.real.lod.cards): a stand-in that is a tree with a real model (attribute card: its
+// row of the impostor atlas, scale, turn and seed; row -1: none) is drawn as that model's cards instead of two boxes, the very cards
+// the loaded chunks' far trees are, so a tree looks the same on either side of the chunks' edge. Among the boxes: the upright card and
+// the level one (BF.real.lod.cards.quads, parts 2 and 3 of the instance; its boxes are dropped). Among the points, further out: one
+// point showing the model from the side, or from above when seen from above; a flat colour, the model's average, under 4 pixels.
+// Until a row is baked its trees stay boxes. Buildings stay boxes, shaded by the sun on each face as the real walls and roofs are.
+let standShaders = null;
+function realStandShaders() {
+  if (standShaders) return standShaders;
+  const C = BF.real.lod && BF.real.lod.cards;
+  if (!C) return (standShaders = { vert: STAND_VERT, frag: STAND_FRAG_USED, cards: null });
+  const rep = (s, a, b) => { if (!s.includes(a)) throw new Error("js/lod.js: stand-in shader changed under the realistic look's patch: " + a.slice(0, 40)); return s.replace(a, b); };
+  let v = STAND_VERT, f = STAND_FRAG_USED;
+  v = rep(v, "attribute float c;  // crown bottom", `attribute float c;  // crown bottom
+attribute vec4 card;   // atlas row (-1: not a tree with a model), scale, turn, seed
+uniform vec3 uRowCol[${C.MAXROW}];
+varying float vCard;   // 0: boxes or the plain point, 1: cards or a flat point, 2: a point showing the model
+varying vec3 vTint;
+varying vec3 vN;
+#ifndef BOXES
+varying vec4 vCell;
+varying vec2 vSpr;
+#endif` + C.VERT);
+  // the axes at the stand-in's foot, in view space
+  const AXES = `
+  vec3 upL = vec3(0.0, 1.0, 0.0), xL = vec3(1.0, 0.0, 0.0), zL = vec3(0.0, 0.0, 1.0);
+  if (uK > 0.0) { mat3 fr = mat3(sphM) * frame; upL = normalize(mix(upL, fr * upL, uK)); xL = normalize(mix(xL, fr * xL, uK)); zL = normalize(mix(zL, fr * zL, uK)); }
+  vec3 upV = normalize((modelViewMatrix * vec4(upL, 0.0)).xyz), xV = normalize((modelViewMatrix * vec4(xL, 0.0)).xyz), zV = normalize((modelViewMatrix * vec4(zL, 0.0)).xyz);
+  vec3 footV = (modelViewMatrix * vec4(w0, 1.0)).xyz;
+  vec4 rowI = uRow[int(max(card.x, 0.0) + 0.5)];
+  bool tree = card.x >= 0.0 && rowI.y > 0.0;
+  float tv = 0.9 + 0.2 * fract(card.w * 5.3);
+  vTint = pow(vec3(tv, tv * (0.94 + 0.12 * fract(card.w * 9.1)), tv), vec3(1.0 / 2.2));
+  vCard = 0.0; vN = upV;
+  vec4 cardAt = vec4(0.0);`;
+  v = rep(v, "#ifdef BOXES\n  bool up = part > 0.5;", AXES + `
+#ifdef BOXES
+  if (part > 1.5) {
+    if (!tree) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+    cardAt = rlCard(footV, upV, xV, zV, vec3(position.xy, part - 2.0), card.x, card.y, card.z);
+    if (cardAt.w < 0.5) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+    vCard = 1.0;
+  } else if (tree) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+  bool up = part > 0.5;`);
+  // (a box face's normal from its block shade: 1 the top, 0.8 the x sides, 0.65 the z sides; the colour then goes without the shade)
+  v = rep(v, "  vColor = (up ? top : low) * shade;\n  vMask = ((toHole * vec3(g.xy + l.xz, 1.0)).xy - maskO) / CHUNK;", `  vColor = up ? top : low;
+  if (vCard < 0.5) vN = shade > 0.9 ? upV : shade > 0.7 ? xV * sign(position.x) : zV * sign(position.z);
+  if (card.w < -0.5) {
+    // a house as worldgen.js builds it: walls to the eaves, two blocks over the stand-in's; on them a gable roof, its ridge along
+    // the longer side, rising half its span and overhanging the walls on the slopes' sides only, with the gable ends wall (the
+    // slopes are steps: lit mostly from above); or, where the village builds flat roofs, a slab
+    float eaves = c + 2.0;
+    if (!up) l.y = position.y * eaves;
+    else if (card.z > 0.5) l = vec3(position.x * (b.x - 2.0), eaves + position.y, position.z * (b.y - 2.0));
+    else {
+      bool alongX = b.x >= b.y, xFace = shade > 0.7 && shade < 0.9, zFace = shade < 0.7;
+      float span = alongX ? b.y : b.x, hR = 0.5 * span, narrow = 1.0 - position.y;
+      l = alongX ? vec3(position.x * (b.x - 2.0), eaves + position.y * hR, position.z * b.y * narrow) : vec3(position.x * b.x * narrow, eaves + position.y * hR, position.z * (b.y - 2.0));
+      if (alongX ? xFace : zFace) vColor = low;
+      if (alongX ? zFace : xFace) vN = normalize((alongX ? zV * sign(position.z) : xV * sign(position.x)) * 0.4 + upV);
+    }
+  }
+  vMask = ((toHole * vec3(g.xy + (vCard > 0.5 ? vec2(0.0) : l.xz), 1.0)).xy - maskO) / CHUNK;`);
+  v = rep(v, "  gl_PointSize = size;\n  vec3 l = vec3(0.0, 0.5 * tall, 0.0);", `  gl_PointSize = size;
+  vec3 l = vec3(0.0, 0.5 * tall, 0.0);
+  if (tree) {
+    float tr = rowI.x * card.y, tH = rowI.y * card.y, cells = uGrid.x + 1.0, col = mod(floor(card.x + 0.5), uGrid.y), line = floor((card.x + 0.5) / uGrid.y);
+    vec3 toCam = normalize(-footV);
+    bool above = dot(toCam, upV) > 0.7;
+    float sz = (above ? 2.0 * tr : max(tH, 2.0 * tr)) * k;
+    gl_PointSize = clamp(sz, 1.0, 64.0);
+    vSpr = above ? vec2(1.0) : vec2(sz / (2.0 * tr * k), sz / (tH * k));
+    float f0 = mod(floor(fract((atan(dot(toCam, xV), dot(toCam, zV)) - card.z) / 6.2831853) * uGrid.x + 0.5), uGrid.x);
+    vCell = above ? vec4((col * cells + uGrid.x + 0.02) / (uGrid.y * cells), (line + 0.02 * CARD_SQUARE) / uGrid.z, 0.96 / (uGrid.y * cells), 0.96 * CARD_SQUARE / uGrid.z)
+      : vec4((col * cells + f0 + 0.02) / (uGrid.y * cells), (line + 0.02) / uGrid.z, 0.96 / (uGrid.y * cells), 0.96 / uGrid.z);
+    vCard = sz < 4.0 ? 1.0 : 2.0;
+    vColor = pow(uRowCol[int(card.x + 0.5)], vec3(1.0 / 2.2)) * vTint;
+    vRows = vec4(0.0);
+    l = vec3(0.0, above ? rowI.w * card.y : (rowI.z + 0.5 * rowI.y) * card.y, 0.0);
+  }`);
+  v = rep(v, "  vec4 mvPosition = modelViewMatrix * vec4(t, 1.0);", "  vec4 mvPosition = modelViewMatrix * vec4(t, 1.0);\n  if (cardAt.w > 0.5) mvPosition = vec4(cardAt.xyz, 1.0);");
+  f = rep(f, "uniform sampler2D chunkMask;", `uniform sampler2D chunkMask;
+varying float vCard;
+varying vec3 vTint;
+varying vec3 vN;
+#ifndef BOXES
+varying vec4 vCell;
+varying vec2 vSpr;
+#endif` + C.FRAG);
+  f = rep(f, "  vec3 alb = col;\n  vec3 light = mix(uGroundCol, uSkyCol, 0.8) + uSunCol * 0.4;", `  vec3 alb = col;
+  vec3 light = mix(uGroundCol, uSkyCol, 0.8) + uSunCol * 0.4;
+  vec3 sunV = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz), upV = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+#ifdef BOXES
+  vec3 n = normalize(vN);
+  if (vCard > 0.5) {
+    vec4 tc = rlCardTexel();
+    if (tc.a < 0.4) discard;
+    alb = tc.rgb * vTint; n = rlCardNormal(); upV = normalize(vUp);
+  }
+  light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, upV)) + uSunCol * max(dot(n, sunV), 0.0);
+  if (vCard > 0.5) light += uSunCol * 0.3 * max(-dot(n, sunV), 0.0);   // (leaves let the sun through, as BF.real.lod's cards)
+#else
+  if (vCard > 1.5) {
+    vec2 q = vec2(gl_PointCoord.x - 0.5, 0.5 - gl_PointCoord.y) * vSpr + 0.5;
+    if (q.x < 0.0 || q.x > 1.0 || q.y < 0.0 || q.y > 1.0) discard;
+    vec4 tc = texture2D(map, vCell.xy + q * vCell.zw);
+    if (tc.a < 0.4) discard;
+    alb = tc.rgb * vTint;
+  }
+  if (vCard > 0.5) light = mix(uGroundCol, uSkyCol, 0.72) + uSunCol * max(dot(normalize(upV * 0.6 + vec3(0.0, 0.0, 0.8)), sunV), 0.0);
+#endif`);
+  return (standShaders = { vert: v, frag: f, cards: C });
+}
 function standMaterial(boxes) {
-  const sphM = new THREE.Matrix4();
+  const sphM = new THREE.Matrix4(), SH = REAL ? realStandShaders() : null;
   const m = new THREE.ShaderMaterial({
-    vertexShader: STAND_VERT, fragmentShader: STAND_FRAG_USED, fog: true,
-    defines: Object.assign({ FACE_N: P().N.toFixed(1), MASK_N: MASK_N.toFixed(1), CHUNK: BF.CS.toFixed(1) }, boxes ? { BOXES: 1 } : {}),
+    vertexShader: SH ? SH.vert : STAND_VERT, fragmentShader: SH ? SH.frag : STAND_FRAG_USED, fog: true,
+    defines: Object.assign({ FACE_N: P().N.toFixed(1), MASK_N: MASK_N.toFixed(1), CHUNK: BF.CS.toFixed(1) }, boxes ? { BOXES: 1 } : {}, SH && SH.cards ? SH.cards.defines() : {}),
     uniforms: Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), {
       sphM: { value: sphM }, uK: BF.world.roundK, uDay: BF.world.dayUniform, pxScale, frame: { value: new THREE.Matrix3() },
       edge: { value: new THREE.Vector2(1e30, 2e30) }, hole: { value: new THREE.Vector3() }, hole2: { value: new THREE.Vector3() },
@@ -341,7 +495,7 @@ function standMaterial(boxes) {
       toHole2: { value: new THREE.Matrix3() }, seam2: { value: 0 }, chunkMask, maskO,
     }),
   });
-  if (REAL) Object.assign(m.uniforms, realUniforms());
+  if (REAL) Object.assign(m.uniforms, realUniforms(), SH.cards ? SH.cards.uniforms : {});
   m.userData.sphM = sphM;
   return m;
 }
@@ -364,16 +518,58 @@ function box() {
 // the stand-ins S (joined arrays, see keep) as boxes or points, one instance each
 const SK = { base: 3, sph: 3, top: 3, low: 3, a: 4, b: 4, c: 1, bin: 2 };
 const SA = { base: Float32Array, sph: Float32Array, bin: Uint16Array };
+if (REAL) { SK.k = 4; SA.k = Float32Array; }   // (the realistic look: each tree's flora record, js/grid.js)
+// The realistic look: each stand-in's card (atlas row, scale, turn, seed) from its record k, as js/real/lod.js would draw the loaded
+// chunk's tree; far: rings where a tree is a few pixels (its species' first variant).
+function cardsOf(S, far) {
+  const n = S.c.length, out = new Float32Array(n * 4), C = realStandShaders().cards, names = BF.worldgen.NAMES || [];
+  for (let i = 0; i < n; i++) {
+    const o = i * 4, block = S.k ? S.k[o] : 0;
+    out[o] = -1;
+    if (!block && S.k) { out[o + 2] = S.k[o + 2]; out[o + 3] = S.k[o + 3]; }   // (a house: -1 last, and whether its roof is flat)
+    if (!block || !C) continue;
+    const logs = Math.floor(S.k[o + 2]), big = S.k[o + 2] - logs > 0.25, seed = S.k[o + 3];
+    const r = C.rowOf(big ? 4 : 0, block, names[S.k[o + 1]] || "", logs, seed, far);
+    if (r) { out[o] = r[0]; out[o + 1] = r[1]; out[o + 2] = seed * 6.2831853; out[o + 3] = seed; }
+  }
+  return out;
+}
 // (points as plain vertices: software rendering draws instances one by one, tens of times slower)
-function standGeometry(S, boxes) {
+function standGeometry(S, boxes, far) {
   if (!boxes) {
     const g = new THREE.BufferGeometry();
-    for (const k in SK) if (k !== "bin") g.setAttribute(k, new THREE.BufferAttribute(S[k], SK[k], k === "top" || k === "low"));
+    for (const k in SK) if (k !== "bin" && k !== "k") g.setAttribute(k, new THREE.BufferAttribute(S[k], SK[k], k === "top" || k === "low"));
+    if (REAL && realStandShaders().cards) g.setAttribute("card", new THREE.BufferAttribute(cardsOf(S, true), 4));
     g.setAttribute("position", g.getAttribute("base"));
     return g;
   }
   const g = new THREE.InstancedBufferGeometry(), B = box();
   g.setAttribute("position", B.pos); g.setAttribute("part", B.part); g.setAttribute("shade", B.shade); g.setIndex(B.idx);
+  if (REAL && realStandShaders().cards) {
+    // the realistic look: the trees with a real model are their own object, two cards each (g.userData.cards; drawn with the boxes'
+    // material, as the boxes' child: finish()); the boxes are the rest
+    const card = cardsOf(S, !!far), n = S.c.length, boxes = [], trees = [];
+    for (let i = 0; i < n; i++) (card[i * 4] >= 0 ? trees : boxes).push(i);
+    const pick = (G, list) => {
+      const A = Object.assign({ card }, S);
+      for (const k in A) {
+        if (k === "bin" || k === "k") continue;
+        const m = k === "card" ? 4 : SK[k], src = A[k], a = new src.constructor(list.length * m);
+        for (let p = 0; p < list.length; p++) for (let x = 0; x < m; x++) a[p * m + x] = src[list[p] * m + x];
+        G.setAttribute(k, new THREE.InstancedBufferAttribute(a, m, k === "top" || k === "low"));
+      }
+      G.instanceCount = list.length;
+    };
+    pick(g, boxes);
+    if (trees.length) {
+      const Q = realStandShaders().cards.quads, c = new THREE.InstancedBufferGeometry();
+      c.setAttribute("position", new THREE.BufferAttribute(Q.pos, 3)); c.setIndex(Q.idx);
+      c.setAttribute("part", new THREE.Float32BufferAttribute([2, 2, 2, 2, 3, 3, 3, 3], 1)); c.setAttribute("shade", new THREE.Float32BufferAttribute([1, 1, 1, 1, 1, 1, 1, 1], 1));
+      pick(c, trees);
+      g.userData.cards = c;
+    }
+    return g;
+  }
   for (const k in SK) if (k !== "bin") g.setAttribute(k, new THREE.InstancedBufferAttribute(S[k], SK[k], k === "top" || k === "low"));
   g.instanceCount = S.c.length;
   return g;
@@ -438,6 +634,12 @@ function palette() {
     const t = BF.world._faceTint ? BF.world._faceTint[id * 6] : 0;
     tint[id] = t === 4 ? 0 : t;
   }
+  // the realistic look: natural ground in the colours its smooth terrain has in the loaded chunks (BF.real.assets.ground; a later
+  // entry for a block wins), so the land keeps its colour where the chunks end
+  if (REAL && BF.real.assets && BF.real.assets.ground) for (const g of BF.real.assets.ground) {
+    const c = typeof g.color === "string" ? new THREE.Color(g.color).toArray() : g.color;
+    if (c) for (const name of g.blocks || []) if (BF.B[name] != null) top[BF.B[name]] = [c[0], c[1], c[2]];
+  }
   return { top, side, tint };
 }
 
@@ -471,6 +673,7 @@ function off() {
 }
 function dispose(m) {
   if (m.parent) m.parent.remove(m);
+  for (const ch of m.children) ch.geometry.dispose();   // (the realistic look: a ring's tree cards, with its boxes)
   m.geometry.dispose(); for (const x of [].concat(m.material)) x.dispose();
 }
 
@@ -479,8 +682,8 @@ function start(L, f, cu, cv) {
   const Pl = P(), c = L.cell, n = 2 * EXT + 1, gu0 = cu - EXT * c, gv0 = cv - EXT * c;
   const anchor = Pl.pos(f, cu, cv, BF.SEA, [0, 0, 0]);
   const stand = L.lv < STAND_LEVELS && lod.standIns ? { cu, cv, anchor, gu0, gv0, m: THIN[L.lv], max: STAND_MAX + MOVE * L.half, exact: L.lv === 0,
-    houses: L.lv < HOUSE_LEVELS, villages: L.lv < HOUSE_LEVELS } : null;
-  const b = { f, cu, cv, gu0, gv0, n, anchor, pending: 0, t0: performance.now(), raw: BF.gridJob.alloc({ nx: n, ny: n }), fresh: true, parts: stand ? [] : null };
+    houses: L.lv < HOUSE_LEVELS, villages: L.lv < HOUSE_LEVELS, real: REAL } : null;
+  const b = { f, cu, cv, gu0, gv0, n, anchor, pending: 0, t0: performance.now(), raw: BF.gridJob.alloc({ nx: n, ny: n, real: REAL }), fresh: true, parts: stand ? [] : null };
   let rects = [[0, n, 0, n]];   // [j0, j1, i0, i1] still to sample
   const old = L.raw && L.f === f ? L : null;
   if (old) {
@@ -494,6 +697,7 @@ function start(L, f, cu, cv) {
         b.raw.col.set(old.raw.col.subarray(3 * (s + i0), 3 * (s + i1)), 3 * (d + i0));
         b.raw.dir.set(old.raw.dir.subarray(3 * (s + i0), 3 * (s + i1)), 3 * (d + i0));
         b.raw.can.set(old.raw.can.subarray(4 * (s + i0), 4 * (s + i1)), 4 * (d + i0));
+        if (b.raw.wat && old.raw.wat) b.raw.wat.set(old.raw.wat.subarray(s + i0, s + i1), d + i0);
       }
       if (stand && L.stand) b.parts.push(keep(old, b, i0, i1, j0, j1, di, dj));   // the old ring's stand-ins on the samples kept
       b.fresh = false;
@@ -512,7 +716,7 @@ function start(L, f, cu, cv) {
     // about 12,000 samples a job (a few hundred ms in a worker): few enough answers that a slow frame doesn't leave workers idle
     const w = i1 - i0, step = Math.max(1, Math.floor(12000 / w));
     for (let j = j0; j < j1; j += step) {
-      const job = { f, u0: gu0 + i0 * c, v0: gv0 + j * c, cell: c, nx: w, ny: Math.min(step, j1 - j), stand };
+      const job = { f, u0: gu0 + i0 * c, v0: gv0 + j * c, cell: c, nx: w, ny: Math.min(step, j1 - j), stand, real: REAL };   // (real: the samples also say where water is, its colour its floor's: js/grid.js)
       b.pending++;
       BF.sampler.request(job, prio, (res) => {
         if (L.building !== b) return;
@@ -523,6 +727,7 @@ function start(L, f, cu, cv) {
           b.raw.col.set(res.col.subarray(3 * s, 3 * (s + w)), 3 * d);
           b.raw.dir.set(res.dir.subarray(3 * s, 3 * (s + w)), 3 * d);
           b.raw.can.set(res.can.subarray(4 * s, 4 * (s + w)), 4 * d);
+          if (b.raw.wat && res.wat) b.raw.wat.set(res.wat.subarray(s, s + w), d);
         }
         if (res.stand && b.parts) b.parts.push(res.stand);
         if (--b.pending === 0) build(L, b);
@@ -534,10 +739,10 @@ function start(L, f, cu, cv) {
 
 // Builds ring L's mesh from its samples (in a worker), then swaps it in.
 function build(L, b) {
-  const p = { n: b.n, c: L.cell, gu0: b.gu0, gv0: b.gv0, cu: b.cu, cv: b.cv, anchor: b.anchor, bridge: L.lv === CELLS.length - 1, ext: EXT, disc: HALF };
+  const p = { n: b.n, c: L.cell, gu0: b.gu0, gv0: b.gv0, cu: b.cu, cv: b.cv, anchor: b.anchor, bridge: L.lv === CELLS.length - 1, ext: EXT, disc: HALF, real: REAL };
   const raw = b.raw;
   b.tm = performance.now();
-  const copy = BF.sampler.inline ? raw : { y: raw.y.slice(), col: raw.col.slice(), can: raw.can.slice(), ok: raw.ok.slice(), dir: raw.dir.slice() };
+  const copy = BF.sampler.inline ? raw : { y: raw.y.slice(), col: raw.col.slice(), can: raw.can.slice(), ok: raw.ok.slice(), dir: raw.dir.slice(), wat: raw.wat && raw.wat.slice() };
   BF.sampler.request({ mesh: true, p, raw: copy }, -100, (m) => { if (L.building === b) finish(L, b, m); }, L);
 }
 let fullIdx = null, fullCounts = null;
@@ -552,6 +757,8 @@ function finish(L, b, m) {
   g.setAttribute("msph", attr(m.msph, 3));
   g.setAttribute("mcol", attr(m.mcol, 3, true));
   g.setAttribute("canopy", attr(m.can, 4, true));
+  if (m.wat) g.setAttribute("wat", attr(m.wat, 1, true));
+  if (m.nrm) g.setAttribute("nrm", attr(m.nrm, 3, true));
   if (m.idx) g.setIndex(attr(m.idx, 1));
   else g.setIndex(fullIdx);
   L.counts = m.idx ? m.counts : fullCounts; L.bounds = m.bounds;
@@ -569,9 +776,9 @@ function finish(L, b, m) {
   // the stand-ins: their own object, placed the same way (kept with their material, like the ring)
   const S = b.parts ? join(b.parts) : null;
   L.mat.uniforms.stand.value = S ? 1 / (1 << 2 * THIN[L.lv]) : 0;   // the share of tree cells drawn as stand-ins
-  if (L.si) { L.si.parent && L.si.parent.remove(L.si); L.si.geometry.dispose(); }
+  if (L.si) { L.si.parent && L.si.parent.remove(L.si); for (const ch of L.si.children) ch.geometry.dispose(); L.si.geometry.dispose(); }
   if (S) {
-    const boxes = L.lv < BOX_LEVELS, mat = L.si ? L.si.material : standMaterial(boxes), geo = standGeometry(S, boxes);
+    const boxes = L.lv < BOX_LEVELS, mat = L.si ? L.si.material : standMaterial(boxes), geo = standGeometry(S, boxes, L.lv > 0);
     geo.boundingSphere = g.boundingSphere;   // (js/view.js culls by it while the view is flat)
     const si = boxes ? new THREE.Mesh(geo, mat) : new THREE.Points(geo, mat);
     const fr = Pl.frame(b.f, b.cu, b.cv, BF.SEA, {}), U = fr.eu, Up = fr.up, W = fr.ev;
@@ -581,6 +788,11 @@ function finish(L, b, m) {
     si.position.copy(mesh.position); si.updateMatrix();
     si.userData = { anchor: b.anchor, lod: L.lv, stand: true };
     si.visible = false;
+    if (geo.userData.cards) {   // (the realistic look: the ring's trees as cards, placed and shown with the boxes)
+      const tc = new THREE.Mesh(geo.userData.cards, mat);
+      tc.frustumCulled = false; tc.matrixAutoUpdate = false; tc.matrixWorld = si.matrixWorld;
+      si.add(tc);
+    }
     L.si = si;
     lod.scene.add(si);
   } else L.si = null;
@@ -859,6 +1071,11 @@ function ribbons(V, top) {
   geo.setAttribute("sphere", new THREE.Float32BufferAttribute(sph, 3));
   geo.setAttribute("col", new THREE.BufferAttribute(new Uint8Array(col), 3, true));
   geo.setAttribute("canopy", new THREE.BufferAttribute(new Uint8Array(nv * 4), 4, true));
+  if (REAL) {   // (a river is water, and flat: FRAG_USED)
+    geo.setAttribute("wat", new THREE.BufferAttribute(new Uint8Array(nv).fill(255), 1, true));
+    const up = new Int8Array(nv * 3); for (let i = 1; i < up.length; i += 3) up[i] = 127;
+    geo.setAttribute("nrm", new THREE.BufferAttribute(up, 3, true));
+  }
   geo.setIndex(new THREE.Uint32BufferAttribute(idx, 1));
   const mat = material(false);
   mat.side = THREE.DoubleSide;
@@ -874,6 +1091,7 @@ function ribbons(V, top) {
 
 // for the globe (js/globe.js): the same material and cuts
 lod.material = material; lod.cuts = cuts; lod.HIDE = HIDE;
+if (REAL) { lod.standMaterial = standMaterial; lod.standGeometry = standGeometry; }   // (test/real-lod.js)
 
 // Numbers for tests and the debug overlay.
 lod.stats = () => ({

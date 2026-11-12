@@ -92,6 +92,7 @@ BF.gridJob = {
     const n = job.nx * job.ny;
     const out = { id: job.id, y: new Float32Array(n), col: new Uint8Array(3 * n), can: new Uint8Array(4 * n), ok: new Uint8Array(n), dir: new Float32Array(3 * n) };
     // stand-ins (job.stand): each sample's column (ground, water level, biome) and foliage tint, kept only until stand() has run
+    if (job.real) out.wat = new Uint8Array(n);   // (the realistic look: where water is and how deep, js/lod.js FRAG_USED)
     if (job.stand) out.cols = { h: new Float32Array(n), wl: new Float32Array(n), bio: new Uint8Array(n), fol: new Float32Array(3 * n) };
     return out;
   },
@@ -112,7 +113,12 @@ BF.gridJob = {
       const ice = wet && c.tb === 0 && (wl - h < 4 || ((gu * 7 + gv * 13) & 3) !== 0);
       const t = TB;
       let r, gg, bb;
-      if (wet && !ice) {
+      if (wet && !ice && out.wat) {   // (the realistic look draws the water itself: here its floor's colour, and its depth)
+        const T = PAL.top[top];
+        tmp[0] = T[0]; tmp[1] = T[1]; tmp[2] = T[2]; tint(tmp, 0, PAL.tint[top], t);
+        r = tmp[0]; gg = tmp[1]; bb = tmp[2];
+        out.wat[o] = Math.round(255 * (0.55 + 0.45 * Math.min(1, (wl - h) / 16)));
+      } else if (wet && !ice) {
         const W = PAL.top[B.water], depth = wl - h;
         tmp[0] = W[0]; tmp[1] = W[1]; tmp[2] = W[2]; tint(tmp, 0, 3, t);
         const k = 1 - 0.55 * smooth(2, 60, depth), F = PAL.top[top], s = 0.45 * (1 - smooth(1, 6, depth));
@@ -147,11 +153,12 @@ BF.gridJob = {
   },
   buffers(out) {
     const b = [out.y.buffer, out.col.buffer, out.can.buffer, out.ok.buffer, out.dir.buffer];
-    if (out.stand) for (const k of STAND) b.push(out.stand[k].buffer);
+    if (out.wat) b.push(out.wat.buffer);
+    if (out.stand) { for (const k of STAND) b.push(out.stand[k].buffer); if (out.stand.k) b.push(out.stand.k.buffer); }
     return b;
   },
   stand,
-  mesh, meshBuffers: (m) => [m.pos, m.sph, m.col, m.mpos, m.msph, m.mcol, m.can, m.idx].filter(Boolean).map((a) => a.buffer),
+  mesh, meshBuffers: (m) => [m.pos, m.sph, m.col, m.mpos, m.msph, m.mcol, m.can, m.wat, m.nrm, m.idx].filter(Boolean).map((a) => a.buffer),
   topOf, CROWNS,
 };
 
@@ -169,6 +176,9 @@ BF.gridJob = {
 //   top, low: crown (roof) and trunk (wall) colours; a: trunk width x and z, height, crown top width (of 255, of the crown's width);
 //   b: crown width x and z, height, a random byte; c: crown bottom above the foot; bin: its sample's column and row in the ring (from
 //   gu0, gv0), so a moved ring keeps it with its sample.
+// With job.stand.real (the realistic look, 1.6: js/lod.js draws a tree as cards of its real model, js/real/lod.js) also k, what the
+// loaded chunk's flora record of the same tree holds (js/real/mesh.js): its log block, its sample's biome, its log count (plus 0.5
+// for a 2 x 2 trunk) and its seed; all 0 for anything but a tree (for a house the last is -1, and the third 1 where its village builds flat roofs).
 const STAND = ["base", "sph", "top", "low", "a", "b", "c", "bin"];
 // [foot offset (0.5, or 1 for a 2 x 2 trunk), trunk width, trunk height, crown bottom, crown height, crown width, crown top width
 // (share), trunk block, crown block] of tree t (worldgen.js treeOf; heights in blocks above t.y). Crown sizes are the leaves' extent.
@@ -205,6 +215,7 @@ function stand(job, out) {
   const P = BF.planet, N = P.N, W = P.W, WG = BF.worldgen, B = BF.B, R = job.stand, c = job.cell, nx = job.nx, ny = job.ny, f = job.f;
   const K = {}, w = {}, d = [0, 0, 0], M = 1 << R.m, BS = 4 * M, cols = out.cols, col = { h: 0, biome: 0, wl: 0 };
   for (const k of STAND) K[k] = [];
+  if (R.real) K.k = [];
   const C = (x) => Math.max(0, Math.min(255, Math.round(x * 255)));
   const rgb = (id, tintK, fol, k) => {
     const T = PAL[tintK === -1 ? "side" : "top"][id] || PAL.top[id];
@@ -222,6 +233,7 @@ function stand(job, out) {
     K.sph.push(d[0] * rr - R.anchor[0], d[1] * rr - R.anchor[1], d[2] * rr - R.anchor[2]);
     K.top.push(top[0], top[1], top[2]); K.low.push(low[0], low[1], low[2]);
     K.a.push(lx, lz, Math.min(255, lh), Math.round(taper * 255)); K.b.push(ux, uz, Math.min(255, uh), Math.floor(r * 255.99)); K.c.push(Math.min(255, ub));
+    if (K.k) K.k.push(0, 0, 0, 0);
   };
   const lo = c > 4 ? c / 2 : 0;   // a sample's cells start this far before its grid point (whole cells: c is 4 or a multiple of 8)
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
@@ -262,6 +274,10 @@ function stand(job, out) {
       if (cb < 0) { layer += cb; trunk = 0; cb = 0; }
       const k = 0.85 + 0.15 * WG.hash(gx, gz, 108);   // a little variety in brightness
       emit(g, gu, gv, x, y, layer, e, rgb(leaf, 1, fol, k), rgb(log, -1, null, 0.9), tw, tw, trunk, taper, cw, cw, ch, cb, WG.hash(gx, gz, 109), i, j);
+      if (K.k && th > 0 && trunk > 0) {   // (the seed as js/real/mesh.js makes it, from the trunk's lowest log)
+        const hs = ((t.x * 73856093) ^ (t.z * 19349663) ^ (t.y * 83492791)) >>> 0, q = K.k.length - 4;
+        K.k[q] = log; K.k[q + 1] = col.biome; K.k[q + 2] = th + (off === 1 ? 0.5 : 0); K.k[q + 3] = (hs % 65521) / 65521;
+      }
     }
   }
   // village buildings: walls and a roof (fields and other low plots as a patch), from the villages' own layouts; each belongs to the sample
@@ -298,11 +314,13 @@ function stand(job, out) {
         // walls to two blocks under the top, then a roof overhanging them by a block, rising to a ridge
         const wh = Math.max(2, F.h - 3);
         emit(g, gu, gv, x, y, F.y, e, rgb(B[S[1]], 0, null, 0.9), rgb(B[S[0]], -1, null, 0.95), wx, wz, wh, 0.3, wx + 2, wz + 2, F.h - wh + 1, wh - 1, r, i, j);
+        if (K.k) { K.k[K.k.length - 1] = -1; K.k[K.k.length - 2] = ((F.village && F.village.style) || 0) === 1 ? 1 : 0; }   // (a house, and whether its style's roofs are flat: the realistic look draws its real roof, js/lod.js)
       }
     }
   }
   out.stand = { base: new Float32Array(K.base), sph: new Float32Array(K.sph), top: new Uint8Array(K.top), low: new Uint8Array(K.low),
     a: new Uint8Array(K.a), b: new Uint8Array(K.b), c: new Uint8Array(K.c), bin: new Uint16Array(K.bin) };
+  if (K.k) out.stand.k = new Float32Array(K.k);
   out.cols = null;
 }
 
@@ -342,6 +360,9 @@ function mesh(p, raw) {
   const pos = new Float32Array(NV * 3), sph = new Float32Array(NV * 3), col = new Uint8Array(NV * 3), can = new Uint8Array(NV * 4);
   const mpos = p.noMorph ? null : new Float32Array(NV * 3), msph = p.noMorph ? null : new Float32Array(NV * 3), mcol = p.noMorph ? null : new Uint8Array(NV * 3);
   const C = (v) => Math.min(255, Math.round(v));
+  // (p.real, the realistic look: no slope shade in the colours, the ring is lit by its slope each frame; and where its water is)
+  const wat = p.real && raw.wat ? raw.wat.slice(0, NV) : null, lit = p.real ? () => 1 : shade, nrm = p.real ? new Int8Array(NV * 3) : null;
+  const yAt = (i, j, o) => { const q = Math.min(n - 1, Math.max(0, j)) * n + Math.min(n - 1, Math.max(0, i)); return raw.ok[q] ? raw.y[q] : raw.y[o]; };
   let full = true;
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
     const o = j * n + i;
@@ -349,18 +370,22 @@ function mesh(p, raw) {
     const r = R + raw.y[o] - SEA;
     pos[o * 3] = p.gu0 + i * c - p.cu; pos[o * 3 + 1] = raw.y[o]; pos[o * 3 + 2] = p.gv0 + j * c - p.cv;
     for (let k = 0; k < 3; k++) sph[o * 3 + k] = raw.dir[o * 3 + k] * r - A[k];
-    const sh = shade(raw, n, i, j, 1);
+    const sh = lit(raw, n, i, j, 1);
     for (let k = 0; k < 3; k++) col[o * 3 + k] = C(raw.col[o * 3 + k] * sh);
     for (let k = 0; k < 3; k++) can[o * 4 + k] = C(raw.can[o * 4 + k] * sh);
     can[o * 4 + 3] = raw.can[o * 4 + 3];
+    if (nrm) {   // (the ground's slope in the ring's flat frame: x = u, y = up, z = v)
+      const dx = (yAt(i - 1, j, o) - yAt(i + 1, j, o)) / (2 * c), dz = (yAt(i, j - 1, o) - yAt(i, j + 1, o)) / (2 * c), l = 127 / Math.hypot(dx, 1, dz);
+      nrm[o * 3] = Math.round(dx * l); nrm[o * 3 + 1] = Math.round(l); nrm[o * 3 + 2] = Math.round(dz * l);
+    }
   }
-  if (p.noMorph) return { pos, sph, col, mpos, msph, mcol, can, idx: null };
+  if (p.noMorph) return { pos, sph, col, mpos, msph, mcol, can, idx: null };   // (the globe: never p.real)
   // a point on the coarser grid (even i and j) stays put and takes the coarser ring's shading; any other point goes to the middle of the
   // coarser triangle edge it lies on (that ring splits its cells along the same diagonal)
   for (let j = 0; j < n; j += 2) for (let i = 0; i < n; i += 2) {
     const o = j * n + i;
     if (!raw.ok[o]) continue;
-    const sh = shade(raw, n, i, j, 2);
+    const sh = lit(raw, n, i, j, 2);
     for (let k = 0; k < 3; k++) { mpos[o * 3 + k] = pos[o * 3 + k]; msph[o * 3 + k] = sph[o * 3 + k]; mcol[o * 3 + k] = C(raw.col[o * 3 + k] * sh); }
   }
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
@@ -392,7 +417,10 @@ function mesh(p, raw) {
     idx = new Uint32Array(q);
   }
   const bounds = sectorBounds(n, p.ext, p.disc, raw.ok, pos, mpos, sph, msph);
-  return { pos, sph, col, mpos, msph, mcol, can, idx, counts, bounds };
+  const out = { pos, sph, col, mpos, msph, mcol, can, idx, counts, bounds };
+  if (wat) out.wat = wat;
+  if (nrm) out.nrm = nrm;
+  return out;
 }
 // The coarsest ring has no coarser ring to fill the strip along its corner wedge (see js/lod.js), so it closes the wedge itself: the
 // samples along one side of the wedge are joined to those the same distance along the other side, which are neighbours on the sphere,

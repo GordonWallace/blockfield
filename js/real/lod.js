@@ -42,20 +42,22 @@ const config = {
   // by kind (tree, bush, ground cover, rock, big tree): the far end of each mesh level's band (a level whose band is empty is never
   // built), whether an impostor follows, where the kind ends (0: never, while its chunk is loaded), how much a plant's switch
   // distances vary (a share of the distance), and the level from which all variants of an entry are drawn as its first one (share).
-  // Tuned on the 1.6 models: a tree is about 4,400 / 1,300 / 370 triangles at detail 0 / 1 / 2 and a tuft of ground cover 36 / 24, so
-  // a dense forest (10 trees a chunk) is about 1.3 million triangles of trees all round, under half of that in view, and ground cover
-  // costs draw calls rather than triangles (two levels, variants only near the player). A tree never shares (3): it keeps its own
-  // variant all the way out, as a mesh and as a card.
+  // Tuned on the 1.6 models: a tree is about 4,400 triangles in full and 2,500 / 900 thinned, and a tuft of ground cover 36, so a
+  // dense forest (10 trees a chunk) is about 2 million triangles of trees all round, under half of that in view, and ground cover
+  // costs draw calls rather than triangles (two levels, variants only near the player). The full model reaches well past where a
+  // walker looks at a tree. A tree never shares (3): it keeps its own variant all the way out, as a mesh and as a card.
   kinds: [
-    { dist: [24, 60, 120], impostor: true, maxDist: 0, jitter: 0.2, share: 3 },
+    { dist: [48, 100, 160], impostor: true, maxDist: 0, jitter: 0.2, share: 3 },
     { dist: [18, 44, 110], impostor: false, maxDist: 110, jitter: 0.4, share: 3 },
     { dist: [28, 72, 72], impostor: false, maxDist: 72, jitter: 0.5, share: 1 },
     { dist: [24, 60, 220], impostor: false, maxDist: 220, jitter: 0.3, share: 3 },
-    { dist: [30, 76, 150], impostor: true, maxDist: 0, jitter: 0.2, share: 3 },
+    { dist: [56, 110, 190], impostor: true, maxDist: 0, jitter: 0.2, share: 3 },
   ],
   // levels 1 and 2 of a model, from its level 0: the share of its wood (largest branches first) and of its leaf cards that stay, and
   // how much larger the leaf cards that stay are drawn (the crown keeps its cover). A part of fewer than minParts pieces is left whole.
-  thin: { wood: [1, 0.35, 0.1], leaves: [1, 0.35, 0.1], grow: [1, 1.6, 2.6], minParts: 24 },
+  // The first step is small (walking up to a tree, the switch to the full model is the one seen closest).
+  thin: { wood: [1, 0.6, 0.2], leaves: [1, 0.55, 0.2], grow: [1, 1.3, 2.0], minParts: 24 },
+  fade: 0.25,             // a level gives way to the next over this share of the switch distance, dissolving pixel by pixel
   scale: 1,               // multiplies every distance (set from BF.real.quality.level each frame unless fixedScale)
   fixedScale: false,
   budgetMs: 2,            // batch building per frame
@@ -82,15 +84,29 @@ const st = { buildMs: 0, built: 0, pending: 0, drawn: 0, batches: 0, tris: 0, in
 
 // ---------------------------------------------------------------- models
 const HASH = "fract(sin(dot(P, vec2(12.9898, 78.233))) * 43758.5453) - 0.5";
+// Across the last part of its band (rlFadeW of the switch distance) a level dissolves into the next: rlFade holds how far it has
+// come in and how far it has gone out, and each pixel is kept by the level whose turn it is in a fixed screen pattern (FADE_FRAG), so
+// the two levels never both draw a pixel and there is no moment at which the tree changes.
 const CULL_VERT = `
+rlFade = vec2(1.0, 0.0);
 #ifdef USE_INSTANCING
 {
   vec2 P = instanceMatrix[3].xz;
   float rlD = length((modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz) * (1.0 + rlJit * (${HASH}));
-  if (rlD < rlRange.x || rlD >= rlRange.y) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  float rlA = rlRange.x * (1.0 - rlFadeW);
+  if (rlD < rlA || rlD >= rlRange.y) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  rlFade = vec2(rlRange.x > 0.0 ? clamp((rlD - rlA) / (rlRange.x * rlFadeW), 0.0, 1.0) : 1.0, clamp((rlD - rlRange.y * (1.0 - rlFadeW)) / (rlRange.y * rlFadeW), 0.0, 1.0));
 }
 #endif
 `;
+const DITHER = "fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))))";
+const FADE_FRAG = `
+{
+  float rlN = ${DITHER};
+  if (rlN >= rlFade.x || rlN < rlFade.y) discard;
+}
+`;
+const fadeW = { value: config.fade };
 const canCull = m => !m.isShaderMaterial || m.vertexShader.includes("#include <project_vertex>");
 // A copy of a registry material for one level of one model: the same look, plus the per-instance distance band.
 function levelMaterial(src, range, jit) {
@@ -98,8 +114,10 @@ function levelMaterial(src, range, jit) {
   if (src.isShaderMaterial) m.uniforms = Object.assign({}, src.uniforms);   // (shared holders: the owner's wind, sun... keep driving it)
   const patch = sh => {
     if (!sh.vertexShader.includes("#include <project_vertex>")) return;
-    sh.uniforms.rlRange = range; sh.uniforms.rlJit = jit;
-    sh.vertexShader = "uniform vec2 rlRange;\nuniform float rlJit;\n" + sh.vertexShader.replace("#include <project_vertex>", "#include <project_vertex>" + CULL_VERT);
+    sh.uniforms.rlRange = range; sh.uniforms.rlJit = jit; sh.uniforms.rlFadeW = fadeW;
+    sh.vertexShader = "uniform vec2 rlRange;\nuniform float rlJit;\nuniform float rlFadeW;\nvarying vec2 rlFade;\n" + sh.vertexShader.replace("#include <project_vertex>", "#include <project_vertex>" + CULL_VERT);
+    if (sh.fragmentShader.includes("#include <clipping_planes_fragment>"))
+      sh.fragmentShader = "varying vec2 rlFade;\n" + sh.fragmentShader.replace("#include <clipping_planes_fragment>", "#include <clipping_planes_fragment>" + FADE_FRAG);
   };
   if (src.isShaderMaterial) patch(m);
   else {
@@ -371,7 +389,9 @@ attribute vec3 iB;   // scale, atlas row, kind
 attribute vec3 iC;   // tint
 uniform vec2 uRange[5];   // by kind: the cards' band of distance
 uniform float uJit[5];
+uniform float rlFadeW;
 varying vec3 vTint;
+varying float vFade;
 #include <fog_pars_vertex>
 ` + CARD_VERT + `
 void main() {
@@ -385,7 +405,10 @@ void main() {
   vTint = iC;
   mvPosition.xyz = q.xyz;
   gl_Position = projectionMatrix * mvPosition;
-  if (q.w < 0.5 || d < uRange[kind].x || d >= uRange[kind].y) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  // (the card comes in as the last mesh level goes out: CULL_VERT)
+  float a = uRange[kind].x * (1.0 - rlFadeW);
+  vFade = clamp((d - a) / (uRange[kind].x * rlFadeW), 0.0, 1.0);
+  if (q.w < 0.5 || d < a || d >= uRange[kind].y) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   #include <fog_vertex>
 }`;
 const IMP_FRAG = `
@@ -394,15 +417,18 @@ uniform vec3 uSunDir;
 uniform vec3 uSkyCol;
 uniform vec3 uGroundCol;
 varying vec3 vTint;
+varying float vFade;
 #include <common>
 #include <fog_pars_fragment>
 ` + CARD_FRAG + `
 void main() {
+  if (${DITHER} >= vFade) discard;
   vec4 c = rlCardTexel();
   if (c.a < 0.4) discard;
   vec3 n = rlCardNormal();
   vec3 sunV = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz);
-  vec3 light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, normalize(vUp))) + uSunCol * max(dot(n, sunV), 0.0);
+  // (a crown lets the sun through: its far side isn't black)
+  vec3 light = mix(uGroundCol, uSkyCol, 0.5 + 0.5 * dot(n, normalize(vUp))) + uSunCol * (max(dot(n, sunV), 0.0) + 0.3 * max(-dot(n, sunV), 0.0));
   gl_FragColor = vec4(pow(c.rgb, vec3(2.2)) * vTint * light, 1.0);
   #include <tonemapping_fragment>
   #include <encodings_fragment>
@@ -416,6 +442,7 @@ function impostorMaterial() {
   const U = real.U;
   const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uRange: { value: ranges }, uJit: { value: jits } }]);
   Object.assign(uniforms, cardU);
+  uniforms.rlFadeW = fadeW;
   uniforms.uSunCol = U.uSunCol; uniforms.uSunDir = U.uSunDir; uniforms.uSkyCol = U.uSkyCol; uniforms.uGroundCol = U.uGroundCol;   // (shared by reference, contract section 3)
   imp.material = new THREE.ShaderMaterial({ uniforms, defines: CARD_DEFINES(), vertexShader: IMP_VERT, fragmentShader: IMP_FRAG, fog: true, side: THREE.DoubleSide });
   return imp.material;
@@ -735,6 +762,7 @@ function update(camera) {
   if (!config.enabled) { for (const r of regions.values()) for (const b of r.built.values()) for (const m of b.meshes) m.visible = false; return; }
   if (!config.fixedScale && real.quality) config.scale = QUALITY[Math.max(0, Math.min(2, real.quality.level | 0))];
   builtThisFrame = false;
+  fadeW.value = Math.max(0.001, config.fade);
   if (toBake.length || imp.dirty) bake();
   // this frame's bands
   const mat = imp.material, bands = [];
@@ -780,7 +808,7 @@ function update(camera) {
         const band = bd[i];
         if (!band || band[1] <= band[0]) continue;
         // (a plant at distance d switches at d (1 +- j): the batch is needed if any of its plants can fall in the band)
-        const hit = M.cull ? rc.min * (1 - j) < band[1] && rc.max * (1 + j) >= band[0] : rc.mid >= band[0] && rc.mid < band[1];
+        const hit = M.cull ? rc.min * (1 - j) < band[1] && rc.max * (1 + j) >= band[0] * (1 - fadeW.value) : rc.mid >= band[0] && rc.mid < band[1];
         if (!hit) continue;
         if (i === 3) { wantImp = true; continue; }
         const D = i >= M.K.share ? M.far : M, key = D.id + ":" + i, b = r.built.get(key);
