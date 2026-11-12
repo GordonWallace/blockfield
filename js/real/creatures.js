@@ -58,7 +58,7 @@ function cells(x, y, z) {
 
 // ---------- geometry ----------
 // A part's geometry under construction: positions in model pixels, colours as painted (sRGB), triangles by index.
-function Geo() { return { pos: [], col: [], idx: [] }; }
+function Geo() { return { pos: [], col: [], idx: [], fix: [] }; }   // fix: [vertex, nx, ny, nz] normals given, not computed (hair)
 const P = { x: 0, y: 0, z: 0, u: 0, v: 0, up: 0, d: 0 };   // what a painter is told about a vertex
 function vert(g, x, y, z, paint) {
   P.x = x; P.y = y; P.z = z;
@@ -135,6 +135,41 @@ function ball(g, c, r, paint, seg) {
 // The same piece on both sides: fn(g, s) with s = 1 (the animal's left, +x) then -1.
 const both = (g, fn) => { fn(g, 1); fn(g, -1); };
 
+// Hair: small blades standing off the triangles added to g since index i0, coloured like the skin under them.
+// o: density (blades per square pixel), len(p, n) -> length (0: none), flow(p, n) -> the way the hair lies, lift (how far it stands off),
+//    width, tip (brightening of the tip), seed.
+function fur(g, i0, o) {
+  let seed = (o.seed || 1) >>> 0;
+  const rnd = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+  const p = g.pos, c = g.col, end = g.idx.length, q = [0, 0, 0], n = [0, 0, 0], tip = o.tip != null ? o.tip : 1.3, w = o.width || 0.22;
+  for (let i = i0; i < end; i += 3) {
+    const a = g.idx[i] * 3, b = g.idx[i + 1] * 3, d = g.idx[i + 2] * 3;
+    const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2], vx = p[d] - p[a], vy = p[d + 1] - p[a + 1], vz = p[d + 2] - p[a + 2];
+    n[0] = uy * vz - uz * vy; n[1] = uz * vx - ux * vz; n[2] = ux * vy - uy * vx;
+    const l = Math.hypot(n[0], n[1], n[2]); if (l < 1e-9) continue;
+    n[0] /= l; n[1] /= l; n[2] /= l;
+    const want = l * 0.5 * o.density; let count = Math.floor(want); if (rnd() < want - count) count++;
+    while (count-- > 0) {
+      let r1 = rnd(), r2 = rnd(); if (r1 + r2 > 1) { r1 = 1 - r1; r2 = 1 - r2; }
+      const r0 = 1 - r1 - r2;
+      q[0] = p[a] + ux * r1 + vx * r2; q[1] = p[a + 1] + uy * r1 + vy * r2; q[2] = p[a + 2] + uz * r1 + vz * r2;
+      const L = o.len(q, n) * (0.65 + 0.7 * rnd()); if (!(L > 0)) continue;
+      const f = o.flow(q, n), dn = f[0] * n[0] + f[1] * n[1] + f[2] * n[2], lift = (o.lift || 0.35) * (0.6 + 0.8 * rnd());
+      let dx = f[0] - n[0] * dn + (rnd() - 0.5) * 0.5, dy = f[1] - n[1] * dn + (rnd() - 0.5) * 0.5, dz = f[2] - n[2] * dn + (rnd() - 0.5) * 0.5;
+      let dl = Math.hypot(dx, dy, dz) || 1; dx = dx / dl + n[0] * lift; dy = dy / dl + n[1] * lift; dz = dz / dl + n[2] * lift;
+      dl = Math.hypot(dx, dy, dz); dx /= dl; dy /= dl; dz /= dl;
+      let sx = n[1] * dz - n[2] * dy, sy = n[2] * dx - n[0] * dz, sz = n[0] * dy - n[1] * dx; const sl = (Math.hypot(sx, sy, sz) || 1) / (w * 0.5);
+      sx /= sl; sy /= sl; sz /= sl;
+      const k = 0.72 + 0.4 * rnd(), cr = (c[a] * r0 + c[b] * r1 + c[d] * r2) * k, cg = (c[a + 1] * r0 + c[b + 1] * r1 + c[d + 1] * r2) * k, cb = (c[a + 2] * r0 + c[b + 2] * r1 + c[d + 2] * r2) * k;
+      const v = g.pos.length / 3;
+      g.pos.push(q[0] - sx - n[0] * 0.05, q[1] - sy - n[1] * 0.05, q[2] - sz - n[2] * 0.05, q[0] + sx - n[0] * 0.05, q[1] + sy - n[1] * 0.05, q[2] + sz - n[2] * 0.05, q[0] + dx * L, q[1] + dy * L, q[2] + dz * L);
+      g.col.push(cr, cg, cb, cr, cg, cb, cr * tip, cg * tip, cb * tip);
+      g.fix.push(v, n[0], n[1], n[2], v + 1, n[0], n[1], n[2], v + 2, n[0] + dx * 0.4, n[1] + dy * 0.4, n[2] + dz * 0.4);
+      g.idx.push(v, v + 1, v + 2, v + 1, v, v + 2);
+    }
+  }
+}
+
 const _c = new THREE.Color();
 function finish(g, pivot) {
   const n = g.pos.length / 3, pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3), col = new Float32Array(n * 3), p = g.pos, ix = g.idx;
@@ -144,6 +179,7 @@ function finish(g, pivot) {
     const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     nrm[a] += nx; nrm[a + 1] += ny; nrm[a + 2] += nz; nrm[b] += nx; nrm[b + 1] += ny; nrm[b + 2] += nz; nrm[c] += nx; nrm[c + 1] += ny; nrm[c + 2] += nz;
   }
+  for (let i = 0; i < g.fix.length; i += 4) { const k = g.fix[i] * 3; nrm[k] = g.fix[i + 1]; nrm[k + 1] = g.fix[i + 2]; nrm[k + 2] = g.fix[i + 3]; }
   for (let i = 0; i < n; i++) {
     const k = i * 3, l = Math.hypot(nrm[k], nrm[k + 1], nrm[k + 2]) || 1;
     nrm[k] /= l; nrm[k + 1] /= l; nrm[k + 2] /= l;
@@ -203,6 +239,7 @@ function flap(g, a, b, w, th, paint, side, o) {
 
 // ---------- pig ----------
 function pig(style) {
+  if (style === "real" || style === "toon") return pigWild(style);
   const nat = style === "b";
   const pink = nat ? C(0xe3b3a0) : C(0xefa9a6), belly = nat ? C(0xeec7b6) : C(0xf6c2bc), dark = nat ? C(0x35302c) : null, hoof = nat ? C(0x5b4a44) : C(0xb26f6d);
   const skin = Q => {
@@ -239,6 +276,94 @@ function pig(style) {
     }
   });
   return [body, head, ...quadLegs(3, 5, 6, { r: nat ? 1.75 : 2.0, paint: skin, hoof, hoofH: nat ? 1.0 : 1.2, natural: nat, fat: 0.85, joint: 0.6 })];
+}
+
+// ---------- pig, from photographs of feral hogs ----------
+// "real": the animal as photographed: a slab-sided body highest at the shoulder, a long wedge of a head carried low, upright hairy ears,
+// thin dark legs, a straight tufted tail, a rust coat of coarse bristles with ragged black blotches and a mane along the spine.
+// "toon": the same animal drawn as a character: big head and eyes, big ears, short legs, flat colours and a few clean spots.
+function pigWild(style) {
+  const toon = style === "toon";
+  const rust = C(0xa05c2a), rustHi = C(0xc07a38), under = C(0x5e361c), black = C(0x17120e), legC = C(0x24170f), hoof = C(0x15100c), disc = C(0xa5675c);
+  if (toon) return pigToon();
+  const blot = Q => fbm((Q.x + Q.z * 0.5) * 0.42 + 2.7, (Q.y - Q.x * 0.4) * 0.42 + 5.1, (Q.z + Q.y * 0.4) * 0.36 + 9.3) + (vnoise(Q.x * 3, Q.y * 3, Q.z * 3) - 0.5) * 0.07;
+  const coat = Q => {
+    const streak = vnoise(Q.x * 2.6 + 3, Q.y * 2.6, Q.z * 0.7), fine = vnoise(Q.x * 7, Q.y * 7 + 2, Q.z * 1.8);
+    let c = mix(rust, rustHi, ramp(Q.y, 9, 14.5));
+    c = mix(c, under, ramp(Q.y, 9.6, 6.6) * 0.8);
+    c = mul(c, 0.74 + 0.34 * streak + 0.16 * fine);
+    c = mix(c, black, sm(ramp(blot(Q), 0.575, 0.61)) * 0.95 * ramp(Q.y, 6.4, 8.2));
+    return mix(c, legC, ramp(Q.y, 6.6, 4.2) * 0.92);
+  };
+  const face = Q => {
+    let c = coat(Q);
+    const e = Math.hypot(Math.abs(Q.x) - 2.1, Q.y - 12.1, Q.z - 12.3);
+    c = mix(c, C(0x20150f), Math.max(sm(ramp(e, 1.3, 0.5)) * 0.8, sm(ramp(Q.z - (Q.y - 10) * 0.3, 14.2, 16.4)) * 0.8));   // dark round the eyes and down the snout
+    return c;
+  };
+  const back = [0, -0.3, -1], bodyLen = (q, n) => (n[1] > 0.8 && Math.abs(q[0]) < 1.4 && q[2] > -5 ? 1.9 : n[1] < -0.6 ? 1.0 : 0.75);
+  const body = part("body", [0, 0, 0], {}, g => {
+    let i0 = g.idx.length;
+    loft(g, [[0, 10.5, -8.2, 2.9, [2.5, 2.7]], [0, 10.7, -6, 3.7, [3.3, 3.8]], [0, 10.5, -2, 3.9, [3.5, 3.95]], [0, 10.5, 2, 3.95, [3.9, 4.05]], [0, 10.9, 5.4, 3.8, [4.2, 4.2]], [0, 11.1, 8, 3.3, [3.7, 3.8]]],
+      coat, { seg: 40, sub: 10, cap: [1.4, 1.2], n: 2.3 });
+    fur(g, i0, { density: 7, seed: 11, len: bodyLen, flow: () => back, lift: 0.4 });
+    // tail: straight, with a tuft
+    i0 = g.idx.length;
+    loft(g, [[0, 12.4, -9.0, 0.45, 0.45], [0, 10.6, -9.9, 0.34, 0.34], [0, 8.6, -10.3, 0.3, 0.3], [0, 7.6, -10.3, 0.36, 0.36]], Q => mul(mix(rust, under, 0.4), 0.8 + 0.3 * vnoise(Q.x * 5, Q.y * 2, Q.z * 5)), { seg: 7, sub: 3, cap: [0.2, 0.3] });
+    fur(g, i0, { density: 16, seed: 5, len: q => (q[1] < 9 ? 1.6 : 0.4), flow: () => [0, -1, -0.15], lift: 0.25, tip: 1.5 });
+  });
+  const head = part("head", [0, 12, 7], { head: true }, g => {
+    let i0 = g.idx.length;
+    loft(g, [[0, 11.4, 6.8, 3.2, [3.5, 3.6]], [0, 11.6, 9.6, 3.15, [3.2, 3.5]], [0, 11.0, 12, 2.65, [2.55, 2.85]], [0, 10.0, 14.3, 1.9, [1.7, 1.85]], [0, 9.25, 16.3, 1.45, [1.25, 1.3]], [0, 8.9, 17.5, 1.36, [1.14, 1.14]]],
+      face, { seg: 28, sub: 6, cap: [1.2, 0], n: 2.2 });
+    fur(g, i0, { density: 9, seed: 23, len: (q, n) => (q[2] > 16.2 ? 0 : q[2] > 14 ? 0.35 : n[1] > 0.8 && Math.abs(q[0]) < 1.2 ? 1.5 : n[1] < -0.5 ? 1.0 : 0.6), flow: () => [0, -0.15, -1], lift: 0.4 });
+    loft(g, [[0, 8.9, 17.4, 1.44, 1.2], [0, 8.86, 17.75, 1.46, 1.22]], Q => mul(mix(disc, C(0x4a2c24), ramp(Q.y, 8.9, 9.9) * 0.6 + 0.3 * vnoise(Q.x * 4, Q.y * 4, 3)), 0.9), { seg: 16, sub: 1, cap: [0, 0.22] });
+    both(g, (g, s) => {
+      ball(g, [s * 0.55, 8.9, 17.98], [0.24, 0.34, 0.14], C(0x1a0e0c), 6);
+      eye(g, s * 2.32, 12.15, 12.5, 0.36);
+      ball(g, [s * 2.42, 12.25, 12.62], 0.1, C(0xbfb8ae), 5);   // the light in the eye
+      // an upright, cupped, hairy ear
+      const j0 = g.idx.length;
+      flap(g, [s * 2.2, 13.8, 9.4], [s * 3.9, 17.5, 8.8], 1.75, 0.4, Q => { const e = ramp(Q.y, 14.2, 17.4); return mul(mix(mix(rust, C(0x3a2416), 0.35 + 0.4 * e), black, sm(ramp(blot(Q), 0.6, 0.64)) * 0.6), 0.8 + 0.3 * vnoise(Q.x * 5, Q.y * 5, Q.z * 5)); },
+        [s * 0.55, 0, 1], { bend: [s * -0.35, 0, -0.5], root: 0.8 });
+      fur(g, j0, { density: 14, seed: 31 + s, len: () => 0.75, flow: q => [s * 0.45, 1, -0.1], lift: 0.5, tip: 1.5 });
+    });
+  });
+  const furry = (name, sx, sz, swing) => part(name, [sx * 3, 6, sz * 5], { swing }, g => {
+    leg(g, sx * 3, 6, sz * 5, { r: 1.3, paint: coat, hoof, hoofH: 0.9, natural: sz > 0 ? "front" : "hind", fat: 0.95, joint: 0.6 });
+    fur(g, 0, { density: 7, seed: 41 + sx * 3 + sz, len: q => (q[1] < 1.2 ? 0 : q[1] > 5.5 ? 0.8 : 0.45), flow: () => [0, -1, -0.1], lift: 0.3, width: 0.18 });
+  });
+  return [body, head, furry("legFL", -1, 1, 1), furry("legFR", 1, 1, -1), furry("legBL", -1, -1, -1), furry("legBR", 1, -1, 1)];
+
+  function pigToon() {
+    const orange = C(0xc9762f), belly = C(0xe9b377), dark = C(0x3a2318), sock = C(0x4a2c1c), pink = C(0xd98a7c);
+    // a few clean spots: [x, y, z, radius]
+    const SPOTS = [[4.6, 11.5, -3.5, 2.0], [-4.6, 12.2, 1.5, 1.7], [4.2, 9.8, 2.6, 1.5], [-4.4, 10.4, -5, 1.6], [1.5, 15, -1, 1.5], [-2.2, 14.6, 4.6, 1.2], [3, 13.6, -7.4, 1.3]];
+    const spot = Q => { let m = 0; for (const [x, y, z, r] of SPOTS) m = Math.max(m, sm(ramp(Math.hypot(Q.x - x, Q.y - y, Q.z - z), r + 0.2, r - 0.2))); return m; };
+    const coat = Q => mix(mix(orange, belly, sm(ramp(Q.y, 8.6, 7.0))), dark, spot(Q));
+    const body = part("body", [0, 0, 0], {}, g => {
+      loft(g, [[0, 10.6, -7.4, 3.9, [3.5, 3.6]], [0, 10.6, -4, 5.1, [4.3, 4.6]], [0, 10.6, 1, 5.2, [4.6, 4.7]], [0, 11.0, 5, 4.8, [4.8, 4.6]], [0, 11.2, 7.6, 3.9, [4.0, 4.0]]], coat, { seg: 44, sub: 9, cap: [2.8, 1.6] });
+      // a mane of chunky spikes over the shoulders, a tail with a tuft
+      for (let k = 0; k < 5; k++) { const z = 7.0 - k * 2.0, y = 15.5 - k * 0.28; loft(g, [[0, y - 0.8, z + 0.2, 0.75, 1.0], [0, y + 0.5, z - 0.5, 0.55, 0.75], [0, y + 1.5, z - 1.5, 0.1, 0.12]], dark, { seg: 7, sub: 2, cap: [0.2, 0.1] }); }
+      loft(g, [[0, 12.4, -10.0, 0.45, 0.45], [0, 12.6, -11.4, 0.36, 0.36], [0, 11.4, -12.2, 0.32, 0.32], [0, 10.2, -12.3, 0.32, 0.32]], orange, { seg: 7, sub: 3 });
+      ball(g, [0, 9.5, -12.3], [0.7, 1.1, 0.7], dark, 8);
+    });
+    const head = part("head", [0, 12, 7], { head: true }, g => {
+      const mask = Q => mix(coat(Q), dark, sm(ramp(Q.z - (Q.y - 11) * 0.35, 14.0, 14.8)));
+      loft(g, [[0, 12.2, 7.4, 4.4, [4.4, 4.3]], [0, 12.6, 10.4, 4.7, [4.5, 4.5]], [0, 12.0, 13.2, 3.9, [3.5, 3.6]], [0, 10.9, 15.6, 2.7, [2.2, 2.3]], [0, 10.3, 17.4, 2.3, [1.8, 1.8]]], mask, { seg: 22, sub: 5, cap: [2.6, 0] });
+      loft(g, [[0, 10.3, 17.3, 2.45, 1.95], [0, 10.25, 18.0, 2.5, 2.0]], pink, { seg: 16, sub: 1, cap: [0, 0.4] });
+      both(g, (g, s) => {
+        ball(g, [s * 0.9, 10.3, 18.35], [0.4, 0.6, 0.18], C(0x6b3a36), 6);
+        ball(g, [s * 2.55, 13.5, 13.9], [1.05, 1.25, 0.8], C(0xf4f1ea), 12);      // big eyes
+        ball(g, [s * 2.75, 13.4, 14.5], [0.6, 0.75, 0.35], C(0x1a120e), 10);
+        ball(g, [s * 2.95, 13.8, 14.8], 0.2, C(0xffffff), 6);
+        loft(g, [[s * 1.6, 15.0, 14.0, 0.2, 0.3], [s * 2.6, 15.25, 13.8, 0.22, 0.34], [s * 3.6, 14.8, 13.2, 0.18, 0.26]], dark, { seg: 6, sub: 2, side: [0, 0, 1] });   // brows
+        flap(g, [s * 2.9, 15.6, 9.6], [s * 5.6, 20.4, 9.0], 2.5, 0.6, Q => (Q.y > 18.6 ? dark : mix(orange, pink, sm(ramp(Q.z, 9.3, 9.9)) * 0.6)), [s * 0.5, 0, 1], { bend: [s * -0.5, 0, -0.5], root: 0.75 });
+      });
+    });
+    const legPaint = Q => (Q.y < 3.6 ? sock : orange);
+    return [body, head, ...quadLegs(3, 5, 6, { r: 1.9, paint: legPaint, hoof: C(0x241610), hoofH: 1.1 })];
+  }
 }
 
 // ---------- cow ----------
@@ -460,7 +585,7 @@ function pickFromUrl() {
   let q = null;
   try { q = new URLSearchParams(location.search).get("creatures"); } catch (_) {}
   if (!q) return pick;
-  const ok = s => (s === "a" || s === "b" ? s : null);
+  const ok = s => (s === "a" || s === "b" || s === "real" || s === "toon" ? s : null);   // (real, toon: the pig from photographs)
   for (const tok of q.split(",")) {
     const [k, v] = tok.split(":");
     if (v === undefined) for (const t in TYPES) pick[t] = ok(k);

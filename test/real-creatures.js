@@ -62,6 +62,15 @@ const root = path.resolve(__dirname, '..');
     check(more.smooth && more.shorn !== more.woolly, style + ' sheep: shorn, it is rebuilt with the shorn model');
     await pg.close();
   }
+  // the pig modelled from photographs: a realistic one with hair and a cartoon one
+  for (const style of ['real', 'toon']) {
+    const pg = await open('&creatures=pig:' + style);
+    const got = await spawnAll(pg);
+    const A = boxes[0], B = got[0], same = Object.keys(A).sort().join() === Object.keys(B).sort().join();
+    check(same && Object.keys(A).every(k => B[k].smooth && B[k].nrm && A[k].at.join() === B[k].at.join()), style + ' pig: smooth parts on the box model\'s pivots');
+    check(got.slice(1).every(o => Object.values(o).every(p => !p.smooth)), style + ' pig: the other animals stay boxes');
+    await pg.close();
+  }
   await b.close();
   console.log(bad ? bad + ' FAILED' : 'all ok');
   process.exit(bad ? 1 : 0);
