@@ -156,8 +156,11 @@ const REAL_OUT = `
 #include <fog_fragment>
 }`;
 const realUniforms = () => { const U = BF.real.U; return { uSunCol: U.uSunCol, uSunDir: U.uSunDir, uSkyCol: U.uSkyCol, uGroundCol: U.uGroundCol, uFogCol: U.uFogCol, uWet: U.uWet }; };
+// (fog by the distance from the eye, not by the depth along its line of sight: far land at the side of the view is as hazy as it is
+// straight ahead, and doesn't fade as the eye turns to it)
+const REAL_FOG = ["#include <fog_vertex>", "#include <fog_vertex>\n#ifdef USE_FOG\n  fogDepth = length(mvPosition.xyz);\n#endif"];
 const VERT_USED = !REAL ? VERT : VERT.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;\nattribute float wat;\nattribute vec3 nrm;\nvarying float vWat;\nvarying vec3 vN;")
-  .replace("  vDist = length(mvPosition.xyz);", "  vDist = length(mvPosition.xyz);\n  vV = mvPosition.xyz;\n  vWat = wat;\n  vN = (modelViewMatrix * vec4(nrm, 0.0)).xyz;");
+  .replace("  vDist = length(mvPosition.xyz);", "  vDist = length(mvPosition.xyz);\n  vV = mvPosition.xyz;\n  vWat = wat;\n  vN = (modelViewMatrix * vec4(nrm, 0.0)).xyz;").replace(REAL_FOG[0], REAL_FOG[1]);
 // The ground is the loaded chunks' terrain seen from afar (js/real/terrain.js: half its colour's light, its detail texture's average;
 // darker when wet); water is theirs too (js/real/water.js, rwShade on a flat surface: its own dark colour, the sky by the angle it is
 // seen at, the floor through the shallows). `wat` is 0 on land and 0.55 (the shore) to 1 (16 blocks deep and more) on water, whose
@@ -171,6 +174,15 @@ const FRAG_USED = !REAL ? FRAG : FRAG.replace("varying float vDist;", "varying f
   vec3 ground = pow(vColor, vec3(2.2)) * 0.5;
   ground = mix(ground, ground * 0.55, uWet);
   vec3 lin = mix(ground, pow(vCanopy.rgb, vec3(2.2)), a) * light;
+  {
+    // the sheen the terrain's material has (three.js' GGX highlight for roughness 0.94 and 4% reflectance): faint, but it is what
+    // lifts the dark channels of a sunlit ground's colour
+    vec3 Ve = normalize(-vV), Hh = normalize(Ve + sunV);
+    float a2 = 0.7807, nl = max(dot(n, sunV), 0.0), nv = max(dot(n, Ve), 0.0), nh = max(dot(n, Hh), 0.0), lh = max(dot(sunV, Hh), 0.0);
+    float gv = nl * sqrt(a2 + (1.0 - a2) * nv * nv), gl = nv * sqrt(a2 + (1.0 - a2) * nl * nl), dn = nh * nh * (a2 - 1.0) + 1.0;
+    float Fr = 0.04 + 0.96 * exp2((-5.55473 * lh - 6.98316) * lh);
+    lin += uSunCol * (nl * Fr * (0.5 / max(gv + gl, 1e-6)) * a2 / (dn * dn)) * (1.0 - a);
+  }
   gl_FragColor = vec4(lin, 1.0);
   float wa = smoothstep(0.0, 0.5, vWat);
 #include <tonemapping_fragment>
@@ -380,9 +392,9 @@ let standShaders = null;
 function realStandShaders() {
   if (standShaders) return standShaders;
   const C = BF.real.lod && BF.real.lod.cards;
-  if (!C) return (standShaders = { vert: STAND_VERT, frag: STAND_FRAG_USED, cards: null });
+  if (!C) return (standShaders = { vert: STAND_VERT.replace(REAL_FOG[0], REAL_FOG[1]), frag: STAND_FRAG_USED, cards: null });
   const rep = (s, a, b) => { if (!s.includes(a)) throw new Error("js/lod.js: stand-in shader changed under the realistic look's patch: " + a.slice(0, 40)); return s.replace(a, b); };
-  let v = STAND_VERT, f = STAND_FRAG_USED;
+  let v = STAND_VERT.replace(REAL_FOG[0], REAL_FOG[1]), f = STAND_FRAG_USED;
   v = rep(v, "attribute float c;  // crown bottom", `attribute float c;  // crown bottom
 attribute vec4 card;   // atlas row (-1: not a tree with a model), scale, turn, seed
 uniform vec3 uRowCol[${C.MAXROW}];
@@ -440,7 +452,8 @@ varying vec2 vSpr;
     vec3 toCam = normalize(-footV);
     bool above = dot(toCam, upV) > 0.7;
     float sz = (above ? 2.0 * tr : max(tH, 2.0 * tr)) * k;
-    gl_PointSize = clamp(sz, 1.0, 64.0);
+    // (under 4 pixels a tree is a dot of its colour: smaller than its picture's square, which its crown only part fills)
+    gl_PointSize = sz < 4.0 ? clamp(sz * 0.7, 1.0, 64.0) : min(sz, 64.0);
     vSpr = above ? vec2(1.0) : vec2(sz / (2.0 * tr * k), sz / (tH * k));
     float f0 = mod(floor(fract((atan(dot(toCam, xV), dot(toCam, zV)) - card.z) / 6.2831853) * uGrid.x + 0.5), uGrid.x);
     vCell = above ? vec4((col * cells + uGrid.x + 0.02) / (uGrid.y * cells), (line + 0.02 * CARD_SQUARE) / uGrid.z, 0.96 / (uGrid.y * cells), 0.96 * CARD_SQUARE / uGrid.z)
@@ -479,7 +492,11 @@ varying vec2 vSpr;
     if (tc.a < 0.4) discard;
     alb = tc.rgb * vTint;
   }
-  if (vCard > 0.5) light = mix(uGroundCol, uSkyCol, 0.72) + uSunCol * max(dot(normalize(upV * 0.6 + vec3(0.0, 0.0, 0.8)), sunV), 0.0);
+  if (vCard > 0.5) {   // (lit as a crown seen from here: mostly from above, and the sun comes through it from behind)
+    float sl = dot(normalize(upV * 0.8 + vec3(0.0, 0.0, 0.6)), sunV);
+    light = mix(uGroundCol, uSkyCol, 0.8) + uSunCol * (max(sl, 0.0) + 0.3 * max(-sl, 0.0));
+    if (vCard < 1.5 && length(gl_PointCoord - 0.5) > 0.5) discard;
+  }
 #endif`);
   return (standShaders = { vert: v, frag: f, cards: C });
 }

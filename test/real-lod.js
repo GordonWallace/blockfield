@@ -116,6 +116,9 @@ module.exports = async (pg, out) => {
   // the distant rings' materials take the look's shared light (js/lod.js)
   const ring = await pg.evaluate(() => { const m = BF.lod.material(false), U = BF.real.U; return { sun: m.uniforms.uSunCol === U.uSunCol, sky: m.uniforms.uSkyCol === U.uSkyCol, tone: /tonemapping_fragment/.test(m.fragmentShader) }; });
   check(ring.sun && ring.sky && ring.tone, "distant rings use the look's shared light", ring);
+  // fog on the far land goes by distance from the eye, so a far island is as hazy at the side of the view as straight ahead
+  const fog = await pg.evaluate(() => [BF.lod.material(false).vertexShader, BF.lod.standMaterial(true).vertexShader, BF.lod.standMaterial(false).vertexShader].map(v => /fogDepth = length\(mvPosition\.xyz\)/.test(v)));
+  check(fog.every(Boolean), "far land is fogged by its distance from the eye", fog);
   // the trees past the loaded chunks are cards of the same models (js/lod.js with BF.real.lod.cards): a stand-in with a tree's flora
   // record gets that tree's atlas row and goes to the ring's cards, a house stays a box; both materials compile
   const far = await pg.evaluate(() => {
@@ -172,6 +175,26 @@ module.exports = async (pg, out) => {
   check(land.wat && land.old, "only the look's ring samples and meshes carry water and slope", [land.wat, land.old]);
   check(land.mesh && land.mesh[0] === 255 && land.mesh[2] === 0 && land.nrm && land.nrm[0] < -60 && land.nrm[1] > 60 && land.nrm[2] === 0 && land.shade[0] === 200, "a ring's mesh says where water is, its ground's slope, and keeps its colours unshaded", [land.mesh, land.nrm, land.shade]);
   check(!land.errs.length, "the rings' ground and water material compiles", land.errs);
+  // the atlas' smaller copies are made by hand (js/real/lod.js mipRow): a tree drawn small keeps the share of its picture that passes
+  // the cards' alpha test, and its colour isn't darkened by the empty texels round it
+  const mips = await pg.evaluate(() => {
+    const L = BF.real.lod, tex = L.cards.uniforms.map.value, m = tex.mipmaps, M = [...L.models.values()].find(x => x.row >= 0 && L.cards.uniforms.uRow.value[x.row].y > 0);
+    if (!m || !M) return null;
+    const cw = L.config.cellW, ch = L.config.cellH, W = (L.config.frames + 1) * cw, x0 = (M.row % 2) * W, y0 = Math.floor(M.row / 2) * ch;
+    const at = l => { const d = m[l].data, w = m[l].width; let n = 0, lum = 0, k = 0;
+      for (let y = 0; y < ch >> l; y++) for (let x = 0; x < cw >> l; x++) { const o = (((y0 >> l) + y) * w + (x0 >> l) + x) * 4; if (d[o + 3] >= 102) { n++; lum += d[o] + d[o + 1] + d[o + 2]; } k++; }
+      return [n / k, n ? lum / n : 0]; };
+    // lines of the full picture that have something in them (a trunk, a twig), and how many of them still do three levels down
+    const lines = l => { const d = m[l].data, w = m[l].width, out = []; for (let y = 0; y < ch >> l; y++) { let n = 0; for (let x = 0; x < cw >> l; x++) if (d[(((y0 >> l) + y) * w + (x0 >> l) + x) * 4 + 3] >= 102) n++; out.push(n); } return out; };
+    const l0 = lines(0), l3 = lines(3);
+    let had = 0, kept = 0;
+    for (let y = 0; y < l3.length; y++) { let any = false; for (let k = 0; k < 8; k++) if (l0[y * 8 + k]) any = true; if (any) { had++; if (l3[y]) kept++; } }
+    return { n: m.length, last: [m[m.length - 1].width, m[m.length - 1].height], gen: tex.generateMipmaps, a0: at(0), a2: at(2), a3: at(3), had, kept };
+  });
+  check(mips && !mips.gen && mips.last[0] === 1 && mips.last[1] === 1, "the atlas carries its own smaller copies, down to one texel", mips && [mips.n, mips.last, mips.gen]);
+  check(mips && mips.a0[0] > 0.02 && mips.a2[0] >= mips.a0[0] * 0.9 && mips.a3[0] >= mips.a0[0] * 0.9 && mips.a3[1] > mips.a0[1] * 0.8,
+    "a tree drawn small keeps its cover and its colour", mips && [mips.a0, mips.a2, mips.a3].map(a => a.map(v => +v.toFixed(2))));
+  check(mips && mips.had > 4 && mips.kept === mips.had, "and every line of it that had something still does (a thin trunk stays)", mips && [mips.kept, mips.had]);
   await pg.waitForTimeout(1500);
   await pg.evaluate(() => localStorage.setItem("bf.look", "blocks"));
   console.log(fails ? "real-lod FAIL " + fails : "real-lod PASS");
