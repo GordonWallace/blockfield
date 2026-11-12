@@ -201,7 +201,7 @@ const drops = {
 
 BF.drops = drops;
 
-// the drops by group (BF.ctick.owned, registered at init): plain [key, id, count, pos, vel, age, pickupDelay, wear, base cluster]
+// the drops by group (BF.ctick.owned, registered at init): plain [key, id, count, pos, vel, age, pickupDelay, wear, base cluster, homing]
 const V = v => [v.x, v.y, v.z];
 function ownTables() {
   const C = BF.ctick;
@@ -209,12 +209,12 @@ function ownTables() {
   ownTables.done = true;
   const G = (d, g) => CL().groupFor(CL().thingBase(d, d.pos)) === g;   // (thingBase: a drop no pass here has seen yet, restored from a save, too)
   C.owned("drops", {
-    snap: g => drops.list.filter(d => G(d, g)).map(d => [d.key, d.id, d.count, V(d.pos), V(d.vel), d.age, d.pickupDelay, d.wear || 0, CL().clOf(d)]),
+    snap: g => drops.list.filter(d => G(d, g)).map(d => [d.key, d.id, d.count, V(d.pos), V(d.vel), d.age, d.pickupDelay, d.wear || 0, CL().clOf(d), d.homing ? 1 : 0]),
     apply(g, a) {
       for (const d of drops.list.slice()) if (G(d, g)) drops.remove(d);
-      for (const [key, id, count, p, v, age, delay, wear, cl] of a || []) {
+      for (const [key, id, count, p, v, age, delay, wear, cl, homing] of a || []) {
         const d = { key, id, count, pos: new THREE.Vector3(p[0], p[1], p[2]), prev: new THREE.Vector3(p[0], p[1], p[2]), prevAge: age, vel: new THREE.Vector3(v[0], v[1], v[2]), age,
-          phase: Math.random() * 6.28, pulled: false, pickupDelay: delay, wear };   // visual (phase: the bob)
+          phase: Math.random() * 6.28, pulled: false, pickupDelay: delay, wear, homing: !!homing };   // (homing: on its way to the player, kept across a meeting)   // visual (phase: the bob)
         CL().keepThing(d, cl);
         drops.list.push(d);
         byKey.set(key, d);

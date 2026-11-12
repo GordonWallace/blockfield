@@ -390,7 +390,14 @@ function markNeighboursDirty(c) {
     if (!dx && !dz) continue;
     const n = world.chunkC(c.cx + dx, c.cz + dz);
     if (n && n.mesh !== undefined) world._dirty.add(n.key);
+    else if (!n && BF.real && BF.real.on) farStale(c.cx + dx, c.cz + dz);
   }
+}
+// The realistic look: a neighbour that is only a far mesh can't be meshed again now. Its smooth ground reaches over the border that
+// just changed, so it is meshed again when its blocks are loaded (nbMiss, installChunk).
+function farStale(cx, cz) {
+  const k = resChunk(cx, cz), key = k ? ckey(k[0], k[1]) : null;
+  if (key && world.farMeshes.has(key)) nbMiss.add(key);
 }
 // Makes sure the sections covering y0..y1 are loaded in the chunk holding (x, z). False if that chunk is not loaded.
 world.ensureRange = function (x, z, y0, y1) {
@@ -488,6 +495,7 @@ world.setBlock = function (x, y, z, id) {
     if (nx >= 0 && nx < CS && nz >= 0 && nz < CS) continue;
     const n = world.chunkC(c.cx + dx, c.cz + dz);
     if (n && n.mesh !== undefined) world._dirty.add(n.key);
+    else if (!n && NBR > 1) farStale(c.cx + dx, c.cz + dz);
   }
   return true;
 };
@@ -748,6 +756,10 @@ function installChunk(c) {
     if (staleFar.delete(key)) world._dirty.add(key);   // (the page's copy: edited while it was only a mesh, r15-38)
     else world._dirty.delete(key);
   }
+  if (nbMiss.size) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    const n = dx || dz ? world.chunkC(cx + dx, cz + dz) : c;
+    if (n && n.mesh === true && nbMiss.has(n.key)) world._dirty.add(n.key);
+  }
   return c;
 }
 // extendDown for a chunk that is not registered yet (no light, no meshes, no neighbours to notify).
@@ -800,7 +812,7 @@ world.contextRestored = function () {
   return n;
 };
 function dropFar(key) {
-  staleFar.delete(key);
+  staleFar.delete(key); nbMiss.delete(key);
   if (BF.real && BF.real.on) BF.real.flora.remove(key);
   for (const m of world.farMeshes.get(key) || []) { scene.remove(m); m.geometry.dispose(); if (m.material.userData.planet) m.material.dispose(); }
   world.farMeshes.delete(key);
@@ -846,6 +858,9 @@ world.replay = {
   drops,
 };
 
+// The realistic look: chunks whose ground was last meshed without a neighbour's blocks (meshJob), and far meshes whose neighbour
+// changed by their border since (farStale). They are meshed again when a neighbour's blocks, or their own, arrive (installChunk).
+const nbMiss = new Set();
 function disposeMeshes(c) {
   for (const m of c.meshes) { scene.remove(m); m.geometry.dispose(); if (m.material.userData.planet) m.material.dispose(); }
   c.meshes = [];
@@ -1187,12 +1202,30 @@ function meshJob(c, copy) {
     Y0 = lo - 3; Y1 = hi + 3;
   }
   const NY = Y1 - Y0, RW = CS + 4;
+  let miss = false;
   const rb = new Uint16Array(M.RN * NY), rl = new Uint8Array(M.RN * NY), rs = new Uint8Array(M.RN * NY);
   for (let z = -2; z < CS + 2; z++) for (let x = -2; x < CS + 2; x++) {
     const r = M.RING[(z + 2) * RW + x + 2];
     if (r < 0) continue;
     const ix = x < 0 ? 0 : x >= CS ? 2 : 1, iz = z < 0 ? 0 : z >= CS ? 2 : 1, ch = NB[iz * 3 + ix], o = r * NY;
-    if (!ch) { rs.fill(15, o, o + NY); continue; }
+    if (!ch) {
+      rs.fill(15, o, o + NY);
+      // the realistic look: a neighbour whose blocks are not loaded (a far chunk that kept only its mesh, past the edge of the loaded
+      // area) is not open air, or the smooth ground would round off into a cliff along the border and part from the neighbour's
+      // ground. Its ground is taken to carry on as this chunk's own edge column does, and the chunk is meshed again when the
+      // neighbour's blocks arrive (nbMiss, installChunk).
+      if (T.real) {
+        miss = true;
+        const col = ((z < 0 ? 0 : z >= CS ? CS - 1 : z) << 4) | (x < 0 ? 0 : x >= CS ? CS - 1 : x), NATG = T.real.NAT;
+        for (let i = 0, y = Y0; i < NY; i++, y++) {
+          if (y < c.y0) { rb[o + i] = T.STONE; rs[o + i] = 0; continue; }
+          if (y >= c.y1) break;
+          const s = c.secs[(y >> 4) - c.lo], b = typeof s === "number" ? s : s[((y & 15) << 8) | col];
+          if (NATG[b]) { rb[o + i] = b; rs[o + i] = 0; }
+        }
+      }
+      continue;
+    }
     if (ch === EDGE_NB) {
       for (let i = 0, y = Y0; i < NY; i++, y++) {
         rb[o + i] = world.getBlock(ox + x, y, oz + z);
@@ -1234,18 +1267,37 @@ function meshJob(c, copy) {
       q = q.slice(); q[6] = BF.textures.uv(q[6]); return q;
     });
   });
+  if (T.real) { if (miss) nbMiss.add(c.key); else nbMiss.delete(c.key); }
   const cp = a => typeof a === "number" || !a ? a : a.slice();
   return {
     ox, oz, lo: c.lo, hi: c.hi, y0: c.y0, y1: c.y1,
     secs: copy ? c.secs.map(cp) : c.secs, light: copy && c.light ? c.light.map(cp) : c.light, sky: copy && c.sky ? c.sky.map(cp) : c.sky,
     stood: T.real && BF.real.fell ? BF.real.fell.stood(ox, oz) : null,   // (where trees stand or stood: only there is a lone log a stump, js/real/fell.js)
-    Y0, Y1, rb, rl, rs, tint, ext, real: T.real ? (homeOfClay(ox + 8, oz + 8) ? 1 : 2) : false,   // (2: terracotta and sandstone stay cubes here, js/real/terrain.js)
+    Y0, Y1, rb, rl, rs, tint, ext, real: T.real ? 1 : false,
+    clay: T.real ? clayColumns(ox, oz) : null,   // (where terracotta and sandstone are the ground itself; elsewhere they stay cubes, js/real/terrain.js)
     sph: Object.assign(sphereFrame(ox, oz), { R: BF.planet.R, sea: BF.SEA }),
   };
 }
-// The realistic look: is this chunk in the biome where terracotta is the ground itself (the badlands)? Elsewhere it is only ever built with.
+// The realistic look: is this column in the biome where terracotta is the ground itself (the badlands)? Elsewhere it is only ever built with.
 function homeOfClay(x, z) {
   try { const b = BF.worldgen.biomeAt(x, z); return !!b && b.name === "Badlands"; } catch (_) { return false; }
+}
+// The same for every column of a chunk and its ring (20 x 20, 1 where it is). Decided by column, not by chunk: the chunks on both sides
+// of a border must agree on what is ground in the columns they both read, or their smooth ground parts along the border. Asked on a
+// lattice of every 4th column of the world first (the same lattice for every chunk); only a square of it whose corners differ is
+// asked column by column.
+const CLAY_NONE = new Uint8Array((CS + 4) * (CS + 4));
+function clayColumns(ox, oz) {
+  const Wd = CS + 4, x0 = ox - 4, z0 = oz - 4, L = new Uint8Array(49);   // lattice points x0 + 4 i, z0 + 4 k (ox and oz are multiples of 16)
+  let any = 0;
+  for (let k = 0; k < 7; k++) for (let i = 0; i < 7; i++) any += (L[k * 7 + i] = homeOfClay(x0 + 4 * i, z0 + 4 * k) ? 1 : 0);
+  if (!any) return CLAY_NONE;
+  const out = new Uint8Array(Wd * Wd);
+  for (let z = -2; z < CS + 2; z++) for (let x = -2; x < CS + 2; x++) {
+    const i = (x + 4) >> 2, k = (z + 4) >> 2, a = L[k * 7 + i], n = a + L[k * 7 + i + 1] + L[(k + 1) * 7 + i] + L[(k + 1) * 7 + i + 1];
+    out[(z + 2) * Wd + x + 2] = n === 0 ? 0 : n === 4 ? 1 : homeOfClay(ox + x, oz + z) ? 1 : 0;
+  }
+  return out;
 }
 // The arrays of a job copied for a worker (to transfer them).
 function jobBuffers(J) {
@@ -1264,7 +1316,10 @@ function applyMesh(c, R, anchor) {
     if (!T) return;
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(T.pos, 3));
-    if (ground) { g.setAttribute("normal", new THREE.BufferAttribute(T.nrm, 3)); g.setAttribute("mat", new THREE.BufferAttribute(T.mat, 4)); }
+    if (ground) {
+      g.setAttribute("normal", new THREE.BufferAttribute(T.nrm, 3)); g.setAttribute("mat", new THREE.BufferAttribute(T.mat, 4));
+      if (T.till) g.setAttribute("till", new THREE.BufferAttribute(T.till, 1));
+    }
     else g.setAttribute("uv", new THREE.BufferAttribute(T.uv, 2));
     g.setAttribute("color", new THREE.BufferAttribute(T.col, 3));
     g.setAttribute("skyl", new THREE.BufferAttribute(T.sky, 1));
@@ -1307,6 +1362,7 @@ function buildMesh(c) {
 }
 world.buildMeshNow = buildMesh;   // (tests)
 world.meshJobFor = (c, copy) => meshJob(c, copy);   // (tests, profiling)
+world.nbMiss = nbMiss;   // (tests)
 // (tests) the arrays the page's mesher makes for chunk c now, without showing them; and the arrays of c's meshes as shown
 world.meshArrays = c => M.build(meshJob(c, false), meshTables());
 world.shownArrays = c => {
