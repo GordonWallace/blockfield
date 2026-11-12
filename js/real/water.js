@@ -618,11 +618,14 @@ if (uRwOn > 0.5) {
   float flat_ = smoothstep(0.5, 0.9, abs(Ng.y));
   vec2 n3 = texture2D(uRwNoise, P.xz * 3.0).xy - 0.5;
   vec3 Nn = normalize(vec3((n.x + n3.x * 1.4) * 0.07, 1.0, (n.y + n3.y * 1.4) * 0.07));
+  // falling water and the sides of a step in a river: white water running down, in the light the surface above and below it has,
+  // so a fall down a slope is one stream (dark sides between bright tops read as gaps, most of all at night)
+  float fall = 1.0 - flat_;
+  float fz = texture2D(uRwNoise, vec2((P.x + P.z) * 0.75, P.y * 0.125 + uRwTime * 0.45)).z * 0.6
+    + texture2D(uRwNoise, vec2((P.x - P.z) * 1.5 + 0.3, P.y * 0.25 + uRwTime * 0.8)).z * 0.4;
   float alpha;
-  vec3 col = rwShade(Nn, Vd, 1.6, 0.0, 0.0, rwLit, alpha);
-  // falling water and the sides of a body of water: its own colour, a little sky
-  vec3 side = vec3(0.018, 0.075, 0.06) * max(rwLit * uDay, 0.04) + rwSky(vec3(0.0, 0.4, 0.0)) * rwLit * 0.22;
-  gl_FragColor = vec4(mix(side, col, flat_), mix(0.78, alpha, flat_) * (diffuseColor.a / 0.75));
+  vec3 col = rwShade(Nn, Vd, 1.6, fall * 0.8, fz, rwLit, alpha);
+  gl_FragColor = vec4(col, mix(max(alpha, 0.8), alpha, flat_) * (diffuseColor.a / 0.75));
 }
 #include <tonemapping_fragment>`);
   };
