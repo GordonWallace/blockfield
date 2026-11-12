@@ -812,7 +812,8 @@ function connect(send, mode) {
     if (e && !(on && r.prev === e.p && r.xt === e.t)) {   // (it was drawn on along a step that is no longer the one drawn)
       const p = r.prev, B = r.k < 1 && r.to || r, k = p ? r.k : 1;
       const x = p ? lin(p.x, B.x, k) : r.x, y = p ? lin(p.y, B.y, k) : r.y, z = p ? lin(p.z, B.z, k) : r.z;
-      const q = Math.min(world.rt - e.t, e.ext) / e.d, dx = lin(e.ax, e.bx, 1 + q) - x, dy = lin(e.ay, e.by, 1 + q) - y, dz = lin(e.az, e.bz, 1 + q) - z;
+      // (the height is not drawn on along the step, js/mobview.js drawState: a step up a block takes one tick and would be drawn on blocks up into the air)
+      const q = Math.min(world.rt - e.t, e.ext) / e.d, dx = lin(e.ax, e.bx, 1 + q) - x, dy = e.by - y, dz = lin(e.az, e.bz, 1 + q) - z;
       if (dx * dx + dy * dy + dz * dz < 16) { r.ox = (r.ox || 0) + dx; r.oy = (r.oy || 0) + dy; r.oz = (r.oz || 0) + dz; }
     }
     r.ex = on ? { p: r.prev, t: r.xt, d: r.xt - r.prev.t, ext: world.ext, ax: r.prev.x, ay: r.prev.y, az: r.prev.z, bx: r.x, by: r.y, bz: r.z } : null;
