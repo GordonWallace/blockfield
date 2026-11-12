@@ -1268,13 +1268,15 @@ function meshJob(c, copy) {
     });
   });
   if (T.real) { if (miss) nbMiss.add(c.key); else nbMiss.delete(c.key); }
+  const CC = T.real ? clayColumns(c, ox, oz) : null;
   const cp = a => typeof a === "number" || !a ? a : a.slice();
   return {
     ox, oz, lo: c.lo, hi: c.hi, y0: c.y0, y1: c.y1,
     secs: copy ? c.secs.map(cp) : c.secs, light: copy && c.light ? c.light.map(cp) : c.light, sky: copy && c.sky ? c.sky.map(cp) : c.sky,
     stood: T.real && BF.real.fell ? BF.real.fell.stood(ox, oz) : null,   // (where trees stand or stood: only there is a lone log a stump, js/real/fell.js)
     Y0, Y1, rb, rl, rs, tint, ext, real: T.real ? 1 : false,
-    clay: T.real ? clayColumns(ox, oz) : null,   // (where terracotta and sandstone are the ground itself; elsewhere they stay cubes, js/real/terrain.js)
+    // (where terracotta and sandstone are the ground itself; elsewhere they stay cubes, js/real/terrain.js)
+    clay: CC ? CC.clay : null, clayH: CC ? CC.H : null, strata: CC && CC.strata || null,
     sph: Object.assign(sphereFrame(ox, oz), { R: BF.planet.R, sea: BF.SEA }),
   };
 }
@@ -1286,19 +1288,26 @@ function homeOfClay(x, z) {
 // of a border must agree on what is ground in the columns they both read, or their smooth ground parts along the border. Asked on a
 // lattice of every 4th column of the world first (the same lattice for every chunk); only a square of it whose corners differ is
 // asked column by column.
-const CLAY_NONE = new Uint8Array((CS + 4) * (CS + 4));
-function clayColumns(ox, oz) {
-  const Wd = CS + 4, x0 = ox - 4, z0 = oz - 4, L = new Uint8Array(49);   // lattice points x0 + 4 i, z0 + 4 k (ox and oz are multiples of 16)
+// In such a column the value is 1 + the shift of the badlands' bands there, and H holds the height the ground was generated at: with
+// those the mesher tells the clay the world was made of (at or under that height, and the very band generated there) from terracotta
+// someone placed, which stays a cube (js/real/mesh.js). Kept on the chunk: a column's answer never changes.
+const CLAY_NONE = { clay: new Uint8Array((CS + 4) * (CS + 4)), H: null };
+function clayColumns(c, ox, oz) {
+  if (c.clayCols) return c.clayCols;
+  const Wd = CS + 4, x0 = ox - 4, z0 = oz - 4;   // lattice points x0 + 4 i, z0 + 4 k (ox and oz are multiples of 16)
   let any = 0;
-  for (let k = 0; k < 7; k++) for (let i = 0; i < 7; i++) any += (L[k * 7 + i] = homeOfClay(x0 + 4 * i, z0 + 4 * k) ? 1 : 0);
-  if (!any) return CLAY_NONE;
-  const out = new Uint8Array(Wd * Wd);
+  for (let k = 0; k < 7 && !any; k++) for (let i = 0; i < 7 && !any; i++) any = homeOfClay(x0 + 4 * i, z0 + 4 * k) ? 1 : 0;
+  if (!any) return (c.clayCols = CLAY_NONE);
+  const clay = new Uint8Array(Wd * Wd), H = new Int16Array(Wd * Wd), g = BF.worldgen, o = [0];
   for (let z = -2; z < CS + 2; z++) for (let x = -2; x < CS + 2; x++) {
-    const i = (x + 4) >> 2, k = (z + 4) >> 2, a = L[k * 7 + i], n = a + L[k * 7 + i + 1] + L[(k + 1) * 7 + i] + L[(k + 1) * 7 + i + 1];
-    out[(z + 2) * Wd + x + 2] = n === 0 ? 0 : n === 4 ? 1 : homeOfClay(ox + x, oz + z) ? 1 : 0;
+    let v = 0;
+    try { v = g.strataAt(ox + x, oz + z, o); } catch (_) { v = 0; }
+    if (v) { clay[(z + 2) * Wd + x + 2] = v; H[(z + 2) * Wd + x + 2] = o[0]; }
   }
-  return out;
+  if (BF.real.setStrata) BF.real.setStrata(g.strata());   // (the terrain material draws the same bands, js/real/terrain.js)
+  return (c.clayCols = { clay, H, strata: g.strata() });
 }
+
 // The arrays of a job copied for a worker (to transfer them).
 function jobBuffers(J) {
   const a = [J.rb.buffer, J.rl.buffer, J.rs.buffer, J.tint.buffer];
@@ -1319,6 +1328,7 @@ function applyMesh(c, R, anchor) {
     if (ground) {
       g.setAttribute("normal", new THREE.BufferAttribute(T.nrm, 3)); g.setAttribute("mat", new THREE.BufferAttribute(T.mat, 4));
       if (T.till) g.setAttribute("till", new THREE.BufferAttribute(T.till, 1));
+      if (T.strat) g.setAttribute("strat", new THREE.BufferAttribute(T.strat, 2));
     }
     else g.setAttribute("uv", new THREE.BufferAttribute(T.uv, 2));
     g.setAttribute("color", new THREE.BufferAttribute(T.col, 3));

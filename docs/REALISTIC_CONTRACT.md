@@ -91,7 +91,7 @@ reaches the cell) and `bl` (block light level / 15; above 1.5 marks an emissive 
 `BF.mesher.build(J, TB)` returns `{ S, L }` as in 1.5 and, when the job has `J.real` (js/real/mesh.js does the work, in the
 page and in the mesher workers), also:
 
-- `T`: the natural terrain pass: `{ pos, nrm, col, sky, bl, mat, till, sphere, ind }`. A smooth surface (surface nets, eased once)
+- `T`: the natural terrain pass: `{ pos, nrm, col, sky, bl, mat, till, strat, sphere, ind }`. A smooth surface (surface nets, eased once)
   over the natural ground blocks listed in `BF.real.assets.ground` (grass, dirt, sand, gravel, stone and its variants, snow,
   ores under their rock, ...). Those blocks are left out of `S`; every other block stays a cube, and a cube's face against
   natural ground is drawn (the ground may slope away from it). Digging and placing ground materials reshapes the surface.
@@ -105,7 +105,12 @@ page and in the mesher workers), also:
   For the same reason what is ground is decided by column, never by chunk (`J.clay`: the columns where terracotta and
   sandstone are the ground itself), and a chunk meshed while a neighbour's blocks are not loaded takes the neighbour's
   ground to carry on as its own edge column does and is meshed again when those blocks arrive (`nbMiss` in js/world.js).
-  Farmland is ground too (tilled soil, an entry with `till: true`): `till` is its share at a vertex, drawn as furrows. `col` is the ground's colour
+  Farmland is ground too (tilled soil, an entry with `till: true`): `till` is its share at a vertex, drawn as furrows.
+  The badlands' banded clay is ground only where the world was generated with it: in a home column (`J.clay` there is 1 + the
+  shift of the bands, `J.clayH` the generated ground height, `J.strata` the 64 bands from `BF.worldgen.strata()`), a terracotta
+  block at or under that height that is the very band generated there. Terracotta placed above the old ground, or of another
+  colour, stays a cube. `strat` (2 floats a vertex) is the clay's share and the shift of its bands: the material looks the band
+  up by height (`BF.real.setStrata`), so the beds are level and sharp and each lies where its blocks are. `col` is the ground's colour
   (times the biome grass tint where the entry says so), `mat` four weights for the detail layers (section 5).
   Turf (a `tint` entry: the grass block) is green on top only. A vertex is listed once per kind of face that uses it: a face that
   looks up shows the ground whose top it is (so the floor of a dug hole is the soil dug down to), every other face shows a cut
