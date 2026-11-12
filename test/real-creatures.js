@@ -67,7 +67,7 @@ const root = path.resolve(__dirname, '..');
     const pg = await open('&creatures=pig:' + style);
     const got = await spawnAll(pg);
     const A = boxes[0], B = got[0], same = Object.keys(A).sort().join() === Object.keys(B).sort().join();
-    check(same && Object.keys(A).every(k => B[k].smooth && B[k].nrm && A[k].at.join() === B[k].at.join()), style + ' pig: smooth parts on the box model\'s pivots');
+    check(same && Object.keys(A).every(k => B[k].smooth && B[k].nrm && A[k].at[0] === B[k].at[0] && A[k].at[2] === B[k].at[2] && B[k].at[1] >= A[k].at[1]), style + ' pig: smooth parts on the box model\'s pivots (its legs swing from higher up, inside the body)');
     check(got.slice(1).every(o => Object.values(o).every(p => !p.smooth)), style + ' pig: the other animals stay boxes');
     await pg.close();
   }

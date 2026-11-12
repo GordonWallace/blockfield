@@ -278,6 +278,11 @@ function pig(style) {
   return [body, head, ...quadLegs(3, 5, 6, { r: nat ? 1.75 : 2.0, paint: skin, hoof, hoofH: nat ? 1.0 : 1.2, natural: nat, fat: 0.85, joint: 0.6 })];
 }
 
+// A leg as rings [height, forward of the hip, half width, front, back], top (inside the body) to hoof.
+function limb(g, x, z, rings, paint, k) {
+  k = k || 1;
+  loft(g, rings.map(q => [x, q[0], z + q[1], q[2] * k, [q[3] * k, q[4] * k]]), paint, { seg: 12, sub: 4, cap: [0.8, 0] });
+}
 // ---------- pig, from photographs of feral hogs ----------
 // "real": the animal as photographed: a slab-sided body highest at the shoulder, a long wedge of a head carried low, upright hairy ears,
 // thin dark legs, a straight tufted tail, a rust coat of coarse bristles with ragged black blotches and a mane along the spine.
@@ -285,6 +290,11 @@ function pig(style) {
 function pigWild(style) {
   const toon = style === "toon";
   const rust = C(0xa05c2a), rustHi = C(0xc07a38), under = C(0x5e361c), black = C(0x17120e), legC = C(0x24170f), hoof = C(0x15100c), disc = C(0xa5675c);
+  const HIP = 9.5;
+  const FRONT = [[12.2, 0.3, 1.0, 1.6, 1.6], [10.2, 0.4, 1.45, 2.0, 2.0], [8.2, 0.3, 1.4, 1.75, 1.7], [6.5, 0.2, 1.05, 1.2, 1.2], [4.6, 0.25, 0.8, 0.86, 0.8], [2.6, 0.1, 0.6, 0.62, 0.62],
+    [1.1, 0.1, 0.62, 0.68, 0.68], [0.5, 0.25, 0.75, 0.9, 0.75], [0, 0.3, 0.85, 1.05, 0.8]];
+  const HIND = [[12.4, 0.2, 1.0, 2.0, 1.8], [10.3, 0.3, 1.6, 2.6, 2.3], [8.3, 0.4, 1.55, 2.3, 2.0], [6.6, 0.1, 1.15, 1.5, 1.4], [4.4, -0.7, 0.8, 0.85, 0.95], [2.6, -0.5, 0.6, 0.62, 0.62],
+    [1.1, -0.3, 0.62, 0.68, 0.68], [0.5, -0.05, 0.75, 0.9, 0.75], [0, 0.1, 0.85, 1.05, 0.8]];
   if (toon) return pigToon();
   const blot = Q => fbm((Q.x + Q.z * 0.5) * 0.42 + 2.7, (Q.y - Q.x * 0.4) * 0.42 + 5.1, (Q.z + Q.y * 0.4) * 0.36 + 9.3) + (vnoise(Q.x * 3, Q.y * 3, Q.z * 3) - 0.5) * 0.07;
   const coat = Q => {
@@ -329,9 +339,11 @@ function pigWild(style) {
       fur(g, j0, { density: 14, seed: 31 + s, len: () => 0.75, flow: q => [s * 0.45, 1, -0.1], lift: 0.5, tip: 1.5 });
     });
   });
-  const furry = (name, sx, sz, swing) => part(name, [sx * 3, 6, sz * 5], { swing }, g => {
-    leg(g, sx * 3, 6, sz * 5, { r: 1.3, paint: coat, hoof, hoofH: 0.9, natural: sz > 0 ? "front" : "hind", fat: 0.95, joint: 0.6 });
-    fur(g, 0, { density: 7, seed: 41 + sx * 3 + sz, len: q => (q[1] < 1.2 ? 0 : q[1] > 5.5 ? 0.8 : 0.45), flow: () => [0, -1, -0.1], lift: 0.3, width: 0.18 });
+  // Legs that grow out of the body: each swings from a joint inside it (HIP high, not at the belly line), and its upper part is a flat
+  // slab of muscle lying in the flank (shoulder, ham), so no gap or socket shows where it leaves the body.
+  const furry = (name, sx, sz, swing) => part(name, [sx * 3, HIP, sz * 5], { swing }, g => {
+    limb(g, sx * 2.9, sz * 5, sz > 0 ? FRONT : HIND, Q => (Q.y < 0.9 ? hoof : coat(Q)));
+    fur(g, 0, { density: 7, seed: 41 + sx * 3 + sz, len: q => (q[1] < 1.2 ? 0 : q[1] > 6.5 ? 0.75 : 0.45), flow: q => (q[1] > 6.5 ? back : [0, -1, -0.1]), lift: 0.35, width: 0.18 });
   });
   return [body, head, furry("legFL", -1, 1, 1), furry("legFR", 1, 1, -1), furry("legBL", -1, -1, -1), furry("legBR", 1, -1, 1)];
 
@@ -361,8 +373,11 @@ function pigWild(style) {
         flap(g, [s * 2.9, 15.6, 9.6], [s * 5.6, 20.4, 9.0], 2.5, 0.6, Q => (Q.y > 18.6 ? dark : mix(orange, pink, sm(ramp(Q.z, 9.3, 9.9)) * 0.6)), [s * 0.5, 0, 1], { bend: [s * -0.5, 0, -0.5], root: 0.75 });
       });
     });
-    const legPaint = Q => (Q.y < 3.6 ? sock : orange);
-    return [body, head, ...quadLegs(3, 5, 6, { r: 1.9, paint: legPaint, hoof: C(0x241610), hoofH: 1.1 })];
+    const TF = [[12.0, 0.2, 1.5, 2.3, 2.3], [9.8, 0.3, 2.2, 2.9, 2.9], [7.2, 0.2, 2.15, 2.5, 2.5], [4.6, 0.1, 1.85, 1.95, 1.95], [1.4, 0.1, 1.6, 1.65, 1.65], [0.7, 0.15, 1.8, 1.9, 1.8], [0, 0.15, 1.85, 1.95, 1.85]];
+    const TH = [[12.2, 0, 1.5, 2.6, 2.5], [9.8, 0.1, 2.3, 3.2, 3.0], [7.2, 0.1, 2.2, 2.7, 2.6], [4.6, -0.1, 1.85, 1.95, 1.95], [1.4, -0.1, 1.6, 1.65, 1.65], [0.7, 0, 1.8, 1.9, 1.8], [0, 0, 1.85, 1.95, 1.85]];
+    const one = (name, sx, sz, swing) => part(name, [sx * 3, HIP, sz * 5], { swing }, g =>
+      limb(g, sx * 2.75, sz * 5, sz > 0 ? TF : TH, Q => (Q.y < 1.1 ? C(0x241610) : Q.y < 3.6 ? sock : orange)));
+    return [body, head, one("legFL", -1, 1, 1), one("legFR", 1, 1, -1), one("legBL", -1, -1, -1), one("legBR", 1, -1, 1)];
   }
 }
 
