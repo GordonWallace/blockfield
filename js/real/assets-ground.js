@@ -14,7 +14,7 @@ const G = BF.real.assets.ground;
 const rgb = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
 const add = (id, layer, color, blocks, tint) => G.push({ id, blocks, color: rgb(color), layer, tint: !!tint });
 // soil and turf
-add("turf", 0, "#a9b08a", ["grass"], true);          // near-neutral, so the biome's grass colour decides the hue
+add("turf", 0, "#80876b", ["grass"], true);          // near-neutral, so the biome's grass colour decides the hue
 add("loam", 0, "#5e4a38", ["dirt"]);
 add("stony_soil", 0, "#6e5c48", ["coarse_dirt"]);
 add("needle_litter", 0, "#5a4028", ["podzol"]);
