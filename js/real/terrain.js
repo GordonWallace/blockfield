@@ -231,19 +231,30 @@ let mat = null;
 real.terrainMaterial = function () {
   if (mat) return mat;
   const detail = { value: detailTexture() }, turf = { value: turfTexture() }, soil = { value: soilTexture() };
+  // the soil under turf (linear), for the bare ground at turf's edge
+  const tb = real.meshTables(), di = BF.B.dirt != null && tb.NAT[BF.B.dirt] ? tb.NAT[BF.B.dirt] - 1 : -1;
+  const under = { value: di < 0 ? new T.Vector3(0.11, 0.07, 0.04) : new T.Vector3(Math.pow(tb.GCOL[di * 3], 2.2), Math.pow(tb.GCOL[di * 3 + 1], 2.2), Math.pow(tb.GCOL[di * 3 + 2], 2.2)) };
   mat = new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0 });
   mat.onBeforeCompile = sh => {
-    sh.uniforms.uDetail = detail; sh.uniforms.uTurf = turf; sh.uniforms.uSoil = soil; sh.uniforms.uWet = real.U.uWet;
+    sh.uniforms.uDetail = detail; sh.uniforms.uTurf = turf; sh.uniforms.uSoil = soil; sh.uniforms.uUnder = under; sh.uniforms.uWet = real.U.uWet;
     sh.vertexShader = "attribute vec4 mat;\nvarying vec4 vMat;\nvarying vec3 vLp;\nvarying vec3 vLn;\n" +
       sh.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\nvMat = mat; vLp = position; vLn = normal;");
-    sh.fragmentShader = "uniform sampler2D uDetail;\nuniform sampler2D uTurf;\nuniform sampler2D uSoil;\nuniform float uWet;\nvarying vec4 vMat;\nvarying vec3 vLp;\nvarying vec3 vLn;\n" +
+    sh.fragmentShader = "uniform sampler2D uDetail;\nuniform sampler2D uTurf;\nuniform sampler2D uSoil;\nuniform vec3 uUnder;\nuniform float uWet;\nvarying vec4 vMat;\nvarying vec3 vLp;\nvarying vec3 vLn;\n" +
       `float bfDetail(vec3 p, vec3 w, vec4 m, float s) {
         vec4 tx = texture2D(uDetail, p.zy * s), ty = texture2D(uDetail, p.xz * s), tz = texture2D(uDetail, p.xy * s);
         return dot(tx * w.x + ty * w.y + tz * w.z, m);
       }
+      // the weights of the three projections from the face's own direction: the smoothed normal of a hole's wall still points
+      // half up, and a texture laid on a wall from above is drawn out into streaks
+      vec3 bfFaceW(vec3 p) { vec3 n = abs(normalize(cross(dFdx(p), dFdy(p)))); n = n * n * n; return n / max(1e-4, n.x + n.y + n.z); }
       vec4 bfSoil(vec3 p, vec3 w) { return texture2D(uSoil, p.zy * 0.5) * w.x + texture2D(uSoil, p.xz * 0.5) * w.y + texture2D(uSoil, p.xy * 0.5) * w.z; }
       // how much of the ground here is turf: the vertices' share, with a ragged edge where turf meets bare ground
-      float bfTurf(float share, vec4 g) { return smoothstep(0.3, 0.7, share + (g.b - 0.45) * 0.7 * step(0.001, share) * step(share, 0.999)); }\n` +
+      // (the edge sits where the share is about 0.8 and wanders with the blades and with a slower noise: the mesher gives the rim of
+      // a cut 0.86 on top and 1 at the top of the wall, so soil bites into the sward and turf hangs a little way over the cut)
+      float bfTurf(float share, vec4 g, float slow) {
+        float e = share + ((g.b - 0.45) * 0.3 + (slow - 0.5) * 0.3) * step(0.001, share) * step(share, 0.999);
+        return smoothstep(0.76, 0.84, e);
+      }\n` +
       sh.fragmentShader
         .replace("#include <color_fragment>", `#include <color_fragment>
 {
@@ -251,16 +262,18 @@ real.terrainMaterial = function () {
   float ms = max(1e-3, vMat.x + vMat.y + vMat.z + vMat.w);
   vec4 m = vMat / ms;
   vec4 g1 = texture2D(uTurf, vLp.xz * 0.625), g2 = texture2D(uTurf, vLp.zx * 0.3125 + 0.37);
-  float turf = bfTurf(clamp(ms - 1.0, 0.0, 1.0), g1);
+  float share = clamp(ms - 1.0, 0.0, 1.0), turf = bfTurf(share, g1, texture2D(uDetail, vLp.xz * 0.37 + vLp.y * 0.61).g);
   // steep turf shows the rock under it; steep soil (a bank, the wall of a dug hole) stays soil
   float steep = smoothstep(0.62, 0.42, normalize(vLn).y);
   float d1 = bfDetail(vLp, bw, m, 0.25), d2 = bfDetail(vLp, bw, m, 0.031);
   vec3 c = pow(diffuseColor.rgb, vec3(2.2));
-  c = mix(c, vec3(0.19, 0.18, 0.17), steep * m.x * mix(0.2, 0.75, turf));
-  vec3 bare = c * 0.5 * (0.7 + 0.6 * d1) * (0.7 + 0.6 * d2);
+  // (where turf gives way the vertex colour is still part green: the bare ground beside turf is the soil under it)
+  vec3 cb = mix(c, uUnder, smoothstep(0.0, 0.5, share) * step(share, 0.999));
+  c = mix(c, vec3(0.19, 0.18, 0.17), steep * m.x * 0.75);
+  vec3 bare = cb * 0.5 * (0.7 + 0.6 * d1) * (0.7 + 0.6 * d2);
   // bare earth: clods and the dark crevices between them, a few small stones, damper and darker in patches
-  vec4 so = bfSoil(vLp, bw);
-  vec3 earth = c * 0.5 * (0.45 + 0.85 * so.r) * (0.72 + 0.56 * d2);
+  vec4 so = bfSoil(vLp, bfFaceW(vLp));
+  vec3 earth = cb * 0.5 * (0.45 + 0.85 * so.r) * (0.72 + 0.56 * d2);
   earth = mix(earth, vec3(0.085, 0.072, 0.058) * (0.5 + 0.7 * so.r), so.g * 0.8);
   bare = mix(bare, earth, m.x);
   // short grass: blades light at the tip over dark roots, some drier than others, in patches a few blocks across
@@ -277,8 +290,8 @@ real.terrainMaterial = function () {
   float ms = max(1e-3, vMat.x + vMat.y + vMat.z + vMat.w);
   vec4 m = vMat / ms;
   vec4 g1 = texture2D(uTurf, vLp.xz * 0.625);
-  float turf = bfTurf(clamp(ms - 1.0, 0.0, 1.0), g1);
-  float h = mix(mix(bfDetail(vLp, bw, m, 0.25), bfSoil(vLp, bw).b * 2.0, m.x), g1.b * 1.6, turf);
+  float turf = bfTurf(clamp(ms - 1.0, 0.0, 1.0), g1, texture2D(uDetail, vLp.xz * 0.37 + vLp.y * 0.61).g);
+  float h = mix(mix(bfDetail(vLp, bw, m, 0.25), bfSoil(vLp, bfFaceW(vLp)).b * 2.0, m.x), g1.b * 1.6, turf);
   vec3 dp1 = dFdx(-vViewPosition), dp2 = dFdy(-vViewPosition);
   float dh1 = dFdx(h), dh2 = dFdy(h);
   vec3 r1 = cross(dp2, normal), r2 = cross(normal, dp1);

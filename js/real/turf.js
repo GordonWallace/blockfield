@@ -68,7 +68,9 @@ function build(g, ox, oz, density) {
     // not under water, and not up through something that lies on the ground
     const over = W.getBlock(Math.floor(ox + ax + (ux + vx) / 3), Math.floor(ay + (uy + vy) / 3 + 0.3), Math.floor(oz + az + (uz + vz) / 3));
     if (over && (FLUID[over] || SOLID[over])) continue;
-    const n = 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) * density;
+    const cl = Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+    if (Math.abs(uz * vx - ux * vz) < 0.8 * cl) continue;   // the face itself leans too far (the lip of turf over a cut has no blades)
+    const n = 0.5 * cl * density;
     cnt[t] = Math.min(255, Math.floor(n) + (rnd() < n - Math.floor(n) ? 1 : 0));
     most += cnt[t];
   }

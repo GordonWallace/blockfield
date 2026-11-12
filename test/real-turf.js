@@ -1,7 +1,7 @@
 // @ci baseline suite=world timeout=420
 // Grass as ground in the realistic look (1.6, js/real/mesh.js, terrain.js, turf.js): turf is green on top only. The floor of a dug
 // hole and the walls of a shaft show the soil that was dug into (no turf share at any of their vertices), the rim around them stays
-// turf, short blades of grass stand on turf near the player and not in the hole, and when the game's grass spreading (js/grass.js)
+// turf with a rough edge, short blades of grass stand on turf near the player and not in the hole, and when the game's grass spreading (js/grass.js)
 // turns the floor back into grass the turf and its blades come back. With the look off none of it runs.
 // Usage: node test/real-turf.js [outDir for screenshots]
 const path = require('path');
@@ -100,7 +100,8 @@ const BLADES = ([x, z, top]) => {
       const hole = await pg.evaluate(COLUMN, [x, z, y - 4]), low = hole.filter(v => v[0] < y + 0.6), high = hole.filter(v => v[0] >= y + 0.6);
       check(low.length >= 4 && low.every(v => v[1] < 0.01), 'the floor of a dug hole is bare soil', low);
       check(low.every(v => v[2] > v[3] * 1.05), 'and brown, not green', low);
-      check(high.some(v => v[1] > 0.99) && high.some(v => v[1] < 0.01), 'its rim is turf on top and soil on the inside', high);
+      // (the rim is a rough edge, not a line: the top's rim vertices carry a little soil, the wall's top vertices are the sward's lip)
+      check(high.some(v => v[1] > 0.99) && high.some(v => v[1] > 0.8 && v[1] < 0.95) && high.every(v => v[1] > 0.8), 'its rim is turf with a little soil worked in, for a rough edge', high);
       const shaft = await pg.evaluate(COLUMN, [x + 3, z, y - 4]), walls = shaft.filter(v => v[0] < y + 0.6);
       check(walls.length >= 12 && walls.every(v => v[1] < 0.01 && v[2] > v[3]), 'the walls of a shaft are soil all the way up, with no turf', walls);
       check(shaft.some(v => v[0] >= y + 0.6 && v[1] > 0.99), 'and the ground around its mouth is still turf');

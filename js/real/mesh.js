@@ -195,10 +195,29 @@ function finish(R) {
   const P = [], Nn = [], C = [], SK = [], BLt = [], MT = [], tc = [1, 1, 1];
   const gc = RT.GCOL, GLAY = RT.GLAY, GTINT = RT.GTINT, GSIDE = RT.GSIDE;
   const acc = new Float64Array(9);   // r, g, b, the 4 layers, turf, count
-  const addG = (g, x, z) => {
+  const addG = (g, x, z, w) => {
     let r = gc[g * 3], gg = gc[g * 3 + 1], b = gc[g * 3 + 2];
-    if (GTINT[g]) { h.tint(Math.max(0, Math.min(CS, Math.round(x))), Math.max(0, Math.min(CS, Math.round(z))), 1, tc); r *= tc[0]; gg *= tc[1]; b *= tc[2]; acc[7]++; }
-    acc[0] += r; acc[1] += gg; acc[2] += b; acc[3 + GLAY[g]]++; acc[8]++;
+    if (GTINT[g]) { h.tint(Math.max(0, Math.min(CS, Math.round(x))), Math.max(0, Math.min(CS, Math.round(z))), 1, tc); r *= tc[0]; gg *= tc[1]; b *= tc[2]; acc[7] += w; }
+    acc[0] += r * w; acc[1] += gg * w; acc[2] += b * w; acc[3 + GLAY[g]] += w; acc[8] += w;
+  };
+  // The cut edge of turf (the rim of a dug hole, the lip of a bank): the side of a turf cell at band row Y that shows soil, seen
+  // from the 2 x 2 columns at (i, k). Returns the turf's ground index + 1, or 0. The line where turf ends is not drawn at the rim
+  // itself: the top's rim vertices carry a little soil and the wall's top vertices are turf, so the material (js/real/terrain.js)
+  // breaks the edge up, soil biting into the sward and turf hanging over the cut.
+  const cutTurf = (i, Y, k) => {
+    if (Y < 0 || Y >= NY) return 0;
+    for (let e = 0; e < 4; e++) {
+      const X0 = i + (e === 1 ? 1 : 0), Z0 = k + (e === 3 ? 1 : 0), X1 = e < 2 ? X0 : X0 + 1, Z1 = e < 2 ? Z0 + 1 : Z0;
+      const a = m(X0, Y, Z0), b = m(X1, Y, Z1);
+      if (!a === !b) continue;
+      const g = (a || b) - 1;
+      if (GSIDE[g] === g) continue;
+      const ox = a ? X1 : X0, oz = a ? Z1 : Z0, sx = a ? X0 : X1, sz = a ? Z0 : Z1;
+      if (hm(ox, Y, oz) || (Y + 1 < NY && m(sx, Y + 1, sz))) continue;   // against something built, or not the top of the turf
+      const foot = Y > 0 ? m(ox, Y - 1, oz) : 0;
+      if (!foot || GSIDE[foot - 1] === foot - 1) return g + 1;
+    }
+    return 0;
   };
   const vert = (v, side) => {
     const slot = v * 2 + side;
@@ -243,9 +262,12 @@ function finish(R) {
       // a top: the grounds of the (up to 4) cells of the lower level whose tops are open, mixed
       for (let c = 0; c < 4; c++) {
         const X = i + (c & 1), Z = k + (c >> 1), mv = m(X, j, Z);
-        if (mv && !m(X, j + 1, Z)) addG(mv - 1, x, z);
+        if (mv && !m(X, j + 1, Z)) addG(mv - 1, x, z, 1);
       }
-    } else {
+      const ct = cutTurf(i, j, k);
+      if (ct && acc[8]) addG(GSIDE[ct - 1], x, z, 0.16 * acc[8]);
+    } else if (cutTurf(i, j, k)) addG(cutTurf(i, j, k) - 1, x, z, 1);   // (the top of a cut through turf: the sward's own edge)
+    else {
       // a wall: the sides of the cells that have an open cell beside them, mixed
       for (let Y = j; Y <= j + 1; Y++) for (let e = 0; e < 4; e++) {
         const X0 = i + (e === 1 ? 1 : 0), Z0 = k + (e === 3 ? 1 : 0), X1 = e < 2 ? X0 : X0 + 1, Z1 = e < 2 ? Z0 + 1 : Z0;
@@ -256,10 +278,10 @@ function finish(R) {
           const foot = Y > 0 ? (a ? m(X1, Y - 1, Z1) : m(X0, Y - 1, Z0)) : 0;
           if (!foot || GSIDE[foot - 1] === foot - 1) sg = GSIDE[sg];
         }
-        addG(sg, x, z);
+        addG(sg, x, z, 1);
       }
     }
-    if (!acc[8]) addG(side ? GSIDE[g] : g, x, z);
+    if (!acc[8]) addG(side ? GSIDE[g] : g, x, z, 1);
     const id = P.length / 3, w = 1 / acc[8], tf = 1 + acc[7] * w;   // (the layers' weights add up to 1 + the share of turf: terrain.js)
     P.push(x, y + ya, z); Nn.push(nx / l, ny / l, nz / l);
     SK.push(on ? sk / on : 0); BLt.push(on ? bl / on / 15 : 0);
