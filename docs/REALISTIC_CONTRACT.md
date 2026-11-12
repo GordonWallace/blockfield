@@ -91,23 +91,29 @@ reaches the cell) and `bl` (block light level / 15; above 1.5 marks an emissive 
 `BF.mesher.build(J, TB)` returns `{ S, L }` as in 1.5 and, when the job has `J.real` (js/real/mesh.js does the work, in the
 page and in the mesher workers), also:
 
-- `T`: the natural terrain pass: `{ pos, nrm, col, sky, bl, mat, sphere, ind }`. A smooth surface (surface nets, eased once)
+- `T`: the natural terrain pass: `{ pos, nrm, col, sky, bl, mat, till, sphere, ind }`. A smooth surface (surface nets, eased once)
   over the natural ground blocks listed in `BF.real.assets.ground` (grass, dirt, sand, gravel, stone and its variants, snow,
   ores under their rock, ...). Those blocks are left out of `S`; every other block stays a cube, and a cube's face against
   natural ground is drawn (the ground may slope away from it). Digging and placing ground materials reshapes the surface.
   A flat floor comes out exactly on the block tops, and collision stays on the block grid. Three rules keep the smooth
-  surface honest against the block grid: (1) a vertex that touches a built full block (planks, a job site, a log border,
-  farmland) sits exactly on the block grid and is not eased, so the ground is flat under such a block and square against
+  surface honest against the block grid: (1) a vertex that touches a built full block (planks, a job site, a log border)
+  sits exactly on the block grid and is not eased, so the ground is flat under such a block and square against
   it, and no quad is drawn against the block's face; (2) beside a wall two blocks high or more (a dug shaft, a trench, a
   cliff foot) a vertex leans at most 0.08 of a block into the open cells, so a player standing in them never ends up
   behind the surface; (3) with the look on a job's ring band (`Y0`..`Y1`) covers the 8 neighbours' loaded bands too, and
-  an edit within 3 blocks of a chunk border re-meshes the neighbour, so both sides of a border build the same vertices. `col` is the ground's colour
+  an edit within 3 blocks of a chunk border re-meshes the neighbour, so both sides of a border build the same vertices.
+  For the same reason what is ground is decided by column, never by chunk (`J.clay`: the columns where terracotta and
+  sandstone are the ground itself), and a chunk meshed while a neighbour's blocks are not loaded takes the neighbour's
+  ground to carry on as its own edge column does and is meshed again when those blocks arrive (`nbMiss` in js/world.js).
+  Farmland is ground too (tilled soil, an entry with `till: true`): `till` is its share at a vertex, drawn as furrows. `col` is the ground's colour
   (times the biome grass tint where the entry says so), `mat` four weights for the detail layers (section 5).
   Turf (a `tint` entry: the grass block) is green on top only. A vertex is listed once per kind of face that uses it: a face that
   looks up shows the ground whose top it is (so the floor of a dug hole is the soil dug down to), every other face shows a cut
   through the ground, where turf shows the soil under it (the entry's `under` block, dirt by default) unless the foot of that
   side is turf too (the steps of a grassy slope). At such a cut the top's rim vertices carry a little soil and the wall's top
-  vertices are turf, so the material breaks the line up (soil biting into the sward, turf hanging over the cut). The `mat` weights add up to 1 + the share of turf at the vertex; the terrain
+  vertices are turf, so the material breaks the line up (soil biting into the sward, turf hanging over the cut). The riser of a step one
+  block high with ground at its foot is not a cut: its vertices are tops, so across the steps of a slope one ground runs into
+  the next as it does on the flat. The `mat` weights add up to 1 + the share of turf at the vertex; the terrain
   material draws that share as short grass, the rest of the soil layer as crumbly earth (lumps, grit, a few stones), and `js/real/turf.js` stands blades on it near the player (`BF.real.turf`, by
   quality level; it reads the ground meshes world.js shows and needs no hook).
 - `F`: the flora list, plain data, a `Float32Array` with one record of 8 floats per plant:
@@ -208,6 +214,7 @@ foundation thread for the attribute you need). Water physics is 1.5's fluid simu
 | Atmosphere and creatures | `js/real/atmos.js`, `js/real/mobs.js` | `js/sky.js`, `js/weather.js`, `js/mobs.js`, `js/mobview.js`, `js/entityview.js`, `js/audio.js` |
 | Digging | `js/real/dig.js` (the wear drawn on smooth ground while it is mined, `BF.real.dig`) | `js/cracks.js`, the break particles' line in `js/player.js` |
 | Grass ground | `js/real/turf.js` (blades of short grass on turf near the player, `BF.real.turf`) | the ground's colour rule in `js/real/mesh.js`, the turf drawing in `js/real/terrain.js` |
+| Dropped items | `js/real/drops.js` (a dropped ground block as a lit lump of that ground, other items as a lit icon, `BF.real.drops`) | the drop lines of `js/entityview.js`; `js/drops.js` (game rule, both looks: reach, items rising out of blocks) |
 
 `index.html` already loads every file above (empty stubs are on the branch), so nobody else needs to touch it. If you need
 another new file, name it `js/real/<yours>-*.js` and ask the foundation thread for the script tag.

@@ -3,8 +3,8 @@
 // helpers the mesher hands it.
 //   prepare(J, TB, h) -> R: finds the trees and the cells the cube pass must leave out
 //     R.NAT[b] natural ground (drawn by the smooth pass), R.skip(b, x, y, z) -> true when the cube pass leaves this cell out
-//   finish(R) -> { T, F }: T the smooth terrain pass { pos, nrm, col, sky, bl, mat, sphere, ind } (mat: the 4 layers' weights, adding
-//     up to 1 + the share of turf), F the flora list (8 floats a record)
+//   finish(R) -> { T, F }: T the smooth terrain pass { pos, nrm, col, sky, bl, mat, till, sphere, ind } (mat: the 4 layers' weights, adding
+//     up to 1 + the share of turf; till: the share of tilled soil), F the flora list (8 floats a record)
 // h: { get, lget, skyAt, tint(vx, vz, kind, out), sphere(pos) }
 (() => {
 "use strict";
@@ -13,7 +13,15 @@ const BF = (G.BF = G.BF || {});
 const CS = 16, W = 20;   // the chunk and the 2-block ring around it
 
 function prepare(J, TB, h) {
-  const RT = TB.real, NAT = J.real === 2 && RT.NATB ? RT.NATB : RT.NAT, TREE = RT.TREE, COVER = RT.COVER, get = h.get, OPAQUE = TB.OPAQUE;
+  const RT = TB.real, TREE = RT.TREE, COVER = RT.COVER, get = h.get, OPAQUE = TB.OPAQUE;
+  // What is ground is decided column by column: terracotta and sandstone are ground only in the columns of their home biome (J.clay,
+  // js/world.js), and the chunks on both sides of a border read the same columns, so they agree and their ground meets. (A job with no
+  // J.clay decides for the whole chunk: J.real 2 is "not their home".)
+  const NATA = RT.NAT, NATB = RT.NATB || RT.NAT, CL = J.clay || null;
+  const nat = CL ? (b, x, z) => (CL[(z + 2) * W + x + 2] ? NATA : NATB)[b] : J.real === 2 ? b => NATB[b] : b => NATA[b];
+  let allClay = !CL ? J.real !== 2 : true;
+  if (CL) for (let i = 0; i < CL.length && allClay; i++) if (!CL[i]) allClay = false;
+  const NAT = allClay ? NATA : NATB;   // (for the cube pass's whole-section shortcut: what is ground in every column)
   // the band is the job's ring band: with the look on it covers the neighbours' bands too (js/world.js meshJob), so the chunks on both
   // sides of a border see the same cells around it and their ground meets
   const ya = J.Y0, yb = J.Y1, NY = yb - ya;
@@ -28,11 +36,11 @@ function prepare(J, TB, h) {
     for (let i = 0; i < NY; i++) {
       const b = get(x, ya + i, z);
       if (b) {
-        const n = NAT[b];
+        const n = nat(b, x, z);
         if (n) mask[o + i] = n;
         else {
-          if ((OPAQUE[b] && TREE[b] !== 2) || b === TB.FARM || b === TB.FARM_DRY) hard[o + i] = 1;
-          if ((TREE[b] & 1) && NAT[below]) logs.push(x, ya + i, z, b);
+          if (OPAQUE[b] && TREE[b] !== 2) hard[o + i] = 1;
+          if ((TREE[b] & 1) && nat(below, x, z)) logs.push(x, ya + i, z, b);
         }
       }
       below = b;
@@ -68,7 +76,7 @@ function prepare(J, TB, h) {
     const sq = square(x, y, z, b);
     for (let k = 0; k < hgt; k++) for (let d = 0; d < 4; d++) {
       const nx = x + (d === 0) - (d === 1), nz = z + (d === 2) - (d === 3), n = get(nx, y + k, nz);
-      if (!n || NAT[n] || TREE[n] === 2) continue;
+      if (!n || nat(n, nx, nz) || TREE[n] === 2) continue;
       if (n === b) { if (sq && nx >= sq[0] && nx <= sq[0] + 1 && nz >= sq[1] && nz <= sq[1] + 1) continue; return false; }   // a row of logs is a wall
       if (SOLID[n]) return false;   // built against it
     }
@@ -103,6 +111,14 @@ function prepare(J, TB, h) {
       leafy = leafOf(b, qx, qy + 1, qz) || leafOf(b, qx + 1, qy, qz) || leafOf(b, qx - 1, qy, qz) || leafOf(b, qx, qy, qz + 1) || leafOf(b, qx, qy, qz - 1);
     }
     if (!leafy) {
+      // a trunk that reaches the rim of the ring (a bent one, an acacia's) may have its crown out of sight: the chunk it stands in
+      // sees it whole and takes it for a tree, so here it is not a built cell either, or the two would shape the ground around it
+      // differently and it would part along their border
+      if (TREE[b] === 1 && q.length >= 9) {
+        let rim = false;
+        for (let qi = 0; qi < q.length && !rim; qi += 3) rim = q[qi] <= -2 || q[qi] >= CS + 1 || q[qi + 2] <= -2 || q[qi + 2] >= CS + 1;
+        if (rim) { for (const k of mine) soft(k); continue; }
+      }
       // a stump (what a felled tree leaves, js/real/fell.js): one to three logs of a tree species standing alone on natural ground
       // with nothing on top, where a tree stood (J.stood). Its logs leave the cube pass and it is listed as kind 5. Posts and what the
       // player builds or places stay cubes.
@@ -129,9 +145,9 @@ function prepare(J, TB, h) {
       Math.round(h.skyAt(x + 1, ty, z) * 15) + 16 * h.lget(x + 1, y + 1, z));
   }
   return {
-    J, TB, h, mask, hard, ya, NY, F, NAT,
+    J, TB, h, mask, hard, ya, NY, F, NAT, nat,
     skip(b, x, y, z) {
-      if (NAT[b]) return true;
+      if (nat(b, x, z)) return true;
       const t = TREE[b];
       if (t === 2) return true;
       if (t & 1) return gone.has(ck(x, y, z));
@@ -202,9 +218,9 @@ function finish(R) {
   // what a cut through the ground shows: turf is green on top only, and its side is the soil under it (RT.GSIDE), unless the foot of
   // that side is turf too, which is how a grassy slope's steps look.
   const out = new Int32Array(nv * 2).fill(-1);
-  const P = [], Nn = [], C = [], SK = [], BLt = [], MT = [], tc = [1, 1, 1];
-  const gc = RT.GCOL, GLAY = RT.GLAY, GTINT = RT.GTINT, GSIDE = RT.GSIDE;
-  const acc = new Float64Array(9);   // r, g, b, the 4 layers, turf, count
+  const P = [], Nn = [], C = [], SK = [], BLt = [], MT = [], TL = [], tc = [1, 1, 1];
+  const gc = RT.GCOL, GLAY = RT.GLAY, GTINT = RT.GTINT, GSIDE = RT.GSIDE, GTILL = RT.GTILL || GTINT.map(() => 0);
+  const acc = new Float64Array(10);   // r, g, b, the 4 layers, turf, count, tilled (tops only)
   const addG = (g, x, z, w) => {
     let r = gc[g * 3], gg = gc[g * 3 + 1], b = gc[g * 3 + 2];
     if (GTINT[g]) { h.tint(Math.max(0, Math.min(CS, Math.round(x))), Math.max(0, Math.min(CS, Math.round(z))), 1, tc); r *= tc[0]; gg *= tc[1]; b *= tc[2]; acc[7] += w; }
@@ -272,7 +288,7 @@ function finish(R) {
       // a top: the grounds of the (up to 4) cells of the lower level whose tops are open, mixed
       for (let c = 0; c < 4; c++) {
         const X = i + (c & 1), Z = k + (c >> 1), mv = m(X, j, Z);
-        if (mv && !m(X, j + 1, Z)) addG(mv - 1, x, z, 1);
+        if (mv && !m(X, j + 1, Z)) { addG(mv - 1, x, z, 1); if (GTILL[mv - 1]) acc[9] += 1; }
       }
       const ct = cutTurf(i, j, k);
       if (ct && acc[8]) addG(GSIDE[ct - 1], x, z, 0.16 * acc[8]);
@@ -297,6 +313,7 @@ function finish(R) {
     SK.push(on ? sk / on : 0); BLt.push(on ? bl / on / 15 : 0);
     C.push(acc[0] * w, acc[1] * w, acc[2] * w);
     MT.push(acc[3] * w * tf, acc[4] * w * tf, acc[5] * w * tf, acc[6] * w * tf);
+    TL.push(side ? 0 : Math.min(1, acc[9] * w));   // (the share of tilled soil, drawn in furrows: js/real/terrain.js)
     return (out[slot] = id);
   };
   const I = [];
@@ -306,16 +323,20 @@ function finish(R) {
     const A = vert(a, side), B = vert(b, side), Cc = vert(c, side), D = vert(d, side);
     if (flip) I.push(A, Cc, B, A, D, Cc); else I.push(A, B, Cc, A, Cc, D);
   };
+  // The riser of a step one block high (ground at its foot, nothing on the cell it is the side of) is part of a slope, not a cut:
+  // it takes its vertices as tops, the upper ones the ground of the upper level and the lower ones the ground of the lower level, so
+  // one ground runs into the other across the step as it does on the flat, with the same rough edge, and not along a straight line.
+  const step = (sx, sz, ox, oz, y) => (m(ox, y - 1, oz) && !m(sx, y + 1, sz) && !hm(sx, y + 1, sz)) ? 0 : 1;
   for (let y = 1; y < NY - 1; y++) for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
     const s = m(x, y, z) ? 1 : 0;
     // +x edge: cells (x, y-1..y, z-1..z)
     // (no quad against a built block: its vertices are all on the grid, so it would lie in the block's own face)
     let t = m(x + 1, y, z) ? 1 : 0;
-    if (s !== t && !hm(x + s, y, z)) quad(at(x, y - 1, z - 1), at(x, y, z - 1), at(x, y, z), at(x, y - 1, z), !s, 1);
+    if (s !== t && !hm(x + s, y, z)) quad(at(x, y - 1, z - 1), at(x, y, z - 1), at(x, y, z), at(x, y - 1, z), !s, s ? step(x, z, x + 1, z, y) : step(x + 1, z, x, z, y));
     t = m(x, y + 1, z) ? 1 : 0;
     if (s !== t && !hm(x, y + s, z)) quad(at(x - 1, y, z - 1), at(x - 1, y, z), at(x, y, z), at(x, y, z - 1), !s, s ? 0 : 1);
     t = m(x, y, z + 1) ? 1 : 0;
-    if (s !== t && !hm(x, y, z + s)) quad(at(x - 1, y - 1, z), at(x, y - 1, z), at(x, y, z), at(x - 1, y, z), !s, 1);
+    if (s !== t && !hm(x, y, z + s)) quad(at(x - 1, y - 1, z), at(x, y - 1, z), at(x, y, z), at(x - 1, y, z), !s, s ? step(x, z, x, z + 1, y) : step(x, z + 1, x, z, y));
   }
   const F = R.F.length ? new Float32Array(R.F) : null;
   if (!I.length) return { T: null, F };
@@ -327,13 +348,14 @@ function finish(R) {
     const sf = [0, 0, 0];
     // the ground's top face under the cell (x, y, z), as the plane through its 4 corners (eased, they are not at the block's own
     // corners: on a stair of blocks the top faces are half as long as the blocks), read at (px, pz)
-    const V = (v, a) => P[out[v] * 3 + a];
+    const ov = v => out[v * 2] >= 0 ? out[v * 2] : out[v * 2 + 1];   // (a vertex is listed per face kind; both are at the same place)
+    const V = (v, a) => P[ov(v) * 3 + a];
     const cl = v => Math.max(-1, Math.min(1, v));
     const surf = (x, y, z, px, pz) => {
       const Y = y - 1 - ya;
       if (x < 0 || x >= CS || z < 0 || z >= CS || Y < 1 || Y >= NY - 1 || !m(x, Y, z)) return false;
       const a = at(x - 1, Y, z - 1), b = at(x, Y, z - 1), c = at(x, Y, z), d = at(x - 1, Y, z);
-      if (a < 0 || b < 0 || c < 0 || d < 0 || out[a] < 0 || out[b] < 0 || out[c] < 0 || out[d] < 0) return false;
+      if (a < 0 || b < 0 || c < 0 || d < 0 || ov(a) < 0 || ov(b) < 0 || ov(c) < 0 || ov(d) < 0) return false;
       const wx = Math.max(0.25, (V(b, 0) + V(c, 0) - V(a, 0) - V(d, 0)) / 2), wz = Math.max(0.25, (V(c, 2) + V(d, 2) - V(a, 2) - V(b, 2)) / 2);
       sf[1] = cl((V(b, 1) + V(c, 1) - V(a, 1) - V(d, 1)) / 2 / wx); sf[2] = cl((V(c, 1) + V(d, 1) - V(a, 1) - V(b, 1)) / 2 / wz);
       sf[0] = (V(a, 1) + V(b, 1) + V(c, 1) + V(d, 1)) / 4 - y
@@ -358,6 +380,7 @@ function finish(R) {
   const pos = new Float32Array(P);
   const T = {
     pos, nrm: new Float32Array(Nn), col: new Float32Array(C), sky: new Float32Array(SK), bl: new Float32Array(BLt), mat: new Float32Array(MT),
+    till: new Float32Array(TL),
     sphere: J.sph ? h.sphere(P) : null,
     ind: P.length / 3 > 65535 ? new Uint32Array(I) : new Uint16Array(I),
   };

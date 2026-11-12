@@ -10,7 +10,7 @@ const BF = (globalThis.BF = globalThis.BF || {});
 // seen from the item's frame (BF.planet.local), so an item slides across a face edge and is picked up from either side of it.
 const LQ = {};
 const seenXZ = (a, b) => BF.planet.local(a, b, LQ);
-const HW = 0.125, H = 0.25, GRAV = 18, PICKUP_R = 1.6, PICKUP_DELAY = 0.5, LIFE = 300, MAX = 300;
+const HW = 0.125, H = 0.25, GRAV = 18, PICKUP_R = 1.6, LOSE_R = 6, RISE = 4, PICKUP_DELAY = 0.5, LIFE = 300, MAX = 300;
 // Picking an item up is a "pickup" request (spec r15-22): the player (in drops.update) and foresters (js/forester.js) ask during the think,
 // and the queue gives the item to the first in order: the player first, then villagers by id. Each takes what it has room for, and the
 // rest stays on the ground for the next. target: the drop's key "d<n>" (from a counter, per session; not saved), data {}.
@@ -61,6 +61,13 @@ function through() {
   const t = new Uint8Array(BF.MAX_BLOCK + 1);
   for (const b of BF.blocks) if (b && /_leaves$/.test(b.name)) t[b.id] = 1;
   return (THROUGH = { pass: t });
+}
+// Is the item's foot inside a full solid block (not leaves, which it falls through, nor a slab, door or other part block)?
+function stuck(d) {
+  const w = BF.world, x = Math.floor(d.pos.x), y = Math.floor(d.pos.y + 1e-3), z = Math.floor(d.pos.z);
+  if (!w.isSolid(x, y, z)) return false;
+  const id = w.getBlock(x, y, z);
+  return !(THROUGH || through()).pass[id] && !BF.CBOX[id] && !BF.CBOXES[id] && !BF.DYNBOXES[id];
 }
 const drops = {
   list: [],
@@ -144,21 +151,31 @@ const drops = {
       if (!BF.world.isLoaded(d.pos.x, d.pos.z)) continue;
       d.age += dt;
       if (d.age > LIFE) { drops.remove(d); continue; }
-      // pulled toward the player once close enough, then collected
+      // pulled toward the player once close enough, then collected. The reach is measured from the nearest point of the player's
+      // lower body (feet to a block up), so an item a block under the feet or just over the head is in reach as one beside them is
+      // (1.6: measured from one point at the waist, an item lying in the block the player stood on was never in reach). Once an
+      // item is on its way it keeps coming until it is collected, faster the further behind it is, so a player walking on doesn't
+      // leave it hanging in the air or inside a block it was passing through; it gives up past LOSE_R (a teleport).
       if (alive && d.age > d.pickupDelay && pp) {
-        const q = seenXZ(d.pos, pp), dx = q.x - d.pos.x, dy = pp.y + 0.6 - d.pos.y, dz = q.z - d.pos.z, dist = Math.hypot(dx, dy, dz);
+        const q = seenXZ(d.pos, pp), dx = q.x - d.pos.x, dz = q.z - d.pos.z, cy = d.pos.y + H / 2;
+        const reach = Math.hypot(dx, cy - Math.max(pp.y, Math.min(pp.y + 1, cy)), dz);
+        const dy = pp.y + 0.6 - d.pos.y, dist = Math.hypot(dx, dy, dz);
         if (dist < 0.6) {   // collected: asks for it (applied after the think, before anyone else's ask for it)
           if (!d.wantP || BF.rand.tick - d.wantP.tick > 2) drops.ask(d, "player");
           continue;
-        } else if (dist < PICKUP_R) {
-          const k = 10 / dist;
-          d.vel.set(dx * k * 0.6, dy * k * 0.6, dz * k * 0.6);
+        } else if (reach < PICKUP_R || (d.homing && dist < LOSE_R)) {
+          const sp = Math.min(6 + 5 * Math.max(0, dist - 1), (dist - 0.3) / dt), k = sp / dist;
+          d.vel.set(dx * k, dy * k, dz * k);
           d.pos.addScaledVector(d.vel, dt);
-          d.pulled = true;
+          d.pulled = d.homing = true;
           BF.planet.reframe(d.pos, -1, null, d.vel);
           continue;
         }
       }
+      if (d.homing) { d.homing = false; d.vel.set(0, 0, 0); }
+      // an item inside a solid block (left there by a pull that ended, a block placed or grown over it) rises out of it, as in
+      // vanilla, instead of lying in it out of sight and out of reach
+      if (stuck(d)) { d.vel.set(0, 0, 0); d.pos.y = Math.min(d.pos.y + RISE * dt, Math.floor(d.pos.y + 1e-3) + 1); continue; }   // (stops on the block's top)
       // merge with an identical stack lying nearby
       if (d.age > 1 && (Math.floor(d.age * 4) % 4 === 0)) {
         const o = mergeWith(d);
@@ -184,7 +201,7 @@ const drops = {
 
 BF.drops = drops;
 
-// the drops by group (BF.ctick.owned, registered at init): plain [key, id, count, pos, vel, age, pickupDelay, wear, base cluster]
+// the drops by group (BF.ctick.owned, registered at init): plain [key, id, count, pos, vel, age, pickupDelay, wear, base cluster, homing]
 const V = v => [v.x, v.y, v.z];
 function ownTables() {
   const C = BF.ctick;
@@ -192,12 +209,12 @@ function ownTables() {
   ownTables.done = true;
   const G = (d, g) => CL().groupFor(CL().thingBase(d, d.pos)) === g;   // (thingBase: a drop no pass here has seen yet, restored from a save, too)
   C.owned("drops", {
-    snap: g => drops.list.filter(d => G(d, g)).map(d => [d.key, d.id, d.count, V(d.pos), V(d.vel), d.age, d.pickupDelay, d.wear || 0, CL().clOf(d)]),
+    snap: g => drops.list.filter(d => G(d, g)).map(d => [d.key, d.id, d.count, V(d.pos), V(d.vel), d.age, d.pickupDelay, d.wear || 0, CL().clOf(d), d.homing ? 1 : 0]),
     apply(g, a) {
       for (const d of drops.list.slice()) if (G(d, g)) drops.remove(d);
-      for (const [key, id, count, p, v, age, delay, wear, cl] of a || []) {
+      for (const [key, id, count, p, v, age, delay, wear, cl, homing] of a || []) {
         const d = { key, id, count, pos: new THREE.Vector3(p[0], p[1], p[2]), prev: new THREE.Vector3(p[0], p[1], p[2]), prevAge: age, vel: new THREE.Vector3(v[0], v[1], v[2]), age,
-          phase: Math.random() * 6.28, pulled: false, pickupDelay: delay, wear };   // visual (phase: the bob)
+          phase: Math.random() * 6.28, pulled: false, pickupDelay: delay, wear, homing: !!homing };   // (homing: on its way to the player, kept across a meeting)   // visual (phase: the bob)
         CL().keepThing(d, cl);
         drops.list.push(d);
         byKey.set(key, d);
