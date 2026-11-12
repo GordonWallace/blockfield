@@ -176,8 +176,20 @@ module.exports = async (pg, out) => {
     const kinds = [0, 0, 0, 0, 0];
     for (const w of sm.wat) kinds[w < 3 ? w : w >= 140 ? 3 : 4]++;
     const mat = BF.lod.material(true), SM = [BF.lod.standMaterial(true)];
+    // low ground by the water that generate() leaves as grass (no column under the sea beside it): turf in the look's samples
+    let flat = null;
+    const WG = BF.worldgen, pp = BF.player.position, TB = new Float32Array(9);
+    for (let r = 100; r < 8000 && !flat; r += 37) for (let a = 0; a < 48 && !flat; a++) {
+      const x = Math.round(pp.x + Math.cos(a * 0.1309) * r), z = Math.round(pp.z + Math.sin(a * 0.1309) * r), c = WG.surfaceAt(x, z, TB);
+      if (c.wl > c.h || [12, 1, 4, 2].includes(c.biome) || G.topOf(c, BF.B, BF.SEA) !== BF.B.sand) continue;
+      if (Math.min(WG.heightAt(x - 1, z), WG.heightAt(x + 1, z), WG.heightAt(x, z - 1), WG.heightAt(x, z + 1)) < BF.SEA) continue;
+      const g = BF.planet.grid(x, z), j = { f: g.f, u0: Math.floor(g.u), v0: Math.floor(g.v), cell: 4, nx: 1, ny: 1 };
+      const a1 = G.alloc(Object.assign({ real: true }, j)), a0 = G.alloc(j);
+      G.rows(Object.assign({ real: true }, j), a1, 0, 1); G.rows(j, a0, 0, 1);
+      flat = { kind: a1.wat[0], green: a1.col[1] > a1.col[0], old: Array.from(a0.col) };
+    }
     return { wat: !!raw.wat && !plain.wat, mesh: m.wat && Array.from(m.wat.subarray(0, 2)).concat(m.wat[NV - 1]), nrm: m.nrm && Array.from(m.nrm.subarray(mid, mid + 3)),
-      shade: [m.col[mid], m15.col[mid]], old: !m15.wat && !m15.nrm && !m15.gnd, errs, kinds,
+      shade: [m.col[mid], m15.col[mid]], old: !m15.wat && !m15.nrm && !m15.gnd, errs, kinds, flat,
       gnd: m.gnd && [Array.from(m.gnd.subarray(2 * (2 * n + 1), 2 * (2 * n + 1) + 2)), Array.from(m.gnd.subarray(2 * (2 * n + 3), 2 * (2 * n + 3) + 2)), m.gnd[0], m.wat[2 * n + 1], m.wat[2 * n + 3]],
       turf: /texture2D\(uTurf/.test(mat.fragmentShader) && !!mat.uniforms.uTurf.value && !!mat.uniforms.uDet.value, snow: /uSnowCol, snow\)/.test(mat.fragmentShader),
       house: SM.length > 0 && SM.some(x => x.defines.BOXES && /rlHouse\(alb\)/.test(x.fragmentShader)) };
@@ -192,6 +204,7 @@ module.exports = async (pg, out) => {
   check(land.kinds[4] === 0 && land.kinds[1] > 0, "the samples round the player are water or a kind of land, turf among them", land.kinds);
   check(land.turf && land.snow, "the far ground is drawn with the terrain's turf texture, and snow with its own edge", [land.turf, land.snow]);
   check(land.house, "a far house's faces are drawn as blocks", land.house);
+  check(!land.flat || (land.flat.kind === 1 && land.flat.green), "a low flat by the water that is grass when reached is grass from afar", land.flat);
   // the atlas' smaller copies are made by hand (js/real/lod.js mipRow): a tree drawn small keeps the share of its picture that passes
   // the cards' alpha test, and its colour isn't darkened by the empty texels round it
   const mips = await pg.evaluate(() => {

@@ -106,7 +106,11 @@ BF.gridJob = {
       const g = w.f, gu = Math.min(N - 1, Math.max(0, Math.floor(w.u))), gv = Math.min(N - 1, Math.max(0, Math.floor(w.v)));
       const x = P.W * g + N + gu, z = N + gv;
       const c = WG.surfaceAt(x, z, TB), h = c.h, wl = c.wl, b = c.biome, wet = wl > h;
-      const top = topOf(c, B, SEA);
+      let top = topOf(c, B, SEA);
+      // (the realistic look: low ground by the water is sand only where generate() makes it sand, beside a column under the sea; topOf
+      // has every low column as sand, so a wide flat shore came out as a beach and turned to grass as the player reached it)
+      if (out.wat && !wet && top === B.sand && b !== DESERT && b !== BEACH && b !== RIVER && b !== SNOWY_BEACH &&
+          Math.min(WG.heightAt(x - 1, z), WG.heightAt(x + 1, z), WG.heightAt(x, z - 1), WG.heightAt(x, z + 1)) >= SEA) top = B.grass;
       // the drawn height: the water surface, or the top of the ground (as the blocks are drawn)
       out.y[o] = wet ? wl + 0.875 : h + 1;
       // colour: the top block's texture, tinted like the blocks; the sea and lakes darker with depth, over a sandy floor near the shore
