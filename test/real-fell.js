@@ -60,24 +60,27 @@ module.exports = async (pg, out) => {
   await pg.screenshot({ path: out + "-falling.png" });
 
   await pg.waitForFunction(() => BF.real.fell.stats().falls === 0, null, { timeout: 180000, polling: 250 }).catch(() => {});
-  await pg.waitForTimeout(800);
+  await pg.waitForTimeout(2500);   // (the items come to rest and their sprites settle on the surface)
   const after = await pg.evaluate(T => {
     const f = BF.real.fell, M = BF.client.world;
-    let drops = 0, hidden = 0, shown = 0, logs = 0, off = 0;
+    let drops = 0, hidden = 0, shown = 0, logs = 0, off = 0, onGround = 0;
     for (const e of M.entities.values()) if (e.kind === "drop") {
       drops++; if (f.hides(e)) hidden++;
       const sp = BF.entityView.viewOf(e.n); if (sp && sp.visible) shown++;
       if (BF.items[e.item] && BF.items[e.item].name === "oak_log" || /_log$/.test((BF.items[e.item] || {}).name || "")) logs += e.count;
-      const sy = f.surfaceY(e.x, e.y, e.z); if (sy != null && sp) off = Math.max(off, Math.abs(sp.position.y - sy));
+      // (only an item at rest on natural ground is drawn on the surface: one that came down on the stump lies on the stump's log)
+      const under = (BF.blocks[BF.world.getBlock(Math.floor(e.x), Math.round(e.y) - 1, Math.floor(e.z))] || {}).name || "";
+      const rests = Math.abs(e.y - Math.round(e.y)) < 0.02 && under && !/_log$/.test(under);
+      const sy = rests ? f.surfaceY(e.x, e.y, e.z) : null; if (sy != null && sp) { off = Math.max(off, Math.abs(sp.position.y - sy)); onGround++; }
     }
     // the stump's cubes are not in the chunk's block mesh: the flora list holds a record of kind 5 instead, and the placer was not given it
     const c = BF.world.chunkAt(T.x, T.z);
-    return { st: f.stats(), drops, hidden, shown, logs, off: +off.toFixed(2), meshes: c && c.meshes ? c.meshes.length : 0 };
+    return { st: f.stats(), drops, hidden, shown, logs, off: +off.toFixed(2), onGround, meshes: c && c.meshes ? c.meshes.length : 0 };
   }, T);
   check(after.st.falls === 0 && after.st.felled === 1, "the fall ends and its model is gone", after.st);
   check(after.drops > 0 && after.hidden === 0 && after.shown === after.drops, "the items show once it has landed", after);
   check(after.logs === T.logs - 1, "the logs above the cut lie as items (" + (T.logs - 1) + ")", after.logs);
-  check(after.off < 0.35, "items on natural ground are drawn on the smooth surface (bobbing within 0.35 of it)", after.off);
+  check(after.onGround > 0 && after.off < 0.35, "items on natural ground are drawn on the smooth surface (bobbing within 0.35 of it)", after.off);
   check(after.st.stumps === 1, "the stump stays", after.st);
   await pg.screenshot({ path: out + "-landed.png" });
 

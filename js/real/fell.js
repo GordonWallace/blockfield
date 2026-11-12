@@ -316,7 +316,7 @@ function hides(d) {
 // the height to draw it at: on the drawn surface while it lies on natural ground, its own height otherwise, eased between the two.
 let NAT = null;
 const lift = new Map();   // drop number -> { x, y, z (where it was asked), to (the offset wanted), off (the offset drawn), seen }
-let liftFrame = 0;
+let liftFrame = 0, frameDt = 0.016;
 // The drawn ground's height at (x, z) nearest to y (within a block and a half), or null where no smooth ground is drawn there.
 function surfaceY(x, y, z) {
   const w = W(), c = w && w.chunkAt ? w.chunkAt(x, z) : null;
@@ -353,7 +353,7 @@ function itemY(n, x, y, z, dt) {
       if (sy != null) e.to = sy - y;
     }
   }
-  e.off += (e.to - e.off) * Math.min(1, (dt || 0.016) * 12);
+  e.off += (e.to - e.off) * Math.min(1, (dt || frameDt) * 12);   // (eased over about a fifth of a second, whatever the frame rate)
   return y + e.off;
 }
 function pruneLift() {
@@ -451,6 +451,6 @@ real.fell = {
 real.module({
   name: "fell",
   init(ctx) { scene = ctx.scene; wrap(); },
-  frame(dt) { pruneLift(); if (falls.length) { for (const f of falls) f.age += dt; frame(Math.min(dt, 0.1)); } },
+  frame(dt) { frameDt = dt; pruneLift(); if (falls.length) { for (const f of falls) f.age += dt; frame(Math.min(dt, 0.1)); } },
 });
 })();
