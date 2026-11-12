@@ -388,6 +388,7 @@ const sky = {
     celestial.add(sun, moon, stars);
     root.add(dome, celestial);
     scene.add(root, clouds);
+    if (BF.real && BF.real.on) BF.atmos.old = [root, clouds];   // the realistic look hides the pixel sky (js/real/atmos.js)
     // the dome follows the camera every frame, also while paused or when the camera moves fast (high up on the planet the view
     // climbs hundreds of blocks a frame, and a dome left behind shows as a sphere)
     if (BF.view) BF.view.onBegin(() => { if (BF.camera) root.position.copy(BF.camera.position); });
@@ -537,6 +538,7 @@ function paint(t, day, dt) {
     cu.fogCol.value.copy(horizon);
     cu.under.value = cam.position.y < cloudY ? 1 : 0;
     if (W && W.draw) W.draw(dt);   // the rain or snow and the bolt, at the drawn game time (js/weather.js)
+    if (BF.real && BF.real.on) BF.atmos.sky(t, day, dt, tmpV, dayness, space);   // the realistic look draws its own sky from this (js/real/atmos.js)
 }
 
 BF.sky = sky;

@@ -463,6 +463,37 @@ const LOOPS = {
   },
   underwater: r => { const sr = MSR, L = 6 * sr, X = sr; const b = brown(L + X, r, 0.02); filter(b, "lp", 260, 0.7, sr); for (let i = 0; i < b.length; i++) b[i] *= 0.7 + 0.3 * Math.sin(TAU * i / sr / 3); return loopify(fin(b, 0.8, sr), X); },
 };
+// The realistic look (1.6, js/real/atmos.js): wind in leaves, a stream's rush, frogs and an owl. Only made, started and driven with the look on.
+const REAL = !!(BF.real && BF.real.on);
+if (REAL) {
+  // leaves: a bright hiss that swells and falls in gusts (the swell is in the buffer; the level follows BF.atmos.wind)
+  LOOPS.leaves = r => {
+    const sr = MSR, L = 9 * sr, X = sr, o = new Float32Array(L + X);
+    burst(o, r, 0, (L + X) / sr, 1, 0.001, 1e4, [["hp", 1800], ["lp", 7000]], sr);
+    for (let i = 0; i < o.length; i++) { const t = i / sr; o[i] *= 0.45 + 0.3 * Math.sin(TAU * t / 4.5) + 0.25 * Math.sin(TAU * t / 1.7 + 1.3); }
+    return loopify(fin(o, 0.6, sr), X);
+  };
+  // stream: a low rumble, a mid body and a bright riffle over it, with small bubbling notes
+  LOOPS.stream = r => {
+    const sr = MSR, L = 7 * sr, X = Math.round(0.7 * sr), o = new Float32Array(L + X), b = brown(L + X, r, 0.02), h = new Float32Array(L + X);
+    filter(b, "lp", 320, 0.7, sr);
+    burst(o, r, 0, (L + X) / sr, 0.6, 0.001, 1e4, [["bp", 900, 0.5]], sr);
+    burst(h, r, 0, (L + X) / sr, 0.22, 0.001, 1e4, [["hp", 1500], ["bp", 3200, 0.6]], sr);
+    for (let i = 0; i < o.length; i++) { const t = i / sr; o[i] = (o[i] + b[i] * 0.9 + h[i]) * (0.82 + 0.1 * Math.sin(TAU * t / 2.7) + 0.08 * Math.sin(TAU * t / 0.9 + 1.3)); }
+    for (let i = 0; i < 60; i++) { const f = 300 + r() * 900; tone(o, r() * (L + X) / sr, f, f * 1.7, 0.03 + r() * 0.05, 0.025, 0.09, sr); }
+    return loopify(fin(o, 0.7, sr), X);
+  };
+  def("frog", { n: 3, group: "ambient", vol: 0.2, pitch: [0.9, 1.1], dist: 30, prio: 0, gen: (r, v) => {
+    const o = mk(0.9), f = 520 + v * 170, n = 2 + v;
+    for (let c = 0; c < n; c++) chirp(o, c * 0.24, f, f * 1.25, 0.16, 1, SR, 34 + v * 9, 0.22);
+    return fin(o, 0.5);
+  } });
+  def("owl", { n: 2, group: "ambient", vol: 0.3, pitch: [0.92, 1.06], dist: 60, prio: 0, reverb: true, gen: (r, v) => {
+    const o = mk(2.6), f = v ? 340 : 390, at = v ? [0, 0.42, 0.72, 1.3] : [0, 0.55, 0.8, 1.05, 1.7];
+    for (const t of at) chirp(o, t, f, f * 0.93, t > 1.2 ? 0.5 : 0.2, 1, SR, 5, 0.01);
+    return fin(o, 0.5);
+  } });
+}
 
 // ---------- buffers (generated lazily, shared by every context) ----------
 const bank = {};
@@ -821,6 +852,7 @@ function unlock() {
       applyVolumes(G);
       buildMats();
       for (const n of ["wind", "rain", "water", "underwater"]) startLoop(G, n, "ambient", "lowpass");
+      if (REAL) for (const n of ["leaves", "stream"]) startLoop(G, n, "ambient", "lowpass");
       G.loops.wind.f.frequency.value = 600; G.loops.wind.cut = 600;
       if (document.hidden) ctx.suspend();
     }
@@ -1027,6 +1059,7 @@ function updateEnv(dt) {
   const wd = P.inWater ? 0 : env.waterD;
   setLoop(L.water, (head ? 0 : clamp(1 - wd / 7, 0, 1) * 0.35) * duck);
   setLoop(L.underwater, (head ? 0.55 : 0) * duck);
+  if (REAL) realEnv(dt, p, head, rain, duck);
   if (state.paused || P.dead) return;
   // birds by day in woods (sparse), crickets at night in grass
   const t = sky.time == null ? 0.25 : sky.time, day = t < 0.46 || t > 0.98, night = sky.isNight ? sky.isNight() : false;
@@ -1044,6 +1077,33 @@ function updateEnv(dt) {
     if (env.caveT <= 0) { env.caveT = rnd(50, 160); const a = Math.random() * TAU, r = rnd(6, 16); play("cave", { x: p.x + Math.cos(a) * r, y: p.y + rnd(-4, 4), z: p.z + Math.sin(a) * r }); }
   }
 }
+// The realistic look's ambience: leaves in the wind of BF.atmos (woods, more in a storm), the rush of water where a stream or a shore
+// is close (over the plain lapping), a dawn chorus, frogs by water on mild nights and an owl in the woods.
+function realEnv(dt, p, head, rain, duck) {
+  const A = BF.atmos || EMPTY, L = G.loops, sky = BF.sky || EMPTY, ws = A.wind ? A.wind.strength : 0.2;
+  const outside = !env.covered || env.top - (p.y + 1.6) < 3, out = env.under || head ? 0 : outside ? 1 : 0.35;
+  setLoop(L.leaves, clamp(env.forest, 0, 1.2) * (0.05 + 0.3 * ws) * out * duck, 3000 + 5000 * ws);
+  const near = P_inWater() ? 0.6 : clamp(1 - env.waterD / 9, 0, 1);
+  setLoop(L.stream, (head ? 0 : near * near * 0.3) * duck, env.covered ? 1800 : 9000);
+  if (state.paused || !outside || head || rain > 0.3) return;
+  const t = sky.time == null ? 0.25 : sky.time, night = sky.isNight ? sky.isNight() : false;
+  const ring = (lo, hi) => { const a = Math.random() * TAU, r = rnd(lo, hi); return { x: p.x + Math.cos(a) * r, y: p.y + rnd(0, 6), z: p.z + Math.sin(a) * r }; };
+  // dawn chorus: for the first hour and a half after sunrise the woods are full of song (on top of the day's sparse birds)
+  if (env.forest > 0 && (t < 0.065 || t > 0.985)) {
+    env.dawnT = (env.dawnT == null ? 1 : env.dawnT) - dt * env.forest;
+    if (env.dawnT <= 0) { env.dawnT = rnd(0.5, 2.2); play("bird", Object.assign(ring(6, 26), { variant: Math.floor(Math.random() * 6), volume: 0.8 })); }
+  }
+  if (night && env.grassy && env.waterD < 12) {
+    env.frogT = (env.frogT == null ? 3 : env.frogT) - dt;
+    if (env.frogT <= 0) { env.frogT = rnd(1.5, 6); const q = ring(4, 14); q.y = p.y; play("frog", Object.assign(q, { variant: Math.floor(Math.random() * 3) })); }
+  }
+  if (night && env.forest >= 1) {
+    env.owlT = (env.owlT == null ? rnd(20, 60) : env.owlT) - dt;
+    if (env.owlT <= 0) { env.owlT = rnd(40, 120); play("owl", Object.assign(ring(18, 40), { variant: Math.floor(Math.random() * 2) })); }
+  }
+}
+const P_inWater = () => !!(BF.player && BF.player.inWater);
+
 function pickMood() {
   const P = BF.player;
   if (P && P.gameMode === "creative") return "creative";
