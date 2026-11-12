@@ -88,11 +88,35 @@ if (tier === 'suites') {
 const bodyLine = /^[\s>*_-]*CI suites?\s*:\s*(.*)$/im.exec(process.env.PR_BODY || '');
 const picked = (process.env.CI_SUITES || (bodyLine ? bodyLine[1] : '')).toLowerCase().split(/[\s,]+/).map(s => s.replace(/[`*_.]/g, '')).filter(s => s && s !== 'none');
 const withSoak = picked.includes('all') || picked.includes('soak');
-let suites = picked.includes('all') ? Object.keys(SUITES) : picked.filter(s => s !== 'soak');
+let suites = picked.includes('all') ? Object.keys(SUITES) : picked.filter(s => s !== 'soak' && s !== 'full');
 const unknown = suites.filter(s => !SUITES[s]);
-if (unknown.length) { console.log(`FAIL unknown CI suite(s): ${unknown.join(', ')}. Suites: ${Object.keys(SUITES).join(', ')}, soak, all`); process.exit(1); }
+if (unknown.length) { console.log(`FAIL unknown CI suite(s): ${unknown.join(', ')}. Suites: ${Object.keys(SUITES).join(', ')}, soak, all, full`); process.exit(1); }
 if (withSoak && !suites.length) suites = Object.keys(SUITES);   // soak on its own: every suite's long tests (plus the suites)
-const inTier = t => !t.missing && (tier === 'integration' ? t.tier === 'baseline' || t.tier === 'integration' : t.tier === tier || (t.tier !== 'skip' && (t.suites || []).some(k => suites.includes(k)) && (!t.soak || withSoak)));
+// Look-only pull requests (ci.json "look"): when every file a pull request changes is under look.paths (the realistic look's own
+// modules and tests, docs, index.html), the baseline run is look.tests (every real-* test, the lints, a few look-off game tests)
+// instead of the whole smoke set, which tests the simulation the look can't reach. The changed files come from CI_CHANGED (one a
+// line) or from git (CI_CHANGED_FROM=<ref>: the files that differ between it and HEAD; the workflow passes the merge commit's first
+// parent). No list, an empty list, a git error or any file outside the paths: the whole set. `full` (or `all`) on the pull
+// request's `CI suites:` line runs the whole set too, and suites named there are added either way.
+const LOOK = manifest.look || null;
+const glob = g => new RegExp('^' + g.split('**').map(p => p.split('*').map(q => q.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')).join('.*') + '$');
+let changed = null, scopeWhy = '';
+if (process.env.CI_CHANGED != null) changed = process.env.CI_CHANGED.split('\n').map(s => s.trim()).filter(Boolean);
+else if (process.env.CI_CHANGED_FROM) {
+  try { changed = cp.execFileSync('git', ['diff', '--name-only', process.env.CI_CHANGED_FROM, 'HEAD'], { cwd: root, encoding: 'utf8' }).split('\n').filter(Boolean); }
+  catch (e) { scopeWhy = 'the changed files could not be read from git'; }
+}
+let lookOnly = false;
+if (tier === 'baseline' && LOOK && !only.length) {
+  const outside = changed ? changed.filter(f => !LOOK.paths.some(g => glob(g).test(f))) : [];
+  if (picked.includes('full') || picked.includes('all')) scopeWhy = 'the pull request asks for the whole set';
+  else if (!changed) scopeWhy = scopeWhy || 'no list of changed files';
+  else if (!changed.length) scopeWhy = 'no changed files';
+  else if (outside.length) scopeWhy = `${outside.length} changed file(s) outside the look's own: ${outside.slice(0, 5).join(', ')}${outside.length > 5 ? ', ...' : ''}`;
+  else { lookOnly = true; scopeWhy = `all ${changed.length} changed file(s) are the look's own`; }
+}
+const lookTest = t => LOOK.tests.some(g => glob(g).test(t.name));
+const inTier = t => !t.missing && (tier === 'integration' ? t.tier === 'baseline' || t.tier === 'integration' : (lookOnly ? t.tier !== 'skip' && lookTest(t) : t.tier === tier) || (t.tier !== 'skip' && (t.suites || []).some(k => suites.includes(k)) && (!t.soak || withSoak)));
 let run = tests.filter(t => (only.length ? only.includes(t.name) : inTier(t)));
 const pageOnly = HOST === 'page' || process.env.CI_HOST_ALL ? [] : run.filter(t => !t.hosts.includes(HOST));
 for (const t of run) t.host = pageOnly.includes(t) ? 'page' : HOST;
@@ -117,7 +141,7 @@ if (process.env.CI_PLAN) {
   const total = run.reduce((a, t) => a + weight(t), 0);
   const n = run.length ? Math.max(1, Math.min(20, run.length, Math.ceil(total / +(process.env.CI_PART_SECS || 240)))) : 0;
   const line = `parts=${JSON.stringify(Array.from({ length: n }, (_, i) => i + 1))}\nn=${n}\n`;
-  console.log(`${run.length} test(s), about ${Math.round(total / 60)} min in all: ${n} part(s)`);
+  console.log(`${lookOnly ? 'look-only set' : 'whole smoke set'}${scopeWhy ? ' (' + scopeWhy + ')' : ''}: ${run.length} test(s), about ${Math.round(total / 60)} min in all: ${n} part(s)`);
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, line); else process.stdout.write(line);
   process.exit(0);
 }
@@ -188,7 +212,7 @@ async function runOne(t) {
 }
 
 (async () => {
-const label = tier + (tier === 'baseline' && suites.length ? ' + suites ' + suites.join(', ') + (withSoak ? ' with soak' : '') : '') + (HOST !== 'page' ? ` on host ${HOST}` : '') + (shard ? ` (part ${shard.k} of ${shard.n})` : '');
+const label = tier + (lookOnly ? ' (look-only set: ' + scopeWhy + ')' : '') + (tier === 'baseline' && suites.length ? ' + suites ' + suites.join(', ') + (withSoak ? ' with soak' : '') : '') + (HOST !== 'page' ? ` on host ${HOST}` : '') + (shard ? ` (part ${shard.k} of ${shard.n})` : '');
 console.log(`tier ${label}: ${run.length} test(s)`);
 const results = [];
 for (const t of run) {

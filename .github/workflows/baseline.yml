@@ -3,6 +3,9 @@
 # suites (game areas) the pull request turns on with a line in its description, e.g. `CI suites: jobs, ui` (or `all`). A suite's
 # long tests run only when `soak` is on the line too (`CI suites: village, soak`); `all` includes them.
 # Editing that line re-runs the check. Tiers, suites and timeouts are in test/ci.json; the runner is test/ci.js.
+# Look-only pull requests: when every changed file is one of the realistic look's own (test/ci.json "look": js/real/, test/real-*.js,
+# docs, index.html), the run is the look's set (every real-* test, the lints, a few look-off game tests; about 4 runners) instead of
+# the smoke set, which tests the simulation. Any other changed file, or `full` on the CI suites line, runs the whole set.
 # Host (spec r15-43): the world server, the game's main host. Tests whose // @ci header lists hosts=server run with the simulation on the
 # world server; the rest (not converted yet) run with it in the page. The integration workflow runs every host.
 name: Baseline tests
@@ -30,7 +33,10 @@ jobs:
       parts: ${{ steps.plan.outputs.parts }}
       n: ${{ steps.plan.outputs.n }}
     steps:
+      # two commits deep: a pull request's checkout is its merge commit, whose first parent is the base branch (CI_CHANGED_FROM)
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -39,6 +45,8 @@ jobs:
           CI_PLAN: 1
           PR_BODY: ${{ github.event.pull_request.body }}
           CI_SUITES: ${{ inputs.suites }}
+          # the files the pull request changes: the merge commit against the base branch (not set on a manual run: the whole set)
+          CI_CHANGED_FROM: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
           CI_HOST: server
           CI_OTHERS: page
         run: node test/ci.js baseline
@@ -69,6 +77,7 @@ jobs:
           CI_SHARD: ${{ matrix.part }}/${{ needs.plan.outputs.n }}
           PR_BODY: ${{ github.event.pull_request.body }}
           CI_SUITES: ${{ inputs.suites }}
+          CI_CHANGED_FROM: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
           CI_HOST: server
           CI_OTHERS: page
         run: NODE_PATH=$(npm root -g) node test/ci.js baseline ci-out
