@@ -323,16 +323,20 @@ function finish(R) {
     const A = vert(a, side), B = vert(b, side), Cc = vert(c, side), D = vert(d, side);
     if (flip) I.push(A, Cc, B, A, D, Cc); else I.push(A, B, Cc, A, Cc, D);
   };
+  // The riser of a step one block high (ground at its foot, nothing on the cell it is the side of) is part of a slope, not a cut:
+  // it takes its vertices as tops, the upper ones the ground of the upper level and the lower ones the ground of the lower level, so
+  // one ground runs into the other across the step as it does on the flat, with the same rough edge, and not along a straight line.
+  const step = (sx, sz, ox, oz, y) => (m(ox, y - 1, oz) && !m(sx, y + 1, sz) && !hm(sx, y + 1, sz)) ? 0 : 1;
   for (let y = 1; y < NY - 1; y++) for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
     const s = m(x, y, z) ? 1 : 0;
     // +x edge: cells (x, y-1..y, z-1..z)
     // (no quad against a built block: its vertices are all on the grid, so it would lie in the block's own face)
     let t = m(x + 1, y, z) ? 1 : 0;
-    if (s !== t && !hm(x + s, y, z)) quad(at(x, y - 1, z - 1), at(x, y, z - 1), at(x, y, z), at(x, y - 1, z), !s, 1);
+    if (s !== t && !hm(x + s, y, z)) quad(at(x, y - 1, z - 1), at(x, y, z - 1), at(x, y, z), at(x, y - 1, z), !s, s ? step(x, z, x + 1, z, y) : step(x + 1, z, x, z, y));
     t = m(x, y + 1, z) ? 1 : 0;
     if (s !== t && !hm(x, y + s, z)) quad(at(x - 1, y, z - 1), at(x - 1, y, z), at(x, y, z), at(x, y, z - 1), !s, s ? 0 : 1);
     t = m(x, y, z + 1) ? 1 : 0;
-    if (s !== t && !hm(x, y, z + s)) quad(at(x - 1, y - 1, z), at(x, y - 1, z), at(x, y, z), at(x - 1, y, z), !s, 1);
+    if (s !== t && !hm(x, y, z + s)) quad(at(x - 1, y - 1, z), at(x, y - 1, z), at(x, y, z), at(x - 1, y, z), !s, s ? step(x, z, x, z + 1, y) : step(x, z + 1, x, z, y));
   }
   const F = R.F.length ? new Float32Array(R.F) : null;
   if (!I.length) return { T: null, F };
@@ -344,13 +348,14 @@ function finish(R) {
     const sf = [0, 0, 0];
     // the ground's top face under the cell (x, y, z), as the plane through its 4 corners (eased, they are not at the block's own
     // corners: on a stair of blocks the top faces are half as long as the blocks), read at (px, pz)
-    const V = (v, a) => P[out[v] * 3 + a];
+    const ov = v => out[v * 2] >= 0 ? out[v * 2] : out[v * 2 + 1];   // (a vertex is listed per face kind; both are at the same place)
+    const V = (v, a) => P[ov(v) * 3 + a];
     const cl = v => Math.max(-1, Math.min(1, v));
     const surf = (x, y, z, px, pz) => {
       const Y = y - 1 - ya;
       if (x < 0 || x >= CS || z < 0 || z >= CS || Y < 1 || Y >= NY - 1 || !m(x, Y, z)) return false;
       const a = at(x - 1, Y, z - 1), b = at(x, Y, z - 1), c = at(x, Y, z), d = at(x - 1, Y, z);
-      if (a < 0 || b < 0 || c < 0 || d < 0 || out[a] < 0 || out[b] < 0 || out[c] < 0 || out[d] < 0) return false;
+      if (a < 0 || b < 0 || c < 0 || d < 0 || ov(a) < 0 || ov(b) < 0 || ov(c) < 0 || ov(d) < 0) return false;
       const wx = Math.max(0.25, (V(b, 0) + V(c, 0) - V(a, 0) - V(d, 0)) / 2), wz = Math.max(0.25, (V(c, 2) + V(d, 2) - V(a, 2) - V(b, 2)) / 2);
       sf[1] = cl((V(b, 1) + V(c, 1) - V(a, 1) - V(d, 1)) / 2 / wx); sf[2] = cl((V(c, 1) + V(d, 1) - V(a, 1) - V(b, 1)) / 2 / wz);
       sf[0] = (V(a, 1) + V(b, 1) + V(c, 1) + V(d, 1)) / 4 - y

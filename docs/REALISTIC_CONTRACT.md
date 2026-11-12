@@ -111,7 +111,9 @@ page and in the mesher workers), also:
   looks up shows the ground whose top it is (so the floor of a dug hole is the soil dug down to), every other face shows a cut
   through the ground, where turf shows the soil under it (the entry's `under` block, dirt by default) unless the foot of that
   side is turf too (the steps of a grassy slope). At such a cut the top's rim vertices carry a little soil and the wall's top
-  vertices are turf, so the material breaks the line up (soil biting into the sward, turf hanging over the cut). The `mat` weights add up to 1 + the share of turf at the vertex; the terrain
+  vertices are turf, so the material breaks the line up (soil biting into the sward, turf hanging over the cut). The riser of a step one
+  block high with ground at its foot is not a cut: its vertices are tops, so across the steps of a slope one ground runs into
+  the next as it does on the flat. The `mat` weights add up to 1 + the share of turf at the vertex; the terrain
   material draws that share as short grass, the rest of the soil layer as crumbly earth (lumps, grit, a few stones), and `js/real/turf.js` stands blades on it near the player (`BF.real.turf`, by
   quality level; it reads the ground meshes world.js shows and needs no hook).
 - `F`: the flora list, plain data, a `Float32Array` with one record of 8 floats per plant:
@@ -212,6 +214,7 @@ foundation thread for the attribute you need). Water physics is 1.5's fluid simu
 | Atmosphere and creatures | `js/real/atmos.js`, `js/real/mobs.js` | `js/sky.js`, `js/weather.js`, `js/mobs.js`, `js/mobview.js`, `js/entityview.js`, `js/audio.js` |
 | Digging | `js/real/dig.js` (the wear drawn on smooth ground while it is mined, `BF.real.dig`) | `js/cracks.js`, the break particles' line in `js/player.js` |
 | Grass ground | `js/real/turf.js` (blades of short grass on turf near the player, `BF.real.turf`) | the ground's colour rule in `js/real/mesh.js`, the turf drawing in `js/real/terrain.js` |
+| Dropped items | `js/real/drops.js` (a dropped ground block as a lit lump of that ground, other items as a lit icon, `BF.real.drops`) | the drop lines of `js/entityview.js`; `js/drops.js` (game rule, both looks: reach, items rising out of blocks) |
 
 `index.html` already loads every file above (empty stubs are on the branch), so nobody else needs to touch it. If you need
 another new file, name it `js/real/<yours>-*.js` and ask the foundation thread for the script tag.
