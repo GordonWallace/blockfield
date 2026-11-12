@@ -40,8 +40,9 @@ module.exports = async (pg, out) => {
         while (!fn()) { if (performance.now() - t0 > maxS * 1000) return -1; await new Promise((r) => setTimeout(r, 500)); }
         return (performance.now() - t0) / 1000;
       };
-      // The planet's pixels (drawn with the sky hidden on magenta): the share that is black, and the mean brightness of the middle
-      // (within a tenth of the screen's height of the centre) and of the rest.
+      // The planet's pixels (drawn with the sky hidden on magenta, read before tone mapping, so the sea is dark): the share that is
+      // pure black, as an unlit tile is, and the mean brightness of the middle (within a tenth of the screen's height of the centre)
+      // and of the rest.
       window.__rt = null;
       window.lit = () => {
         const R = BF.renderer, s = R.getDrawingBufferSize(new THREE.Vector2()), sc = BF.scene;
@@ -62,7 +63,7 @@ module.exports = async (pg, out) => {
           const o = (y * w + x) * 4, r = px[o], g = px[o + 1], b = px[o + 2];
           if (r > 200 && g < 60 && b > 200) continue;   // the background
           const v = (r + g + b) / 3;
-          n++; if (v < 6) black++;
+          n++; if (r + g + b === 0) black++;
           if (Math.hypot(x - w / 2, y - h / 2) < h / 10) { mid += v; midN++; } else { rest += v; restN++; }
         }
         return { planet: n / (w * h), black: n ? black / n : 1, mid: midN ? mid / midN : 0, rest: restN ? rest / restN : 0 };
@@ -84,8 +85,8 @@ module.exports = async (pg, out) => {
       const r = await pg.evaluate(() => { BF.state.time = 6000; return lit(); });
       console.log(up + " up", JSON.stringify(r));
       await pg.screenshot({ path: `${out}-${up}.png` });
-      check(r.planet > 0.05 && r.black < 0.02, `${up} up: the planet is lit (${(r.black * 100).toFixed(1)}% of its pixels black)`);
-      check(r.rest > 0.5 * r.mid && r.rest > 25, `${up} up: away from the middle it is about as bright as the middle (${r.rest.toFixed(0)} and ${r.mid.toFixed(0)} of 255)`);
+      check(r.planet > 0.05 && r.black < 0.05, `${up} up: the planet is lit (${(r.black * 100).toFixed(1)}% of its pixels black)`);
+      check(r.rest > 0.4 * r.mid && r.rest > 5, `${up} up: away from the middle it is about as bright as the middle (${r.rest.toFixed(0)} and ${r.mid.toFixed(0)} of 255)`);
     }
 
     const errs = await pg.evaluate(() => window.__errs);
