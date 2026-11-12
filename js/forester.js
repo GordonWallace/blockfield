@@ -33,6 +33,7 @@ const SPECIES = ["oak", "birch", "spruce", "jungle", "acacia", "dark_oak", "cher
 const WORK_START = 0.04, WORK_END = 0.45;   // sky.time window (same as js/jobs.js)
 // numbers of the mod (ticks / 20 = seconds)
 const SEARCH = 16, PLANT_DY = 4, MAX_LOGS = 64, MAX_LEAVES = 256, MIN_FREE = 2;
+const FALL_LOGS = 512, FALL_LEAVES = 2048;   // the player's own felling (fallAbove): any tree the world grows
 const SAP_SPACING = 4, DOOR_AVOID = 10, PLANT_REACH = 2, CUT_REACH = 3;
 const PLANT_CD = 10, CUT_CD = 20, PLANT_MAX = 30, CUT_MAX = 40, W_PLANT = 10, W_CUT = 8;
 // additions
@@ -229,7 +230,7 @@ function builtBlock(id) {
 }
 // The connected logs reached from `seeds` (18-neighbourhood, only at y >= minY) and the leaves joined to them: {logs, leaves}, or null when it is
 // more than 64 logs, touches a block that is not landscape (a building), or has no leaves.
-function collectTree(seeds, minY) {
+function collectTree(seeds, minY, maxLogs = MAX_LOGS, maxLeaves = MAX_LEAVES) {
   const seen = new Set(), logs = [];
   for (const [x, y, z] of seeds) if (isLog(get(x, y, z)) && !seen.has(pk(x, y, z))) { seen.add(pk(x, y, z)); logs.push([x, y, z]); }
   for (let i = 0; i < logs.length; i++) {
@@ -239,7 +240,7 @@ function collectTree(seeds, minY) {
       if (ny < minY || seen.has(k)) continue;
       if (!isLog(get(nx, ny, nz))) continue;
       seen.add(k); logs.push([nx, ny, nz]);
-      if (logs.length > MAX_LOGS) return null;
+      if (logs.length > maxLogs) return null;
     }
   }
   if (!logs.length) return null;
@@ -248,7 +249,7 @@ function collectTree(seeds, minY) {
   // its own logs are nearer (through leaves) than any other tree's, so a neighbour's crown that touches this one keeps its leaves.
   const dA = new Map(), leaves = [], q = logs.map(c => [c[0], c[1], c[2], 0]);
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-  for (let i = 0; i < q.length && leaves.length <= MAX_LEAVES; i++) {
+  for (let i = 0; i < q.length && leaves.length <= maxLeaves; i++) {
     const [cx, cy, cz, d] = q[i];
     if (d >= LEAF_D) continue;
     for (const [dx, dy, dz] of NB6) {
@@ -290,7 +291,7 @@ function treeAt(x, y, z) {
 function fallAbove(x, y, z, drops) {
   const seeds = [];
   for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) seeds.push([x + dx, y + 1, z + dz]);
-  const t = collectTree(seeds, y + 1);
+  const t = collectTree(seeds, y + 1, FALL_LOGS, FALL_LEAVES);   // (a giant cut right through comes down too: a 2 x 2 spruce is over a hundred logs)
   if (!t) return null;
   for (const [lx, ly, lz] of t.logs) { const below = get(lx, ly - 1, lz); if (!isLog(below) && !isLeaf(below) && below !== 0 && !isPlant(below)) return null; }   // resting on something: still standing
   t.base = [x, y, z];

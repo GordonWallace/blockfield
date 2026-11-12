@@ -41,6 +41,29 @@ function prepare(J, TB, h) {
   const gone = new Set(), F = [];
   const ck = (x, y, z) => ((y - ya) * W + z + 2) * W + x + 2;
   const leafOf = (b, x, y, z) => { const n = get(x, y, z); return TREE[n] === 2 && RT.SPEC[n] === b; };
+  // stumps: the low corner of the full 2 x 2 square of log b at height y that holds (x, z), or null
+  // a log that leaves the cube pass (a tree's, a stump's) is not a built cell: the ground around it stays smooth
+  const soft = k => { const c = k % (W * W); hard[c * NY + (k - c) / (W * W)] = 0; };
+  const square = (x, y, z, b) => {
+    for (let dz = -1; dz <= 0; dz++) for (let dx = -1; dx <= 0; dx++) {
+      const cx = x + dx, cz = z + dz;
+      if (get(cx, y, cz) === b && get(cx + 1, y, cz) === b && get(cx, y, cz + 1) === b && get(cx + 1, y, cz + 1) === b) return [cx, cz];
+    }
+    return null;
+  };
+  const SOLID = TB.SOLID;
+  const stump = (x, y, z, b, hgt) => {
+    const top = get(x, y + hgt, z);
+    if (top && TREE[top] !== 2 && SOLID[top]) return false;   // something stands on it: a post
+    const sq = square(x, y, z, b);
+    for (let k = 0; k < hgt; k++) for (let d = 0; d < 4; d++) {
+      const nx = x + (d === 0) - (d === 1), nz = z + (d === 2) - (d === 3), n = get(nx, y + k, nz);
+      if (!n || NAT[n] || TREE[n] === 2) continue;
+      if (n === b) { if (sq && nx >= sq[0] && nx <= sq[0] + 1 && nz >= sq[1] && nz <= sq[1] + 1) continue; return false; }   // a row of logs is a wall
+      if (SOLID[n]) return false;   // built against it
+    }
+    return true;
+  };
   for (let i = 0; i < logs.length; i += 4) {
     const x = logs[i], y = logs[i + 1], z = logs[i + 2], b = logs[i + 3];
     if (gone.has(ck(x, y, z))) continue;   // (already part of a tree found before)
@@ -69,8 +92,22 @@ function prepare(J, TB, h) {
       const qx = q[qi], qy = q[qi + 1], qz = q[qi + 2];
       leafy = leafOf(b, qx, qy + 1, qz) || leafOf(b, qx + 1, qy, qz) || leafOf(b, qx - 1, qy, qz) || leafOf(b, qx, qy, qz + 1) || leafOf(b, qx, qy, qz - 1);
     }
-    if (!leafy) continue;
-    for (const k of mine) { gone.add(k); const c = k % (W * W); hard[c * NY + (k - c) / (W * W)] = 0; }
+    if (!leafy) {
+      // a stump (what a felled tree leaves, js/real/fell.js): one to three logs of a tree species standing alone on natural ground
+      // with nothing on top. Its logs leave the cube pass and it is listed as kind 5. Posts and what the player builds stay cubes.
+      if (TREE[b] === 1 && hgt <= 3 && q.length === hgt * 3 && x >= -1 && x <= CS && z >= -1 && z <= CS && stump(x, y, z, b, hgt)) {
+        for (const k of mine) soft(k);   // (a neighbour's next to the border too: both sides must shape the ground around it alike)
+        if (x < 0 || x >= CS || z < 0 || z >= CS) continue;   // a neighbour's: it hides and lists it
+        for (const k of mine) gone.add(k);
+        const sq = square(x, y, z, b);
+        if (sq && (sq[0] !== x || sq[1] !== z)) continue;   // listed at the square's low corner
+        const hs = (((J.ox + x) * 73856093) ^ ((J.oz + z) * 19349663) ^ (y * 83492791)) >>> 0;
+        F.push(x + (sq ? 1 : 0.5), y, z + (sq ? 1 : 0.5), 5, b, hgt, (hs % 65521) / 65521,
+          Math.round(h.skyAt(x, y + hgt, z) * 15) + 16 * h.lget(x, y + hgt, z));
+      }
+      continue;
+    }
+    for (const k of mine) { gone.add(k); soft(k); }
     const ty = top; hgt = top - y;
     if (x < 0 || x >= CS || z < 0 || z >= CS) continue;   // a neighbour's tree: it lists it
     // a 2 x 2 trunk is one big tree, listed at its low corner

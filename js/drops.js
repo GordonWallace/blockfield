@@ -54,6 +54,14 @@ function mergeWith(d) {
   if (R.verifyQueries && R.checkQuery) R.checkQuery("drops.merge", best ? [best] : [], () => { const o = drops.list.find(ok); return o ? [o] : []; });
   return best;
 }
+// Items fall through leaves, so nothing is left lying in a tree's crown out of reach (1.6: with the realistic look the leaf blocks are
+// not drawn, and an item held up by one hung in the air where the player could not get it).
+let THROUGH = null;
+function through() {
+  const t = new Uint8Array(BF.MAX_BLOCK + 1);
+  for (const b of BF.blocks) if (b && /_leaves$/.test(b.name)) t[b.id] = 1;
+  return (THROUGH = { pass: t });
+}
 const drops = {
   list: [],
 
@@ -157,7 +165,7 @@ const drops = {
         if (o && o.count + d.count <= (BF.items[d.id].stack || 64)) { o.count += d.count; drops.remove(d); continue; }
       }
       d.vel.y -= GRAV * dt;
-      const res = BF.world.moveBox(d.pos, d.vel, HW, H, dt);
+      const res = BF.world.moveBox(d.pos, d.vel, HW, H, dt, THROUGH || through());   // (items fall through leaves)
       BF.planet.reframe(d.pos, -1, null, d.vel);   // past a face edge: onto the next face's square
       if (res.onGround) { d.vel.x *= Math.pow(0.02, dt); d.vel.z *= Math.pow(0.02, dt); }
       if (d.pos.y < BF.MIN_Y - 10) { drops.remove(d); continue; }
