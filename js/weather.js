@@ -12,6 +12,7 @@ const DAY = 1200;                              // seconds per in-game day (sky.d
 const RAMP = 15;                               // seconds for intensity 0 -> 1
 const R = 20, BAND = 44, BAND_LO = 16;         // particle cylinder radius, vertical band (cam.y - 16 .. cam.y + 28)
 const N = BF.real && BF.real.on ? 11000 : 4000;   // particles (the realistic look's drops are short and fine, so there are more of them)
+const SLANT = 0.07, DRIFT_V = 13;               // the realistic look: sideways drift per unit of wind as a share of the fall, at the mean fall speed
 const HM = 64;                                 // height-map window (HM x HM columns around the camera)
 const BOLT_SEGS = 64, BOLT_LIFE = 0.32;
 const ORDER = [[-1, 0], [1, 0], [1, 1], [-1, 0], [1, 1], [-1, 1]];   // (side, t) of a segment quad's 6 vertices
@@ -129,20 +130,21 @@ function makeParticles() {
       uTime: { value: 0 }, uIntensity: { value: 0 }, uLight: { value: 1 },
       uHeight: { value: hmTex }, uOrigin: { value: new THREE.Vector2() }, uHide: { value: 0 }, uMinY: { value: 0 },
       uCam: { value: new THREE.Vector3() },
-      uReal: { value: 0 }, uWind: { value: new THREE.Vector2() },   // the realistic look (1.6): finer streaks, slanted by the wind (0: the 1.5 drawing)
+      uReal: { value: 0 }, uWind: { value: new THREE.Vector2() }, uDrift: { value: new THREE.Vector2() },   // the realistic look (1.6): finer streaks, slanted by the wind (0: the 1.5 drawing)
     },
     vertexShader: `
       attribute vec4 seed; attribute vec2 corner;
-      uniform float uTime, uIntensity, uHide, uMinY, uReal; uniform sampler2D uHeight; uniform vec2 uOrigin, uWind; uniform vec3 uCam;
+      uniform float uTime, uIntensity, uHide, uMinY, uReal; uniform sampler2D uHeight; uniform vec2 uOrigin, uWind, uDrift; uniform vec3 uCam;
       varying vec2 vUv; varying float vA; varying float vSnow; varying float vThin;
-      const float R = ${R.toFixed(1)}, BAND = ${BAND.toFixed(1)}, LO = ${BAND_LO.toFixed(1)}, HM = ${HM.toFixed(1)};
+      const float R = ${R.toFixed(1)}, BAND = ${BAND.toFixed(1)}, LO = ${BAND_LO.toFixed(1)}, HM = ${HM.toFixed(1)}, SLANT = ${SLANT}, DRIFT_V = ${DRIFT_V.toFixed(1)};
       void main() {
         // everything here is relative to the mesh's own position, a whole number of spans (floating origin, js/view.js): uCam is
         // the camera relative to it and uOrigin the height map's corner relative to it
         vec3 cam = uCam;
         float span = 2.0 * R;
-        float x = cam.x + mod(seed.x * span - cam.x, span) - R;
-        float z = cam.z + mod(seed.y * span - cam.z, span) - R;
+        // (uDrift: with the realistic look on, how far the wind has carried the rain so far, so a drop travels along its slant)
+        float x = cam.x + mod(seed.x * span + uDrift.x - cam.x, span) - R;
+        float z = cam.z + mod(seed.y * span + uDrift.y - cam.z, span) - R;
         vec2 cell = floor(vec2(x, z)) - uOrigin;
         vec4 h = texture2D(uHeight, (cell + 0.5) / HM);
         float top = floor(h.r * 255.0 + 0.5) + 256.0 * floor(h.b * 255.0 + 0.5) + uMinY, kind = floor(h.g * 255.0 + 0.5);
@@ -171,7 +173,7 @@ function makeParticles() {
           // cylindrical billboard: vertical streak facing the camera around the y axis
           vec2 side = normalize(vec2(-(z - cam.z), x - cam.x) + 1e-4);
           vec3 p = vec3(x + side.x * corner.x * wid, y + corner.y * len, z + side.y * corner.x * wid);
-          p.xz += uWind * (corner.y * len * 0.09 * uReal);   // slanted along its fall in the wind
+          p.xz -= uWind * (corner.y * len * SLANT * DRIFT_V / speed * uReal);   // its tail lies back along its path, upwind
           mv = modelViewMatrix * vec4(p, 1.0);
         }
         gl_Position = projectionMatrix * mv;
@@ -413,7 +415,7 @@ const weather = {
       u.uMinY.value = BF.MIN_Y;
       u.uLight.value = Math.min(1.3, 0.22 + 0.85 * (BF.sky ? BF.sky.light : 1));
       u.uHide.value = BF.player && BF.player.headInWater ? 1 : 0;
-      if (BF.real && BF.real.on) { u.uReal.value = 1; u.uWind.value.set(BF.atmos.wind.x, BF.atmos.wind.z); BF.atmos.rainMap = { tex: hmTex, ox: hmOX, oz: hmOZ, size: HM }; }   // (js/real/atmos.js: splashes on the same column tops)
+      if (BF.real && BF.real.on) { u.uReal.value = 1; u.uWind.value.set(BF.atmos.wind.x, BF.atmos.wind.z); const k = SLANT * DRIFT_V * dt, D = u.uDrift.value; D.set((D.x + BF.atmos.wind.x * k) % (2 * R), (D.y + BF.atmos.wind.z * k) % (2 * R)); BF.atmos.rainMap = { tex: hmTex, ox: hmOX, oz: hmOZ, size: HM }; }   // (js/real/atmos.js: splashes on the same column tops)
     }
     weather.drawMs = weather.drawMs * 0.95 + (performance.now() - t0) * 0.05;
   },
