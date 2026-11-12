@@ -270,7 +270,9 @@ function finish(R) {
     let nx = 0, ny = 0, nz = 0;
     for (let dz = -1; dz <= 2; dz++) for (let dy = -1; dy <= 2; dy++) for (let dx = -1; dx <= 2; dx++) {
       const X = i + dx, Y = j + dy, Z = k + dz;
-      const solid = Y < 0 ? 1 : Y >= NY ? 0 : (X < -2 || X > CS + 1 || Z < -2 || Z > CS + 1) ? -1 : m(X, Y, Z) ? 1 : 0;
+      // (a built block at or under the surface is solid too: over a floor of sandstone blocks the sand between them would otherwise
+      // take its normal from the pit's walls above alone and face down, that is, be drawn black)
+      const solid = Y < 0 ? 1 : Y >= NY ? 0 : (X < -2 || X > CS + 1 || Z < -2 || Z > CS + 1) ? -1 : (m(X, Y, Z) || (dy <= 0 && hm(X, Y, Z))) ? 1 : 0;
       if (solid !== 1) continue;
       nx -= dx - 0.5; ny -= dy - 0.5; nz -= dz - 0.5;
     }

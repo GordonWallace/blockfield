@@ -96,6 +96,29 @@ const SHAPE = () => {
   return { rim, open, ex, made, spot: [x, y, z], walls, lean, pad };
 };
 
+// A pit dug in sand down to a floor of built blocks with sand between them: the sand of the floor faces up. (Its normal once counted
+// natural ground only, so over built blocks it came from the pit's walls alone and pointed down: black squares in a hole in the desert.)
+const FLOOR = sp => {
+  const W = BF.world, B = BF.B, c0 = W.chunkAt(sp[0], sp[2]);
+  const c = [1, -1].map(d => W.chunkC(c0.cx + d, c0.cz)).find(n => n && n.mesh === true);
+  if (!c) return null;
+  const x = c.cx * 16 + 8, z = c.cz * 16 + 8, y = W.heightAt(x, z);
+  for (let a = -4; a <= 4; a++) for (let d = -4; d <= 4; d++) {
+    for (let h = 1; h < 6; h++) W.setBlock(x + a, y + h, z + d, 0);
+    W.setBlock(x + a, y, z + d, B.sand); W.setBlock(x + a, y - 1, z + d, B.sand);
+    W.setBlock(x + a, y - 2, z + d, ((a + d) & 1) ? B.planks : B.sand); W.setBlock(x + a, y - 3, z + d, B.planks);
+  }
+  for (let a = -1; a <= 1; a++) for (let d = -1; d <= 0; d++) { W.setBlock(x + a, y, z + d, 0); W.setBlock(x + a, y - 1, z + d, 0); }
+  W.flushDirty();
+  const T = W.meshArrays(c).T; let n = 0, low = 1;
+  for (let i = 0; i < T.pos.length; i += 3) {
+    const vx = T.pos[i] - 8, vy = T.pos[i + 1] - (y - 1), vz = T.pos[i + 2] - 8;
+    if (vx < -0.9 || vx > 1.9 || vz < -0.9 || vz > 0.9 || Math.abs(vy) > 0.4) continue;
+    n++; low = Math.min(low, T.nrm[i + 1]);
+  }
+  return { n, low };
+};
+
 async function boot(b, look) {
   const pg = await (await b.newContext({ viewport: { width: 480, height: 300 } })).newPage();
   const errors = [];
@@ -127,6 +150,7 @@ async function boot(b, look) {
     };
   });
   if (look === 'real') r.shape = await pg.evaluate(SHAPE);
+  if (look === 'real' && r.shape.spot) r.floor = await pg.evaluate(FLOOR, r.shape.spot);
   await pg.context().close();
   return { r, errors };
 }
@@ -145,6 +169,8 @@ async function boot(b, look) {
   check(sh.rim > 100 && !!sh.made && sh.open === 0, `neighbouring chunks' ground meets edge to edge, also where it crosses the top of a chunk's band (${sh.made ? 'made at ' + sh.made.slice(0, 3) : 'not made'}; ${sh.rim} rim edges, ${sh.open} without a twin${sh.ex.length ? ': ' + sh.ex.join(' ; ') : ''})`);
   check(!!sh.spot && sh.walls >= 12 && sh.lean <= 0.1, `a shaft dug one block wide keeps its walls on the blocks (${sh.walls} wall vertices, leaning in ${sh.lean == null ? '?' : sh.lean.toFixed(3)} at most)`);
   check(!!sh.spot && sh.pad === 4, `the ground is flat and square under a block set on it (${sh.pad} of 4 corners on the grid)`);
+  const fl = real.r.floor;
+  check(!!fl && fl.n >= 2 && fl.low > 0.3, `sand on the floor of a pit faces up between built blocks (${fl ? fl.n + ' vertices, the lowest normal ' + fl.low.toFixed(2) : 'no pit'})`);
   check(real.r.species >= 3, `tree species are registered (${real.r.species})`);
   check(real.r.instanced > 0, `trees are drawn as instanced models (${real.r.instanced} batches' parts)`);
   for (const look of ['blocks', '']) {
