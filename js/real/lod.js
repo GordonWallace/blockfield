@@ -34,14 +34,18 @@ const real = BF.real;
 const TREE = 0, BUSH = 1, COVER = 2, ROCK = 3, BIG = 4;   // a record's kind (BIG: a tree on a 2 x 2 trunk)
 const config = {
   region: 32,             // blocks along a region's side
-  // by kind (tree, bush, ground cover, rock, big tree): the far end of each mesh level's band, whether an impostor follows, where the kind
-  // ends (0: never, while its chunk is loaded) and how much a plant's switch distances vary (a share of the distance)
+  // by kind (tree, bush, ground cover, rock, big tree): the far end of each mesh level's band (a level whose band is empty is never
+  // built), whether an impostor follows, where the kind ends (0: never, while its chunk is loaded), how much a plant's switch
+  // distances vary (a share of the distance), and the level from which all variants of an entry are drawn as its first one (share).
+  // Tuned on the 1.6 models: a tree is about 4,400 / 1,300 / 370 triangles at detail 0 / 1 / 2 and a tuft of ground cover 36 / 24, so
+  // a dense forest (10 trees a chunk) is about 1.3 million triangles of trees all round, under half of that in view, and ground cover
+  // costs draw calls rather than triangles (two levels, variants only next to the player).
   kinds: [
-    { dist: [28, 72, 150], impostor: true, maxDist: 0, jitter: 0.2 },
-    { dist: [18, 44, 110], impostor: false, maxDist: 110, jitter: 0.4 },
-    { dist: [10, 24, 52], impostor: false, maxDist: 52, jitter: 0.6 },
-    { dist: [24, 60, 220], impostor: false, maxDist: 220, jitter: 0.3 },
-    { dist: [36, 90, 190], impostor: true, maxDist: 0, jitter: 0.2 },
+    { dist: [24, 60, 120], impostor: true, maxDist: 0, jitter: 0.2, share: 2 },
+    { dist: [18, 44, 110], impostor: false, maxDist: 110, jitter: 0.4, share: 2 },
+    { dist: [12, 72, 72], impostor: false, maxDist: 72, jitter: 0.6, share: 1 },
+    { dist: [24, 60, 220], impostor: false, maxDist: 220, jitter: 0.3, share: 1 },
+    { dist: [30, 76, 150], impostor: true, maxDist: 0, jitter: 0.2, share: 2 },
   ],
   scale: 1,               // multiplies every distance (set from BF.real.quality.level each frame unless fixedScale)
   fixedScale: false,
@@ -142,8 +146,8 @@ function modelOf(kind, def, variant) {
     else if (rows.length < MAXROW) { M.row = rows.length; rows.push(M); atlasDirty = true; }
   }
   models.set(key, M); modelById.push(M);
-  // the last mesh level is one model for all of an entry's variants (far enough that they can't be told apart): a region then draws
-  // an entry's far trees in one batch per part, not one per variant
+  // from its kind's share level on, a model is drawn as its entry's first variant (far enough that they can't be told apart): a
+  // region then draws an entry's far plants in one batch per part, not one per variant
   M.far = variant === 0 ? M : modelOf(kind, def, 0);
   return M;
 }
@@ -452,8 +456,8 @@ function addToScene(mesh, r) {
   scene.add(mesh);
 }
 function buildMeshBatch(r, M, lod) {
-  // (level 2 is drawn with the entry's first variant for every variant, see modelFor)
-  const L = levelOf(M, lod), ids = lod === 2 ? modelById.filter(o => o.far === M).map(o => o.id) : [M.id];
+  // (a shared level is drawn with the entry's first variant for every variant, see modelOf)
+  const L = levelOf(M, lod), ids = lod >= M.K.share ? modelById.filter(o => o.far === M).map(o => o.id) : [M.id];
   let n = 0;
   for (const id of ids) n += r.count.get(id) || 0;
   const b = { ver: r.ver, meshes: [], n, tris: L ? L.tris * n : 0, last: 0 };
@@ -581,7 +585,7 @@ function update(camera) {
         const hit = M.cull ? rc.min * (1 - j) < band[1] && rc.max * (1 + j) >= band[0] : rc.mid >= band[0] && rc.mid < band[1];
         if (!hit) continue;
         if (i === 3) { wantImp = true; continue; }
-        const D = i === 2 ? M.far : M, key = D.id + ":" + i, b = r.built.get(key);
+        const D = i >= M.K.share ? M.far : M, key = D.id + ":" + i, b = r.built.get(key);
         if (b) b.want = true;
         if ((!b || b.ver !== r.ver) && !asked.has(key)) { asked.add(key); jobs.push([rc.min + i, r, key, D, i]); }
       }

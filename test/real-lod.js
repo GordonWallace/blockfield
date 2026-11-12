@@ -17,6 +17,10 @@ module.exports = async (pg, out) => {
 
   const placed = await pg.evaluate(() => {
     const T = THREE, R = BF.real, L = R.lod;
+    const takeover = R.flora.place === L.place && R.flora.remove === L.remove;
+    // from here on only the test's own chunks ("t...") reach the module: the world's flora would change every count below
+    R.flora.place = (key, ox, oz, F) => { if (String(key)[0] === "t") L.place(key, ox, oz, F); };
+    L.clear();
     L.config.fixedScale = true; L.config.scale = 1; L.config.budgetMs = 50;
     const first = BF.B.oak_log, cover = BF.B.fern;
     const mat = c => R.lit(new T.MeshLambertMaterial({ color: c }), { light: "cell" });
@@ -53,13 +57,13 @@ module.exports = async (pg, out) => {
       keys.push(k);
     }
     window.__keys = keys;
-    return { n, takeover: R.flora.place === L.place && R.flora.remove === L.remove };
+    return { n, takeover };
   });
   check(placed.takeover, "the module is the flora placer");
   await pg.waitForFunction(() => { const s = BF.real.lod.stats(); return s.plants > 0 && s.pending === 0 && s.batches > 0; }, null, { timeout: 120000, polling: 250 }).catch(() => {});
   await pg.waitForTimeout(1500);
   const r = await pg.evaluate(() => {
-    const L = BF.real.lod, s = L.stats(), tree = [...L.models.values()].find(m => m.kind === 0), bands = tree && L.bandsOf(tree);
+    const L = BF.real.lod, s = L.stats(), tree = [...L.models.values()].find(m => m.def.id === "test_cone" && m.variant === 0), bands = tree && L.bandsOf(tree);
     const mine = BF.scene.children.filter(c => c.userData.rlod);
     return { s, bands, levels: tree && tree.lods.map(l => !!l), imp: tree && tree.imp, atlas: L.impostor.atlas ? [L.impostor.atlas.image.width, L.impostor.atlas.image.height] : null,
       direct: mine.length, cards: mine.filter(c => !c.isInstancedMesh).length, builds: __builds.slice().sort().join("") };
@@ -75,7 +79,7 @@ module.exports = async (pg, out) => {
   await pg.screenshot({ path: out + "-plants.png" });
 
   // the quality level pulls every band in
-  const q = await pg.evaluate(() => { const L = BF.real.lod; L.config.fixedScale = false; BF.real.quality.level = 0; L.update(); const t = [...L.models.values()].find(m => m.kind === 0); return L.bandsOf(t)[0][1]; });
+  const q = await pg.evaluate(() => { const L = BF.real.lod; L.config.fixedScale = false; BF.real.quality.level = 0; L.update(); const t = [...L.models.values()].find(m => m.def.id === "test_cone"); return L.bandsOf(t)[0][1]; });
   check(q < r.bands[0][1], "lower quality switches levels sooner", [q, r.bands[0][1]]);
 
   // remove: nothing left in the scene
