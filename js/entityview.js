@@ -51,9 +51,11 @@ function drawDrops(seen, a) {
     }
     seen.add(d.n);
     sp.visible = loadedAt(d.x, d.z);
+    if (sp.visible && BF.real && BF.real.on && BF.real.fell) sp.visible = !BF.real.fell.hides(d);   // (off a tree still falling, js/real/fell.js)
     const k = M.k(d, a), j = 1 - k, q = d.prev || d, p = k < 1 && d.to || d, snap = k >= 1 || d2(q, p) > 16;
     const age = snap ? d.age : q.age * j + d.age * k, x = snap ? p.x : q.x * j + p.x * k, z = snap ? p.z : q.z * j + p.z * k;
-    const y = snap ? p.y : q.y * j + p.y * k;
+    let y = snap ? p.y : q.y * j + p.y * k;
+    if (!d.pulled && BF.real && BF.real.on && BF.real.fell) y = BF.real.fell.itemY(d.n, x, y, z);   // (on the smooth ground as drawn, js/real/fell.js)
     sp.position.set(x, d.pulled ? y : y + 0.22 + Math.sin(age * 2.5 + d.phase) * 0.06, z);   // one flying into the player doesn't bob
     sp.material.color.setScalar(light);
   }
