@@ -17,7 +17,7 @@
 const BF = (globalThis.BF = globalThis.BF || {});
 if (!BF.real || !BF.real.on || typeof THREE === "undefined") return;
 
-// The painted colours are bright (pure whites, pinks); under a sun of 3 they would burn out, so the models reflect a little less.
+// The painted colours are bright (pure whites, pinks); under the noon sun they would burn out, so the models reflect a little less.
 const ALBEDO = 0.7;
 let blobGeo = null, blobTex = null;
 function blobTexture() {
@@ -58,7 +58,7 @@ const mobs = {
     const b = v.blob;
     if (b) {
       // darkest under an open bright sky, gone in the dark, in a bed, in water and once dead; under a roof a faint one from the room's light
-      const A = BF.atmos, day = A ? Math.min(1, A.hemiIntensity / 0.6 + A.sunIntensity / 3.3) : 1;
+      const A = BF.atmos, day = A ? Math.min(1, A.hemiIntensity / 0.6 + A.sunIntensity / 1.7) : 1;
       const want = m.sleeping || m.dead || m.inWater || m.riding != null ? 0 : 0.5 * Math.min(1, day) * (0.35 + 0.65 * cell.x);
       b.material = blobMat(want);
       b.visible = want > 0.02;
