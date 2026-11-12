@@ -379,7 +379,7 @@ function mesh(p, raw) {
       nrm[o * 3] = Math.round(dx * l); nrm[o * 3 + 1] = Math.round(l); nrm[o * 3 + 2] = Math.round(dz * l);
     }
   }
-  if (p.noMorph) return { pos, sph, col, mpos, msph, mcol, can, idx: null };   // (the globe: never p.real)
+  if (p.noMorph) return { pos, sph, col, mpos, msph, mcol, can, wat, nrm, idx: null };   // (the globe's tiles)
   // a point on the coarser grid (even i and j) stays put and takes the coarser ring's shading; any other point goes to the middle of the
   // coarser triangle edge it lies on (that ring splits its cells along the same diagonal)
   for (let j = 0; j < n; j += 2) for (let i = 0; i < n; i += 2) {
