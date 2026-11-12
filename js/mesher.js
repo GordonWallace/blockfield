@@ -275,6 +275,10 @@ function build(J, tables) {
     }
   }
 
+  // the realistic look (1.6, js/real/mesh.js): natural ground and trees leave the cube pass for the smooth pass and the flora list
+  const RM = J.real && TB.real && BF.realMesh ? BF.realMesh.prepare(J, TB, { get, lget, skyAt, tint: tintAtCorner, sphere: P => spherePositions(P, J.sph) }) : null;
+  const RNAT = RM ? RM.NAT : null;
+
   for (let si = 0; si < J.hi - J.lo; si++) {
   const sec = J.secs[si];
   if (sec === 0) continue;                                   // all-air section
@@ -284,10 +288,12 @@ function build(J, tables) {
     if (uni) {
       // inside a uniform opaque block nothing is visible: only the shell of the section can show faces
       if (OPAQUE[sec] && ly > 0 && ly < 15 && z > 0 && z < 15 && x > 0 && x < 15) { x = 14; continue; }
+      if (RNAT && RNAT[sec]) break;   // (a section of ground: the smooth pass draws it)
       b = sec;
     } else b = sec[(ly << 8) | (z << 4) | x];
     if (!b) continue;
     const y = sy0 + ly;
+    if (RM && RM.skip(b, x, y, z)) continue;
     const r = RENDER[b];
 
     if (r === 4) { // crossed-quad plant
@@ -326,8 +332,8 @@ function build(J, tables) {
       if (isFluid) {
         if (FLUID[n] || OPAQUE[n]) continue;
       } else if (r === 2) {
-        if (OPAQUE[n] || n === b) continue;
-      } else if (OPAQUE[n]) continue;
+        if ((OPAQUE[n] && !(RNAT && RNAT[n])) || n === b) continue;
+      } else if (OPAQUE[n] && !(RNAT && RNAT[n])) continue;   // (smooth ground hides nothing: it may slope away from the block)
       const rect = faceUV[b * 6 + f];
       if (!rect) continue;
       const sky = skyAt(ax, ay, az);
@@ -415,6 +421,7 @@ function build(J, tables) {
     };
   };
   const r = { S: out(S), L: out(L) };
+  if (RM) { const e = BF.realMesh.finish(RM); r.T = e.T; r.F = e.F; }
   return r;
 }
 
@@ -442,7 +449,8 @@ function spherePositions(pos, sph) {
 // The arrays a result holds (to transfer them from a worker).
 function buffers(r) {
   const a = [];
-  for (const T of [r.S, r.L]) if (T) for (const k in T) if (T[k]) a.push(T[k].buffer);
+  for (const T of [r.S, r.L, r.T]) if (T) for (const k in T) if (T[k]) a.push(T[k].buffer);
+  if (r.F) a.push(r.F.buffer);
   return a;
 }
 
