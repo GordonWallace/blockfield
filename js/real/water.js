@@ -177,7 +177,8 @@ function scanColumn(i, j) {
       }
       if (isBed[id]) {
         if (cover < 0) { cover = y; soft = isSoft[id]; }
-        else if (y < cover - 7 || !air) { bedH = cover + 1; break; }   // solid ground: no open water under a roof or a bridge here
+        else if (air) { bedH = y + 1; soft = isSoft[id]; break; }      // the floor under a roof or a bridge: that is this column's ground
+        else { bedH = cover + 1; break; }                              // solid ground: no open water under it
       } else if (cover >= 0) air = true;
     } else if (!f) {
       if (isBed[id] || y === baseY) { bedH = y + 1; bedY = y + 1; soft = isSoft[id]; break; }
@@ -186,7 +187,7 @@ function scanColumn(i, j) {
   if (surf !== NONE && bedH === NONE) { bedH = baseY; bedY = baseY; }      // water deeper than the window reads
   const pSink = cSink[q];
   cSink[q] = surf === NONE && cover < 0 && bedH === NONE ? 1 : 0;
-  if (surf === NONE) bedH = cover >= 0 ? cover + 1 : bedH === NONE ? baseY : bedH;
+  if (surf === NONE && bedH === NONE) bedH = cover >= 0 ? cover + 1 : baseY;
   if (surf !== NONE && surf - bedH < 0.12) surf = bedH + 0.12;
   if (surf === NONE || blk < surf) blk = surf;
   cSurf[q] = surf; cBed[q] = bedH; cKnown[q] = 1; cSoft[q] = soft; cBlk[q] = blk;
@@ -529,6 +530,18 @@ function updateMesh(dt) {
     if (j > 0 && wDepth[q - V] > 0) { sy += wPos[(q - V) * 3 + 1]; n++; }
     if (j < V - 1 && wDepth[q + V] > 0) { sy += wPos[(q + V) * 3 + 1]; n++; }
     if (n) { wPos[q * 3 + 1] = sy / n; wDepth[q] = -0.02; }
+  }
+  // and the dry corners round those never stand above them: next to a wall, a post or a cliff (ground far above the water) the
+  // strip of surface that runs under the bank stays level instead of climbing it as a sheet
+  for (let j = 0; j < V; j++) for (let i = 0; i < V; i++) {
+    const q = i + j * V;
+    if (wDepth[q] > -0.1) continue;
+    let top = 1e9;
+    for (let b = j > 0 ? -1 : 0; b <= (j < V - 1 ? 1 : 0); b++) for (let a = i > 0 ? -1 : 0; a <= (i < V - 1 ? 1 : 0); a++) {
+      const p = q + a + b * V;
+      if (wDepth[p] > -0.1 && wPos[p * 3 + 1] < top) top = wPos[p * 3 + 1];
+    }
+    if (wPos[q * 3 + 1] > top) wPos[q * 3 + 1] = top;
   }
   for (let j = 1; j < V - 1; j++) for (let i = 1; i < V - 1; i++) {
     const q = i + j * V;

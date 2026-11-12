@@ -14,7 +14,8 @@ changes no block and the game never reads it, so a world plays the same with the
    water, and the level the blocks give is the level it rests at. Where the blocks have none, it has none for long.
 2. **Columns.** Each column of the window is read from the blocks: the top water block in reach (16 blocks above the view to
    44 below) is the surface, the ground under that run of water is the bed. A dry column gives only its ground, which is a
-   bank. Leaves are not ground. Water under a roof or a bridge counts when there is air between (a well under its roof); water
+   bank. Leaves are not ground. Under a roof or a bridge with air below it, what is under the air counts: water (a well under
+   its roof) or the floor there, which is then the column's ground. Water
    sealed under ground (a cave lake under a field) does not. Columns are read again when their blocks change
    (`chunk.colVer`) or their chunk loads, so digging, building and the fluid simulation show at once.
 3. **Rivers slope.** The planet's river network has a continuous surface (`BF.rivers.at(...).rs`); the blocks floor it, which
