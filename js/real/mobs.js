@@ -11,7 +11,8 @@
 //   - light(v, mob, x, y, z): once a frame: the cell's light into the material and the contact shadow's strength. Returns the
 //     model's albedo scale: the colour mobview.js then sets is only that and the tint (red when hurt, white for a creeper's fuse),
 //     no longer the light level.
-// API: BF.real.mobs = { material(), part(mesh), view(v, mob), light(v, mob, x, y, z) -> albedo scale }
+//   - ease(v, mob, y, dt): the height the model is drawn at: it glides up and down one-block steps, which the ground draws as slopes.
+// API: BF.real.mobs = { material(), part(mesh), view(v, mob), light(v, mob, x, y, z) -> albedo scale, ease(v, mob, y, dt) -> y }
 (() => {
 "use strict";
 const BF = (globalThis.BF = globalThis.BF || {});
@@ -49,6 +50,14 @@ const mobs = {
     blob.position.y = 0.03; blob.renderOrder = 2;
     v.root.add(blob);
     v.blob = blob;
+  },
+  // The height a mob is drawn at. The simulation lifts it a whole block in one tick where the ground rises a block; the ground is
+  // drawn as a slope there, so the model catches up over a moment instead of hopping (and the same going down).
+  ease(v, m, y, dt) {
+    const d = y - v.easeY;
+    if (!(Math.abs(d) < 1.3) || m.sleeping || m.riding != null || m.dead) return (v.easeY = y);   // first frame, a jump, a fall, a teleport
+    const s = Math.max(5, Math.abs(d) * 16) * dt;
+    return (v.easeY = Math.abs(d) <= s ? y : v.easeY + Math.sign(d) * s);
   },
   light(v, m, x, y, z) {
     BF.real.cellLight(x, y, z, cell);
