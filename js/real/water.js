@@ -16,8 +16,9 @@
 //     whole-block steps, so it runs downhill all the way. It is drawn close to the blocks' level (at most LOWER below it: boats,
 //     swimmers and the player's own waterline are at the blocks' level), so each block step shows as a low riffle.
 //  4. The simulation moves water between cells (virtual pipes), only ever into cells whose column has block water; every cell is
-//     also pulled back towards its rest level. So a dam, a dug trench or a dropped block bends the flow and makes waves and foam, but
-//     the water always settles to what the blocks say.
+//     also pulled back towards its rest level. So the water settles to what the blocks say, and never floods on arrival.
+//  7. Except round a change to a river (an edit in it at the height of its water: a dam, a dug bank, a trench). There the water
+//     runs free of rule 4: a dam fills a pool behind it that goes over or round it, and the reach below it falls. Drawing only still.
 //  5. Inside the window the chunks' own water faces are not drawn for the water this owns (between a column's bed and its surface);
 //     water under that (a cave lake under a river) and everything outside the window stays block water, drawn by the chunk meshes
 //     in the same colours. The two cross-fade over the window's outer EDGE blocks.
@@ -43,9 +44,12 @@ const RIM = 10;                 // blocks over which the surface eases to the bl
 const EDGE = 5;                 // blocks of cross-fade to block water at the window's rim
 const G = 9.81, NONE = -1e9, WET = 0.004, DEEP = 6;
 const FILL = 1.2, EASE = 0.3, SEEP = 0.5;   // per second: towards the rest level from below / from above, and off dry columns
-const WARM = 60;
+const WARM = 60, WARM_ZONE = 240;
 const LOWER = 0.25;              // how much of a river's slope below its blocks' level is drawn (rule 3)
 const HEAP = 0.6;               // water never stands more than this above its rest level (under a fall, behind a dam)
+const Z0 = 14, Z1 = 26;        // blocks round a change to a river where its water runs free (rule 7): wholly, and easing back to rule 4
+const SPILL = 0.15;             // freed water leaves the blocks' water once it stands this far above its rest level
+const POOL = 3;                 // and never stands more than this above it
 const SRC_H = 0.889;            // a source block's surface in its cell (as the mesher draws it)
 
 // ---------- fields ----------
@@ -53,6 +57,9 @@ const SRC_H = 0.889;            // a source block's surface in its cell (as the 
 const cSurf = new Float32Array(WB * WB).fill(NONE), cBed = new Float32Array(WB * WB), cKnown = new Uint8Array(WB * WB), cSoft = new Uint8Array(WB * WB);
 const cSink = new Uint8Array(WB * WB);   // no ground in the heights read (it is further down): water that gets here is gone, not held up
 const cBlk = new Float32Array(WB * WB);   // the surface as the blocks give it (cSurf differs on a river, rule 3)
+const cZone = new Uint8Array(WB * WB);   // a block was changed here, in a river, at the water's height (rule 7)
+const zDist = new Float32Array(WB * WB);
+const fr = new Float32Array(NN);     // 0..1: how free of the blocks' levels the water is here (rule 7)
 const cVer = new Uint32Array(WB * WB), cTopY = new Int16Array(WB * WB), cBedY = new Int16Array(WB * WB);
 // per cell (N x N)
 const sink = new Uint8Array(NN);
@@ -60,13 +67,64 @@ const lift = new Float32Array(NN);   // drawn above the simulated surface by thi
 const bed = new Float32Array(NN), tgt = new Float32Array(NN).fill(NONE), deep = new Float32Array(NN), fresh = new Uint8Array(NN).fill(1);
 const d = new Float32Array(NN), fL = new Float32Array(NN), fR = new Float32Array(NN), fU = new Float32Array(NN), fD = new Float32Array(NN);
 const vx = new Float32Array(NN), vz = new Float32Array(NN), foam = new Float32Array(NN), foam2 = new Float32Array(NN);
-const CELLF = [lift, sink, bed, tgt, deep, d, fL, fR, fU, fD, vx, vz, foam], COLF = [cSurf, cBed, cKnown, cSoft, cVer, cTopY, cBedY, cBlk, cSink];
+const CELLF = [lift, sink, bed, tgt, deep, d, fL, fR, fU, fD, vx, vz, foam], COLF = [cSurf, cBed, cKnown, cSoft, cVer, cTopY, cBedY, cBlk, cSink, cZone];
 const tmpF = new Float32Array(NN), tmpC = new Float64Array(WB * WB);
 
 let ox = 0, oz = 0, baseY = 0, placed = false, enabled = true, active = false, seedKey = "";
 let isBed = null, isSoft = null;
 const RV = {};
-const stats = { scans: 0, wet: 0, stray: 0, stepMs: 0, meshMs: 0 };
+const stats = { scans: 0, wet: 0, stray: 0, zones: 0, stepMs: 0, meshMs: 0 };
+let zoneDirty = true;
+
+// The heights at which each column of a chunk has edits (blocks that differ from the generated world: js/world.js edits), or null.
+const editCache = new Map();   // chunk key -> { ver, n, lo, hi }
+function editSpans(c) {
+  const e = BF.world.edits && BF.world.edits.get(c.key);
+  if (!e || !e.size) return null;
+  let m = editCache.get(c.key);
+  if (m && m.ver === c.ver && m.n === e.size) return m;
+  if (!m) { if (editCache.size > 64) editCache.clear(); editCache.set(c.key, (m = { ver: 0, n: 0, lo: new Int16Array(256), hi: new Int16Array(256) })); }
+  m.ver = c.ver; m.n = e.size; m.lo.fill(32767); m.hi.fill(-32768);
+  for (const i of e.keys()) { const col = i & 255, y = (i >> 8) + BF.MIN_Y; if (y < m.lo[col]) m.lo[col] = y; if (y > m.hi[col]) m.hi[col] = y; }
+  return m;
+}
+// Was this column changed where a river runs, at the height of its water? (a dam, a dug bank, a trench: not a torch or a felled tree)
+function riverEdit(c, x, z) {
+  const m = editSpans(c);
+  if (!m || !BF.rivers) return 0;
+  const col = ((z - c.cz * 16) << 4) | (x - c.cx * 16);
+  if (m.hi[col] < m.lo[col]) return 0;
+  let hit = false;
+  try { hit = BF.rivers.at(x, z, RV); } catch (_) { hit = false; }
+  if (!hit || RV.rs < BF.SEA || RV.d > RV.w + 3) return 0;
+  const ry = Math.floor(RV.rs);
+  return m.lo[col] <= ry + 1 && m.hi[col] >= ry - 6 ? 1 : 0;
+}
+// How free the water is in each cell, from how far the nearest such change is.
+function buildZones() {
+  zoneDirty = false;
+  let n = 0;
+  for (let q = 0; q < WB * WB; q++) { if (cZone[q]) { zDist[q] = 0; n++; } else zDist[q] = 1e9; }
+  if (!n) { if (stats.zones) fr.fill(0); stats.zones = 0; return; }
+  stats.zones = n;
+  for (let j = 0; j < WB; j++) for (let i = 0; i < WB; i++) {
+    const q = i + j * WB; let v = zDist[q];
+    if (i > 0 && zDist[q - 1] + 1 < v) v = zDist[q - 1] + 1;
+    if (j > 0) { if (zDist[q - WB] + 1 < v) v = zDist[q - WB] + 1; if (i > 0 && zDist[q - WB - 1] + 1.414 < v) v = zDist[q - WB - 1] + 1.414; if (i < WB - 1 && zDist[q - WB + 1] + 1.414 < v) v = zDist[q - WB + 1] + 1.414; }
+    zDist[q] = v;
+  }
+  for (let j = WB - 1; j >= 0; j--) for (let i = WB - 1; i >= 0; i--) {
+    const q = i + j * WB; let v = zDist[q];
+    if (i < WB - 1 && zDist[q + 1] + 1 < v) v = zDist[q + 1] + 1;
+    if (j < WB - 1) { if (zDist[q + WB] + 1 < v) v = zDist[q + WB] + 1; if (i < WB - 1 && zDist[q + WB + 1] + 1.414 < v) v = zDist[q + WB + 1] + 1.414; if (i > 0 && zDist[q + WB - 1] + 1.414 < v) v = zDist[q + WB - 1] + 1.414; }
+    zDist[q] = v;
+  }
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    let t = (Z1 - zDist[(i >> 1) + (j >> 1) * WB]) / (Z1 - Z0);
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    fr[i + j * N] = t * t * (3 - 2 * t);
+  }
+}
 
 function tables() {
   const n = BF.blocks.length;
@@ -87,8 +145,10 @@ function scanColumn(i, j) {
   const c = W.chunkAt(x, z);
   const pS = cSurf[q], pB = cBed[q], pK = cKnown[q];
   stats.scans++;
-  if (!c) { cSurf[q] = NONE; cBed[q] = baseY + YH; cKnown[q] = 0; cSoft[q] = 0; cSink[q] = 0; cTopY[q] = cBedY[q] = 0; cVer[q] = 0; return pK !== 0; }
+  if (!c) { if (cZone[q]) { cZone[q] = 0; zoneDirty = true; } cSurf[q] = NONE; cBed[q] = baseY + YH; cKnown[q] = 0; cSoft[q] = 0; cSink[q] = 0; cTopY[q] = cBedY[q] = 0; cVer[q] = 0; return pK !== 0; }
   cVer[q] = c.colVer[((z - c.cz * 16) << 4) | (x - c.cx * 16)] + 1;
+  const zn = riverEdit(c, x, z);
+  if (zn !== cZone[q]) { cZone[q] = zn; zoneDirty = true; }
   let surf = NONE, blk = 0, bedH = NONE, soft = 0, topY = 0, bedY = 0, cover = -1, air = false;
   const get = W.getBlock;
   for (let y = baseY + YH - 1; y >= baseY; y--) {
@@ -183,8 +243,10 @@ function place(px, py, pz, force) {
   // read every column whose content isn't known for this placement (all of them when the heights read changed)
   for (let j = 0; j < WB; j++) for (let i = 0; i < WB; i++) if (yMove || whole || !cKnown[i + j * WB]) scanColumn(i, j);
   buildCells(0, 0, WB - 1, WB - 1);
+  if (zoneDirty) buildZones();
   mesh.position.set(ox, baseY, oz); mesh.updateMatrix();
-  if (whole) for (let q = 0; q < WARM; q++) simStep(0.03);   // a fresh window: rivers already running, not starting from rest
+  // a fresh window: rivers already running, not starting from rest (and a dam's pool already standing, not filling as the player arrives)
+  if (whole) for (let q = stats.zones ? WARM_ZONE : WARM; q > 0; q--) simStep(0.03);   // a fresh window: rivers already running, not starting from rest
 }
 // Moves what the window holds by (-dx, -dz) blocks; the columns and cells that come in are marked unknown / fresh.
 function shift(dx, dz) {
@@ -198,10 +260,11 @@ function shift(dx, dz) {
   };
   for (const a of CELLF) mv(a, N, CPB, tmpF, 0);
   for (const a of COLF) mv(a, WB, 1, tmpC, 0);
+  zoneDirty = true;
   for (let j = 0; j < WB; j++) for (let i = 0; i < WB; i++) {
     const si = i + dx, sj = j + dz, inb = si >= 0 && si < WB && sj >= 0 && sj < WB;
     if (inb) continue;
-    cKnown[i + j * WB] = 0; cSurf[i + j * WB] = NONE;
+    cKnown[i + j * WB] = 0; cSurf[i + j * WB] = NONE; cZone[i + j * WB] = 0;
     for (let b = 0; b < CPB; b++) for (let a = 0; a < CPB; a++) fresh[i * CPB + a + (j * CPB + b) * N] = 1;
   }
 }
@@ -225,18 +288,33 @@ function refresh() {
     if (all) chunkSeen.set(key, [c, c ? c.ver : 0]);
   }
   if (i1 >= 0) buildCells(i0 - 1, j0 - 1, i1 + 1, j1 + 1);
+  if (zoneDirty) buildZones();
 }
 
 // ---------- the simulation (virtual pipes, as Cascade Creek's) ----------
+// The flow from cell k (surface h) into its neighbour n this step.
+function pipe(k, n, f, h, damp, A) {
+  const tn = tgt[n], tk = tgt[k], fk = fr[k];
+  // water only moves into cells the blocks give water (rule 1): never out over a bank or a lip the block water itself doesn't cross.
+  // Except water set free by a change to the river, once it has risen above its rest level (rule 7), and water already out there.
+  if (tn === NONE && tk !== NONE && !(fk > 0 && fr[n] > 0 && h > tk + SPILL)) return 0;
+  let hn = bed[n] + d[n];
+  // where free water eases back to the blocks' levels, the river keeps sending what it carries however high the free water stands:
+  // that is what fills a pool behind a dam
+  if (fk > 0 && fk < 1 && tn !== NONE) hn += (tn - hn) * (1 - fk);
+  let q = f * damp + A * (h - hn);
+  if (q <= 0) return 0;
+  if (fk > 0 && tn !== NONE && tk !== NONE && tn > tk && fr[n] < 1) q *= fr[n];   // and the pool does not run back up the river
+  return q;
+}
 function simStep(dt) {
   const A = dt * G * CELL, cc = CELL * CELL;
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const k = i + j * N, dk = d[k];
     if (dk <= 1e-5 && fL[k] === 0 && fR[k] === 0 && fU[k] === 0 && fD[k] === 0) continue;
     const h = bed[k] + dk, damp = 1 / (1 + dt * (0.06 + 0.11 / (dk + 0.08)));
-    // water only moves into cells the blocks give water (rule 1): never out over a bank or a lip the block water itself doesn't cross
-    let l = i > 0 && tgt[k - 1] !== NONE ? fL[k] * damp + A * (h - bed[k - 1] - d[k - 1]) : 0, r = i < N - 1 && tgt[k + 1] !== NONE ? fR[k] * damp + A * (h - bed[k + 1] - d[k + 1]) : 0;
-    let u = j > 0 && tgt[k - N] !== NONE ? fU[k] * damp + A * (h - bed[k - N] - d[k - N]) : 0, dn = j < N - 1 && tgt[k + N] !== NONE ? fD[k] * damp + A * (h - bed[k + N] - d[k + N]) : 0;
+    let l = i > 0 ? pipe(k, k - 1, fL[k], h, damp, A) : 0, r = i < N - 1 ? pipe(k, k + 1, fR[k], h, damp, A) : 0;
+    let u = j > 0 ? pipe(k, k - N, fU[k], h, damp, A) : 0, dn = j < N - 1 ? pipe(k, k + N, fD[k], h, damp, A) : 0;
     if (l < 0) l = 0; if (r < 0) r = 0; if (u < 0) u = 0; if (dn < 0) dn = 0;
     const sum = l + r + u + dn;
     if (sum > 0) { const K = dk * cc / (sum * dt); if (K < 1) { l *= K; r *= K; u *= K; dn *= K; } }
@@ -259,8 +337,9 @@ function simStep(dt) {
       vx[k] = ux; vz[k] = uz;
     }
     // back towards what the blocks say (rule 4)
-    if (t !== NONE) { const want = t - bed[k]; nd += (want - nd) * (nd < want ? kf : ke); if (nd > want + HEAP) nd = want + HEAP; if (nd < 0) nd = 0; }
-    else if (nd > 0) { nd -= nd * ks + 0.02 * dt; if (nd < 0) nd = 0; if (nd > WET) stray++; }
+    const fk = fr[k];
+    if (t !== NONE) { const want = t - bed[k], top = want + HEAP + fk * POOL; nd += (want - nd) * (nd < want ? kf : ke) * (1 - fk); if (nd > top) nd = top; if (nd < 0) nd = 0; }
+    else if (nd > 0) { nd -= nd * ks * (1 - 0.9 * fk) + 0.02 * dt; if (nd < 0) nd = 0; if (nd > WET) stray++; }
     if (sink[k]) nd = 0;   // over the edge of what is read: it falls out of the picture
     if (i < 2 || j < 2 || i > N - 3 || j > N - 3) nd = t !== NONE && t > bed[k] ? t - bed[k] : 0;   // the rim is held at rest: water comes and goes through it
     d[k] = nd;
@@ -607,7 +686,7 @@ RW = BF.real.water = {
   rebuild() { placed = false; },
   mesh, uniforms: U, stats,
   get window() { return { x: ox, z: oz, y: baseY, size: WB, height: YH, cells: N }; },
-  _fields: { d, bed, tgt, vx, vz, foam, cSurf, cBed, cKnown, cSink },
+  _fields: { fr, cZone, lift, d, bed, tgt, vx, vz, foam, cSurf, cBed, cKnown, cSink },
 };
 // Splashes (the contract's BF.real.splash, atlas coordinates): for now the water's own answer, a ring of waves and foam.
 BF.real.splash = (x, y, z, strength) => { const s = Math.max(0.1, Math.min(3, strength || 1)); return disturb(x, z, 0.12 * s, 0.6 + 0.5 * s); };
