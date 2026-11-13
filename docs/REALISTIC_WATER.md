@@ -87,5 +87,7 @@ blocks, and only changed columns otherwise.
   blocks' level beyond it.
 - The mesher's liquid pass is unchanged, so block water beyond the window still has a river's one-block steps.
 - Falling water (a poured bucket down a cliff) is a steep sheet of the same surface, with foam but no spray.
+  Block water's upright faces (a fall down a cliff, the steps of a steep river beyond the window) are drawn as white water
+  running down, in the same light as the surface, so a fall reads as one stream.
 - The player and drops are not pushed by the current (that would be the simulation's business, not drawing's).
 - No wet band on the shore yet (needs an attribute on the terrain pass).
