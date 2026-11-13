@@ -37,14 +37,14 @@ if (!BF.real || !BF.real.on || typeof THREE === "undefined") return;
 const RU = BF.real.U;
 let RW = null;
 
-const WB = 80, CPB = 2, N = WB * CPB, NN = N * N, CELL = 1 / CPB, V = N + 1, VV = V * V;
+const WB = 112, CPB = 2, N = WB * CPB, NN = N * N, CELL = 1 / CPB, V = N + 1, VV = V * V;
 const SNAP = 8, MOVE = 12;      // the window moves in steps of SNAP blocks once the player is MOVE from its centre
-const YUP = 16, YDN = 44, YH = YUP + YDN;   // the blocks read above and below the player's feet
+const YUP = 40, YDN = 120, YH = YUP + YDN, YSLACK = 24;   // (the window follows the player's height in steps of YSLACK)   // the blocks read above and below the player's feet
 const RIM = 10;                 // blocks over which the surface eases to the blocks' level at the rim
 const EDGE = 5;                 // blocks of cross-fade to block water at the window's rim
 const G = 9.81, NONE = -1e9, WET = 0.004, DEEP = 6;
 const FILL = 1.2, EASE = 0.3, SEEP = 0.5;   // per second: towards the rest level from below / from above, and off dry columns
-const WARM = 60, WARM_ZONE = 240;
+const WARM = 60, WARM_ZONE = 160;
 const LOWER = 0.25;              // how much of a river's slope below its blocks' level is drawn (rule 3)
 const HEAP = 0.6;               // water never stands more than this above its rest level (under a fall, behind a dam)
 const Z0 = 14, Z1 = 26;        // blocks round a change to a river where its water runs free (rule 7): wholly, and easing back to rule 4
@@ -161,7 +161,8 @@ function scanColumn(i, j) {
   if (zn !== cZone[q]) { cZone[q] = zn; zoneDirty = true; }
   let surf = NONE, blk = 0, bedH = NONE, soft = 0, topY = 0, bedY = 0, cover = -1, air = false;
   const get = W.getBlock;
-  for (let y = baseY + YH - 1; y >= baseY; y--) {
+  // (from the top of what the chunk holds: above that it is all air)
+  for (let y = Math.min(baseY + YH, c.y1) - 1; y >= (surf === NONE ? baseY : baseY - DEEP - 2); y--) {   // (a bed is looked for a little further down)
     const id = get(x, y, z), f = FL[id];
     if (surf === NONE) {
       if (f) {
@@ -181,7 +182,7 @@ function scanColumn(i, j) {
         else { bedH = cover + 1; break; }                              // solid ground: no open water under it
       } else if (cover >= 0) air = true;
     } else if (!f) {
-      if (isBed[id] || y === baseY) { bedH = y + 1; bedY = y + 1; soft = isSoft[id]; break; }
+      if (isBed[id] || y === baseY - DEEP - 2) { bedH = y + 1; bedY = y + 1; soft = isSoft[id]; break; }
     }
   }
   if (surf !== NONE && bedH === NONE) { bedH = baseY; bedY = baseY; }      // water deeper than the window reads
@@ -239,7 +240,7 @@ function place(px, py, pz, force) {
   const nx = Math.round((px - WB / 2) / SNAP) * SNAP, nz = Math.round((pz - WB / 2) / SNAP) * SNAP;
   const cx = ox + WB / 2, cz = oz + WB / 2;
   const far = !placed || Math.abs(px - cx) > MOVE || Math.abs(pz - cz) > MOVE;
-  const yOff = py - (baseY + YDN), yMove = !placed || yOff > 9 || yOff < -9;
+  const yOff = py - (baseY + YDN), yMove = !placed || yOff > YSLACK || yOff < -YSLACK;
   if (!force && !far && !yMove) return;
   const dx = placed && !force ? nx - ox : WB, dz = placed && !force ? nz - oz : WB;
   const whole = force || !placed || Math.abs(dx) >= WB || Math.abs(dz) >= WB;
@@ -253,7 +254,12 @@ function place(px, py, pz, force) {
   chunkSeen.clear();
   // read every column whose content isn't known for this placement (all of them when the heights read changed)
   for (let j = 0; j < WB; j++) for (let i = 0; i < WB; i++) if (yMove || whole || !cKnown[i + j * WB]) scanColumn(i, j);
-  buildCells(0, 0, WB - 1, WB - 1);
+  if (whole || yMove) buildCells(0, 0, WB - 1, WB - 1);
+  else {
+    // moved sideways: only the strips of columns that came in (and the column beside them, whose smoothed ground looks at them)
+    if (dx > 0) buildCells(WB - dx - 1, 0, WB - 1, WB - 1); else if (dx < 0) buildCells(0, 0, -dx, WB - 1);
+    if (dz > 0) buildCells(0, WB - dz - 1, WB - 1, WB - 1); else if (dz < 0) buildCells(0, 0, WB - 1, -dz);
+  }
   if (zoneDirty) buildZones();
   mesh.position.set(ox, baseY, oz); mesh.updateMatrix();
   // a fresh window: rivers already running, not starting from rest (and a dam's pool already standing, not filling as the player arrives)
@@ -535,13 +541,12 @@ function updateMesh(dt) {
   // strip of surface that runs under the bank stays level instead of climbing it as a sheet
   for (let j = 0; j < V; j++) for (let i = 0; i < V; i++) {
     const q = i + j * V;
-    if (wDepth[q] > -0.1) continue;
-    let top = 1e9;
+    if (wDepth[q] <= -0.1) continue;   // (from the wet and shore corners outwards: there are far fewer of those)
+    const y = wPos[q * 3 + 1];
     for (let b = j > 0 ? -1 : 0; b <= (j < V - 1 ? 1 : 0); b++) for (let a = i > 0 ? -1 : 0; a <= (i < V - 1 ? 1 : 0); a++) {
       const p = q + a + b * V;
-      if (wDepth[p] > -0.1 && wPos[p * 3 + 1] < top) top = wPos[p * 3 + 1];
+      if (wDepth[p] <= -0.1 && wPos[p * 3 + 1] > y) wPos[p * 3 + 1] = y;
     }
-    if (wPos[q * 3 + 1] > top) wPos[q * 3 + 1] = top;
   }
   for (let j = 1; j < V - 1; j++) for (let i = 1; i < V - 1; i++) {
     const q = i + j * V;

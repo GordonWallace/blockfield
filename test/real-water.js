@@ -60,11 +60,12 @@ module.exports = async (pg) => {
 
   // from any height the water stays in columns that have block water (it once spread over the bottom of the heights read, as a sheet
   // in the air, when the view came down towards a river from above) and never heaps far above the blocks' level
-  for (const up of [50, 30, 12, 6]) {
+  for (const up of [90, 50, 30, 12, 6]) {   // (90: the foot of a tall fall seen from its top is still flowing water)
     await pg.evaluate(([s, up]) => { BF.player.spawn(s.x + 0.5, s.wl + up, s.z + 0.5); BF.player.setFlying(true); }, [spot, up]);
     await run(80);
     const r = await pg.evaluate(() => { const w = BF.real.water, f = w._fields; let stray = 0, high = 0; for (let k = 0; k < f.d.length; k++) if (f.d[k] > 0.004) { if (f.tgt[k] < -1e8) stray++; else if (f.bed[k] + f.d[k] > f.tgt[k] + 0.7) high++; } return { stray, high, wet: w.stats.wet }; });
-    check('from ' + up + ' blocks up: no water outside the blocks\' water, none heaped above it', r.stray === 0 && r.high === 0, r);
+    r.depth = await pg.evaluate(s => BF.real.water.active ? BF.real.water.depthAt(s.x + 0.5, s.z + 0.5) : -1, spot);
+    check('from ' + up + ' blocks up: the water under the view is flowing water, none outside the blocks\' water, none heaped above it', r.stray === 0 && r.high === 0 && r.depth > 0.5, r);
   }
   await pg.evaluate(s => { BF.player.spawn(s.x + 0.5, s.wl + 6, s.z + 0.5); BF.player.setFlying(true); }, spot);
   await run(10);
