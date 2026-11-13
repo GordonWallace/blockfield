@@ -120,6 +120,7 @@ function riverWorkers(seed, show) {
 // ---------- loop ----------
 const PF = BF.perf, simFrame = BF.boot.ticks, host = BF.simHost;   // the simulation's ticks for a frame (js/boot.js); its host (js/simhost.js)
 let last = performance.now();
+const ftLap = BF.frameTimes.lap;   // each step's ms for the F3 screen's "Frame ms" line (js/debugoverlay.js)
 const frame = BF.tload.wrap(function frameBody(now) {   // (timed: the page thread's busy share on the debug screen, js/threadload.js)
   requestAnimationFrame(frame);
   if (BF.preparing) { last = now; return; }
@@ -128,11 +129,14 @@ const frame = BF.tload.wrap(function frameBody(now) {   // (timed: the page thre
   // the detached view (r15-98): the page's own copy of the world (the simulation in a worker or on the world server) streams round the
   // view, which loads nothing in the simulation; in the page the world is the simulation's, so it stays round the body
   const p = BF.player.detached && BF.world.replica ? BF.player.viewPos() : BF.player.position;
+  BF.frameTimes.start();
   PF.frame();
   PF.mark();
   BF.world.update(p.x, p.z, BF.warp.speed >= 10 ? 3 : BF.player.turbo || BF.player.detached ? 14 : 8, p.y);   // turbo flight streams terrain harder; fast-forward leaves the frame to the sim
   PF.lap(PF.C.stream);   // chunk streaming and remeshing, once a frame
+  ftLap("chunks");
   if (BF.lod) BF.lod.update();   // distant terrain rings on the planet (js/lod.js)
+  ftLap("far land");
   const W = BF.warp, drawn0 = W.renderNow(), remote = host.worker;
   if (!BF.state.paused) {
     const done = remote ? host.ticks(raw) : simFrame(raw);   // (in the worker: the page only keeps time for drawing)
@@ -143,6 +147,7 @@ const frame = BF.tload.wrap(function frameBody(now) {   // (timed: the page thre
     BF.player.updatePaused(dt);
   }
   host.frame();   // the player and the speed to the worker (js/simhost.js)
+  ftLap("player and simulation");
   if (BF.proto) BF.proto.flush();   // the frame's changes to the client's mirror: chunks, blocks, entities, clock (js/protocol.js, r15-36)
   // drawing between the last two ticks (r15-10): the sky at the interpolated game time, entities at lerp(prev, cur, alpha)
   const alpha = W.alpha, drawnDt = Math.max(0, W.renderNow() - drawn0);
@@ -156,13 +161,19 @@ const frame = BF.tload.wrap(function frameBody(now) {   // (timed: the page thre
   BF.world.setDaylight(BF.sky.light);
   if (BF.textures.update) BF.textures.update(W.frozen ? 0 : BF.state.paused ? dt : drawnDt);   // water animation runs on the drawn game time (fast-forward included, stopped at 0x)
   if (BF.save && !BF.state.paused && !remote) BF.save.update(dt);   // (the worker autosaves itself)
+  ftLap("sky, screens, textures");
   BF.mobView.render(BF.state.paused || W.frozen ? 0 : dt * Math.max(1, Math.min(10, W.last)));   // the mobs' models from their simulation state (js/mobview.js)
+  ftLap("mobs");
   BF.entityView.render(BF.state.paused || W.frozen ? 0 : drawnDt, dt);   // drops, arrows, boats, bees, leads and effects at BF.warp.alpha (js/entityview.js)
+  ftLap("drops and effects");
   if (BF.real && BF.real.on) BF.real.frame(dt);   // the realistic look: lights, air and its modules (js/real/core.js)
+  ftLap("realistic look");
   BF.view.begin(scene, camera);   // floating origin and unfolded faces on the planet (js/view.js)
   if (BF.lod && BF.lod.cull) BF.lod.cull(camera);   // the distant rings' sectors in view (js/lod.js)
+  ftLap("view");
   const r0 = performance.now();
   renderer.render(scene, camera);
+  ftLap("drawing");
   BF.tload.frame(performance.now() - r0);   // (the debug screen: frames a second and the drawing call's ms, js/threadload.js)
   BF.view.end();
   BF.debugOverlay.update(now);   // F3 (js/debugoverlay.js)
@@ -171,6 +182,8 @@ const frame = BF.tload.wrap(function frameBody(now) {   // (timed: the page thre
   if (BF.villagerHover) BF.villagerHover.update(dt);
   if (BF.stateHash && !remote) BF.stateHash.update();   // the game log's state hash as each game day starts (js/statehash.js; the worker logs its own)
   if (BF.debugFeed) BF.debugFeed.update();
+  ftLap("debug and panels");
+  BF.frameTimes.end();
 });
 
 // ---------- boot ----------

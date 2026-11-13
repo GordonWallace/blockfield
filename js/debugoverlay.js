@@ -52,13 +52,24 @@ function updateDebug(now) {
 // (spec r15-37); in the page its answer comes at once, elsewhere the overlay shows the latest one.
 let f3 = null, f3Asking = false;
 const F3_NONE = { mobs: 0, boats: 0, sim: "", clock: "", weather: "", perf: null, perfText: "", requests: null, requestsText: "", regionText: "", workersText: "", blockLight: 0 };
+// The graphics card the browser draws with (Gordon, 2026-11-13: is it the discrete GPU or the built-in one?): the unmasked WebGL renderer
+// string where the browser gives it (Chrome: "ANGLE (NVIDIA, NVIDIA GeForce RTX 5070 Direct3D11 ...)"), else the masked one. Read once.
+let gpuName = null;
+function gpu() {
+  if (gpuName != null) return gpuName;
+  try {
+    const gl = BF.renderer.getContext(), ext = gl.getExtension("WEBGL_debug_renderer_info");
+    gpuName = String((ext && gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) || gl.getParameter(gl.RENDERER) || "");
+  } catch (e) { gpuName = ""; }
+  return gpuName;
+}
 function debugInfo() {
   const p = BF.player.position;
   const biome = BF.worldgen.biomeAt(p.x, p.z), cc = BF.world.chunkAt(p.x, p.z);
   if (BF.client && !f3Asking) { f3Asking = true; BF.client.query("f3", { x: p.x, y: p.y, z: p.z, shown: !!BF.debugOn }, r => { f3Asking = false; if (r && r.ok) f3 = r; }); }
   const q = f3 || F3_NONE;
   return {
-    fps, x: p.x, y: p.y, z: p.z, yaw: BF.player.yaw,
+    fps, gpu: gpu(), frameMs: BF.frameTimes && BF.frameTimes.last, x: p.x, y: p.y, z: p.z, yaw: BF.player.yaw,
     chunkX: Math.floor(p.x / BF.CS), chunkZ: Math.floor(p.z / BF.CS),
     sections: cc ? { lo: cc.lo, hi: cc.hi - 1, y0: cc.y0, y1: cc.y1 - 1 } : null,
     biome: biome ? biome.name : "?",
@@ -89,6 +100,12 @@ function planetInfo(p) {
 }
 // "Planet debug: face tints, true sphere" when any F3 + B / C / R toggle is on
 const planetToggles = pl => { const on = pl.debug ? Object.keys(PLANET_TOGGLE).filter(k => pl.debug[k]) : []; return on.length ? "Planet debug: " + on.map(k => PLANET_TOGGLE[k].toLowerCase()).join(", ") + "\n" : ""; };
+// "drawing 21.4, realistic look 6.2, chunks 3.0, ... (total 38.1)": the frame's steps, biggest first (js/main.js BF.frameTimes)
+function frameLine(o) {
+  let tot = 0;
+  const rows = Object.entries(o).filter(([, v]) => (tot += v, v >= 0.05)).sort((a, b) => b[1] - a[1]);
+  return rows.map(([k, v]) => k + " " + v.toFixed(1)).join(", ") + " (total " + tot.toFixed(1) + ")";
+}
 function debugText(d) {
   const s = d.sections, pl = d.planet;
   const n1 = v => (Math.floor(v * 10) / 10).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -106,9 +123,29 @@ function debugText(d) {
     (d.weather ? "\n" + d.weather : "") +
     `\nClouds ${d.cloudCover < 0.06 ? "clear" : Math.round(d.cloudCover * 100) + "%"} at y${Math.round(d.cloudHeight)}` +
     (d.shared ? "\n" + d.shared : "") +
+    (d.gpu ? "\nGPU " + d.gpu : "") +
+    (d.frameMs ? "\nFrame ms: " + frameLine(d.frameMs) : "") +
     "\nSimulation: " + d.simMode +
     (d.clicks && d.clicks.length ? "\nMouse (last clicks, newest last):\n" + d.clicks.join("\n") : "");
 }
+// Where the page thread's frame goes (Gordon, 2026-11-13: 15 fps with the page thread at 98%): js/main.js calls start() as its frame
+// begins, lap(step) after each step and end() at the end; each step's ms is averaged over a second for the "Frame ms" line.
+// BF.frameTimes.last: {step: ms a frame}, frames: how many that second.
+let ftAcc = {}, ftN = 0, ftT = 0, ftT0 = performance.now();
+BF.frameTimes = {
+  last: null, frames: 0,
+  start() { ftT = performance.now(); },
+  lap(k) { const t = performance.now(); ftAcc[k] = (ftAcc[k] || 0) + t - ftT; ftT = t; },
+  end() {
+    ftN++;
+    const t = performance.now();
+    if (t - ftT0 < 1000) return;
+    const o = {};
+    for (const k in ftAcc) o[k] = ftAcc[k] / ftN;
+    BF.frameTimes.last = o; BF.frameTimes.frames = ftN;
+    ftAcc = {}; ftN = 0; ftT0 = t;
+  },
+};
 BF.debugInfo = debugInfo;
 BF.debugText = debugText;
 
