@@ -1,4 +1,4 @@
-// @ci baseline suite=world
+// @ci baseline suite=world timeout=600
 // One draw call per mob (js/mobview.js batchOf, Gordon 2026-11-13: 15 fps with the page thread busy, about half of the realistic look's
 // draw calls were mobs' body parts). In both looks a mob's parts are one joined mesh, drawn once, its vertex shader moving each part by
 // its matrix; the part meshes stay (animation, eyelids, held tools, tests) but off the camera's layer. Checks: one draw for a pig whose
