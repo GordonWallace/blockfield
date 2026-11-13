@@ -671,8 +671,38 @@ function biomeAt(x, z) {
 const tintCache = new Map();   // chunk key -> Float32Array(256 * 9), filled by generate()
 const TINT_MAX = 1500;
 function tintCompute(x, z, out, o) {
+  if (BF.real && BF.real.on) { climate(x, z); tintK(out, o); tintReal(out, o, C.biome); return; }
   fields(x, z);
   tintK(out, o);
+}
+// The realistic look (1.6): grass in the colour of its biome. The climate's grass tint was made for the blocks' grey grass texture, and
+// one climate holds several biomes (a savanna and the plains beside it share a tint), so on the look's turf it came out one vivid
+// green everywhere. Here the grass tint (out[o .. o + 2]) becomes the biome's sward as a multiplier of the look's turf colour
+// (TURF: js/real/assets-ground.js "turf"; the sward's colours are of grass in open shade, like that file's), with a quarter of the
+// climate's own drift kept, so a biome is not one flat colour from end to end. Drawing only: the loaded chunks (tintAt) and the far
+// land (surfaceAt) both come through here, so they agree.
+const TURF = [0x80 / 255, 0x87 / 255, 0x6b / 255], SWARD = [];
+(function () {
+  const s = (hex, ...bs) => { const c = [1, 3, 5].map((i, k) => parseInt(hex.slice(i, i + 2), 16) / 255 / TURF[k]); for (const b of bs) SWARD[b] = c; };
+  s("#6c8440", PLAINS, RIVER, BEACH, STONY_SHORE, OCEAN);           // temperate grassland: a fresh mid green
+  s("#63883e", MEADOW);                                             // mountain meadow: a little lusher
+  s("#5c7a3a", FOREST, FLOWER_FOREST, BIRCH, CHERRY);               // woodland floor: deeper, shaded
+  s("#4a6630", DARK_FOREST);
+  s("#5e6a36", SWAMP, MANGROVE);                                    // murky olive
+  s("#929050", SAVANNA);                                            // dry season straw over a little green
+  s("#9c9054", DESERT);                                             // what grows there is parched
+  s("#928250", BADLANDS);
+  s("#5e8a32", SPARSE_JUNGLE);
+  s("#4c8428", JUNGLE);                                             // rank and saturated, but not neon
+  s("#5a7848", TAIGA, OLD_TAIGA);                                   // cool blue green
+  s("#70846a", SNOWY_PLAINS, ICE_SPIKES, SNOWY_TAIGA, SNOWY_BEACH, SNOWY_SLOPES, FROZEN_OCEAN);   // frost greyed
+  s("#74804e", MOUNTAINS, PEAKS, STONY_PEAKS);                      // thin upland grass
+  s("#6c7c5c", MUSHROOM);
+})();
+function tintReal(out, o, biome) {
+  const c = SWARD[biome] || SWARD[PLAINS], r = out[o], g = out[o + 1], b = out[o + 2], m = (r + g + b) / 3 || 1;
+  // (the climate's drift: its tint against its own mean, against the temperate tint's, a quarter of the way)
+  out[o] = c[0] * (1 + 0.25 * (r / m / 0.975 - 1)); out[o + 1] = c[1] * (1 + 0.25 * (g / m / 1.25 - 1)); out[o + 2] = c[2] * (1 + 0.25 * (b / m / 0.775 - 1));
 }
 // the tints of the fields last computed (K)
 function tintK(out, o) {
@@ -703,7 +733,9 @@ function tintAt(x, z) {
   x = Math.floor(x); z = Math.floor(z);
   { const c = BF.planet.canonCell(x, z, CCELL); if (!c.off) { x = c.x; z = c.z; } }
   const CS = BF.CS, cx = Math.floor(x / CS), cz = Math.floor(z / CS);
-  const arr = tintCache.get(cx + "," + cz);
+  let arr = tintCache.get(cx + "," + cz);
+  // (the realistic look: a column's own biome would end the sward's colour on a block's edge; the chunk's 4-block grid blends it)
+  if (!arr && BF.real && BF.real.on) { fillTint(cx, cz); arr = tintCache.get(cx + "," + cz); }
   let a = tintTmp, o = 0;
   if (arr) { a = arr; o = ((z - cz * CS) * CS + (x - cx * CS)) * 9; }
   else tintCompute(x, z, tintTmp, 0);
@@ -2620,7 +2652,8 @@ BF.worldgen = {
   // distant terrain (js/grid.js, spec r14-05): a column's climate in one pass (h, wl, biome, tb, t, hu...; read it before the next call),
   // and the tree probability per 4x4 cell of each biome
   // (with tint, a Float32Array(9): also its grass, foliage and water tints, as tintAt)
-  surfaceAt(x, z, tint) { climate(Math.floor(x), Math.floor(z)); if (tint) tintK(tint, 0); return C; },
+  // (real: the realistic look's sward, as tintAt gives it there; a worker is told, the page knows)
+  surfaceAt(x, z, tint, real) { climate(Math.floor(x), Math.floor(z)); if (tint) { tintK(tint, 0); if (real || (BF.real && BF.real.on)) tintReal(tint, 0, C.biome); } return C; },
   TREE_DENSITY,
   biomeAt, tintAt,
   // The badlands' banded clay as it was generated (the realistic look tells it from terracotta that was placed, js/world.js):

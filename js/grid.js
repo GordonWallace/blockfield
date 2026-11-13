@@ -105,7 +105,7 @@ BF.gridJob = {
       P.wrap(job.f, u, v, w);
       const g = w.f, gu = Math.min(N - 1, Math.max(0, Math.floor(w.u))), gv = Math.min(N - 1, Math.max(0, Math.floor(w.v)));
       const x = P.W * g + N + gu, z = N + gv;
-      const c = WG.surfaceAt(x, z, TB), h = c.h, wl = c.wl, b = c.biome, wet = wl > h;
+      const c = WG.surfaceAt(x, z, TB, job.real), h = c.h, wl = c.wl, b = c.biome, wet = wl > h;
       let top = topOf(c, B, SEA);
       // (the realistic look: low ground by the water is sand only where generate() makes it sand, beside a column under the sea; topOf
       // has every low column as sand, so a wide flat shore came out as a beach and turned to grass as the player reached it)
