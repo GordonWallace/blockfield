@@ -939,12 +939,16 @@ function serialize() {
   for (const k of [...data.keys()].sort(byKey)) { const e = data.get(k); out.data.push([k, e.t || "", e.auto || null, e.ak || null]); }
   return out;
 }
+let lastHH = null;   // (autoTick: the half game hour the auto signs' texts were last written in)
 function reset() {
   if (ed.open) { ed.ro = true; closeEditor(); }
   data.clear(); seen.clear(); groupCache.clear();
   for (const o of overlays.values()) disposeOverlay(o);
   overlays.clear();
   touched(); pendingAuto = true;
+  // (the half hour the auto signs' texts were last written in: a world loaded within the half hour the last one stopped in skipped its
+  // first writing, which a fresh copy of it, a region worker's follower, does at its first tick: test/second-world.js)
+  lastHH = null;
 }
 // a page drawing a replica world (r15-43): the simulation's whole store, from the protocol's "signs" event entry; from then on the
 // page writes no auto signs itself
@@ -960,7 +964,7 @@ function deserialize(o) {
   for (const s of o.seen || []) seen.add(s);
   for (const [k, p] of autoPlan) if (seen.has(p.ak)) autoPlan.delete(k);
 }
-let lastHH = null, tSlow = 0, lastT = 0;
+let tSlow = 0, lastT = 0;
 function tick(now) {
   requestAnimationFrame(tick);
   const dt = Math.min(0.25, Math.max(0, (now - lastT) / 1000)); lastT = now;

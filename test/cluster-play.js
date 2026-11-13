@@ -89,6 +89,23 @@ const run = async (pg, minutes) => {
 };
 
 let S = null, PG = null;
+// When the copies differ, every worker writes the differing parts' texts (js/cworkers.js CW_DUMP), and the run says where they first
+// differ: a CI failure used to name only the part ("villagers", "horses"), which is not enough to find the cause (2026-11-12).
+const DUMP = process.env.CW_DUMP || (process.env.CW_DUMP = fs.mkdtempSync(path.join(os.tmpdir(), 'bf-cp-dump-')));
+function dumped() {
+  let names = [];
+  try { names = fs.readdirSync(DUMP).filter(f => /-w\d+\.txt$/.test(f)).sort(); } catch (e) { return; }
+  const by = new Map();
+  for (const f of names) { const k = f.replace(/-w\d+\.txt$/, ''); if (!by.has(k)) by.set(k, []); by.get(k).push(f); }
+  for (const [k, fsOf] of by) {
+    const t = fsOf.map(f => fs.readFileSync(path.join(DUMP, f), 'utf8'));
+    for (let w = 1; w < t.length; w++) {
+      if (t[w] === t[0]) continue;
+      let i = 0; while (i < t[0].length && t[0][i] === t[w][i]) i++;
+      console.log(`  ${k}: ${fsOf[0]} and ${fsOf[w]} differ from character ${i}:\n    ...${t[0].slice(Math.max(0, i - 500), i + 300)}\n    ...${t[w].slice(Math.max(0, i - 500), i + 300)}`);
+    }
+  }
+}
 (async () => {
   const b = await chromium.launch();
   const saves = fs.mkdtempSync(path.join(os.tmpdir(), 'bf-cp-'));
@@ -171,6 +188,7 @@ let S = null, PG = null;
   const lines = await sim(pg, () => BF.glog.entries().filter(e => e.k === 'workers').map(e => e.l + ' ' + e.x));   // (the simulation's log: the page's copy is partial in a long run)
   check(lines.some(l => /clusters are split/i.test(l)) && !lines.some(l => /^ERROR/.test(l)), `the game log has the workers' lines, no errors (${lines.slice(-3).join(' | ').slice(0, 300)})`);
   for (const l of lines) if (/^ERROR/.test(l)) console.log('  ' + l.slice(0, 1200));
+  if (fails) dumped();
   await pg.context().close();
   S.srv.kill();
   await b.close();

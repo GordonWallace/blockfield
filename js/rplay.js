@@ -173,11 +173,12 @@ function soloText(f, m, text) {
     let i = 0; while (i < p.length && p[i] === q[i]) i++;
     log("ERROR", "Region workers out of step: worker " + f.me + ", " + k + " from character " + i + ": leader ..." + p.slice(Math.max(0, i - 300), i + 200) + " / worker " + f.me + " ..." + q.slice(Math.max(0, i - 300), i + 200));
     // block edits: who last wrote each cell that differs, here and on the follower (js/world.js trail, on with ?verify=): see onFollower
-    if (k === "edits") { const cells = BF.stateHash.editsDiff(p, q); f.trailMine = BF.world.trailOf(cells); f.h.post({ trailOf: cells }); }
+    if (k === "edits") { const cells = BF.stateHash.editsDiff(p, q); f.trailMine = BF.world.trailOf(cells); f.h.post({ trailOf: cells }); if (L.diff) L.diff.trails = (L.diff.trails || 0) + 1; }
   }
 }
 function soloTrail(f, m) {
   const mine = f.trailMine || {};
+  if (L.diff && L.diff.trails > 0) L.diff.trails--;
   for (const c of Object.keys(m.trail)) log("ERROR", "Region workers out of step: the last writes of cell " + c + " [tick, phase, by, id]: leader " + JSON.stringify(mine[c]) + " / worker " + f.me + " " + JSON.stringify(m.trail[c]));
 }
 function soloCheck(f, m) {
@@ -231,7 +232,9 @@ function frame() {
   const loaded = W && !BF.state.paused && W.speed === 1 && !!(BF.active && BF.active.pressed && BF.active.pressed());
   L.loadSince = loaded ? (L.loadSince == null ? t : L.loadSince) : null;
   L.loopT0 = null; L.loopTicks = 0;
-  if (RW.mismatch && L.diff && !L.diff.told && t - L.diff.at < 5000) return;   // (its text of the parts that differ first: soloText)
+  // (its text of the parts that differ first: soloText; and who last wrote the cells that differ, soloTrail: the followers going took
+  // that answer with them, and a failed run never said which system made the edit)
+  if (RW.mismatch && L.diff && (!L.diff.told || L.diff.trails > 0) && t - L.diff.at < 5000) return;
   if (L.endAfter && !clustered()) { const e = L.endAfter; L.endAfter = false; end(e.why, e.level); return; }
   if (RW.mismatch && L.kind === "clusters" && clustered()) {   // (each worker's own clusters are current only on it: back to one whole world at the next meeting first)
     if (!L.endAfter) { log("ERROR", "Region workers: the copies no longer match (" + RW.mismatch.parts.join(", ") + " at tick " + RW.mismatch.tick + "); going on with one after the next meeting"); toSolo("the copies differ"); L.endAfter = { why: "the copies differ" }; }
