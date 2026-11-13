@@ -128,6 +128,14 @@ const SWARD = () => {
     if ((n !== 'Savanna' && n !== 'Plains') || o[n]) continue;
     const g = G.tintAt(x, z).grass; G.surfaceAt(x, z, t9);
     o[n] = { g: g.map(v => +v.toFixed(3)), far: Math.max(...[0, 1, 2].map(i => Math.abs(t9[i] - g[i]))) };
+    if (n === 'Savanna') {   // how much of the savanna's grassland around is bare dirt (6 x 6 chunks' top blocks, as generated)
+      let grass = 0, bare = 0;
+      for (let cz = -3; cz < 3; cz++) for (let cx = -3; cx < 3; cx++) {
+        const X = x + cx * 16, Z = z + cz * 16, h = G.heightAt(X + 8, Z + 8), ids = G.generateRange(X / 16, Z / 16, h - 24, h + 24);
+        for (let i = 0; i < ids.length; i++) if (ids[i] === BF.B.grass) grass++; else if (ids[i] === BF.B.coarse_dirt) bare++;
+      }
+      o[n].grass = grass; o[n].bare = bare;
+    }
   }
   return o;
 };
@@ -188,6 +196,7 @@ async function boot(b, look) {
   const sw = real.r.sward, sv = sw.Savanna && sw.Savanna.g, pl = sw.Plains && sw.Plains.g;
   check(!!sv && !!pl && sv[0] > sv[1] * 1.1 && pl[1] > pl[0] && sv[0] > pl[0] * 1.2, `grass takes its biome's colour: a savanna's is dry and yellow, the plains' green (savanna ${sv}, plains ${pl})`);
   check(!!sv && !!pl && sw.Savanna.far < 1e-6 && sw.Plains.far < 1e-6, 'the far land is given the same grass colour as the loaded chunks');
+  check(!!sw.Savanna && sw.Savanna.grass > 1500 && sw.Savanna.bare < sw.Savanna.grass * 0.02, `a savanna's grass is not dotted with bare dirt (${sw.Savanna && sw.Savanna.bare} bare columns to ${sw.Savanna && sw.Savanna.grass} of grass)`);
   check(real.r.species >= 3, `tree species are registered (${real.r.species})`);
   check(real.r.instanced > 0, `trees are drawn as instanced models (${real.r.instanced} batches' parts)`);
   for (const look of ['blocks', '']) {
