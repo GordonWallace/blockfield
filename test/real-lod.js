@@ -188,7 +188,39 @@ module.exports = async (pg, out) => {
       G.rows(Object.assign({ real: true }, j), a1, 0, 1); G.rows(j, a0, 0, 1);
       flat = { kind: a1.wat[0], green: a1.col[1] > a1.col[0], old: Array.from(a0.col) };
     }
-    return { wat: !!raw.wat && !plain.wat, mesh: m.wat && Array.from(m.wat.subarray(0, 2)).concat(m.wat[NV - 1]), nrm: m.nrm && Array.from(m.nrm.subarray(mid, mid + 3)),
+    // a gentle mountainside under the snow line is grass in generate(): turf from afar too, not bare rock
+    let slope = null;
+    const MB = [24, 26];   // (Windswept Hills, Jagged Peaks)
+    for (let r = 500; r < 60000 && !slope && MB.length; r += 211) for (let a = 0; a < 32 && !slope; a++) {
+      const x = Math.round(pp.x + Math.cos(a * 0.19635) * r), z = Math.round(pp.z + Math.sin(a * 0.19635) * r);
+      let c; try { if (BF.planet.face(x, z) !== BF.planet.face(pp.x, pp.z)) continue; c = WG.surfaceAt(x, z, TB); } catch (e) { continue; }
+      if (!MB.includes(c.biome) || c.wl > c.h || c.h > 1850 || G.topOf(c, BF.B, BF.SEA) !== BF.B.stone) continue;
+      const h = WG.heightAt(x, z);
+      if (Math.max(Math.abs(WG.heightAt(x - 1, z) - h), Math.abs(WG.heightAt(x + 1, z) - h), Math.abs(WG.heightAt(x, z - 1) - h), Math.abs(WG.heightAt(x, z + 1) - h)) >= 2) continue;
+      const g = BF.planet.grid(x, z), j = { f: g.f, u0: Math.floor(g.u), v0: Math.floor(g.v), cell: 4, nx: 1, ny: 1 };
+      const a1 = G.alloc(Object.assign({ real: true }, j)), a0 = G.alloc(j);
+      G.rows(Object.assign({ real: true }, j), a1, 0, 1); G.rows(j, a0, 0, 1);
+      slope = { kind: a1.wat[0], green: a1.col[1] > a1.col[0], old: Array.from(a0.col), can: a1.can[0], can0: a0.can[0], biome: c.biome };
+    }
+    // the far trees' level card must face up (the stand-ins' material draws front faces only)
+    // (wound the other way round from BF.real.lod's own, whose material draws both sides)
+    const Q = BF.real.lod.cards.quads, QI = BF.lod.cardIndex(Q), up = [6, 9].map(t => QI[t] === Q.idx[t] && QI[t + 1] === Q.idx[t + 2] && QI[t + 2] === Q.idx[t + 1]);
+    // near trees whose chunk has no mesh yet: the generator's tree grid gives the records the mesher would, and the ring's cards of
+    // those chunks are cut by the mask's own mark
+    let nearN = 0, nearOk = true, nearRow = false;
+    const pcx = Math.floor(pp.x / 16), pcz = Math.floor(pp.z / 16);
+    for (let dz = -6; dz <= 6; dz++) for (let dx = -6; dx <= 6; dx++) {
+      const F = BF.lod.nearRecords(pcx + dx, pcz + dz);
+      if (F.length % 8) nearOk = false;
+      for (let i = 0; i < F.length; i += 8) {
+        nearN++;
+        if (!(F[i] >= 0 && F[i] <= 16 && F[i + 2] >= 0 && F[i + 2] <= 16 && (F[i + 3] === 0 || F[i + 3] === 4) && F[i + 5] > 0 && F[i + 6] >= 0 && F[i + 6] < 1 && F[i + 7] === 15)) nearOk = false;
+        if (BF.real.lod.cards.rowOf(F[i + 3], F[i + 4], "Plains", F[i + 5], F[i + 6], false)) nearRow = true;
+      }
+    }
+    const near = { n: nearN, ok: nearOk, row: nearRow, cut: SM.some(x => /vCard > 0\.5 \? 0\.3 : 0\.5/.test(x.fragmentShader)) };
+    return { near, slope, up, canU: /uBioCan\[int\(canopy\.r/.test(mat.vertexShader) && mat.uniforms.uBioCan.value.length === 32,
+      wat: !!raw.wat && !plain.wat, mesh: m.wat && Array.from(m.wat.subarray(0, 2)).concat(m.wat[NV - 1]), nrm: m.nrm && Array.from(m.nrm.subarray(mid, mid + 3)),
       shade: [m.col[mid], m15.col[mid]], old: !m15.wat && !m15.nrm && !m15.gnd, errs, kinds, flat,
       gnd: m.gnd && [Array.from(m.gnd.subarray(2 * (2 * n + 1), 2 * (2 * n + 1) + 2)), Array.from(m.gnd.subarray(2 * (2 * n + 3), 2 * (2 * n + 3) + 2)), m.gnd[0], m.wat[2 * n + 1], m.wat[2 * n + 3]],
       turf: /texture2D\(uTurf/.test(mat.fragmentShader) && !!mat.uniforms.uTurf.value && !!mat.uniforms.uDet.value, snow: /uSnowCol, snow\)/.test(mat.fragmentShader),
@@ -205,6 +237,10 @@ module.exports = async (pg, out) => {
   check(land.turf && land.snow, "the far ground is drawn with the terrain's turf texture, and snow with its own edge", [land.turf, land.snow]);
   check(land.house, "a far house's faces are drawn as blocks", land.house);
   check(!land.flat || (land.flat.kind === 1 && land.flat.green), "a low flat by the water that is grass when reached is grass from afar", land.flat);
+  check(!land.slope || (land.slope.kind === 1 && land.slope.green), "a gentle mountainside under the snow line is grass from afar", land.slope);
+  check(land.up && land.up.every(v => v), "a far tree's level card faces up, so it is drawn from above", land.up);
+  check(land.near.n > 0 && land.near.ok && land.near.row && land.near.cut, "trees near the player are listed for chunks without a mesh, and their far cards are cut", land.near);
+  check(land.canU, "the far canopy takes its colour by biome from the tree models", land.canU);
   // the atlas' smaller copies are made by hand (js/real/lod.js mipRow): a tree drawn small keeps the share of its picture that passes
   // the cards' alpha test, and its colour isn't darkened by the empty texels round it
   const mips = await pg.evaluate(() => {
