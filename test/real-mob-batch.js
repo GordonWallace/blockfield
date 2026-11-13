@@ -1,4 +1,4 @@
-// @ci baseline suite=world
+// @ci baseline suite=world timeout=600
 // One draw call per mob (js/mobview.js batchOf, Gordon 2026-11-13: 15 fps with the page thread busy, about half of the realistic look's
 // draw calls were mobs' body parts). In both looks a mob's parts are one joined mesh, drawn once, its vertex shader moving each part by
 // its matrix; the part meshes stay (animation, eyelids, held tools, tests) but off the camera's layer. Checks: one draw for a pig whose
@@ -94,7 +94,11 @@ module.exports = async (pg, out) => {
   const f3 = await pg.evaluate(() => document.getElementById("debug").textContent);
   check(/\nGPU .+/.test(f3), "F3 names the GPU", (f3.match(/GPU .*/) || [""])[0]);
   check(/Frame ms: .*drawing \d/.test(f3), "F3 shows the frame's steps", (f3.match(/Frame ms: .*/) || [""])[0]);
+  check(/\nDraws \d+: .*(ground|blocks) \d+/.test(f3) && /mobs \d+/.test(f3), "F3 counts the draw calls by kind", (f3.match(/Draws .*/) || [""])[0]);
+  check(/\nChunks .* queued, view distance \d+\n/.test(f3), "F3 shows the view distance", (f3.match(/Chunks .*/) || [""])[0]);
   await pg.keyboard.press("F3");
+  await frames(3);
+  check(await pg.evaluate(() => !BF.drawTally.on && BF.drawTally.last === null), "the count stops when F3 closes");
   await pg.screenshot({ path: out + "-" + look + ".png" });
   }
   await pg.evaluate(() => localStorage.removeItem("bf.look"));
