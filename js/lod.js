@@ -159,7 +159,8 @@ const realUniforms = () => { const U = BF.real.U; return { uSunCol: U.uSunCol, u
 // (fog by the distance from the eye, not by the depth along its line of sight: far land at the side of the view is as hazy as it is
 // straight ahead, and doesn't fade as the eye turns to it)
 const REAL_FOG = ["#include <fog_vertex>", "#include <fog_vertex>\n#ifdef USE_FOG\n  fogDepth = length(mvPosition.xyz);\n#endif"];
-const VERT_USED = !REAL ? VERT : VERT.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;\nattribute float wat;\nattribute vec3 nrm;\nattribute vec2 gnd;\nvarying float vWat;\nvarying vec3 vN;\nvarying vec2 vGnd;")
+const VERT_USED = !REAL ? VERT : VERT.replace("varying float vDist;", "varying float vDist;\nvarying vec3 vV;\nattribute float wat;\nattribute vec3 nrm;\nattribute vec2 gnd;\nvarying float vWat;\nvarying vec3 vN;\nvarying vec2 vGnd;\nuniform vec4 uBioCan[32];")
+  .replace("  vCanopy = canopy;", "  vec4 bc = uBioCan[int(canopy.r * 255.0 + 0.5)];\n  vCanopy = vec4(bc.rgb, 1.0 - pow(1.0 - min(canopy.a, 0.999), bc.a));")
   .replace("  vDist = length(mvPosition.xyz);", "  vDist = length(mvPosition.xyz);\n  vV = mvPosition.xyz;\n  vWat = wat;\n  vGnd = gnd;\n  vN = (modelViewMatrix * vec4(nrm, 0.0)).xyz;").replace(REAL_FOG[0], REAL_FOG[1]);
 // The ground is the loaded chunks' terrain seen from afar (js/real/terrain.js: half its colour's light, its detail texture's average;
 // darker when wet); water is theirs too (js/real/water.js, rwShade on a flat surface: its own dark colour, the sky by the angle it is
@@ -234,7 +235,37 @@ let shared = null;
 // The ground's textures under the realistic look: the terrain's turf (js/real/terrain.js makes it) and its detail noise, which that
 // file keeps to itself, so this is its detailTexture() again (the same lattices: r soil and turf's patches, a snow). They repeat every
 // 1.6 and 4 blocks; a ring's texO is its centre within 1,600 blocks, a whole number of every repeat the shader reads them at.
-const groundTex = { uTurf: { value: null }, uDet: { value: null }, uSnowCol: { value: new THREE.Vector3(0.9, 0.93, 0.95) } };
+const groundTex = { uTurf: { value: null }, uDet: { value: null }, uSnowCol: { value: new THREE.Vector3(0.9, 0.93, 0.95) }, uBioCan: { value: [] } };
+for (let i = 0; i < 32; i++) groundTex.uBioCan.value.push(new THREE.Vector4(0.3, 0.36, 0.2, 1));
+// The canopy's colour by biome (sRGB, as the vertex colours): the average colour of the biome's tree models as BF.real.lod bakes them
+// (uRowCol, what a far tree's dot is drawn in), mixed as the biome mixes its trees (js/grid.js CROWNS). A ring's canopy attribute
+// carries the biome (js/grid.js). Refreshed as the models are baked; until then a plain leaf green.
+let bioCanT = 0;
+const CROWN_FILL = 0.4;   // the share of a crown's circle its leaves fill seen from above (a far tree's dot is drawn that much smaller)
+function bioCan(now) {
+  if (now - bioCanT < 1500) return;
+  bioCanT = now;
+  const C = realStandShaders().cards, CR = BF.gridJob.CROWNS, names = BF.worldgen.NAMES || [];
+  if (!C) return;
+  for (let b = 0; b < 32; b++) {
+    const cr = CR[b];
+    if (!cr) continue;
+    let r = 0, g = 0, bl = 0, w = 0, area = 0;
+    for (const [leaf, share] of cr.leaves) {
+      const log = BF.B[leaf.replace(/_leaves$/, "_log")];
+      if (log == null) continue;
+      let row = null;
+      try { row = C.rowOf(0, log, names[b] || "", 6, 0.3, true); } catch (e) { row = null; }
+      const col = row && C.uniforms.uRowCol.value[row[0]];
+      if (!col || col.x + col.y + col.z <= 0) continue;   // (not baked yet)
+      r += col.x * share; g += col.y * share; bl += col.z * share; w += share;
+      const rad = C.uniforms.uRow.value[row[0]].x * row[1];
+      area += Math.PI * rad * rad * CROWN_FILL * share;
+    }
+    // (w: the models' crowns against the blocks' crowns the samples' cover is worked out from, js/grid.js)
+    if (w > 0) groundTex.uBioCan.value[b].set(Math.pow(r / w, 1 / 2.2), Math.pow(g / w, 1 / 2.2), Math.pow(bl / w, 1 / 2.2), Math.max(0.05, area / w / cr.area));
+  }
+}
 function detailTexture() {
   const S = 256, d = new Uint8Array(S * S * 4);
   const lat = (seed, n) => { const a = new Float32Array(n * n); let s = seed >>> 0; for (let i = 0; i < a.length; i++) { s = (s * 1664525 + 1013904223) >>> 0; a[i] = s / 4294967296; } return a; };
@@ -501,7 +532,7 @@ varying vec2 vSpr;
     bool above = dot(toCam, upV) > 0.7;
     float sz = (above ? 2.0 * tr : max(tH, 2.0 * tr)) * k;
     // (under 4 pixels a tree is a dot of its colour: smaller than its picture's square, which its crown only part fills)
-    gl_PointSize = sz < 4.0 ? clamp(sz * 0.7, 1.0, 64.0) : min(sz, 64.0);
+    gl_PointSize = sz < 4.0 ? clamp(sz * 0.8, 1.0, 64.0) : min(sz, 64.0);
     vSpr = above ? vec2(1.0) : vec2(sz / (2.0 * tr * k), sz / (tH * k));
     float f0 = mod(floor(fract((atan(dot(toCam, xV), dot(toCam, zV)) - card.z) / 6.2831853) * uGrid.x + 0.5), uGrid.x);
     vCell = above ? vec4((col * cells + uGrid.x + 0.02) / (uGrid.y * cells), (line + 0.02 * CARD_SQUARE) / uGrid.z, 0.96 / (uGrid.y * cells), 0.96 * CARD_SQUARE / uGrid.z)
@@ -512,6 +543,8 @@ varying vec2 vSpr;
     l = vec3(0.0, above ? rowI.w * card.y : (rowI.z + 0.5 * rowI.y) * card.y, 0.0);
   }`);
   v = rep(v, "  vec4 mvPosition = modelViewMatrix * vec4(t, 1.0);", "  vec4 mvPosition = modelViewMatrix * vec4(t, 1.0);\n  if (cardAt.w > 0.5) mvPosition = vec4(cardAt.xyz, 1.0);");
+  // (a chunk whose trees BF.real.lod draws before its ground has loaded, nearTrees() below: its cards go, its houses stay)
+  f = rep(f, ".r > 0.5) discard;", ".r > (vCard > 0.5 ? 0.3 : 0.5)) discard;");
   f = rep(f, "uniform sampler2D chunkMask;", `uniform sampler2D chunkMask;
 varying float vCard;
 varying vec3 vTint;
@@ -625,6 +658,8 @@ function cardsOf(S, far) {
   return out;
 }
 // (points as plain vertices: software rendering draws instances one by one, tens of times slower)
+const cardIndex = Q => Array.from(Q.idx.slice(0, 6)).concat([Q.idx[6], Q.idx[8], Q.idx[7], Q.idx[9], Q.idx[11], Q.idx[10]]);
+lod.cardIndex = cardIndex;
 function standGeometry(S, boxes, far) {
   if (!boxes) {
     const g = new THREE.BufferGeometry();
@@ -653,7 +688,10 @@ function standGeometry(S, boxes, far) {
     pick(g, boxes);
     if (trees.length) {
       const Q = realStandShaders().cards.quads, c = new THREE.InstancedBufferGeometry();
-      c.setAttribute("position", new THREE.BufferAttribute(Q.pos, 3)); c.setIndex(Q.idx);
+      c.setAttribute("position", new THREE.BufferAttribute(Q.pos, 3));
+      // (the level card faces up: the stand-ins' material draws front faces only, and as BF.real.lod winds it, it faced down and was
+      // never drawn, so from above a forest past the chunks was bare until its trees were small enough to be points)
+      c.setIndex(cardIndex(Q));
       c.setAttribute("part", new THREE.Float32BufferAttribute([2, 2, 2, 2, 3, 3, 3, 3], 1)); c.setAttribute("shade", new THREE.Float32BufferAttribute([1, 1, 1, 1, 1, 1, 1, 1], 1));
       pick(c, trees);
       g.userData.cards = c;
@@ -736,6 +774,7 @@ function palette() {
 // ---- rings ----
 lod.reset = function (scene) {
   lod.scene = scene || lod.scene;
+  nearDrop();
   for (const L of lod.levels) { if (L.mesh) dispose(L.mesh); if (L.si) dispose(L.si); }
   if (lod.ribbon) dispose(lod.ribbon);
   lod.ribbon = null; lod.ribbonAt = null;
@@ -989,6 +1028,7 @@ function update(budgetMs) {
   if (gr.f < 0) return;
   const V = lod.view, now = performance.now();
   V.f = gr.f; V.u = gr.u; V.v = gr.v;
+  if (REAL) bioCan(now);
   const ts = performance.now();
   BF.sampler.tick(budgetMs);
   lod.sampleMs = performance.now() - ts;
@@ -1023,6 +1063,7 @@ function update(budgetMs) {
   // cut each ring to its disc, minus the next finer ring's disc and the loaded chunks
   lod.eyeHole = Math.min(BF.world.viewDist * BF.CS, BF.world.covered || 0) * 0.95;
   if (BF.player.detached && !BF.world.replica) lod.eyeHole = 0;   // (detached in the page: the chunks load round the body, not the view; the chunk mask alone keeps the rings off them, r15-98)
+  if (REAL) nearTrees(pp);
   markChunks(pp, V);
   let prev = null, outer = top;   // outer: the coarsest ring drawn when the globe has taken the rest (it meets the globe as the top ring does)
   if (lod.cap < Infinity) for (const L of lod.levels) if (L.draw) outer = L;
@@ -1059,6 +1100,63 @@ function update(budgetMs) {
     u.outer.value.set(0, 0, top.half);
   }
 }
+// The realistic look: a tree's detail goes by its size on screen, not by whether its ground has loaded. A chunk without a mesh yet
+// (chunks still streaming in, or the player above the height where chunks load) whose trees are near enough to be models has them
+// drawn by BF.real.lod, as the loaded chunk's would be, from the generator's own tree grid (the records js/real/mesh.js would list);
+// the ring's cards of those trees are cut by the chunk mask (NEAR_MARK: cards only, the ring still draws the ground and the houses).
+// Once the chunk has its mesh its own flora takes over. near: chunk key -> its trees listed (0: none).
+const near = new Map(), NEAR_MARK = 100, NEAR_PAD = 24, NEAR_PER_FRAME = 3;
+let nearWant = [], nearKey = "";
+function nearDrop() {
+  const RL = BF.real && BF.real.lod;
+  for (const [k, n] of near) if (n && RL) RL.remove("far:" + k);
+  near.clear(); nearWant = []; nearKey = "";
+}
+function nearRecords(cx, cz) {
+  const WG = BF.worldgen, B = BF.B, CS = BF.CS, shapeOf = BF.gridJob.shapeOf, F = [], ox = cx * CS, oz = cz * CS, q = CS >> 2;
+  for (let j = 0; j < q; j++) for (let i = 0; i < q; i++) {
+    const t = WG.treeAt(cx * q + i, cz * q + j), sh = t && shapeOf(t, B, WG);
+    if (!sh || !(sh[2] > 0) || sh[3] < 0) continue;   // (a tree with a trunk: what js/grid.js gives a card)
+    const hs = ((t.x * 73856093) ^ (t.z * 19349663) ^ (t.y * 83492791)) >>> 0;
+    F.push(t.x - ox + sh[0], t.y, t.z - oz + sh[0], sh[0] === 1 ? 4 : 0, sh[7], sh[2], (hs % 65521) / 65521, 15);
+  }
+  return F;
+}
+function nearTrees(pp) {
+  const RL = BF.real && BF.real.lod, W = BF.world, CS = BF.CS, WG = BF.worldgen;
+  if (!RL || !RL.place || !RL.config || lod.nearOff) { if (near.size) nearDrop(); return; }
+  const meshed = k => { const c = W.chunks.get(k); return c ? c.mesh === true : W.farMeshes.has(k); };
+  // the chunks within the trees' model range of the eye
+  const K = RL.config.kinds[0], reach = K.dist[2] * RL.config.scale + NEAR_PAD, pcx = Math.floor(pp.x / CS), pcz = Math.floor(pp.z / CS);
+  const key = pcx + "," + pcz + "," + Math.round(pp.y / 8) + "," + reach + "," + (lod.maskChanges || 0);
+  if (key !== nearKey) {
+    nearKey = key;
+    let up = 0, face = -1;
+    try { up = Math.max(0, pp.y - WG.heightAt(Math.floor(pp.x), Math.floor(pp.z)) - 32); face = P().face(pp.x, pp.z); } catch (e) { up = 0; }
+    const rad = up < reach ? Math.sqrt(reach * reach - up * up) : 0, n = Math.ceil(rad / CS), want = new Set();
+    nearWant = [];
+    for (let dz = -n; dz <= n && rad > 0; dz++) for (let dx = -n; dx <= n; dx++) {
+      const cx = pcx + dx, cz = pcz + dz, ex = Math.max(cx * CS - pp.x, 0, pp.x - (cx + 1) * CS), ez = Math.max(cz * CS - pp.z, 0, pp.z - (cz + 1) * CS), d = Math.hypot(ex, ez);
+      if (d > rad) continue;
+      const k = cx + "," + cz;
+      if (meshed(k)) continue;
+      try { if (P().face(cx * CS + CS / 2, cz * CS + CS / 2) !== face) continue; } catch (e) { continue; }
+      want.add(k);
+      if (!near.has(k)) nearWant.push([d, cx, cz, k]);
+    }
+    for (const [k, c] of near) if (!want.has(k)) { if (c) RL.remove("far:" + k); near.delete(k); }
+    nearWant.sort((a, b) => a[0] - b[0]);
+  }
+  for (let i = 0; i < NEAR_PER_FRAME && nearWant.length; i++) {
+    const [, cx, cz, k] = nearWant.shift();
+    if (near.has(k) || meshed(k)) continue;
+    let F = null;
+    try { F = nearRecords(cx, cz); } catch (e) { F = null; }
+    if (F && F.length) RL.place("far:" + k, cx * CS, cz * CS, F);
+    near.set(k, F ? F.length / 8 : 0);
+  }
+}
+lod.near = near; lod.nearRecords = nearRecords;
 const tmpV2 = new THREE.Vector2();
 // Fills the chunk mask round the player's chunk (atlas position pp, view face V) and places it in the view face's grid; uploads it only
 // when it changed. A chunk with a mesh outside it would show its stand-ins over it again: logged once (it can't happen at view
@@ -1076,6 +1174,11 @@ function markChunks(pp, V) {
   };
   for (const c of W.chunks.values()) if (c.mesh === true && c.meshes && c.meshes.length) mark(c.cx, c.cz);
   for (const k of W.farMeshes.keys()) { const i = k.indexOf(","); mark(+k.slice(0, i), +k.slice(i + 1)); }
+  for (const [k, n] of near) {
+    if (!n) continue;
+    const c = k.indexOf(","), i = +k.slice(0, c) - ox, j = +k.slice(c + 1) - oz;
+    if (i >= 0 && j >= 0 && i < MASK_N && j < MASK_N && !maskNext[j * MASK_N + i]) maskNext[j * MASK_N + i] = NEAR_MARK;
+  }
   if (outside && !maskWarned && BF.glog) {
     maskWarned = true;
     BF.glog.log("ERROR", "terrain", outside + " drawn chunk" + (outside > 1 ? "s lie" : " lies") + " outside the distant terrain's chunk mask: village and tree stand-ins may show over them");

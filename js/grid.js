@@ -111,6 +111,10 @@ BF.gridJob = {
       // has every low column as sand, so a wide flat shore came out as a beach and turned to grass as the player reached it)
       if (out.wat && !wet && top === B.sand && b !== DESERT && b !== BEACH && b !== RIVER && b !== SNOWY_BEACH &&
           Math.min(WG.heightAt(x - 1, z), WG.heightAt(x + 1, z), WG.heightAt(x, z - 1), WG.heightAt(x, z + 1)) >= SEA) top = B.grass;
+      // (and a mountainside under the snow line is rock only where it is steep or high, as generate() has it: a gentle slope is grass,
+      // and drew as a grey band from afar)
+      else if (out.wat && !wet && top === B.stone && (b === MOUNTAINS || b === PEAKS) && h <= 1850 &&
+          Math.max(Math.abs(WG.heightAt(x - 1, z) - h), Math.abs(WG.heightAt(x + 1, z) - h), Math.abs(WG.heightAt(x, z - 1) - h), Math.abs(WG.heightAt(x, z + 1) - h)) < 2) top = B.grass;
       // the drawn height: the water surface, or the top of the ground (as the blocks are drawn)
       out.y[o] = wet ? wl + 0.875 : h + 1;
       // colour: the top block's texture, tinted like the blocks; the sea and lakes darker with depth, over a sandy floor near the shore
@@ -151,6 +155,9 @@ BF.gridJob = {
           cr0 += tmp[0] * share; cg += tmp[1] * share; cb += tmp[2] * share;
         }
         out.can[4 * o] = Math.min(255, cr0 * SHADOW * 255); out.can[4 * o + 1] = Math.min(255, cg * SHADOW * 255); out.can[4 * o + 2] = Math.min(255, cb * SHADOW * 255);
+        // (the realistic look: the biome instead, js/lod.js gives the canopy the colour of that biome's tree models, so the far ground's
+        // canopy and the trees drawn over it are one colour, and no band shows where fewer of them are drawn)
+        if (out.wat) { out.can[4 * o] = b; out.can[4 * o + 1] = out.can[4 * o + 2] = 0; }
       }
       out.can[4 * o + 3] = Math.round(cover * 255);
       out.ok[o] = 1;
@@ -501,7 +508,7 @@ function sectorBounds(n, c, r, ok, pos, mpos, sph, msph) {
   }
   return b;
 }
-BF.gridJob.discIndex = discIndex; BF.gridJob.SECTORS = SECTORS;
+BF.gridJob.discIndex = discIndex; BF.gridJob.SECTORS = SECTORS; BF.gridJob.shapeOf = shapeOf;
 
 if (typeof document === "undefined") return;   // in a worker: only the sampling above is needed
 
