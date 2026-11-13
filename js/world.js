@@ -260,6 +260,7 @@ world.reset = function () {
 // The last chunk looked up is kept (most lookups land in the same chunk as the one before; on the planet the keys are long atlas
 // strings, so building and hashing one is not free), until a chunk is added or removed (CGEN).
 let LCX = NaN, LCZ = NaN, LC, LGEN = -1, CGEN = 0;
+world.chunkGen = () => CGEN;   // (the loaded set's generation, for lists made from it: js/grass.js)
 const rawChunk = (x, z) => {
   const cx = Math.floor(x / CS), cz = Math.floor(z / CS);
   if (cx === LCX && cz === LCZ && LGEN === CGEN) return LC;

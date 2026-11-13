@@ -1,8 +1,8 @@
 // Grass spreading (idea-044): exposed dirt next to grass turns into grass after a while, as in vanilla. A dirt block becomes grass when it
 // has sky light of at least MIN_LIGHT above it, no opaque block on top, and a grass block among its 26 neighbours (beside it, diagonally, one
 // level up or down). Farmland, dirt paths and coarse dirt never change.
-// Random ticks: every sim step a few columns of loaded chunks are picked at random (SAMPLES_PER_S on the sim clock, so fast-forward speeds it
-// up too), and the top solid block of each is looked at; dirt that qualifies turns at once. With a few hundred chunks loaded a column comes up
+// Random ticks: every sim step a few columns of loaded chunks are picked at random (SAMPLES_PER_S a game second, counted in ticks, so
+// fast-forward speeds it up too), and the top solid block of each is looked at; dirt that qualifies turns at once. With a few hundred chunks loaded a column comes up
 // about once a game day, so bare dirt beside grass greens over within a day or two, at random.
 // API: BF.grass = { tick(), check(x, y, z), spreads(x, y, z), SAMPLES_PER_S, MIN_LIGHT, stats() }
 (() => {
@@ -11,9 +11,9 @@ const BF = (globalThis.BF = globalThis.BF || {});
 
 const SAMPLES_PER_S = 120;   // random columns looked at per sim second, across all loaded chunks
 const MIN_LIGHT = 9;         // sky light above the dirt (vanilla's grass rule)
-const MAX_PER_TICK = 600;    // columns per sim step at most (a long step catches up over the next ones)
+const MAX_PER_TICK = 600;    // columns per sim step at most
 
-let last = null, carry = 0, turned = 0, looked = 0, list = [], listAt = -1;
+let turned = 0, looked = 0, sum = 0, list = [], listGen = -1;
 
 // Would the dirt at (x, y, z) turn into grass now? (dirt, open to the sky light, not covered, grass beside it)
 function spreads(x, y, z) {
@@ -34,9 +34,12 @@ function check(x, y, z) {
   turned++;
   return true;
 }
+// The loaded chunks, sorted (so a sample doesn't hang on load order), rebuilt whenever a chunk loads or unloads (js/world.js chunkGen).
+// By the set's generation, not its size: one chunk unloading as another loaded left the count as it was and the old list in use, the new
+// chunk never sampled; and the list of a world before this one was taken for this world's when the counts happened to match.
 function chunks() {
-  const W = BF.world, n = W.chunks.size;
-  if (listAt !== n) { list = [...W.chunks.values()].sort((a, b) => a.cx - b.cx || a.cz - b.cz); listAt = n; }   // rebuilt when chunks load or unload; sorted, so a sample doesn't hang on load order
+  const W = BF.world, g = W.chunkGen();
+  if (listGen !== g) { list = [...W.chunks.values()].sort((a, b) => a.cx - b.cx || a.cz - b.cz); listGen = g; }
   return list;
 }
 // With the cluster tick on (spec r15-39b, item C6: js/ctick.js) once per cluster group: the group samples its own chunks (a chunk's group
@@ -67,27 +70,26 @@ function tick() {
   const W = BF.world;
   if (!W || !W.chunks || BF.B.dirt == null || BF.B.grass == null) return;
   if (BF.ctick && BF.ctick.filter && W.clusterCells) return tickCluster(BF.ctick.cur);
-  const now = BF.simNow ? BF.simNow() : 0;
-  if (last == null) { last = now; return; }
-  const dt = Math.max(0, Math.min(30, now - last));
-  last = now;
-  carry += dt * SAMPLES_PER_S;
-  let n = Math.min(MAX_PER_TICK, Math.floor(carry));
-  carry -= n;
-  if (carry > MAX_PER_TICK * 4) carry = MAX_PER_TICK * 4;
+  // The tick's samples from the tick counter alone (the world's, saved with it: js/rand.js), so every copy of a world looks at the same
+  // columns on the same ticks whatever it did before (region workers, js/rplay.js: the leader has played the title world or another
+  // world, its followers start fresh). They used to come from the simulation clock's differences and a carry kept here from world to
+  // world: the clock is a float sum of 0.05 s ticks, so a tick gave 6 +- 1e-10 samples and the carry sat at a whole number's edge,
+  // where two copies with different carries took 5, 6 or 7 on different ticks, each its own columns (test/second-world.js).
+  const per = (BF.warp ? BF.warp.TICK : 0.05) * SAMPLES_PER_S, t = BF.rand.tick;
+  let n = Math.min(MAX_PER_TICK, Math.floor((t + 1) * per) - Math.floor(t * per));
   const cs = chunks(), CS = BF.CS;
   if (!cs.length) return;
   for (; n > 0; n--) {
     const r = BF.rand.at("grass", n, 0), c = cs[r.int(cs.length)];   // each sample of the tick has its own seeded stream (js/rand.js)
-    if (!c || !W.chunks.has(c.cx + "," + c.cz)) { listAt = -1; continue; }
+    if (!c) continue;
     const x = c.cx * CS + r.int(CS), z = c.cz * CS + r.int(CS);
     const y = W.heightAt(x, z);
-    looked++;
+    looked++; sum = (sum + Math.imul(x, 73856093) + Math.imul(z, 19349663)) | 0;
     check(x, y, z);
   }
 }
 
-BF.grass = { tick, check, spreads, SAMPLES_PER_S, MIN_LIGHT, stats: () => ({ turned, looked }) };
+BF.grass = { tick, check, spreads, SAMPLES_PER_S, MIN_LIGHT, stats: () => ({ turned, looked, sum }) };
 {
   const world = BF.world;
   if (world && world.onBlockTick) world.onBlockTick(tick, "grass");   // a block tick (spec r15-17, js/world.js tickSim)
