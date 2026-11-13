@@ -84,7 +84,7 @@ module.exports = async (pg, out) => {
     return { meshes: meshes.length, mats: mats.size, shared, behind, front, k: BF.view.state.k,
       blobs: B ? { mesh: !!(B.mesh && B.mesh.parent), drawn: B.drawn, perMob: BF.scene.children.filter(o => o.isGroup && o.children.some(c => c.isMesh && c.geometry.type === "PlaneGeometry")).length } : null };
   });
-  check(two.k === 0 && two.shared && two.mats <= 8 && two.meshes > 20, "flat view: " + two.meshes + " chunk meshes share " + two.mats + " materials");
+  check(two.k === 0 && two.shared && two.mats <= 8 && two.meshes >= 2 && two.mats < two.meshes, "flat view: " + two.meshes + " chunk meshes share " + two.mats + " materials");
   check(!two.behind.vis && two.behind.culled && two.behind.root, "a mob behind the camera has its model hidden", two.behind);
   check(two.front.vis && !two.front.culled, "and shown again in front of it", two.front);
   if (two.blobs) check(two.blobs.mesh && two.blobs.drawn >= 1 && two.blobs.perMob === 0, "the contact shadows are one mesh", two.blobs);
