@@ -159,20 +159,29 @@ view.begin = function (scene, camera) {
   const z = [x[1] * up[2] - x[2] * up[1], x[2] * up[0] - x[0] * up[2], x[0] * up[1] - x[1] * up[0]];
   s.M = [x[0], x[1], x[2], up[0], up[1], up[2], z[0], z[1], z[2]];
 
-  scene.updateMatrixWorld();
+  // Every top-level object's world matrix, and its children's under it, worked out once here (it was scene.updateMatrixWorld() first
+  // and then the children again under the placed parent: twice over thousands of mob parts, 10 ms of Gordon's 51 ms frame, 2026-11-13).
+  // An anchored object's children stay under its plain atlas matrix, as before.
   sceneRef = scene; cameraRef = camera; hidden = [];
   const M = s.M, k = s.k;
+  // (a child its owner marked as out of the camera's view this frame, userData.culled with visible false, is left alone: a mob's model
+  // and its dozen parts, js/mobview.js)
+  const kids = c => { const ch = c.children; for (let i = 0; i < ch.length; i++) if (ch[i].visible || !ch[i].userData.culled) ch[i].updateMatrixWorld(true); };
   for (const c of scene.children) {
-    if (c === camera) continue;
+    if (c.matrixAutoUpdate) c.updateMatrix();
+    if (c === camera) continue;   // (placed below)
     const m = c.matrix, ud = c.userData;
-    if (ud.renderSpace) { c.matrixWorld.copy(m); continue; }   // already in render space (the planet's axis)
+    if (ud.renderSpace) { c.matrixWorld.copy(m); kids(c); continue; }   // already in render space (the planet's axis)
     const g = ud.anchor ? P.face(m.elements[12] + 1, m.elements[14] + 1) : P.face(m.elements[12], m.elements[14]);
-    if (g < 0) continue;   // off the atlas: left as it is
-    if (!Lok[g] && k < 1) { if (c.visible) { c.visible = false; hidden.push(c); } continue; }
+    if (g < 0) { c.matrixWorld.copy(m); kids(c); continue; }   // off the atlas: left as it is
+    if (!Lok[g] && k < 1) { c.matrixWorld.copy(m); kids(c); if (c.visible) { c.visible = false; hidden.push(c); } continue; }
+    if (ud.anchor && c.children.length) { c.matrixWorld.copy(m); kids(c); }
     if (Lok[g]) c.matrixWorld.multiplyMatrices(L[g], m);
     else c.matrixWorld.copy(m);
     if (ud.anchor) {
       c.frustumCulled = k <= 0;   // its bounds are flat ones
+      // a chunk mesh draws with its face's shared material while the view is flat, and with its own (its sphM) while round (js/world.js)
+      if (ud.flat) { const want = k > 0 ? BF.world.roundOf(c) : ud.flat; if (c.material !== want) c.material = want; }
       // a chunk mesh: its round placement, mapped into the mesh's own flat frame (the shader mixes the two by k)
       if (k > 0) {
         const a = ud.anchor, ax = a[0] - s.eye[0], ay = a[1] - s.eye[1], az = a[2] - s.eye[2];
@@ -187,7 +196,7 @@ view.begin = function (scene, camera) {
       if (k > 0 && view.toRender(m.elements[12], m.elements[13], m.elements[14], tr)) {
         const w = c.matrixWorld.elements; w[12] = tr[0]; w[13] = tr[1]; w[14] = tr[2];
       }
-      for (const ch of c.children) ch.updateMatrixWorld(true);
+      kids(c);
     }
   }
   // the camera: at the origin, turned like everything on its own face (not at all). Once the view is partly round it is aimed

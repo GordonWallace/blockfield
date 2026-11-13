@@ -209,6 +209,20 @@ function planetMaterial(base, face) {
   m.customProgramCacheKey = () => "bf-planet-" + ck;
   return m;
 }
+// While the view is flat (roundK 0: on the ground, away from the cube corners) sphM is not read, so every chunk mesh of a face draws
+// with one shared copy per base material: three.js then sets a material's uniforms once for a run of chunks, not once a chunk (Gordon's
+// 20 fps at view distance 16, 2026-11-13: 888 chunks, two or three meshes each, were as many materials). js/view.js swaps a mesh to
+// its own copy (roundOf, made when first needed) while the view is round, and back (userData.flat) when it is flat again.
+const flatMats = new WeakMap();   // base material -> its shared copy per face
+function flatMaterial(base, face) {
+  let a = flatMats.get(base);
+  if (!a) flatMats.set(base, (a = []));
+  const f = face >= 0 ? face : 6;
+  if (!a[f]) { a[f] = planetMaterial(base, face); a[f].userData.shared = true; }
+  return a[f];
+}
+world.roundOf = m => m.userData.own || (m.userData.own = planetMaterial(m.userData.base, m.userData.face));
+const disposeOwn = m => { if (m.userData.own) { m.userData.own.dispose(); m.userData.own = null; } else if (m.material.userData.planet && !m.material.userData.shared) m.material.dispose(); };
 // Unit directions at the 17 x 17 block corners of the chunk at atlas (ox, oz), and its anchor (centre, sea level) on the sphere.
 function sphereFrame(ox, oz) {
   const P = BF.planet, f = P.face(ox, oz), u0 = ox - PW * f - PN, v0 = oz - PN, dirs = new Float64Array(17 * 17 * 3), d = [0, 0, 0];
@@ -824,7 +838,7 @@ world.contextRestored = function () {
 function dropFar(key) {
   staleFar.delete(key); nbMiss.delete(key);
   if (BF.real && BF.real.on) BF.real.flora.remove(key);
-  for (const m of world.farMeshes.get(key) || []) { scene.remove(m); m.geometry.dispose(); if (m.material.userData.planet) m.material.dispose(); }
+  for (const m of world.farMeshes.get(key) || []) { scene.remove(m); m.geometry.dispose(); disposeOwn(m); }
   world.farMeshes.delete(key);
 }
 
@@ -872,7 +886,7 @@ world.replay = {
 // changed by their border since (farStale). They are meshed again when a neighbour's blocks, or their own, arrive (installChunk).
 const nbMiss = new Set();
 function disposeMeshes(c) {
-  for (const m of c.meshes) { scene.remove(m); m.geometry.dispose(); if (m.material.userData.planet) m.material.dispose(); }
+  for (const m of c.meshes) { scene.remove(m); m.geometry.dispose(); disposeOwn(m); }
   c.meshes = [];
 }
 
@@ -1348,7 +1362,9 @@ function applyMesh(c, R, anchor) {
     g.setIndex(new THREE.BufferAttribute(T.ind, 1));
     g.computeBoundingSphere();
     for (const a of [...Object.values(g.attributes), g.index]) a.onUpload(markUploaded);   // (see purge)
-    const m = new THREE.Mesh(g, planetMaterial(mat, BF.planet.face(ox, oz)));
+    const face = BF.planet.face(ox, oz), flat = flatMaterial(mat, face);
+    const m = new THREE.Mesh(g, flat);
+    m.userData.flat = flat; m.userData.base = mat; m.userData.face = face; m.userData.own = null;
     if (ground) m.receiveShadow = true;
     m.renderOrder = order;
     m.matrixAutoUpdate = false;

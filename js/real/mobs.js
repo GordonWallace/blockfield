@@ -20,21 +20,71 @@ if (!BF.real || !BF.real.on || typeof THREE === "undefined") return;
 
 // The painted colours are bright (pure whites, pinks); under the noon sun they would burn out, so the models reflect a little less.
 const ALBEDO = 0.56;
-let blobGeo = null, blobTex = null;
-function blobTexture() {
-  const c = document.createElement("canvas"); c.width = c.height = 64;
-  const g = c.getContext("2d"), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  gr.addColorStop(0, "rgba(0,0,0,0.85)"); gr.addColorStop(0.45, "rgba(0,0,0,0.5)"); gr.addColorStop(1, "rgba(0,0,0,0)");
-  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
-  return new THREE.CanvasTexture(c);
+// The contact shadows: every mob's soft dark disc on the ground, all in one mesh and one draw call (they were a mesh and a draw each:
+// 170 of 1,000 draws in a village at view distance 16, Gordon's 20 fps, 2026-11-13). light() adds a mob's quad as mobview.js draws it;
+// the module's frame() (after the mobs, before the picture) uploads them. The mesh sits at the chunk corner under the first mob, so
+// js/view.js places it like any other object; a mob on another face of the planet than that corner gets no disc this frame.
+const BLOB_VERT = `
+attribute float alpha;
+varying vec2 vUv; varying float vA;
+void main() { vUv = uv; vA = alpha; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+// (the old canvas gradient: 0.85 at the centre, 0.5 at 0.45 of the radius, 0 at the rim)
+const BLOB_FRAG = `
+varying vec2 vUv; varying float vA;
+void main() {
+  float r = min(1.0, length(vUv - 0.5) * 2.0);
+  float g = r < 0.45 ? mix(0.85, 0.5, r / 0.45) : mix(0.5, 0.0, (r - 0.45) / 0.55);
+  gl_FragColor = vec4(0.0, 0.0, 0.0, g * vA);
+}`;
+const blobs = { mesh: null, cap: 0, n: 0, pos: null, uv: null, al: null, ox: 0, oz: 0, face: -1, drawn: 0 };
+function blobRoom(n) {
+  if (n <= blobs.cap) return;
+  const cap = Math.max(64, blobs.cap * 2, n), pos = new Float32Array(cap * 12), uv = new Float32Array(cap * 8), al = new Float32Array(cap * 4), ix = new Uint32Array(cap * 6);
+  if (blobs.pos) { pos.set(blobs.pos); al.set(blobs.al); }
+  for (let i = 0; i < cap; i++) {
+    uv.set([0, 0, 1, 0, 1, 1, 0, 1], i * 8);
+    ix.set([i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3], i * 6);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+  g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  g.setAttribute("alpha", new THREE.BufferAttribute(al, 1).setUsage(THREE.DynamicDrawUsage));
+  g.setIndex(new THREE.BufferAttribute(ix, 1));
+  if (!blobs.mesh) {
+    const mat = new THREE.ShaderMaterial({ vertexShader: BLOB_VERT, fragmentShader: BLOB_FRAG, transparent: true, depthWrite: false, fog: false, toneMapped: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    blobs.mesh = new THREE.Mesh(g, mat);
+    blobs.mesh.frustumCulled = false; blobs.mesh.renderOrder = 2; blobs.mesh.userData.mobBlobs = true;
+    (BF.real.scene || BF.scene).add(blobs.mesh);
+  } else { blobs.mesh.geometry.dispose(); blobs.mesh.geometry = g; }
+  blobs.cap = cap; blobs.pos = pos; blobs.uv = uv; blobs.al = al;
 }
-
-// A few shared materials, one per strength step (so a mob that goes needs nothing disposed).
-const blobMats = [];
-function blobMat(a) {
-  const i = Math.max(0, Math.min(8, Math.round(a * 16)));
-  return blobMats[i] || (blobMats[i] = new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, opacity: i / 16, depthWrite: false, fog: false, toneMapped: false,
-    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+// One mob's disc: centre (x, y, z) in atlas coordinates, w across, strength a (0..0.5, in sixteenths as the old materials were).
+function blobAdd(x, y, z, w, a) {
+  const P = BF.planet, f = P && P.face ? P.face(x, z) : 0;
+  if (!blobs.n) { blobs.ox = Math.floor(x / 16) * 16; blobs.oz = Math.floor(z / 16) * 16; blobs.face = f; }
+  else if (f !== blobs.face) return;
+  blobRoom(blobs.n + 1);
+  const o = blobs.n * 12, p = blobs.pos, h = w / 2, lx = x - blobs.ox, lz = z - blobs.oz;
+  p[o] = lx - h; p[o + 1] = y; p[o + 2] = lz + h;
+  p[o + 3] = lx + h; p[o + 4] = y; p[o + 5] = lz + h;
+  p[o + 6] = lx + h; p[o + 7] = y; p[o + 8] = lz - h;
+  p[o + 9] = lx - h; p[o + 10] = y; p[o + 11] = lz - h;
+  blobs.al.fill(Math.round(a * 16) / 16, blobs.n * 4, blobs.n * 4 + 4);
+  blobs.n++;
+}
+function blobFrame() {
+  const m = blobs.mesh;
+  blobs.drawn = blobs.n;
+  if (!m) return;
+  m.visible = blobs.n > 0;
+  if (blobs.n) {
+    const g = m.geometry;
+    m.position.set(blobs.ox, 0, blobs.oz);
+    g.setDrawRange(0, blobs.n * 6);
+    g.attributes.position.needsUpdate = true; g.attributes.alpha.needsUpdate = true;
+  }
+  blobs.n = 0;
 }
 
 const cell = new THREE.Vector2();
@@ -44,13 +94,7 @@ const mobs = {
     return BF.real.lit(mat, { light: "cell" });
   },
   part(mesh) { mesh.castShadow = true; mesh.receiveShadow = true; },
-  view(v, m) {
-    if (!blobGeo) { blobGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2); blobTex = blobTexture(); }
-    const blob = new THREE.Mesh(blobGeo, blobMat(0));
-    blob.position.y = 0.03; blob.renderOrder = 2;
-    v.root.add(blob);
-    v.blob = blob;
-  },
+  view(v, m) { v.blob = { visible: false, strength: 0 }; },   // (its contact shadow: a quad of the one mesh, see blobAdd)
   // The height a mob is drawn at. The simulation lifts it a whole block in one tick where the ground rises a block; the ground is
   // drawn as a slope there, so the model catches up over a moment instead of hopping (and the same going down).
   ease(v, m, y, dt) {
@@ -69,13 +113,14 @@ const mobs = {
       // darkest under an open bright sky, gone in the dark, in a bed, in water and once dead; under a roof a faint one from the room's light
       const A = BF.atmos, day = A ? Math.min(1, A.hemiIntensity / 0.6 + A.sunIntensity / 1.5) : 1;
       const want = m.sleeping || m.dead || m.inWater || m.riding != null ? 0 : 0.5 * Math.min(1, day) * (0.35 + 0.65 * cell.x);
-      b.material = blobMat(want);
-      b.visible = want > 0.02;
-      if (b.visible) { const w = ((m.hw || 0.3) * 2 + 0.25) * (m.scale || 1) * 1.5; b.scale.set(w, 1, w); }
+      b.strength = want;
+      b.visible = want > 0.02 && v.root.visible;
+      if (b.visible) blobAdd(v.root.position.x, v.root.position.y + 0.03, v.root.position.z, ((m.hw || 0.3) * 2 + 0.25) * (m.scale || 1) * 1.5, want);
     }
     return ALBEDO;
   },
 };
 BF.real.mobs = mobs;
-BF.real.module({ name: "mobs" });
+mobs.blobs = blobs;
+BF.real.module({ name: "mobs", frame: blobFrame });
 })();

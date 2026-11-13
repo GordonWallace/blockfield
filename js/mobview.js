@@ -585,6 +585,7 @@ function buildMeshes(v, m) {
     mesh.userData.part = p;
     if (p.spiderLeg) { mesh.rotation.z = -0.6 * p.spiderLeg; mesh.rotation.y = p.spread; }
     if (REAL) BF.real.mobs.part(mesh);
+    if (joined) { mesh.matrixAutoUpdate = false; mesh.updateMatrix(); }   // (poseBatch works its matrix out once a frame; three.js need not again)
     v.model.add(mesh);
     v.meshes[p.name] = mesh;
   }
@@ -838,6 +839,27 @@ function playerDist(m, pp) {
   return _q.set(LQ.x, pp.y, LQ.z).distanceTo(_mp);
 }
 
+// The camera's view in atlas coordinates, for hiding the models outside it (Gordon's 20 fps with 554 mobs loaded, 2026-11-13). It holds
+// while the view is flat (js/view.js k = 0) and for mobs on the camera's face of the planet; otherwise every model stays shown and
+// three.js culls the joined mesh as before.
+const frustum = new THREE.Frustum(), _pm = new THREE.Matrix4(), _inv = new THREE.Matrix4(), _sph = new THREE.Sphere();
+let cullOn = false, camFace = -1;
+function setFrustum(pp) {
+  const cam = BF.camera, V = BF.view && BF.view.state;
+  cullOn = false;
+  if (!cam || !pp || cam.parent !== BF.scene || !V || !V.on || V.k > 0 || V.offPlanet) return;
+  cam.updateMatrix();
+  frustum.setFromProjectionMatrix(_pm.multiplyMatrices(cam.projectionMatrix, _inv.copy(cam.matrix).invert()));
+  camFace = BF.planet && BF.planet.face ? BF.planet.face(cam.position.x, cam.position.z) : -1;
+  cullOn = camFace >= 0;
+}
+function inView(v, m) {
+  const p = v.root.position, s = m.scale || 1, h = (m.h || 2) * s;
+  if (BF.planet.face(p.x, p.z) !== camFace) return true;
+  _sph.center.set(p.x, p.y + h / 2, p.z); _sph.radius = h + (m.hw || 0.5) * 2 * s + 2;
+  return frustum.intersectsSphere(_sph);
+}
+
 // A model that could not be drawn: logged once per mob type (the game log, js/gamelog.js); the mob itself plays on.
 const failed = new Set();
 function drawFailed(m, e) {
@@ -882,6 +904,7 @@ BF.mobView = {
     if (!scene || !M) return;
     frameNo++;
     const pp = BF.player && (BF.player.viewPos ? BF.player.viewPos() : BF.player.position), far = (BF.world.viewDist + 1) * BF.CS;   // nothing to draw beyond the meshed terrain
+    setFrustum(pp);
     for (const m of M.entities.values()) {
       if (m.kind !== "mob") continue;
       let v = views.get(m.n);
@@ -890,6 +913,9 @@ BF.mobView = {
       v.seen = frameNo;
       v.root.visible = true;
       try { draw(v, m, dt || 0); } catch (e) { drawFailed(m, e); }
+      // out of the camera's view: the model (its joined mesh and a dozen parts) is hidden, so neither js/view.js nor three.js walks it
+      const seen = !cullOn || inView(v, m);
+      v.model.visible = seen; v.model.userData.culled = !seen;
     }
     for (const [n, v] of views) if (v.seen !== frameNo) { dropView(v); views.delete(n); }   // removed, or gone from the mirror
     const sl = Math.max(0.15, skyLight());
