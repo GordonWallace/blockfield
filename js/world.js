@@ -223,6 +223,122 @@ function flatMaterial(base, face) {
 }
 world.roundOf = m => m.userData.own || (m.userData.own = planetMaterial(m.userData.base, m.userData.face));
 const disposeOwn = m => { if (m.userData.own) { m.userData.own.dispose(); m.userData.own = null; } else if (m.material.userData.planet && !m.material.userData.shared) m.material.dispose(); };
+// Far chunks drawn up to FG x FG to a mesh (Gordon 2026-11-13: at view distance 32 the frame was 2,763 draw calls against 896 at 16, and
+// the page thread pays for each: the far chunks, two or three meshes each). A far chunk (purge: only its meshes are kept) waits with its
+// arrays in its group, a cell of FG x FG chunks. Once the cell is whole, or nothing joined the wait for FAR_WAIT frames and no chunk is loading, mergeFar joins the
+// waiting chunks' meshes into one per material (a batch) and lets the chunks' own go (farMeshes keeps the key with an empty list);
+// chunks that turn far later make another batch of the cell. A chunk that leaves (dropped past the view distance, meshed again because
+// it changed or came near) has its triangles' indices zeroed in the joined mesh, whose index array stays for that; a batch goes with
+// its last chunk. world.farMerge: false stops new batches, "hold" (tests) leaves the joining to world.mergeFar(true).
+const FG = 4, FAR_WAIT = 180, farGroups = new Map(), memberOf = new Map(), waiting = new Set();   // "gx,gz" -> group; chunk key -> its batch; groups with waiting chunks
+let farTick = 0;   // frames (not the clock: what is drawn when decides nothing in the simulation, but a count is enough)
+world.farMerge = true; world.farGroups = farGroups; world.farMerged = key => memberOf.has(key); world.farBatch = key => memberOf.get(key);   // (farBatch: tests)
+const groupOf = (key, make) => {
+  const i = key.indexOf(","), gk = Math.floor(+key.slice(0, i) / FG) + "," + Math.floor(+key.slice(i + 1) / FG);
+  let G = farGroups.get(gk);
+  if (!G && make) farGroups.set(gk, (G = { key: gk, wait: new Map(), t: 0, members: 0, batches: 0 }));
+  return G;
+};
+const groupDone = G => { if (!G.wait.size) { waiting.delete(G); if (!G.members) farGroups.delete(G.key); } };
+const hasArrays = m => { const g = m.geometry; for (const n in g.attributes) if (!g.attributes[n].array.length) return false; return !!(g.index && g.index.array.length); };
+const freeMesh = m => { const g = m.geometry; for (const a of [...Object.values(g.attributes), g.index]) if (a) { if (a.uploaded) a.array = NOARR; else a.onUpload(freeArray); } };
+// Chunk key became far with meshes ms: true when it waits for a batch of its group with its arrays kept.
+function farWait(key, ms) {
+  if (!world.farMerge || memberOf.has(key) || !ms.length || !ms.every(hasArrays)) return false;
+  const G = groupOf(key, true);
+  G.wait.set(key, ms); G.t = farTick;
+  waiting.add(G);
+  return true;
+}
+// Chunk key is no longer a waiting far chunk (it has its data again, or is gone).
+function farUnwait(key) {
+  const G = groupOf(key, false);
+  if (G && G.wait.delete(key)) groupDone(G);
+}
+// Chunk key's triangles leave its batch's joined meshes.
+function leaveGroup(key) {
+  const B = memberOf.get(key);
+  if (!B) return;
+  memberOf.delete(key);
+  for (const r of B.ranges.get(key) || []) { const ix = r.mesh.geometry.index; ix.array.fill(0, r.start, r.start + r.count); ix.needsUpdate = true; }
+  B.ranges.delete(key);
+  B.G.members--;
+  if (--B.live <= 0) { for (const m of B.meshes) { scene.remove(m); m.geometry.dispose(); disposeOwn(m); } B.G.batches--; }
+  groupDone(B.G);
+}
+// Joins one group's waiting chunks a call (a frame; all: whether or not they waited long enough): returns true when it did.
+function mergeFar(all) {
+  const now = ++farTick;
+  for (const G of waiting) {
+    if (!all && G.wait.size + G.members < FG * FG && (now - G.t < FAR_WAIT || loadQ > 0)) continue;   // (while chunks load, far ones are still loaded and meshed again for their neighbours)
+    const [gx, gz] = G.key.split(",").map(Number), gox = gx * FG * CS, goz = gz * FG * CS, face = BF.planet.face(gox + 1, goz + 1);
+    // the chunks to join: settled ones on the cell's face (one about to be meshed again waits on; the others stay as they are, their arrays freed)
+    const take = [];
+    for (const [k, ms] of G.wait) {
+      if (staleFar.has(k)) continue;
+      if (world.farMeshes.get(k) !== ms || !ms.every(hasArrays) || ms.some(m => m.userData.face !== face)) { for (const m of ms) freeMesh(m); G.wait.delete(k); continue; }
+      take.push([k, ms]);
+    }
+    if (take.length < 2) {   // (one chunk alone gains nothing)
+      if (take.length && G.wait.size === 1) { for (const m of take[0][1]) freeMesh(m); G.wait.delete(take[0][0]); }
+      if (G.wait.size) G.t = now;
+      groupDone(G);
+      continue;
+    }
+    const kinds = new Map();   // base material -> the chunks' meshes of it
+    for (const [k, ms] of take) for (const m of ms) { let a = kinds.get(m.userData.base); if (!a) kinds.set(m.userData.base, (a = [])); a.push([k, m]); }
+    const B = { G, meshes: [], ranges: new Map(), live: take.length };
+    for (const [base, list] of kinds) {
+      const first = list[0][1], anchor = first.userData.anchor, names = new Set();
+      let nv = 0, ni = 0;
+      for (const [, m] of list) { nv += m.geometry.attributes.position.count; ni += m.geometry.index.count; for (const n in m.geometry.attributes) names.add(n); }
+      const g = new THREE.BufferGeometry(), out = {}, ind = new (nv > 65535 ? Uint32Array : Uint16Array)(ni);
+      for (const n of names) {
+        let a0 = null;
+        for (const [, m] of list) if ((a0 = m.geometry.attributes[n])) break;
+        out[n] = new THREE.BufferAttribute(new a0.array.constructor(nv * a0.itemSize), a0.itemSize, a0.normalized);
+      }
+      let v0 = 0, i0 = 0;
+      for (const [k, m] of list) {
+        const ga = m.geometry.attributes, n = ga.position.count, dx = m.position.x - gox, dz = m.position.z - goz, a = m.userData.anchor;
+        for (const name of names) {
+          const src = ga[name];
+          if (!src) continue;   // (a chunk without tilled soil or strata: zeros, as an attribute that is off reads)
+          const dst = out[name].array, o = v0 * src.itemSize;
+          dst.set(src.array, o);
+          if (name === "position") for (let j = 0; j < n; j++) { dst[o + j * 3] += dx; dst[o + j * 3 + 2] += dz; }
+          else if (name === "sphere" && anchor && a) { const ax = a[0] - anchor[0], ay = a[1] - anchor[1], az = a[2] - anchor[2]; for (let j = 0; j < n; j++) { dst[o + j * 3] += ax; dst[o + j * 3 + 1] += ay; dst[o + j * 3 + 2] += az; } }
+        }
+        const si = m.geometry.index.array, c = si.length;
+        for (let j = 0; j < c; j++) ind[i0 + j] = si[j] + v0;
+        let r = B.ranges.get(k); if (!r) B.ranges.set(k, (r = []));
+        r.push({ mesh: null, start: i0, count: c, at: B.meshes.length });
+        v0 += n; i0 += c;
+      }
+      for (const n of names) { g.setAttribute(n, out[n]); out[n].onUpload(freeArray); }
+      g.setIndex(new THREE.BufferAttribute(ind, 1));   // (kept: leaveGroup zeroes a chunk's part)
+      g.computeBoundingSphere();
+      const flat = flatMaterial(base, face), M = new THREE.Mesh(g, flat);
+      M.userData.flat = flat; M.userData.base = base; M.userData.face = face; M.userData.own = null;
+      M.receiveShadow = first.receiveShadow; M.renderOrder = first.renderOrder;
+      M.matrixAutoUpdate = false; M.position.set(gox, 0, goz); M.updateMatrix();
+      M.userData.chunk = FAR; M.userData.anchor = anchor; M.userData.farGroup = G.key;
+      scene.add(M);
+      B.meshes.push(M);
+    }
+    for (const rs of B.ranges.values()) for (const r of rs) r.mesh = B.meshes[r.at];
+    for (const [k, ms] of take) {
+      for (const m of ms) { scene.remove(m); m.geometry.dispose(); disposeOwn(m); }
+      world.farMeshes.set(k, []); memberOf.set(k, B); G.wait.delete(k);
+    }
+    G.members += take.length; G.batches++; G.t = now;
+    groupDone(G);
+    world.farJoined = (world.farJoined || 0) + 1;
+    return true;
+  }
+  return false;
+}
+world.mergeFar = mergeFar;
 // Unit directions at the 17 x 17 block corners of the chunk at atlas (ox, oz), and its anchor (centre, sea level) on the sphere.
 function sphereFrame(ox, oz) {
   const P = BF.planet, f = P.face(ox, oz), u0 = ox - PW * f - PN, v0 = oz - PN, dirs = new Float64Array(17 * 17 * 3), d = [0, 0, 0];
@@ -255,6 +371,7 @@ world.onChunkUnload = fn => world._unloadL.push(fn);
 world.reset = function () {
   for (const k of [...world.chunks.keys()]) unload(k);
   for (const k of [...world.farMeshes.keys()]) dropFar(k);
+  farGroups.clear(); memberOf.clear(); waiting.clear();
   world.edits.clear();
   world._dirty.clear();
   staleFar.clear();
@@ -775,9 +892,11 @@ function installChunk(c) {
   const fm = world.farMeshes.get(key);
   if (fm) {
     world.farMeshes.delete(key);
+    farUnwait(key);
     c.meshes = fm; c.mesh = true;
     for (const m of fm) m.userData.chunk = c;
     if (staleFar.delete(key)) world._dirty.add(key);   // (the page's copy: edited while it was only a mesh, r15-38)
+    else if (memberOf.has(key) && nearPlan(cx, cz)) world._dirty.add(key);   // (drawn by its far group: near the player it has meshes of its own)
     else world._dirty.delete(key);
   }
   if (nbMiss.size) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
@@ -813,11 +932,8 @@ function purge(key) {
   const c = world.chunks.get(key);
   if (!c) return;
   world.farMeshes.set(key, c.meshes);
-  for (const m of c.meshes) {
-    m.userData.chunk = FAR;
-    const g = m.geometry;
-    for (const a of [...Object.values(g.attributes), g.index]) if (a) { if (a.uploaded) a.array = NOARR; else a.onUpload(freeArray); }
-  }
+  for (const m of c.meshes) m.userData.chunk = FAR;
+  if (!farWait(key, c.meshes)) for (const m of c.meshes) freeMesh(m);   // (a chunk waiting for its far group keeps its arrays till it is joined)
   c.meshes = [];
   world.chunks.delete(key); CGEN++; forgetChunk(c);   // (caches must not keep its arrays alive, r15-35)
   world._dirty.delete(key);
@@ -838,6 +954,7 @@ world.contextRestored = function () {
 function dropFar(key) {
   staleFar.delete(key); nbMiss.delete(key);
   if (BF.real && BF.real.on) BF.real.flora.remove(key);
+  farUnwait(key); leaveGroup(key);
   for (const m of world.farMeshes.get(key) || []) { scene.remove(m); m.geometry.dispose(); disposeOwn(m); }
   world.farMeshes.delete(key);
 }
@@ -886,6 +1003,7 @@ world.replay = {
 // changed by their border since (farStale). They are meshed again when a neighbour's blocks, or their own, arrive (installChunk).
 const nbMiss = new Set();
 function disposeMeshes(c) {
+  leaveGroup(c.key);
   for (const m of c.meshes) { scene.remove(m); m.geometry.dispose(); disposeOwn(m); }
   c.meshes = [];
 }
@@ -903,8 +1021,16 @@ const TW = {};
 let fwdX = 0, fwdZ = -1, lastPlanT = 0;
 let roundPlan = false;
 const TV2 = new THREE.Vector2();
+let planCx = 0, planCz = 0;
+// Chunk (cx, cz) is within the block data's range of the last plan's centre.
+function nearPlan(cx, cz) {
+  const t = BF.planet.toward({ x: planCx * CS + 8, z: planCz * CS + 8 }, { x: cx * CS + 8, z: cz * CS + 8 }, TW), dx = t.x / CS, dz = t.z / CS, K = Math.min(world.viewDist, KEEP) + 1.5;
+  return dx * dx + dz * dz <= K * K;
+}
 function plan(pcx, pcz) {
   const R = world.viewDist;
+  planCx = pcx; planCz = pcz;
+  for (const k of memberOf.keys()) { const c = world.chunks.get(k); if (c && !world._dirty.has(k) && nearPlan(c.cx, c.cz)) world._dirty.add(k); }
   lastPlanT = performance.now();
   if (BF.camera) {
     const e = BF.camera.matrixWorld.elements; // camera looks down -Z
@@ -1095,6 +1221,7 @@ world.update = function (px, pz, budgetMs = 8, py) {
   const ffBatch = !!(BF.warp && BF.warp.speed >= 10);
   remeshDirty(pcx, pcz, ffBatch);
   ffTrack(ffBatch);
+  if (waiting.size && world.farMerge === true) mergeFar();
 
   // a real-time budget (spec r15-16 allows it): it decides what is drawn and when chunk data arrives, never what villagers do, since they
   // and their jobs wait for unloaded chunks (js/villagesim.js)

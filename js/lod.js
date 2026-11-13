@@ -1172,7 +1172,7 @@ function markChunks(pp, V) {
     if (i < 0 || j < 0 || i >= MASK_N || j >= MASK_N) { outside++; return; }
     maskNext[j * MASK_N + i] = 255;
   };
-  for (const c of W.chunks.values()) if (c.mesh === true && c.meshes && c.meshes.length) mark(c.cx, c.cz);
+  for (const c of W.chunks.values()) if (c.mesh === true && c.meshes && (c.meshes.length || W.farMerged(c.key))) mark(c.cx, c.cz);   // (or drawn by its far group, js/world.js)
   for (const k of W.farMeshes.keys()) { const i = k.indexOf(","); mark(+k.slice(0, i), +k.slice(i + 1)); }
   for (const [k, n] of near) {
     if (!n) continue;
