@@ -119,6 +119,19 @@ const FLOOR = sp => {
   return { n, low };
 };
 
+// The grass tint in the nearest savanna and the nearest plains (on the chunks' 4-block tint grid, where tintAt is not interpolated), and
+// what the far land's sampler gets for the same columns (surfaceAt).
+const SWARD = () => {
+  const G = BF.worldgen, p = BF.player.position, o = {}, t9 = new Float32Array(9);
+  for (let r = 1; r < 300 && !(o.Savanna && o.Plains); r++) for (let k = 0; k < r * 8; k++) {
+    const a = k / (r * 8) * Math.PI * 2, x = Math.floor((p.x + Math.cos(a) * r * 96) / 16) * 16, z = Math.floor((p.z + Math.sin(a) * r * 96) / 16) * 16, n = G.biomeAt(x, z).name;
+    if ((n !== 'Savanna' && n !== 'Plains') || o[n]) continue;
+    const g = G.tintAt(x, z).grass; G.surfaceAt(x, z, t9);
+    o[n] = { g: g.map(v => +v.toFixed(3)), far: Math.max(...[0, 1, 2].map(i => Math.abs(t9[i] - g[i]))) };
+  }
+  return o;
+};
+
 async function boot(b, look) {
   const pg = await (await b.newContext({ viewport: { width: 480, height: 300 } })).newPage();
   const errors = [];
@@ -149,6 +162,7 @@ async function boot(b, look) {
       built: BF.real && BF.real.meshTables ? (() => { const t = BF.real.meshTables(), B = BF.B; return [t.NAT[B.orange_terracotta], t.NATB[B.orange_terracotta], t.NATB[B.sandstone], t.NATB[B.grass], t.NATB[B.stone]]; })() : null,
     };
   });
+  r.sward = await pg.evaluate(SWARD);
   if (look === 'real') r.shape = await pg.evaluate(SHAPE);
   if (look === 'real' && r.shape.spot) r.floor = await pg.evaluate(FLOOR, r.shape.spot);
   await pg.context().close();
@@ -171,6 +185,9 @@ async function boot(b, look) {
   check(!!sh.spot && sh.pad === 4, `the ground is flat and square under a block set on it (${sh.pad} of 4 corners on the grid)`);
   const fl = real.r.floor;
   check(!!fl && fl.n >= 2 && fl.low > 0.3, `sand on the floor of a pit faces up between built blocks (${fl ? fl.n + ' vertices, the lowest normal ' + fl.low.toFixed(2) : 'no pit'})`);
+  const sw = real.r.sward, sv = sw.Savanna && sw.Savanna.g, pl = sw.Plains && sw.Plains.g;
+  check(!!sv && !!pl && sv[0] > sv[1] * 1.1 && pl[1] > pl[0] && sv[0] > pl[0] * 1.2, `grass takes its biome's colour: a savanna's is dry and yellow, the plains' green (savanna ${sv}, plains ${pl})`);
+  check(!!sv && !!pl && sw.Savanna.far < 1e-6 && sw.Plains.far < 1e-6, 'the far land is given the same grass colour as the loaded chunks');
   check(real.r.species >= 3, `tree species are registered (${real.r.species})`);
   check(real.r.instanced > 0, `trees are drawn as instanced models (${real.r.instanced} batches' parts)`);
   for (const look of ['blocks', '']) {
@@ -178,6 +195,8 @@ async function boot(b, look) {
     console.log('look=' + (look || '(default)') + ': ' + JSON.stringify(off.r));
     check(!off.r.on && off.r.ground === 0 && off.r.instanced === 0 && off.r.lights === 0 && off.r.tone === 0, `look=${look || '(default)'} draws the block world untouched`);
     check(off.errors.length === 0, `no page errors with look=${look || '(default)'}`);
+    const os = off.r.sward, og = os.Savanna && os.Savanna.g;
+    check(!!og && og[1] <= 1.05 && og[2] < 0.6 && og[0] < 1.15, `with look=${look || '(default)'} the blocks keep the climate's grass tint (savanna ${og})`);
   }
   await b.close();
   console.log(fails ? `FAIL ${fails} check(s)` : 'PASS real-look');
