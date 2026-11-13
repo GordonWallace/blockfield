@@ -1939,8 +1939,15 @@ function boxHit(px, py, pz, hw, h, axis, prev) {
   return hit;
 }
 // True if an axis-aligned box (feet-centre pos, half-width hw, height h) overlaps any solid block
-// (doors and beds collide with their smaller box).
-world.boxCollides = (px, py, pz, hw, h) => boxHit(px, py, pz, hw, h);
+// (doors and beds collide with their smaller box). pass: as moveBox's opts.pass (blocks the box goes through); left out, inside
+// moveBox it keeps the move's own.
+world.boxCollides = (px, py, pz, hw, h, pass) => {
+  if (pass === undefined) return boxHit(px, py, pz, hw, h);
+  const was = passIds; passIds = pass;
+  const hit = boxHit(px, py, pz, hw, h);
+  passIds = was;
+  return hit;
+};
 
 // Moves an entity box through the world with per-axis collision.
 // pos: {x,y,z} feet centre (mutated). vel: {x,y,z} (mutated: blocked axes zeroed).
