@@ -4,7 +4,7 @@ Owner: the Water thread. Code: `js/real/water.js`. Test: `test/real-water.js`. T
 `docs/REALISTIC_CONTRACT.md`.
 
 With the realistic look on, water near the player is the Cascade Creek water: a shallow-water simulation (virtual pipes) drawn
-with its shader, in a window of 80 x 80 blocks (two cells a block) that follows the view. Everything else about water is 1.5's:
+with its shader, in a window of 112 x 112 blocks (two cells a block) that follows the view. Everything else about water is 1.5's:
 water blocks, the fluid simulation that spreads them, farmland, swimming, buckets, boats, villagers. This is drawing only. It
 changes no block and the game never reads it, so a world plays the same with the look on or off.
 
@@ -12,8 +12,8 @@ changes no block and the game never reads it, so a world plays the same with the
 
 1. **Blocks decide.** Where the game has water blocks (sea, rivers, lakes, farm channels, wells, a poured bucket) the window has
    water, and the level the blocks give is the level it rests at. Where the blocks have none, it has none for long.
-2. **Columns.** Each column of the window is read from the blocks: the top water block in reach (16 blocks above the view to
-   44 below) is the surface, the ground under that run of water is the bed. A dry column gives only its ground, which is a
+2. **Columns.** Each column of the window is read from the blocks: the top water block in reach (at least 16 blocks above the view and
+   96 below, so the foot of a tall fall seen from its top) is the surface, the ground under that run of water is the bed. A dry column gives only its ground, which is a
    bank. Leaves are not ground. Under a roof or a bridge with air below it, what is under the air counts: water (a well under
    its roof) or the floor there, which is then the column's ground. Water
    sealed under ground (a cave lake under a field) does not. Columns are read again when their blocks change
@@ -27,7 +27,7 @@ changes no block and the game never reads it, so a world plays the same with the
    it never runs out over a bank, a cliff lip or dry ground that the block water itself has not crossed. Every cell is also
    pulled towards its rest level (about a second to fill, three to drain) and never stands more than 0.6 blocks above it. So
    as the world was generated, and wherever nobody has changed a river, the water settles to what the blocks say, and nothing
-   floods when the player arrives. A column with no ground in the heights read (a drop deeper than 44 blocks) holds no water.
+   floods when the player arrives. A column with no ground in the heights read (a drop deeper than the reach) holds no water.
 5. **One water, two drawings.** `BF.real.water.material(base)` is the chunks' liquid material: the same colours, sky
    reflection and ripples as the flowing water, lit by the game's sky light and block light. It draws all block water outside
    the window, and inside the window the water the window does not own (under the bed: a cave pool under a river). The faces
@@ -75,9 +75,10 @@ All in atlas coordinates, valid inside the window (`covers(x, z)`), zero or null
 
 ## Cost
 
-About 1 ms a frame for the simulation and 1 ms for the mesh on the test machine (26,000 cells, two steps a frame; software GL
-for the drawing, so no GPU figure yet). Reading the blocks: 6,400 columns when the window is placed, 640 when it moves 8
-blocks, and only changed columns otherwise.
+About 2 ms a frame for the simulation and 2 ms for the mesh on the test machine, a slow cloud container (50,000 cells, two
+steps a frame; software GL for the drawing, so no GPU figure yet). Reading the blocks: 12,500 columns when the window is
+placed or the view has moved 24 blocks up or down (about 30 ms there), 900 when it moves 8 blocks sideways (about 10 ms),
+and only changed columns otherwise.
 
 ## Not done yet
 
