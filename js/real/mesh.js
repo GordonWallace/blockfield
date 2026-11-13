@@ -208,17 +208,11 @@ function finish(R) {
     raw.push(i + 0.5 + sx / e, j + 0.5 + sy / e, k + 0.5 + sz / e);
     cellOf.push(i, j, k); square.push(0);
   }
-  // a wall cell: one of its 4 columns is ground at both levels and another is open at both
-  const LEAN = 0.08;
-  const wall = (i, j, k) => {
-    if (j < 0) return false;
-    let full = 0, open = 0;
-    for (let c = 0; c < 4; c++) {
-      const X = i + (c & 1), Z = k + (c >> 1), a = m(X, j, Z) || hm(X, j, Z), b = m(X, j + 1, Z) || hm(X, j + 1, Z);
-      if (a && b) full = 1; else if (!a && !b) open = 1;
-    }
-    return full && open;
-  };
+  // head room (see vert): a cell is open when it holds neither ground nor a built block; the column (X, Z) has head room at row
+  // j when it is open there and in the row over or under it
+  const LEAN = 0.08, SAG = 0.04;
+  const open = (X, Y, Z) => Y >= 0 && Y < NY && !m(X, Y, Z) && !hm(X, Y, Z);
+  const head = (X, j, Z) => open(X, j, Z) && (open(X, j + 1, Z) || open(X, j - 1, Z));
   const nv = raw.length / 3;
   if (!nv) return { T: null, F: R.F.length ? new Float32Array(R.F) : null };
   const at = (i, j, k) => (i < -2 || i > CS || k < -2 || k > CS || j < 0 || j >= NY - 1) ? -1 : vid[j * NC + (k + 2) * CW + i + 2];
@@ -266,15 +260,18 @@ function finish(R) {
       if (u >= 0) { ax += raw[u * 3]; ay += raw[u * 3 + 1]; az += raw[u * 3 + 2]; an++; }
     }
     if (an) { x = 0.5 * x + 0.5 * ax / an; y = 0.5 * y + 0.5 * ay / an; z = 0.5 * z + 0.5 * az / an; }
-    // beside a wall two blocks high or more (a dug shaft, a trench, a cliff foot) the surface must not lean into the open cells: the
-    // player stands in them against the blocks, and a wall pulled in past the eye is seen from behind, that is, not at all
-    if (!square[v] && (wall(i, j, k) || wall(i, j - 1, k))) {
-      const gx = i + 1, gz = k + 1, dx = x - gx, dz = z - gz;
-      if (dx || dz) {
-        const cx = i + (dx > 0 ? 1 : 0), cz = k + (dz > 0 ? 1 : 0);
-        if (!m(cx, j, cz) && !hm(cx, j, cz) && !m(cx, j + 1, cz) && !hm(cx, j + 1, cz)) {
-          x = gx + Math.max(-LEAN, Math.min(LEAN, dx)); z = gz + Math.max(-LEAN, Math.min(LEAN, dz));
-        }
+    // Head room. The player's box stops at the blocks, so the eye comes within 0.3 of a block's side and, under a ceiling two
+    // blocks up, within a sixth of a block of it. A surface eased further than that into a cell the eye can be in (an open cell
+    // with another open cell under or over it) ends up behind the eye and is not drawn at all: the player sees out through the
+    // ground. So a vertex leans at most LEAN sideways into such a cell (a dug shaft, a trench, the wall of a cave, most of all
+    // where the wall meets the roof), and sags at most SAG under a roof that has head room below it.
+    if (!square[v]) {
+      const gx = i + 1, gy = j + 1, gz = k + 1, dx = x - gx, dz = z - gz;
+      if (dx) { const X = i + (dx > 0 ? 1 : 0); if (head(X, j, k) || head(X, j, k + 1)) x = gx + Math.max(-LEAN, Math.min(LEAN, dx)); }
+      if (dz) { const Z = k + (dz > 0 ? 1 : 0); if (head(i, j, Z) || head(i + 1, j, Z)) z = gz + Math.max(-LEAN, Math.min(LEAN, dz)); }
+      if (y < gy - SAG) for (let c = 0; c < 4; c++) {
+        const X = i + (c & 1), Z = k + (c >> 1);
+        if (open(X, j, Z) && open(X, j - 1, Z) && j + 1 < NY && !open(X, j + 1, Z)) { y = gy - SAG; break; }
       }
     }
     // normal: away from the ground in the 4 x 4 x 4 cells around; light: the open cells' mean

@@ -98,9 +98,10 @@ page and in the mesher workers), also:
   A flat floor comes out exactly on the block tops, and collision stays on the block grid. Three rules keep the smooth
   surface honest against the block grid: (1) a vertex that touches a built full block (planks, a job site, a log border)
   sits exactly on the block grid and is not eased, so the ground is flat under such a block and square against
-  it, and no quad is drawn against the block's face; (2) beside a wall two blocks high or more (a dug shaft, a trench, a
-  cliff foot) a vertex leans at most 0.08 of a block into the open cells, so a player standing in them never ends up
-  behind the surface; (3) with the look on a job's ring band (`Y0`..`Y1`) covers the 8 neighbours' loaded bands too, and
+  it, and no quad is drawn against the block's face; (2) head room: a vertex leans at most 0.08 of a block sideways into a cell the
+  player's eye can be in (an open cell with another open cell over or under it: a dug shaft, a trench, a cave) and sags at
+  most 0.04 under a roof with head room below it, so the surface never ends up behind the eye of a player standing against
+  the blocks; (3) with the look on a job's ring band (`Y0`..`Y1`) covers the 8 neighbours' loaded bands too, and
   an edit within 3 blocks of a chunk border re-meshes the neighbour, so both sides of a border build the same vertices.
   For the same reason what is ground is decided by column, never by chunk (`J.clay`: the columns where terracotta and
   sandstone are the ground itself), and a chunk meshed while a neighbour's blocks are not loaded takes the neighbour's
