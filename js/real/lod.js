@@ -686,9 +686,17 @@ const skyOf = ex => ((ex | 0) & 15) / 15, blockOf = ex => (((ex | 0) >> 4) & 15)
 // The flora of one chunk (contract section 4), replacing what it had: F holds 8 floats per plant, [x, y, z, kind, block, height,
 // seed, extra], x and z from the chunk's corner (ox, oz); block is the log's or the plant's block id. An empty list is the same as
 // remove.
+function sameList(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && !(a[i] !== a[i] && b[i] !== b[i])) return false;
+  return true;
+}
 function place(key, ox, oz, F) {
   const had = chunks.get(key), n = F ? Math.floor(F.length / 8) : 0;
   if (!n) { if (had) remove(key); return; }
+  // the same list again (a chunk is remeshed for any change in it: a door a villager opens, a crop that grows): nothing to do. A new
+  // list bumps the region's version, and every batch of the region's 32 blocks is built again (Gordon's 15 fps, 2026-11-13).
+  if (had && had.F && had.ox === ox && had.oz === oz && sameList(had.F, F)) return;
   const cnt = new Map(), ms = new Array(n);
   let biome = "";
   try { const b = BF.worldgen && BF.worldgen.biomeAt && BF.worldgen.biomeAt(ox + 8, oz + 8); biome = b ? b.name : ""; } catch (_) { /* no world yet */ }
@@ -712,7 +720,7 @@ function place(key, ox, oz, F) {
   }
   const r = regionFor(ox + 8, oz + 8);
   if (had && had.rk !== r.rk) remove(key);
-  chunks.set(key, { rk: r.rk, by });
+  chunks.set(key, { rk: r.rk, by, F: Float32Array.from(F), ox, oz });
   r.chunks.add(key);
   tally(r);
 }

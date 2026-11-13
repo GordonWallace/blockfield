@@ -531,8 +531,17 @@ function applyCell(key, i, id, replayed) {
   if (BF.skyLight) BF.skyLight.onSet(x, y, z, oldId, id);
   if (world.replica && BF.signs) BF.signs.onView(x, y, z, oldId, id);   // the page finds the sign to draw its text (js/signs.js, bug-097)
   if (replayed) for (let k = 0; k < replL.length; k++) replL[k](x, y, z, oldId, id);
-  const edge = BF.real && BF.real.on ? 3 : 1;   // (the smooth ground reads further across the border, as in setBlock)
-  if (lx < edge || lz < edge || lx >= CS - edge || lz >= CS - edge) markNeighboursDirty(c);
+  // the neighbours the cell is near, as setBlock marks them: only those on its sides (it marked all eight for any cell near an edge, and
+  // with the smooth ground's reach of 3 that was most cells: every door a villager opened remeshed nine chunks, Gordon's 15 fps, 2026-11-13)
+  const NBR = BF.real && BF.real.on ? 3 : 1;   // (the smooth ground reads further across the border, as in setBlock)
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    if (!dx && !dz) continue;
+    const nx = lx + dx * NBR, nz = lz + dz * NBR;
+    if (nx >= 0 && nx < CS && nz >= 0 && nz < CS) continue;
+    const n = world.chunkC(c.cx + dx, c.cz + dz);
+    if (n && n.mesh !== undefined) world._dirty.add(n.key);
+    else if (!n && NBR > 1) farStale(c.cx + dx, c.cz + dz);
+  }
 }
 world.applyEdits = function (chunks, full, replayed) {
   let gone = null;

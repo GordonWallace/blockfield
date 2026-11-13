@@ -482,6 +482,82 @@ function typeParts(name, variant) {
   }
   return parts;
 }
+
+// ---------- one draw per mob ----------
+// Every body part used to be its own mesh and its own draw call: about 435 of the realistic look's 800 draws a frame near a village
+// (Gordon, 2026-11-13: 15 fps with the page thread at 98% and the GPU at 20%; the page's cost there is draw calls, not pixels). A model's
+// parts are now one geometry (batchOf: the parts' geometries joined, each vertex with its part's number in bfPart) drawn once, its vertex
+// shader moving each vertex by its part's matrix (bfParts[i]: from its standing place to the part's own position, rotation and scale under the model, or zero
+// scale while the part is hidden). The part meshes stay as they were (positions, rotations, visible, children such as eyelids and the
+// held tool, all that animate() and the tests read) but are kept off the camera's layer, so only the joined mesh draws them.
+// Shadow maps (BF.real.quality.shadows, off) would not see the parts moved: the joined mesh casts none.
+const MAXP = 16;               // parts a joined model can hold (the most any model has is 12)
+const PART_LAYER = 30;         // the part meshes' layer: never the camera's (0)
+const batches = new WeakMap(); // a model's parts -> its joined geometry
+function batchOf(parts) {
+  if (parts.length > MAXP) return null;
+  let g = batches.get(parts);
+  if (g !== undefined) return g;
+  const names = Object.keys(parts[0].geo.attributes);
+  if (parts.some(p => Object.keys(p.geo.attributes).join() !== names.join() || p.geo.index)) { batches.set(parts, null); return null; }
+  let n = 0;
+  for (const p of parts) n += p.geo.attributes.position.count;
+  g = new THREE.BufferGeometry();
+  for (const a of names) {
+    const sz = parts[0].geo.attributes[a].itemSize, arr = new Float32Array(n * sz);
+    let o = 0;
+    for (const p of parts) {
+      const src = p.geo.attributes[a];
+      arr.set(src.array, o);
+      if (a === "position") for (let k = o; k < o + src.count * 3; k += 3) { arr[k] += p.pivot[0] * PX; arr[k + 1] += p.pivot[1] * PX; arr[k + 2] += p.pivot[2] * PX; }
+      o += src.count * sz;
+    }
+    g.setAttribute(a, new THREE.BufferAttribute(arr, sz));
+  }
+  // (positions in the standing pose, each part at its pivot, so the bounds are the model's; bfParts[i] takes the pivot off again first)
+  g.userData.unpivot = parts.map(p => new THREE.Matrix4().makeTranslation(-p.pivot[0] * PX, -p.pivot[1] * PX, -p.pivot[2] * PX));
+  const idx = new Float32Array(n);
+  let o = 0;
+  parts.forEach((p, i) => { const c = p.geo.attributes.position.count; idx.fill(i, o, o + c); o += c; });
+  g.setAttribute("bfPart", new THREE.BufferAttribute(idx, 1));
+  g.computeBoundingSphere();
+  g.boundingSphere.radius = g.boundingSphere.radius * 1.25 + 0.25;   // (limbs swing out of the standing pose's bounds)
+  batches.set(parts, g);
+  return g;
+}
+// The joined mesh's material: the mob's own kind (lit in the realistic look), sharing the colour and the cell light that draw() and
+// BF.real.mobs.light() set on v.mat every frame.
+function batchMaterial(v) {
+  const mat = REAL ? BF.real.mobs.material() : baseMat.clone();
+  mat.color = v.mat.color;
+  if (v.mat.userData.cell) mat.userData.cell = v.mat.userData.cell;
+  const mats = [];
+  for (let i = 0; i < MAXP; i++) mats.push(new THREE.Matrix4().makeScale(0, 0, 0));
+  const u = { value: mats };
+  mat.userData.parts = u;
+  const inner = mat.onBeforeCompile;
+  mat.onBeforeCompile = function (sh, r) {
+    if (inner) inner.call(mat, sh, r);
+    sh.uniforms.bfParts = u;
+    sh.vertexShader = "attribute float bfPart;\nuniform mat4 bfParts[" + MAXP + "];\n" + sh.vertexShader
+      .replace("#include <beginnormal_vertex>", "#include <beginnormal_vertex>\nobjectNormal = mat3(bfParts[int(bfPart + 0.5)]) * objectNormal;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\ntransformed = (bfParts[int(bfPart + 0.5)] * vec4(transformed, 1.0)).xyz;");
+  };
+  const key = mat.customProgramCacheKey ? mat.customProgramCacheKey.bind(mat) : () => "";
+  mat.customProgramCacheKey = () => key() + ":bfParts" + MAXP;
+  return mat;
+}
+// The parts' matrices for this frame, after draw() posed them.
+function poseBatch(v) {
+  const B = v.batch;
+  if (!B) return;
+  const mats = B.material.userData.parts.value, list = v.partList, un = B.geometry.userData.unpivot;
+  for (let i = 0; i < list.length; i++) {
+    const mesh = list[i];
+    if (mesh.visible) { mesh.updateMatrix(); mats[i].multiplyMatrices(mesh.matrix, un[i]); }
+    else mats[i].makeScale(0, 0, 0);
+  }
+}
 // ---------- per-mob models ----------
 let scene = null, baseMat = null, fireMat = null, fireGeo = null, badgeGeo = null, lidGeo = null;
 const views = new Map();   // protocol number -> its view: {root, model, meshes, mat, look, lids, badge, badgeLv, heldMesh, heldId, fire, seen}
@@ -490,10 +566,20 @@ let frameNo = 0;
 const lookOf = m => (m.golem ? (m.crackStage ? String(m.crackStage) : null) : m.look);
 function buildMeshes(v, m) {
   for (const k in v.meshes) v.model.remove(v.meshes[k]);
-  v.meshes = {}; v.lids = null; v.heldMesh = null; v.heldId = null;
+  v.meshes = {}; v.lids = null; v.heldMesh = null; v.heldId = null; v.partList = [];
   v.look = lookOf(m);
-  for (const p of typeParts(m.type, v.look)) {
+  const parts = typeParts(m.type, v.look), joined = batchOf(parts);
+  if (joined) {
+    if (!v.batch) {
+      v.batch = new THREE.Mesh(joined, batchMaterial(v));
+      v.batch.userData.mobBatch = true;
+      v.model.add(v.batch);
+    } else v.batch.geometry = joined;
+  } else if (v.batch) { v.model.remove(v.batch); v.batch.material.dispose(); v.batch = null; }
+  for (const p of parts) {
     const mesh = new THREE.Mesh(p.geo, v.mat);
+    if (joined) mesh.layers.set(PART_LAYER);   // (drawn by v.batch)
+    v.partList.push(mesh);
     mesh.position.set(p.pivot[0] * PX, p.pivot[1] * PX, p.pivot[2] * PX);
     mesh.rotation.order = "YXZ";
     mesh.userData.part = p;
@@ -506,7 +592,7 @@ function buildMeshes(v, m) {
 function createView(m) {
   const root = new THREE.Group(), model = new THREE.Group();
   root.add(model);
-  const v = { root, model, meshes: {}, mat: REAL ? BF.real.mobs.material() : baseMat.clone(), look: undefined, lids: null, badge: null, badgeLv: 0, heldMesh: null, heldId: null, fire: null, seen: 0 };
+  const v = { root, model, meshes: {}, partList: [], batch: null, mat: REAL ? BF.real.mobs.material() : baseMat.clone(), look: undefined, lids: null, badge: null, badgeLv: 0, heldMesh: null, heldId: null, fire: null, seen: 0 };
   buildMeshes(v, m);
   if (REAL) BF.real.mobs.view(v, m);
   scene.add(root);
@@ -515,6 +601,7 @@ function createView(m) {
 function dropView(v) {
   if (scene) scene.remove(v.root);
   v.mat.dispose();
+  if (v.batch) v.batch.material.dispose();
 }
 
 // ---------- drawn state ----------
@@ -728,6 +815,7 @@ function draw(v, m, dt) {
   } else col.setScalar(light);
   if (m.type === "villager") updateBadge(v, m);
   updateFire(v, m, !!m.onFire && !m.dead, dt);
+  poseBatch(v);
 }
 
 // partVis as the protocol sends it ("saddle1chest0": a part's name, then 1 shown or 0 hidden) -> {saddle: true, chest: false}
