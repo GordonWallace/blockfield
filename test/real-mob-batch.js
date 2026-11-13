@@ -66,6 +66,28 @@ module.exports = async (pg, out) => {
     return mob;
   });
   check(calls === 4, "the mobs' bodies take one draw each (" + calls + " in two frames for two mobs)");
+  // round two (2026-11-13): chunk meshes of a face share a material while the view is flat; a mob behind the camera has its model
+  // hidden (and shown again in front); in the realistic look the contact shadows are one mesh
+  const two = await pg.evaluate(async () => {
+    const next = () => new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+    const mats = new Set(), meshes = [];
+    for (const c of BF.world.chunks.values()) for (const m of c.meshes || []) { meshes.push(m); mats.add(m.material); }
+    const shared = meshes.every(m => m.material === m.userData.flat && m.material.userData.shared);
+    const v = BF.mobView.viewOf(window.__pig), d = new THREE.Vector3(), p = BF.player.position;
+    BF.camera.getWorldDirection(d); d.y = 0; d.normalize();
+    const put = k => { const e = window.__pig; e.position.set(p.x + d.x * k, p.y, p.z + d.z * k); if (e.vel) e.vel.set(0, 0, 0); if (e.prev) { e.prev.x = e.position.x; e.prev.z = e.position.z; } };
+    put(-12); await next(); await next();
+    const behind = { vis: v.model.visible, culled: !!v.model.userData.culled, root: v.root.visible };
+    put(6); await next(); await next();
+    const front = { vis: v.model.visible, culled: !!v.model.userData.culled };
+    const B = BF.real && BF.real.on ? BF.real.mobs.blobs : null;
+    return { meshes: meshes.length, mats: mats.size, shared, behind, front, k: BF.view.state.k,
+      blobs: B ? { mesh: !!(B.mesh && B.mesh.parent), drawn: B.drawn, perMob: BF.scene.children.filter(o => o.isGroup && o.children.some(c => c.isMesh && c.geometry.type === "PlaneGeometry")).length } : null };
+  });
+  check(two.k === 0 && two.shared && two.mats <= 8 && two.meshes > 20, "flat view: " + two.meshes + " chunk meshes share " + two.mats + " materials");
+  check(!two.behind.vis && two.behind.culled && two.behind.root, "a mob behind the camera has its model hidden", two.behind);
+  check(two.front.vis && !two.front.culled, "and shown again in front of it", two.front);
+  if (two.blobs) check(two.blobs.mesh && two.blobs.drawn >= 1 && two.blobs.perMob === 0, "the contact shadows are one mesh", two.blobs);
   await pg.keyboard.press("F3");
   await frames(70);
   await pg.waitForTimeout(1200);
