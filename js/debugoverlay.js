@@ -74,7 +74,7 @@ function debugInfo() {
     chunkX: Math.floor(p.x / BF.CS), chunkZ: Math.floor(p.z / BF.CS),
     sections: cc ? { lo: cc.lo, hi: cc.hi - 1, y0: cc.y0, y1: cc.y1 - 1 } : null,
     biome: biome ? biome.name : "?",
-    chunksDrawn: BF.world.meshedCount(), chunksLoaded: BF.world.chunks.size, chunksQueued: BF.world.queueLength,
+    viewDist: BF.world.viewDist, chunksDrawn: BF.world.meshedCount(), chunksLoaded: BF.world.chunks.size, chunksQueued: BF.world.queueLength,
     mobs: q.mobs, boats: q.boats, seed: BF.state.seed, gen: BF.state.gen, biomeScale: BF.state.biomeScale, sim: q.sim,
     day: BF.sky.day + BF.sky.time, clock: q.clock, light: BF.sky.light,
     blockLight: q.blockLight, calls: BF.renderer.info.render.calls,
@@ -114,7 +114,7 @@ function debugText(d) {
     (pl ? `Face ${pl.face}  u ${n1(pl.u)}  v ${n1(pl.v)}  y ${n1(d.y)}\n${pl.latLon}  Facing ${pl.facing}\n` + planetToggles(pl)
       : `XYZ ${d.x.toFixed(1)} / ${d.y.toFixed(1)} / ${d.z.toFixed(1)}\n`) +
     `Chunk ${pl ? Math.floor(pl.u / BF.CS) + ", " + Math.floor(pl.v / BF.CS) : d.chunkX + ", " + d.chunkZ}${s ? `  Sections ${s.lo}..${s.hi} (y ${s.y0}..${s.y1})` : ""}  Biome ${d.biome}\n` +
-    `Chunks ${d.chunksDrawn} drawn / ${d.chunksLoaded} loaded, ${d.chunksQueued} queued\n` +
+    `Chunks ${d.chunksDrawn} drawn / ${d.chunksLoaded} loaded, ${d.chunksQueued} queued, view distance ${d.viewDist}\n` +
     `Mobs ${d.mobs}${d.boats ? `  Boats ${d.boats}` : ""}  Seed ${d.seed}  Gen ${d.gen} Biomes x${d.biomeScale}  ${d.sim}\n` +
     (d.perf ? d.perfText + "\n" : "") +
     (d.requests ? d.requestsText + "\n" : "") +

@@ -95,6 +95,7 @@ module.exports = async (pg, out) => {
   check(/\nGPU .+/.test(f3), "F3 names the GPU", (f3.match(/GPU .*/) || [""])[0]);
   check(/Frame ms: .*drawing \d/.test(f3), "F3 shows the frame's steps", (f3.match(/Frame ms: .*/) || [""])[0]);
   check(/\nDraws \d+: .*(ground|blocks) \d+/.test(f3) && /mobs \d+/.test(f3), "F3 counts the draw calls by kind", (f3.match(/Draws .*/) || [""])[0]);
+  check(/\nChunks .* queued, view distance \d+\n/.test(f3), "F3 shows the view distance", (f3.match(/Chunks .*/) || [""])[0]);
   await pg.keyboard.press("F3");
   await frames(3);
   check(await pg.evaluate(() => !BF.drawTally.on && BF.drawTally.last === null), "the count stops when F3 closes");
