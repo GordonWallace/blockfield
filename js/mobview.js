@@ -592,6 +592,7 @@ function buildMeshes(v, m) {
 }
 function createView(m) {
   const root = new THREE.Group(), model = new THREE.Group();
+  root.userData.mob = true;   // (the F3 screen's draw-call tally, js/debugoverlay.js)
   root.add(model);
   const v = { root, model, meshes: {}, partList: [], batch: null, mat: REAL ? BF.real.mobs.material() : baseMat.clone(), look: undefined, lids: null, badge: null, badgeLv: 0, heldMesh: null, heldId: null, fire: null, seen: 0 };
   buildMeshes(v, m);
