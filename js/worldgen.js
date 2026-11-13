@@ -2162,7 +2162,9 @@ function core(cx, cz, vox, Y0, NY) {
       case OLD_TAIGA: top = patch > 0.35 ? B.coarse_dirt : patch > -0.45 ? B.podzol : B.grass; break;
       case TAIGA: if (patch > 0.5) top = B.podzol; break;
       case DARK_FOREST: if (patch > 0.6) top = B.podzol; break;
-      case SAVANNA: if (patch > 0.62) top = B.coarse_dirt; break;
+      // (bare ground in a savanna: once every patch > 0.62, a spot of dirt every dozen blocks all over the grassland, like polka dots.
+      // Now only where a broad field also says the ground is poor: a few spots together here and there, most of the grass unbroken.)
+      case SAVANNA: if (patch > 0.7 && N2(wx, wz, 67, 11.7, 4.9) > 0.4) top = B.coarse_dirt; break;
       case MOUNTAINS: case SNOWY_SLOPES: case PEAKS: case STONY_PEAKS: {
         const snowLine = (b === SNOWY_SLOPES ? 1450 : b === PEAKS ? 1800 : 1950) + N2(wx, wz, 23, 0, 0) * 30;
         const snowy = b !== STONY_PEAKS && h >= snowLine;
