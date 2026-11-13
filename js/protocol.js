@@ -275,6 +275,7 @@ function serve(send, opts) {
     out({ t: "hello", v: VERSION, version: BF.VERSION || null, seed: St.seed >>> 0, tick: tickNow(),
       settings: { gen: St.gen, villages: St.villages, biomeScale: St.biomeScale, gameMode: BF.player && BF.player.gameMode || null } });
     S.invSent = S.cursorSent = S.screenSent = null;   // (self sends the inventory and the screen again)
+    S.dynSent = -1;                                     // (and the map items made so far)
     if (R) { S.editsDue = true; S.spawnSent = null; S.hurts = []; S.mountSent = "null"; S.signsVer = -1; }
   }
   function reset() {
@@ -443,6 +444,15 @@ function serve(send, opts) {
     for (const [k, m] of BF.world.edits) if (m.size) chunks.push([k, [...m]]);
     out({ t: "edits", tick: tickNow(), chunks });
   }
+  // The map items made here (filled and auto maps, js/blocks.js BF.resolveItem: ids from this side's own counter), when that changed,
+  // before anything that carries their ids (the held stack, the screens, a villager's inventory, drops): the page makes them under the
+  // same ids (self.dyn). Without it an explorer's maps and a map held by the pointer showed as a magenta "?" in the page, or as another map
+  // (Gordon, 2026-11-12; test/map-ids-page.js). The page's own 36 slots come by name, so they were right.
+  function flushDyn() {
+    if (!BF.dynItemsVer || BF.dynItemsVer() === S.dynSent) return;
+    S.dynSent = BF.dynItemsVer();
+    out({ t: "self", tick: tickNow(), dyn: BF.dynItems() });
+  }
   // The player's items and screens, in every mode (r15-44: js/invscreen.js draws from them): the 36 slots, the held stack and the open
   // screen, when they changed. Replica: also what the simulation did to the player since the last self (hurts; food, health and game mode
   // it changed; a teleport; the spawn point when it changed). The client reports its own changes in player messages, which set the baseline.
@@ -522,6 +532,7 @@ function serve(send, opts) {
     if (R && !force && !S.changed && !S.editsDue && BF.warp && BF.warp.speed > 1 && !BF.warp.frozen && !(BF.state && BF.state.paused) && now() - S.flushedAt < FLUSH_MS) return;
     S.flushedAt = now();
     S.flushes++; ST.flushes++;
+    flushDyn();
     if (S.editsDue) flushEdits();
     const want = wanted();
     flushChunks(want, S.view && S.view.budget != null ? S.view.budget : 16);
@@ -938,7 +949,11 @@ function connect(send, mode) {
     },
     edits(m) { if (C.onEdits) C.onEdits(m.chunks, true); },
     self(m) {
-      const o = Object.assign({}, m); delete o.t; delete o.hurt; C.self = Object.assign(C.self || {}, o);
+      if (m.dyn) {   // the simulation's map items (flushDyn): made here under the same ids; a clash is logged once
+        for (const [name, id] of m.dyn) if (BF.dynItemAs && !BF.dynItemAs(name, id)) errorOnce("dyn " + id, "The simulation's item " + name + " has id " + id + ", which is another item in the page");
+        if (Object.keys(m).length <= 3) return;   // (t, tick, dyn: nothing else for the listeners)
+      }
+      const o = Object.assign({}, m); delete o.t; delete o.hurt; delete o.dyn; C.self = Object.assign(C.self || {}, o);
       if (C.onSelf) C.onSelf(m);
       for (const fn of SELF) { try { fn(m); } catch (e) { errorOnce("cself", "A self listener failed: " + (e && e.message)); console.error(e); } }
     },

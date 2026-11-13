@@ -788,6 +788,7 @@ BF.bedId = (f, head) => B["red_bed_" + (head ? "head_" : "foot_") + "nesw"[f & 3
 // Item by name, creating the per-zone filled map items ("filled_map_<size>_<zoneX>_<zoneZ>", see js/maps.js) on demand: saves store items by name.
 // Dynamic items get ids from ITEM_BASE + 0x10000 up; undefined for names that are not items.
 let dynItem = ITEM_BASE + 0x10000;
+let dynVer = 0;   // counts the dynamic items made (BF.dynItemsVer: js/protocol.js sends the list to the page when it changes)
 // Widest auto map, in 128-block zones a side: 4096 zones = 524288 blocks (512 blocks per pixel). One map that wide peaks around 2 GB of
 // browser memory; the old limit (about 4 million blocks) was of little use and a few such maps in a row crashed the browser.
 BF.AUTO_MAP_MAX_K = 4096;
@@ -838,12 +839,14 @@ function dynMake(name, id) {
   }
   if (I[name] === undefined || !dynR) I[name] = id;   // (inside a slot, a name already there stays until the meeting settles it)
   if (id >= dynItem) dynItem = id + 1;
+  dynVer++;
   return true;
 }
 // The dynamic items made so far, [[name, id]] in id order, and one made under the id another copy of the world gave it (spec r15-39:
 // region workers, so the same map is the same item everywhere; a new world doesn't forget them, so a follower starting on a later world
 // takes the leader's list first)
 BF.dynItems = () => { const out = []; for (let id = ITEM_BASE + 0x10000; id < dynItem; id++) if (items[id]) out.push([items[id].name, id]); return out; };
+BF.dynItemsVer = () => dynVer;
 BF.dynItemAs = (name, id) => (I[name] !== undefined ? I[name] === id : dynMake(name, id));
 // clusters (js/ctick.js): the slot's range (null: the one counter), the items made since the meeting ([[name, id]]: js/cworkers.js sends
 // them), adopt(name, id) (another worker's: false when the id is another item here), settle() (at the meeting: the lowest id under each
