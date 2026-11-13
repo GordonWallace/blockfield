@@ -120,20 +120,7 @@ function riverWorkers(seed, show) {
 // ---------- loop ----------
 const PF = BF.perf, simFrame = BF.boot.ticks, host = BF.simHost;   // the simulation's ticks for a frame (js/boot.js); its host (js/simhost.js)
 let last = performance.now();
-// Where the page thread's frame goes (Gordon, 2026-11-13: 15 fps with the page thread at 98%): each step's ms, averaged over a second, for
-// the F3 screen's "Frame ms" line (js/debugoverlay.js). BF.frameTimes.last: {step: ms a frame}, frames: how many that second.
-const FT = (BF.frameTimes = { last: null, frames: 0 });
-let ftAcc = {}, ftN = 0, ftT = 0, ftT0 = performance.now();
-const ftLap = k => { const t = performance.now(); ftAcc[k] = (ftAcc[k] || 0) + t - ftT; ftT = t; };
-function ftEnd() {
-  ftN++;
-  const t = performance.now();
-  if (t - ftT0 < 1000) return;
-  const o = {};
-  for (const k in ftAcc) o[k] = ftAcc[k] / ftN;
-  FT.last = o; FT.frames = ftN;
-  ftAcc = {}; ftN = 0; ftT0 = t;
-}
+const ftLap = BF.frameTimes.lap;   // each step's ms for the F3 screen's "Frame ms" line (js/debugoverlay.js)
 const frame = BF.tload.wrap(function frameBody(now) {   // (timed: the page thread's busy share on the debug screen, js/threadload.js)
   requestAnimationFrame(frame);
   if (BF.preparing) { last = now; return; }
@@ -142,7 +129,7 @@ const frame = BF.tload.wrap(function frameBody(now) {   // (timed: the page thre
   // the detached view (r15-98): the page's own copy of the world (the simulation in a worker or on the world server) streams round the
   // view, which loads nothing in the simulation; in the page the world is the simulation's, so it stays round the body
   const p = BF.player.detached && BF.world.replica ? BF.player.viewPos() : BF.player.position;
-  ftT = performance.now();
+  BF.frameTimes.start();
   PF.frame();
   PF.mark();
   BF.world.update(p.x, p.z, BF.warp.speed >= 10 ? 3 : BF.player.turbo || BF.player.detached ? 14 : 8, p.y);   // turbo flight streams terrain harder; fast-forward leaves the frame to the sim
@@ -196,7 +183,7 @@ const frame = BF.tload.wrap(function frameBody(now) {   // (timed: the page thre
   if (BF.stateHash && !remote) BF.stateHash.update();   // the game log's state hash as each game day starts (js/statehash.js; the worker logs its own)
   if (BF.debugFeed) BF.debugFeed.update();
   ftLap("debug and panels");
-  ftEnd();
+  BF.frameTimes.end();
 });
 
 // ---------- boot ----------

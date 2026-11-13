@@ -128,6 +128,24 @@ function debugText(d) {
     "\nSimulation: " + d.simMode +
     (d.clicks && d.clicks.length ? "\nMouse (last clicks, newest last):\n" + d.clicks.join("\n") : "");
 }
+// Where the page thread's frame goes (Gordon, 2026-11-13: 15 fps with the page thread at 98%): js/main.js calls start() as its frame
+// begins, lap(step) after each step and end() at the end; each step's ms is averaged over a second for the "Frame ms" line.
+// BF.frameTimes.last: {step: ms a frame}, frames: how many that second.
+let ftAcc = {}, ftN = 0, ftT = 0, ftT0 = performance.now();
+BF.frameTimes = {
+  last: null, frames: 0,
+  start() { ftT = performance.now(); },
+  lap(k) { const t = performance.now(); ftAcc[k] = (ftAcc[k] || 0) + t - ftT; ftT = t; },
+  end() {
+    ftN++;
+    const t = performance.now();
+    if (t - ftT0 < 1000) return;
+    const o = {};
+    for (const k in ftAcc) o[k] = ftAcc[k] / ftN;
+    BF.frameTimes.last = o; BF.frameTimes.frames = ftN;
+    ftAcc = {}; ftN = 0; ftT0 = t;
+  },
+};
 BF.debugInfo = debugInfo;
 BF.debugText = debugText;
 
