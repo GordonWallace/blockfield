@@ -56,9 +56,12 @@ const MODELS = {
     return [[5, o, 5, 11, o + 7, 11], [6, o + 7, 6, 10, o + 9, 10], ...(hang ? [[7.5, 15, 7.5, 8.5, 16, 8.5].map((v, i) => i === 1 ? o + 9 : v)] : [])];
   },
   // torches: boxes in 1/16; entry 8 = glow (flame drawn at full brightness), entry 9 = lean {dy, base, k, dx, dz} (wall torch)
-  torch() { return [[7, 0, 7, 9, 7, 9], [7, 7, 7, 9, 10, 9, undefined, 0, 1]]; },
-  wall_torch(get, x, y, z, id) {
-    const [dx, dz] = TB.DIRS[TB.blocks[id].wallTorch.f], lean = { dy: 3, base: -6, k: 0.41, dx, dz };
+  // A wall torch (blocks.js torchDefs: same model name, `wallTorch.f` = the way it faces) leans out from the block behind it: its
+  // foot rests against that wall 3/16 up and its flame ends near the middle of the cell.
+  torch(get, x, y, z, id) {
+    const wt = TB.blocks[id].wallTorch;
+    if (!wt) return [[7, 0, 7, 9, 7, 9], [7, 7, 7, 9, 10, 9, undefined, 0, 1]];
+    const [dx, dz] = TB.DIRS[wt.f], lean = { dy: 3, base: -7, k: 0.45, dx, dz };
     return [[7, 0, 7, 9, 7, 9, undefined, 0, 0, lean], [7, 7, 7, 9, 10, 9, undefined, 0, 1, lean]];
   },
   bell() { return [[4, 4, 4, 12, 6, 12], [5, 6, 5, 11, 13, 11], [7, 13, 7, 9, 16, 9]]; },
